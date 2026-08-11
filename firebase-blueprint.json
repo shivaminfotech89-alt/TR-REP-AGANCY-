@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "Job": {
+      "title": "Transformer Repair Job",
+      "description": "Represents a transformer repair job.",
+      "type": "object",
+      "properties": {
+        "jobNo": { "type": "string", "maxLength": 50 },
+        "mrNo": { "type": "string", "maxLength": 50 },
+        "dateOfIssue": { "type": "string", "maxLength": 20 },
+        "capacityKva": { "type": "number" },
+        "make": { "type": "string", "maxLength": 100 },
+        "serialNo": { "type": "string", "maxLength": 100 },
+        "type": { "type": "string", "maxLength": 50 },
+        "repairType": { "type": "string", "maxLength": 50 },
+        "division": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "maxLength": 50 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["jobNo", "mrNo", "capacityKva", "make", "serialNo", "createdAt", "updatedAt", "ownerId"]
+    },
+    "Inspection": {
+      "title": "Inspection Report",
+      "description": "External or Internal Inspection data for a job.",
+      "type": "object",
+      "properties": {
+        "jobId": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "maxLength": 20 },
+        "data": { "type": "string", "maxLength": 5000 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["jobId", "type", "createdAt", "updatedAt", "ownerId"]
+    }
+  },
+  "firestore": {
+    "/jobs/{jobId}": {
+      "schema": { "$ref": "#/entities/Job" },
+      "description": "Stores transformer repair jobs."
+    },
+    "/inspections/{inspectionId}": {
+      "schema": { "$ref": "#/entities/Inspection" },
+      "description": "Stores inspection reports."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "TR Rep Agency",
+  "description": "Transformer repair management agency software",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
