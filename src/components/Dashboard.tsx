@@ -1,234 +1,246 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Loader2, ClipboardPlus, Search, FileSpreadsheet, FileText, Droplet, Truck } from 'lucide-react';
-import { daysLeftFrom, getCircleOfficeLimit } from '../lib/contractRates';
-import { SLA_DAYS, GUARANTEE_MONTHS } from '../lib/types';
-import type { Job } from '../lib/types';
 import { useAgency } from '../lib/AgencyContext';
+import { daysLeftFrom, getCircleOfficeLimit } from '../lib/contractRates';
+import { SLA_DAYS } from '../lib/types';
+import type { Job } from '../lib/types';
+import {
+  ClipboardPlus,
+  FileEdit,
+  FileSearch,
+  FlaskConical,
+  FileSpreadsheet,
+  Truck,
+  Receipt,
+  BadgeIndianRupee,
+  Droplets,
+  Package,
+  Building2,
+  ClipboardCheck,
+  FileBarChart,
+  Warehouse,
+  Settings,
+  Loader2,
+} from 'lucide-react';
+
+type Mod = {
+  to: string;
+  label: string;
+  icon: typeof ClipboardPlus;
+  color: string;
+  group: string;
+};
+
+const MODULES: Mod[] = [
+  // Entry
+  { to: '/new-job', label: 'New Job Entry', icon: ClipboardPlus, color: 'bg-blue-600', group: 'Entry' },
+  { to: '/external-inspection', label: 'OGP External', icon: FileEdit, color: 'bg-indigo-700', group: 'Entry' },
+  { to: '/internal-inspection', label: 'OGP Internal', icon: FileSearch, color: 'bg-red-600', group: 'Entry' },
+  { to: '/jobs?core=Amorphous', label: 'AMORPHOUS Entry', icon: ClipboardPlus, color: 'bg-slate-700', group: 'Entry' },
+  { to: '/jobs?core=Wound', label: 'Wound CORE Entry', icon: ClipboardPlus, color: 'bg-emerald-600', group: 'Entry' },
+  { to: '/testing-report?type=CRGO', label: 'CRGO Test Entry', icon: FlaskConical, color: 'bg-blue-600', group: 'Entry' },
+  { to: '/testing-report?type=LSTC', label: 'LSTC Test Entry', icon: FlaskConical, color: 'bg-red-600', group: 'Entry' },
+  { to: '/data-modification', label: 'Data Modification', icon: FileEdit, color: 'bg-indigo-800', group: 'Entry' },
+  // Reports
+  { to: '/reports/inspection', label: 'Inspection Report', icon: ClipboardCheck, color: 'bg-emerald-700', group: 'Reports' },
+  { to: '/estimates/new', label: 'Estimate Report', icon: FileSpreadsheet, color: 'bg-emerald-600', group: 'Reports' },
+  { to: '/challans/new', label: 'Challan Report', icon: ClipboardCheck, color: 'bg-teal-600', group: 'Reports' },
+  { to: '/bills/new', label: 'Bill Report', icon: Receipt, color: 'bg-emerald-700', group: 'Reports' },
+  { to: '/testing-report', label: 'Test Report', icon: FileBarChart, color: 'bg-green-600', group: 'Reports' },
+  { to: '/reports/inspection-blank', label: 'Insp. Report Blank', icon: ClipboardCheck, color: 'bg-lime-600', group: 'Reports' },
+  { to: '/reports/stock', label: 'Stock Statement', icon: Warehouse, color: 'bg-emerald-800', group: 'Reports' },
+  { to: '/barrel-delivery', label: 'Barrel Delivery Report', icon: Package, color: 'bg-violet-700', group: 'Reports' },
+  // Generate
+  { to: '/estimates/new', label: 'Estimate Generate', icon: FileSpreadsheet, color: 'bg-red-600', group: 'Generate' },
+  { to: '/challans/new', label: 'Challan Generate', icon: Truck, color: 'bg-red-600', group: 'Generate' },
+  { to: '/bills/new', label: 'Bill Generate', icon: Receipt, color: 'bg-red-600', group: 'Generate' },
+  { to: '/approval-amount', label: 'Approval Amount', icon: BadgeIndianRupee, color: 'bg-rose-700', group: 'Generate' },
+  // Logistics
+  { to: '/oil-inward', label: 'Oil Inward', icon: Droplets, color: 'bg-amber-800', group: 'Logistics' },
+  { to: '/barrel-delivery', label: 'Barrel Delivery', icon: Package, color: 'bg-amber-700', group: 'Logistics' },
+  { to: '/change-division', label: 'Change Division', icon: Building2, color: 'bg-stone-700', group: 'Logistics' },
+  { to: '/agency-settings', label: 'Agency Settings', icon: Settings, color: 'bg-slate-800', group: 'Logistics' },
+];
 
 export default function Dashboard() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, setActiveAgencyId, agencies } = useAgency();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
-  const [oilShortage, setOilShortage] = useState(0);
+  const [division, setDivision] = useState('');
 
   useEffect(() => {
-    async function fetchData() {
+    const first = activeAgency ? Object.keys(activeAgency.prefixes || {})[0] : '';
+    const stored = localStorage.getItem('activeDivision');
+    setDivision(stored || first || '');
+  }, [activeAgency]);
+
+  useEffect(() => {
+    async function fetchJobs() {
       if (!auth.currentUser) return;
       try {
-        const q = query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          orderBy('createdAt', 'desc'),
-          limit(40)
-        );
+        const q = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid));
         const snapshot = await getDocs(q);
-        const fetchedJobs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Job));
-        setJobs(fetchedJobs);
-
-        const iq = query(
-          collection(db, 'inspections'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('type', '==', 'External')
-        );
-        const is = await getDocs(iq);
-        let short = 0;
-        is.forEach((d) => {
-          const data = d.data().data;
-          const parsed = typeof data === 'string' ? JSON.parse(data) : data;
-          short += Number(parsed?.netShortage) || 0;
-        });
-        setOilShortage(Number(short.toFixed(2)));
+        setJobs(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Job)));
       } catch (err) {
-        // orderBy may need index — fallback
-        try {
-          const q2 = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser!.uid));
-          const snapshot = await getDocs(q2);
-          const fetchedJobs = snapshot.docs
-            .map((d) => ({ id: d.id, ...d.data() } as Job))
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .slice(0, 40);
-          setJobs(fetchedJobs);
-        } catch (err2) {
-          handleFirestoreError(err2, OperationType.LIST, 'jobs');
-        }
+        handleFirestoreError(err, OperationType.LIST, 'jobs');
       } finally {
         setLoading(false);
       }
     }
-    fetchData();
+    fetchJobs();
   }, []);
 
-  const active = jobs.filter((j) => !['Dispatched', 'Completed', 'Non-Repairable'].includes(j.status));
+  const onDivisionChange = (div: string) => {
+    setDivision(div);
+    localStorage.setItem('activeDivision', div);
+  };
+
   const pendingExt = jobs.filter((j) => j.repairType === 'OGP' && j.status === 'Received').length;
-  const pendingInt = jobs.filter((j) =>
-    (j.repairType === 'GP' && j.status === 'Received') || j.status === 'External Done'
+  const pendingInt = jobs.filter(
+    (j) => (j.repairType === 'GP' && j.status === 'Received') || j.status === 'External Done'
   ).length;
-  const pendingEst = jobs.filter((j) => j.status === 'Internal Done').length;
-  const pendingApr = jobs.filter((j) => j.status === 'Estimate Sent' || j.status === 'Estimate Prepared').length;
-  const slaRisk = active.filter((j) => {
+  const slaRisk = jobs.filter((j) => {
     const left = daysLeftFrom(j.estimateApprovedAt || null, SLA_DAYS);
-    return left !== null && left < 15;
+    return left !== null && left < 15 && !['Dispatched', 'Completed', 'Non-Repairable'].includes(j.status);
   }).length;
 
-  const getStatusColor = (status: string, repairType: string) => {
-    if (status === 'Non-Repairable') return 'text-red-700 bg-red-50';
-    if (repairType === 'GP') return 'text-violet-700 bg-violet-50';
-    if (status.includes('Approved') || status === 'Dispatched' || status === 'Billed') return 'text-emerald-700 bg-emerald-50';
-    if (status.includes('Internal') || status.includes('Estimate')) return 'text-blue-700 bg-blue-50';
-    return 'text-slate-600 bg-slate-50';
-  };
+  const groups = ['Entry', 'Reports', 'Generate', 'Logistics'];
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
+      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
-            {activeAgency?.name || 'TR Rep Agency'}
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+            {activeAgency?.name || 'Transformer Management System'}
           </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Transformer repair workflow · SLA {SLA_DAYS} days from estimate approval · Guarantee {GUARANTEE_MONTHS} months
-          </p>
+          <p className="text-xs text-slate-500 mt-0.5">Web modules matching your Ideal Engineering Co. desktop system</p>
         </div>
-        <Link to="/new-job"
-          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded hover:bg-blue-700">
-          <ClipboardPlus className="w-4 h-4" /> New MR Intake
-        </Link>
+        <div className="flex flex-wrap items-center gap-3">
+          {agencies.length > 1 && (
+            <select
+              value={activeAgency?.id || ''}
+              onChange={(e) => setActiveAgencyId(e.target.value)}
+              className="text-xs border rounded px-2 py-1.5 bg-slate-50"
+            >
+              {agencies.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase text-slate-500">Division</span>
+            <select
+              value={division}
+              onChange={(e) => onDivisionChange(e.target.value)}
+              className="text-sm font-semibold border border-slate-300 rounded px-3 py-1.5 bg-amber-50 text-amber-900"
+            >
+              {(activeAgency ? Object.keys(activeAgency.prefixes) : ['SABARMATI']).map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-        {[
-          { label: 'Ext. Pending', value: pendingExt, to: '/external-inspection', color: 'border-slate-200' },
-          { label: 'Int. Pending', value: pendingInt, to: '/internal-inspection', color: 'border-slate-200' },
-          { label: 'Est. Ready', value: pendingEst, to: '/estimates/new', color: 'border-blue-200' },
-          { label: 'Awaiting Approval', value: pendingApr, to: '/estimates/new', color: 'border-amber-200' },
-          { label: 'SLA Risk', value: slaRisk, to: '/', color: 'border-red-200' },
-        ].map((c) => (
-          <Link key={c.label} to={c.to} className={`bg-white border ${c.color} rounded p-4 hover:shadow-sm transition-shadow`}>
-            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{c.label}</p>
-            <p className="text-2xl font-bold mt-1 font-mono">{c.value}</p>
-          </Link>
-        ))}
+      <div className="grid grid-cols-3 gap-3 max-w-xl">
+        <div className="bg-white border rounded-lg p-3">
+          <p className="text-[10px] uppercase font-bold text-slate-500">Ext. Pending</p>
+          <p className="text-2xl font-mono font-bold">{loading ? '…' : pendingExt}</p>
+        </div>
+        <div className="bg-white border rounded-lg p-3">
+          <p className="text-[10px] uppercase font-bold text-slate-500">Int. Pending</p>
+          <p className="text-2xl font-mono font-bold">{loading ? '…' : pendingInt}</p>
+        </div>
+        <div className="bg-white border rounded-lg p-3">
+          <p className="text-[10px] uppercase font-bold text-slate-500">SLA Risk</p>
+          <p className={`text-2xl font-mono font-bold ${slaRisk ? 'text-red-600' : ''}`}>{loading ? '…' : slaRisk}</p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        <div className="lg:col-span-8 space-y-6">
-          <section className="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
-            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">
-                Active Repair Queue (SLA from Estimate Approval)
-              </h2>
-              <span className="text-[10px] bg-slate-200 px-2 py-0.5 rounded">{active.length} active</span>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-white text-slate-400 uppercase text-[10px] font-bold">
-                  <tr>
-                    <th className="p-3">Job No</th>
-                    <th className="p-3">MR / Div</th>
-                    <th className="p-3">KVA / Make</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Circle Limit</th>
-                    <th className="p-3">Days Left</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {loading ? (
-                    <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400 mx-auto" /></td></tr>
-                  ) : active.length === 0 ? (
-                    <tr><td colSpan={6} className="p-8 text-center text-slate-500">No active jobs. Start with MR Intake.</td></tr>
-                  ) : (
-                    active.slice(0, 20).map((job) => {
-                      const daysLeft = daysLeftFrom(job.estimateApprovedAt || null, SLA_DAYS);
-                      const limit = activeAgency?.circleOfficeLimits?.[job.capacityKva.toString()] ?? getCircleOfficeLimit(job.capacityKva);
-                      return (
-                        <tr key={job.id} className="hover:bg-slate-50">
-                          <td className={`p-3 font-mono font-bold ${job.repairType === 'GP' ? 'text-violet-700' : ''}`}>
-                            {job.jobNo}{job.repairType === 'GP' ? '*' : ''}
-                          </td>
-                          <td className="p-3">{job.mrNo}<div className="text-[10px] text-slate-400">{job.division}</div></td>
-                          <td className="p-3">{job.capacityKva} / {job.make}</td>
-                          <td className="p-3">
-                            <span className={`px-2 py-1 rounded text-[10px] font-semibold ${getStatusColor(job.status, job.repairType)}`}>
-                              {job.status}
-                            </span>
-                          </td>
-                          <td className="p-3 font-mono text-slate-600">₹{limit.toLocaleString()}</td>
-                          <td className={`p-3 font-bold ${daysLeft !== null && daysLeft < 15 ? 'text-red-500' : 'text-slate-700'}`}>
-                            {daysLeft === null ? '—' : `${daysLeft}d`}
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </section>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {[
-              { to: '/external-inspection', icon: Search, label: 'External Inspection', desc: 'Physical + oil' },
-              { to: '/internal-inspection', icon: Search, label: 'Internal Inspection', desc: 'Winding / scrap' },
-              { to: '/estimates/new', icon: FileSpreadsheet, label: 'Estimates', desc: 'Pre-fill + letter' },
-              { to: '/bills/new', icon: FileText, label: 'Bills', desc: 'Tax invoice' },
-              { to: '/oil-inward', icon: Droplet, label: 'Oil Ledger', desc: '5% filtration' },
-              { to: '/challans/new', icon: Truck, label: 'Challan', desc: 'Return to division' },
-            ].map((a) => (
-              <Link key={a.to} to={a.to} className="bg-white border border-slate-200 rounded p-4 hover:border-blue-300 transition-colors">
-                <a.icon className="w-5 h-5 text-blue-600 mb-2" />
-                <p className="text-sm font-bold text-slate-900">{a.label}</p>
-                <p className="text-[10px] text-slate-500 mt-0.5">{a.desc}</p>
+      {groups.map((g) => (
+        <section key={g}>
+          <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">{g}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3">
+            {MODULES.filter((m) => m.group === g).map((m) => (
+              <Link
+                key={`${g}-${m.label}`}
+                to={m.to}
+                className="group flex flex-col items-center text-center bg-white border border-slate-200 rounded-xl p-3 hover:shadow-md hover:border-slate-300 transition-all"
+              >
+                <div className={`w-14 h-14 ${m.color} text-white rounded-xl flex items-center justify-center mb-2 shadow-sm group-hover:scale-105 transition-transform`}>
+                  <m.icon className="w-7 h-7" />
+                </div>
+                <span className="text-[11px] font-semibold text-slate-800 leading-tight">{m.label}</span>
               </Link>
             ))}
           </div>
+        </section>
+      ))}
+
+      <section className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b bg-slate-50 flex justify-between items-center">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Recent Jobs · {division || 'All'}</h2>
+          {loading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
         </div>
-
-        <aside className="lg:col-span-4 space-y-4">
-          <section className="bg-slate-900 text-white rounded p-5">
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Oil Receivable</h3>
-            <p className="text-3xl font-bold mt-2 font-mono">{oilShortage.toFixed(1)}</p>
-            <p className="text-[10px] opacity-60">Litres (shortage + 5% filtration) from external inspections</p>
-            <Link to="/oil-inward" className="mt-4 block text-center border border-blue-400 text-blue-300 py-2 rounded text-[10px] font-bold uppercase hover:bg-blue-400 hover:text-slate-900 transition-colors">
-              Open Oil Account
-            </Link>
-          </section>
-
-          <section className="bg-white border border-slate-200 rounded p-4">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-3">Guarantee Policy</h3>
-            <div className="flex items-end gap-2 mb-2">
-              <span className="text-3xl font-bold font-mono">{GUARANTEE_MONTHS}</span>
-              <span className="text-xs text-slate-500 mb-1">months from first dispatch</span>
-            </div>
-            <ul className="text-[11px] text-slate-600 space-y-1.5 list-disc ml-4">
-              <li>GP return: new MR, same Job No, skip external</li>
-              <li>Internal only if declaring non-repairable</li>
-              <li>Guarantee date never resets on GP jobs</li>
-            </ul>
-          </section>
-
-          <section className="bg-white border border-slate-200 rounded p-4">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-3">Circle Office Limits (prefix)</h3>
-            <div className="grid grid-cols-2 gap-1 text-[10px] font-mono">
-              {Object.entries(
-                activeAgency?.circleOfficeLimits && Object.keys(activeAgency.circleOfficeLimits).length
-                  ? activeAgency.circleOfficeLimits
-                  : { '10': 8716, '16': 8696, '25': 10124, '63': 20423, '100': 24609 }
-              ).map(([kva, lim]) => (
-                <div key={kva} className="flex justify-between bg-slate-50 px-2 py-1 rounded">
-                  <span>{kva} KVA</span>
-                  <span>₹{Number(lim).toLocaleString()}</span>
-                </div>
-              ))}
-            </div>
-            <Link to="/agency-settings" className="mt-3 inline-block text-[10px] font-bold uppercase text-blue-600 hover:underline">
-              Edit in Agency Settings →
-            </Link>
-          </section>
-        </aside>
-      </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-[10px] uppercase text-slate-400">
+              <tr>
+                <th className="p-3 text-left">Job</th>
+                <th className="p-3 text-left">MR</th>
+                <th className="p-3 text-left">KVA / Make</th>
+                <th className="p-3 text-left">Status</th>
+                <th className="p-3 text-left">Circle Limit</th>
+                <th className="p-3 text-left">Days Left</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {jobs
+                .filter((j) => !division || j.division === division)
+                .slice(0, 12)
+                .map((job) => {
+                  const daysLeft = daysLeftFrom(job.estimateApprovedAt || null, SLA_DAYS);
+                  const limit =
+                    activeAgency?.circleOfficeLimits?.[job.capacityKva.toString()] ?? getCircleOfficeLimit(job.capacityKva);
+                  return (
+                    <tr key={job.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-mono font-bold">
+                        {job.jobNo}
+                        {job.repairType === 'GP' ? '*' : ''}
+                      </td>
+                      <td className="p-3">{job.mrNo}</td>
+                      <td className="p-3">
+                        {job.capacityKva} / {job.make}
+                      </td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono">₹{limit.toLocaleString()}</td>
+                      <td className={`p-3 font-bold ${daysLeft !== null && daysLeft < 15 ? 'text-red-500' : ''}`}>
+                        {daysLeft === null ? '—' : `${daysLeft}d`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              {!loading && jobs.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-slate-500">
+                    No jobs yet — start with <Link className="text-blue-600 underline" to="/new-job">New Job Entry</Link>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
