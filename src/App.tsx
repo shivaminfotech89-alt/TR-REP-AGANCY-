@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, NavLink } from 'react-router-dom';
 import { auth } from './lib/firebase';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { onAuthStateChanged, User, signOut, getRedirectResult } from 'firebase/auth';
 import { AgencyProvider, useAgency } from './lib/AgencyContext';
 import Dashboard from './components/Dashboard';
 import NewJob from './components/NewJob';
@@ -13,6 +13,7 @@ import AgencySettings from './components/AgencySettings';
 import BillGenerate from './components/BillGenerate';
 import OilAccount from './components/OilAccount';
 import ChallanGenerate from './components/ChallanGenerate';
+import LoginScreen from './components/LoginScreen';
 import { LogOut, Loader2, Settings, LayoutDashboard, ClipboardList, Search, FileSpreadsheet, FileText, Droplet, Truck, Activity } from 'lucide-react';
 
 function Shell({ user, onLogout }: { user: User; onLogout: () => void }) {
@@ -100,20 +101,15 @@ export default function App() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Complete Google redirect flow if popup fallback was used
+    getRedirectResult(auth).catch((err) => {
+      console.error('Redirect sign-in error', err);
+    });
     return onAuthStateChanged(auth, (u) => {
       setUser(u);
       setLoading(false);
     });
   }, []);
-
-  const handleLogin = async () => {
-    try {
-      await signInWithPopup(auth, new GoogleAuthProvider());
-    } catch (err) {
-      console.error(err);
-      alert('Login failed. Ensure Google sign-in is enabled for project tr-rep-agancy.');
-    }
-  };
 
   if (loading) {
     return (
@@ -124,20 +120,7 @@ export default function App() {
   }
 
   if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-slate-900 via-slate-800 to-blue-950 px-4">
-        <div className="max-w-md w-full p-8 bg-white/95 shadow-2xl rounded-2xl text-center border border-white/20">
-          <div className="w-14 h-14 bg-blue-600 text-white rounded-2xl flex items-center justify-center mx-auto mb-5 text-xl font-bold tracking-tight">
-            TR
-          </div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-1 tracking-tight">TR REP AGANCY</h1>
-          <p className="text-slate-500 text-sm mb-8">Transformer Repair Agency Management · Firebase project tr-rep-agancy</p>
-          <button onClick={handleLogin} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors">
-            Sign in with Google
-          </button>
-        </div>
-      </div>
-    );
+    return <LoginScreen />;
   }
 
   return (

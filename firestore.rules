@@ -6,7 +6,8 @@ service cloud.firestore {
     }
 
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      // Allow any authenticated user (email/password may be unverified initially)
+      return request.auth != null;
     }
 
     function isValidId(id) {
