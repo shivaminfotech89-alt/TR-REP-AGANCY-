@@ -46,7 +46,12 @@ export default function TestingReport() {
           where('ownerId', '==', auth.currentUser.uid)
         );
         const snapshot = await getDocs(q);
-        const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
+        const fetchedJobs = snapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as Job))
+          .filter(j =>
+            ['Estimate Approved', 'Under Repair', 'Tested', 'Billed'].includes(j.status) &&
+            !j.status.includes('Non-Repairable')
+          );
         setJobs(fetchedJobs);
       } catch (err) {
         handleFirestoreError(err, OperationType.LIST, 'jobs');

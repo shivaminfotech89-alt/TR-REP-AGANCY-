@@ -6,7 +6,8 @@ service cloud.firestore {
     }
 
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      // Allow any authenticated user (email/password may be unverified initially)
+      return request.auth != null;
     }
 
     function isValidId(id) {
@@ -19,6 +20,14 @@ service cloud.firestore {
 
     function existing() {
       return resource.data;
+    }
+
+    function ownsIncoming() {
+      return incoming().ownerId == request.auth.uid;
+    }
+
+    function ownsExisting() {
+      return existing().ownerId == request.auth.uid;
     }
 
     function isValidJob(data) {
@@ -35,55 +44,194 @@ service cloud.firestore {
              (data.get('type', '') is string && data.get('type', '').size() <= 50) &&
              (data.get('repairType', '') is string && data.get('repairType', '').size() <= 50) &&
              (data.get('division', '') is string && data.get('division', '').size() <= 100) &&
-             (data.get('status', '') is string && data.get('status', '').size() <= 50);
+             (data.get('status', '') is string && data.get('status', '').size() <= 50) &&
+             (data.get('kv', '') is string && data.get('kv', '').size() <= 10) &&
+             (data.get('transformerCore', '') is string && data.get('transformerCore', '').size() <= 50) &&
+             (data.get('agencyId', '') is string && data.get('agencyId', '').size() <= 128) &&
+             (data.get('originalJobId', '') is string && data.get('originalJobId', '').size() <= 128) &&
+             (data.get('guaranteeStartDate', '') is string && data.get('guaranteeStartDate', '').size() <= 20) &&
+             (data.get('guaranteeEndDate', '') is string && data.get('guaranteeEndDate', '').size() <= 20) &&
+             (data.get('estimateId', '') is string && data.get('estimateId', '').size() <= 128) &&
+             (data.get('challanNo', '') is string && data.get('challanNo', '').size() <= 50) &&
+             (data.get('billId', '') is string && data.get('billId', '').size() <= 128) &&
+             (!('estimateApprovedAt' in data) || data.estimateApprovedAt == null || data.estimateApprovedAt is number) &&
+             (!('isNonRepairable' in data) || data.isNonRepairable is bool) &&
+             (!('testingDetails' in data) || data.testingDetails is map);
     }
 
     match /jobs/{jobId} {
-      allow read: if isSignedIn() && isValidId(jobId) && existing().ownerId == request.auth.uid;
+      allow read: if isSignedIn() && isValidId(jobId) && ownsExisting();
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if isSignedIn() && isValidId(jobId) && isValidJob(incoming());
       allow update: if isSignedIn() && isValidId(jobId) && isValidJob(incoming()) &&
                     incoming().ownerId == existing().ownerId &&
                     incoming().createdAt == existing().createdAt;
-      allow delete: if isSignedIn() && isValidId(jobId) && existing().ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(jobId) && ownsExisting();
     }
 
     function isValidInspection(data) {
-      return data.keys().hasAll(['jobId', 'type', 'createdAt', 'updatedAt', 'ownerId']) &&
+      return data.keys().hasAll(['jobId', 'type', 'data', 'createdAt', 'updatedAt', 'ownerId']) &&
              data.jobId is string && data.jobId.size() <= 128 &&
              data.type is string && data.type.size() <= 20 &&
+             data.data is map &&
              data.createdAt is number &&
              data.updatedAt is number &&
-             data.ownerId == request.auth.uid &&
-             (data.get('data', '') is string && data.get('data', '').size() <= 5000);
+             data.ownerId == request.auth.uid;
     }
 
     match /inspections/{inspectionId} {
-      allow read: if isSignedIn() && isValidId(inspectionId) && existing().ownerId == request.auth.uid;
+      allow read: if isSignedIn() && isValidId(inspectionId) && ownsExisting();
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if isSignedIn() && isValidId(inspectionId) && isValidInspection(incoming());
       allow update: if isSignedIn() && isValidId(inspectionId) && isValidInspection(incoming()) &&
                     incoming().ownerId == existing().ownerId &&
                     incoming().jobId == existing().jobId &&
                     incoming().createdAt == existing().createdAt;
-      allow delete: if isSignedIn() && isValidId(inspectionId) && existing().ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(inspectionId) && ownsExisting();
     }
+
     function isValidAgency(data) {
       return data.keys().hasAll(['name', 'letterheadUrl', 'prefixes', 'lastJobNumbers', 'ownerId']) &&
              data.name is string && data.name.size() <= 100 &&
              data.letterheadUrl is string &&
              data.prefixes is map &&
              data.lastJobNumbers is map &&
-             data.ownerId == request.auth.uid;
+             data.ownerId == request.auth.uid &&
+             (data.get('gstNo', '') is string && data.get('gstNo', '').size() <= 30) &&
+             (data.get('panNo', '') is string && data.get('panNo', '').size() <= 20) &&
+             (data.get('address', '') is string && data.get('address', '').size() <= 500) &&
+             (data.get('phone', '') is string && data.get('phone', '').size() <= 30) &&
+             (data.get('email', '') is string && data.get('email', '').size() <= 100) &&
+             (data.get('bankName', '') is string && data.get('bankName', '').size() <= 100) &&
+             (data.get('bankAccNo', '') is string && data.get('bankAccNo', '').size() <= 50) &&
+             (data.get('bankIfsc', '') is string && data.get('bankIfsc', '').size() <= 20) &&
+             (data.get('orderNo', '') is string && data.get('orderNo', '').size() <= 200) &&
+             (!('circleOfficeLimits' in data) || data.circleOfficeLimits is map) &&
+             (!('lastEstimateNo' in data) || data.lastEstimateNo is number) &&
+             (!('lastBillNo' in data) || data.lastBillNo is number) &&
+             (!('lastChallanNo' in data) || data.lastChallanNo is number) &&
+             (!('lastExtInspNo' in data) || data.lastExtInspNo is number) &&
+             (!('lastIntInspNo' in data) || data.lastIntInspNo is number);
     }
 
     match /agencies/{agencyId} {
-      allow read: if isSignedIn() && isValidId(agencyId) && existing().ownerId == request.auth.uid;
+      allow read: if isSignedIn() && isValidId(agencyId) && ownsExisting();
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if isSignedIn() && isValidId(agencyId) && isValidAgency(incoming());
       allow update: if isSignedIn() && isValidId(agencyId) && isValidAgency(incoming()) &&
                     incoming().ownerId == existing().ownerId;
-      allow delete: if isSignedIn() && isValidId(agencyId) && existing().ownerId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(agencyId) && ownsExisting();
+    }
+
+    function isValidEstimate(data) {
+      return data.keys().hasAll(['estimateNo', 'estimateDate', 'division', 'mrNo', 'status', 'lines', 'grandTotal', 'createdAt', 'updatedAt', 'ownerId']) &&
+             data.estimateNo is string && data.estimateNo.size() <= 50 &&
+             data.estimateDate is string && data.estimateDate.size() <= 20 &&
+             data.division is string && data.division.size() <= 100 &&
+             data.mrNo is string && data.mrNo.size() <= 50 &&
+             data.status is string && data.status.size() <= 30 &&
+             data.lines is list &&
+             data.grandTotal is number &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerId == request.auth.uid &&
+             (data.get('orderNo', '') is string && data.get('orderNo', '').size() <= 200) &&
+             (data.get('approvalRef', '') is string && data.get('approvalRef', '').size() <= 100) &&
+             (data.get('agencyId', '') is string && data.get('agencyId', '').size() <= 128) &&
+             (!('approvedAt' in data) || data.approvedAt == null || data.approvedAt is number);
+    }
+
+    match /estimates/{estimateId} {
+      allow read: if isSignedIn() && isValidId(estimateId) && ownsExisting();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(estimateId) && isValidEstimate(incoming());
+      allow update: if isSignedIn() && isValidId(estimateId) && isValidEstimate(incoming()) &&
+                    incoming().ownerId == existing().ownerId &&
+                    incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && isValidId(estimateId) && ownsExisting();
+    }
+
+    function isValidBill(data) {
+      return data.keys().hasAll(['billNo', 'billDate', 'division', 'lines', 'subTotal', 'netTotal', 'createdAt', 'updatedAt', 'ownerId']) &&
+             data.billNo is string && data.billNo.size() <= 50 &&
+             data.billDate is string && data.billDate.size() <= 20 &&
+             data.division is string && data.division.size() <= 100 &&
+             data.lines is list &&
+             data.subTotal is number &&
+             data.netTotal is number &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerId == request.auth.uid &&
+             (data.get('orderNo', '') is string && data.get('orderNo', '').size() <= 200) &&
+             (data.get('amountInWords', '') is string && data.get('amountInWords', '').size() <= 500) &&
+             (data.get('agencyId', '') is string && data.get('agencyId', '').size() <= 128) &&
+             (!('cgstPct' in data) || data.cgstPct is number) &&
+             (!('sgstPct' in data) || data.sgstPct is number) &&
+             (!('cgstAmt' in data) || data.cgstAmt is number) &&
+             (!('sgstAmt' in data) || data.sgstAmt is number) &&
+             (!('advanceStamp' in data) || data.advanceStamp is number);
+    }
+
+    match /bills/{billId} {
+      allow read: if isSignedIn() && isValidId(billId) && ownsExisting();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(billId) && isValidBill(incoming());
+      allow update: if isSignedIn() && isValidId(billId) && isValidBill(incoming()) &&
+                    incoming().ownerId == existing().ownerId &&
+                    incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && isValidId(billId) && ownsExisting();
+    }
+
+    function isValidOilAccount(data) {
+      return data.keys().hasAll(['billNo', 'billDate', 'lines', 'createdAt', 'updatedAt', 'ownerId']) &&
+             data.billNo is string && data.billNo.size() <= 50 &&
+             data.billDate is string && data.billDate.size() <= 20 &&
+             data.lines is list &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerId == request.auth.uid &&
+             (data.get('division', '') is string && data.get('division', '').size() <= 100) &&
+             (data.get('agencyId', '') is string && data.get('agencyId', '').size() <= 128) &&
+             (!('openingBalance' in data) || data.openingBalance is number) &&
+             (!('oilReceived' in data) || data.oilReceived is number) &&
+             (!('total' in data) || data.total is number) &&
+             (!('lessAsPerBill' in data) || data.lessAsPerBill is number) &&
+             (!('scrapTransOil' in data) || data.scrapTransOil is number) &&
+             (!('closingBalance' in data) || data.closingBalance is number) &&
+             (!('debitCreditBalance' in data) || data.debitCreditBalance is number) &&
+             (!('receipts' in data) || data.receipts is list);
+    }
+
+    match /oilAccounts/{oilId} {
+      allow read: if isSignedIn() && isValidId(oilId) && ownsExisting();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(oilId) && isValidOilAccount(incoming());
+      allow update: if isSignedIn() && isValidId(oilId) && isValidOilAccount(incoming()) &&
+                    incoming().ownerId == existing().ownerId &&
+                    incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && isValidId(oilId) && ownsExisting();
+    }
+
+    function isValidChallan(data) {
+      return data.keys().hasAll(['challanNo', 'challanDate', 'division', 'lines', 'createdAt', 'updatedAt', 'ownerId']) &&
+             data.challanNo is string && data.challanNo.size() <= 50 &&
+             data.challanDate is string && data.challanDate.size() <= 20 &&
+             data.division is string && data.division.size() <= 100 &&
+             data.lines is list &&
+             data.createdAt is number &&
+             data.updatedAt is number &&
+             data.ownerId == request.auth.uid &&
+             (data.get('agencyId', '') is string && data.get('agencyId', '').size() <= 128);
+    }
+
+    match /challans/{challanId} {
+      allow read: if isSignedIn() && isValidId(challanId) && ownsExisting();
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && isValidId(challanId) && isValidChallan(incoming());
+      allow update: if isSignedIn() && isValidId(challanId) && isValidChallan(incoming()) &&
+                    incoming().ownerId == existing().ownerId &&
+                    incoming().createdAt == existing().createdAt;
+      allow delete: if isSignedIn() && isValidId(challanId) && ownsExisting();
     }
   }
 }

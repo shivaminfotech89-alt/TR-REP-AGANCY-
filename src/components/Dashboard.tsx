@@ -1,38 +1,88 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Loader2 } from 'lucide-react';
+import { useAgency } from '../lib/AgencyContext';
+import { daysLeftFrom, getCircleOfficeLimit } from '../lib/contractRates';
+import { SLA_DAYS } from '../lib/types';
+import type { Job } from '../lib/types';
+import {
+  ClipboardPlus,
+  FileEdit,
+  FileSearch,
+  FlaskConical,
+  FileSpreadsheet,
+  Truck,
+  Receipt,
+  BadgeIndianRupee,
+  Droplets,
+  Package,
+  Building2,
+  ClipboardCheck,
+  FileBarChart,
+  Warehouse,
+  Settings,
+  Loader2,
+} from 'lucide-react';
 
-interface Job {
-  id: string;
-  jobNo: string;
-  mrNo: string;
-  dateOfIssue: string;
-  capacityKva: number;
-  make: string;
-  status: string;
-  repairType: string;
-  createdAt: number;
-}
+type Mod = {
+  to: string;
+  label: string;
+  icon: typeof ClipboardPlus;
+  color: string;
+  group: string;
+};
+
+const MODULES: Mod[] = [
+  // Entry
+  { to: '/new-job', label: 'New Job Entry', icon: ClipboardPlus, color: 'bg-blue-600', group: 'Entry' },
+  { to: '/external-inspection', label: 'OGP External', icon: FileEdit, color: 'bg-indigo-700', group: 'Entry' },
+  { to: '/internal-inspection', label: 'OGP Internal', icon: FileSearch, color: 'bg-red-600', group: 'Entry' },
+  { to: '/jobs?core=Amorphous', label: 'AMORPHOUS Entry', icon: ClipboardPlus, color: 'bg-slate-700', group: 'Entry' },
+  { to: '/jobs?core=Wound', label: 'Wound CORE Entry', icon: ClipboardPlus, color: 'bg-emerald-600', group: 'Entry' },
+  { to: '/testing-report?type=CRGO', label: 'CRGO Test Entry', icon: FlaskConical, color: 'bg-blue-600', group: 'Entry' },
+  { to: '/testing-report?type=LSTC', label: 'LSTC Test Entry', icon: FlaskConical, color: 'bg-red-600', group: 'Entry' },
+  { to: '/data-modification', label: 'Data Modification', icon: FileEdit, color: 'bg-indigo-800', group: 'Entry' },
+  // Reports
+  { to: '/reports/inspection', label: 'Inspection Report', icon: ClipboardCheck, color: 'bg-emerald-700', group: 'Reports' },
+  { to: '/estimates/new', label: 'Estimate Report', icon: FileSpreadsheet, color: 'bg-emerald-600', group: 'Reports' },
+  { to: '/challans/new', label: 'Challan Report', icon: ClipboardCheck, color: 'bg-teal-600', group: 'Reports' },
+  { to: '/bills/new', label: 'Bill Report', icon: Receipt, color: 'bg-emerald-700', group: 'Reports' },
+  { to: '/testing-report', label: 'Test Report', icon: FileBarChart, color: 'bg-green-600', group: 'Reports' },
+  { to: '/reports/inspection-blank', label: 'Insp. Report Blank', icon: ClipboardCheck, color: 'bg-lime-600', group: 'Reports' },
+  { to: '/reports/stock', label: 'Stock Statement', icon: Warehouse, color: 'bg-emerald-800', group: 'Reports' },
+  { to: '/barrel-delivery', label: 'Barrel Delivery Report', icon: Package, color: 'bg-violet-700', group: 'Reports' },
+  // Generate
+  { to: '/estimates/new', label: 'Estimate Generate', icon: FileSpreadsheet, color: 'bg-red-600', group: 'Generate' },
+  { to: '/challans/new', label: 'Challan Generate', icon: Truck, color: 'bg-red-600', group: 'Generate' },
+  { to: '/bills/new', label: 'Bill Generate', icon: Receipt, color: 'bg-red-600', group: 'Generate' },
+  { to: '/approval-amount', label: 'Approval Amount', icon: BadgeIndianRupee, color: 'bg-rose-700', group: 'Generate' },
+  // Logistics
+  { to: '/oil-inward', label: 'Oil Inward', icon: Droplets, color: 'bg-amber-800', group: 'Logistics' },
+  { to: '/barrel-delivery', label: 'Barrel Delivery', icon: Package, color: 'bg-amber-700', group: 'Logistics' },
+  { to: '/change-division', label: 'Change Division', icon: Building2, color: 'bg-stone-700', group: 'Logistics' },
+  { to: '/agency-settings', label: 'Agency Settings', icon: Settings, color: 'bg-slate-800', group: 'Logistics' },
+];
 
 export default function Dashboard() {
+  const { activeAgency, setActiveAgencyId, agencies } = useAgency();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [division, setDivision] = useState('');
+
+  useEffect(() => {
+    const first = activeAgency ? Object.keys(activeAgency.prefixes || {})[0] : '';
+    const stored = localStorage.getItem('activeDivision');
+    setDivision(stored || first || '');
+  }, [activeAgency]);
 
   useEffect(() => {
     async function fetchJobs() {
       if (!auth.currentUser) return;
       try {
-        const q = query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          orderBy('createdAt', 'desc'),
-          limit(5)
-        );
+        const q = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid));
         const snapshot = await getDocs(q);
-        const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
-        setJobs(fetchedJobs);
+        setJobs(snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Job)));
       } catch (err) {
         handleFirestoreError(err, OperationType.LIST, 'jobs');
       } finally {
@@ -42,166 +92,155 @@ export default function Dashboard() {
     fetchJobs();
   }, []);
 
-  const getStatusColor = (status: string, repairType: string) => {
-    if (repairType === 'GP') return 'text-purple-600 bg-purple-50';
-    if (status.includes('Internal')) return 'text-blue-600 bg-blue-50';
-    if (status.includes('External') || status === 'Received') return 'text-slate-600 bg-slate-50';
-    return 'text-green-600 bg-green-50';
+  const onDivisionChange = (div: string) => {
+    setDivision(div);
+    localStorage.setItem('activeDivision', div);
   };
 
-  const calculateDaysLeft = (createdAt: number) => {
-    const daysPassed = Math.floor((Date.now() - createdAt) / (1000 * 60 * 60 * 24));
-    return 45 - daysPassed;
-  };
+  const pendingExt = jobs.filter((j) => j.repairType === 'OGP' && j.status === 'Received').length;
+  const pendingInt = jobs.filter(
+    (j) => (j.repairType === 'GP' && j.status === 'Received') || j.status === 'External Done'
+  ).length;
+  const slaRisk = jobs.filter((j) => {
+    const left = daysLeftFrom(j.estimateApprovedAt || null, SLA_DAYS);
+    return left !== null && left < 15 && !['Dispatched', 'Completed', 'Non-Repairable'].includes(j.status);
+  }).length;
+
+  const groups = ['Entry', 'Reports', 'Generate', 'Logistics'];
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      <div className="lg:col-span-8 space-y-6">
-        
-        <section className="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
-          <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Active Repair Queue (SLA: 45 Days)</h2>
-            <span className="text-[10px] bg-slate-200 px-2 py-0.5 rounded">Viewing {jobs.length} Items</span>
+    <div className="space-y-6">
+      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900 tracking-tight">
+            {activeAgency?.name || 'Transformer Management System'}
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">Web modules matching your Ideal Engineering Co. desktop system</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          {agencies.length > 1 && (
+            <select
+              value={activeAgency?.id || ''}
+              onChange={(e) => setActiveAgencyId(e.target.value)}
+              className="text-xs border rounded px-2 py-1.5 bg-slate-50"
+            >
+              {agencies.map((a) => (
+                <option key={a.id} value={a.id}>
+                  {a.name}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase text-slate-500">Division</span>
+            <select
+              value={division}
+              onChange={(e) => onDivisionChange(e.target.value)}
+              className="text-sm font-semibold border border-slate-300 rounded px-3 py-1.5 bg-amber-50 text-amber-900"
+            >
+              {(activeAgency ? Object.keys(activeAgency.prefixes) : ['SABARMATI']).map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
           </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-white text-slate-400 uppercase text-[10px] font-bold">
-                <tr>
-                  <th className="p-4">Job No</th>
-                  <th className="p-4">MR No / Date</th>
-                  <th className="p-4">KVA / Make</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Days Left</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400 mx-auto" /></td>
-                  </tr>
-                ) : jobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500">No active jobs found.</td>
-                  </tr>
-                ) : (
-                  jobs.map(job => {
-                    const daysLeft = calculateDaysLeft(job.createdAt);
-                    return (
-                      <tr key={job.id} className="hover:bg-slate-50">
-                        <td className={`p-4 font-mono font-bold ${job.repairType === 'GP' ? 'text-orange-600' : ''}`}>
-                          {job.jobNo}{job.repairType === 'GP' ? '*' : ''}
-                        </td>
-                        <td className="p-4">{job.mrNo} / {job.dateOfIssue.slice(5)}</td>
-                        <td className="p-4">{job.capacityKva} / {job.make}</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-1 rounded-full text-[10px] ${getStatusColor(job.status, job.repairType)}`}>
-                            {job.repairType === 'GP' ? 'Guarantee Return' : job.status}
-                          </span>
-                        </td>
-                        <td className={`p-4 font-bold ${daysLeft < 15 ? 'text-red-500' : 'text-slate-700'}`}>
-                          {daysLeft} Days
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <section className="bg-white border border-slate-200 rounded p-4">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-4">Oil Accounting Ledger</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">Received Qty:</span>
-                <span className="font-mono">1,200 Litres</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">Filtration Loss (5%):</span>
-                <span className="font-mono text-red-500">-60.0 Litres</span>
-              </div>
-              <div className="flex justify-between text-xs pt-2 border-t border-dashed">
-                <span className="font-bold">Adjusted Receivable:</span>
-                <span className="font-mono font-bold">1,140 Litres</span>
-              </div>
-              <Link to="/oil-inward" className="block w-full mt-2 bg-slate-900 text-white text-[10px] py-2 rounded font-bold uppercase text-center hover:bg-slate-800 transition-colors">
-                View Oil Shortage Report
-              </Link>
-            </div>
-          </section>
-          
-          <section className="bg-white border border-slate-200 rounded p-4">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-4">Guarantee Monitoring</h3>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold">18</span>
-              <span className="text-xs text-slate-500 mb-1">Months Fixed Period</span>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-2 leading-tight">GP Return Policy: Use existing Job No. Internal inspection required only for scrap declaration.</p>
-          </section>
         </div>
       </div>
 
-      <aside className="lg:col-span-4 space-y-6">
-        <section className="bg-slate-900 text-white rounded p-5 shadow-lg relative overflow-hidden">
-          <div className="relative z-10">
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Circle Office Approval</h3>
-            <p className="text-xl font-bold mt-2">$12,450.00</p>
-            <p className="text-[10px] opacity-60">Estimate Power Limit: $15,000.00</p>
-            <div className="mt-4 h-1 w-full bg-slate-700 rounded-full">
-              <div className="h-full bg-blue-500 rounded-full w-[83%]"></div>
-            </div>
-            <Link to="/estimates/new" className="block text-center mt-6 w-full border border-blue-400 text-blue-400 py-2 rounded text-[10px] font-bold uppercase hover:bg-blue-400 hover:text-slate-900 transition-colors">
-              Generate New Estimate
-            </Link>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-blue-500 opacity-10 rounded-full"></div>
-        </section>
+      <div className="grid grid-cols-3 gap-3 max-w-xl">
+        <div className="bg-white border rounded-lg p-3">
+          <p className="text-[10px] uppercase font-bold text-slate-500">Ext. Pending</p>
+          <p className="text-2xl font-mono font-bold">{loading ? '…' : pendingExt}</p>
+        </div>
+        <div className="bg-white border rounded-lg p-3">
+          <p className="text-[10px] uppercase font-bold text-slate-500">Int. Pending</p>
+          <p className="text-2xl font-mono font-bold">{loading ? '…' : pendingInt}</p>
+        </div>
+        <div className="bg-white border rounded-lg p-3">
+          <p className="text-[10px] uppercase font-bold text-slate-500">SLA Risk</p>
+          <p className={`text-2xl font-mono font-bold ${slaRisk ? 'text-red-600' : ''}`}>{loading ? '…' : slaRisk}</p>
+        </div>
+      </div>
 
-        <section className="bg-white border border-slate-200 rounded p-4">
-          <h3 className="text-xs font-bold uppercase text-slate-500 mb-3">Pending Tasks</h3>
-          <div className="space-y-4">
-            <div className="flex gap-3">
-              <div className="w-1 bg-orange-400 rounded"></div>
-              <div>
-                <p className="text-xs font-bold">Upload SP Estimate.pdf</p>
-                <p className="text-[10px] text-slate-400">Job: TR-2023-892 • North Division</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <div className="w-1 bg-blue-400 rounded"></div>
-              <div>
-                <p className="text-xs font-bold">Create Dispatch Challan</p>
-                <p className="text-[10px] text-slate-400">MR-5510 • Completed Unit</p>
-              </div>
-            </div>
-            <div className="flex gap-3">
-              <div className="w-1 bg-red-400 rounded"></div>
-              <div>
-                <p className="text-xs font-bold">Declare Non-Repairable</p>
-                <p className="text-[10px] text-slate-400">GP-2022-104 • Scrap Report Needed</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section className="bg-blue-50 border border-blue-100 rounded p-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h4 className="text-blue-800 text-xs font-bold">Quick Billing</h4>
-              <p className="text-[10px] text-blue-600 mt-1">Generate SP Bill & Letter for approved estimates.</p>
-              <Link to="/bills/new" className="mt-3 inline-block text-[10px] font-bold text-blue-700 uppercase hover:underline">
-                Create Bill &rarr;
+      {groups.map((g) => (
+        <section key={g}>
+          <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-500 mb-3">{g}</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3">
+            {MODULES.filter((m) => m.group === g).map((m) => (
+              <Link
+                key={`${g}-${m.label}`}
+                to={m.to}
+                className="group flex flex-col items-center text-center bg-white border border-slate-200 rounded-xl p-3 hover:shadow-md hover:border-slate-300 transition-all"
+              >
+                <div className={`w-14 h-14 ${m.color} text-white rounded-xl flex items-center justify-center mb-2 shadow-sm group-hover:scale-105 transition-transform`}>
+                  <m.icon className="w-7 h-7" />
+                </div>
+                <span className="text-[11px] font-semibold text-slate-800 leading-tight">{m.label}</span>
               </Link>
-            </div>
-            <div className="text-blue-200">
-              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"></path></svg>
-            </div>
+            ))}
           </div>
         </section>
-      </aside>
+      ))}
+
+      <section className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b bg-slate-50 flex justify-between items-center">
+          <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Recent Jobs · {division || 'All'}</h2>
+          {loading && <Loader2 className="w-4 h-4 animate-spin text-slate-400" />}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead className="text-[10px] uppercase text-slate-400">
+              <tr>
+                <th className="p-3 text-left">Job</th>
+                <th className="p-3 text-left">MR</th>
+                <th className="p-3 text-left">KVA / Make</th>
+                <th className="p-3 text-left">Status</th>
+                <th className="p-3 text-left">Circle Limit</th>
+                <th className="p-3 text-left">Days Left</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {jobs
+                .filter((j) => !division || j.division === division)
+                .slice(0, 12)
+                .map((job) => {
+                  const daysLeft = daysLeftFrom(job.estimateApprovedAt || null, SLA_DAYS);
+                  const limit =
+                    activeAgency?.circleOfficeLimits?.[job.capacityKva.toString()] ?? getCircleOfficeLimit(job.capacityKva);
+                  return (
+                    <tr key={job.id} className="hover:bg-slate-50">
+                      <td className="p-3 font-mono font-bold">
+                        {job.jobNo}
+                        {job.repairType === 'GP' ? '*' : ''}
+                      </td>
+                      <td className="p-3">{job.mrNo}</td>
+                      <td className="p-3">
+                        {job.capacityKva} / {job.make}
+                      </td>
+                      <td className="p-3">
+                        <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-semibold">
+                          {job.status}
+                        </span>
+                      </td>
+                      <td className="p-3 font-mono">₹{limit.toLocaleString()}</td>
+                      <td className={`p-3 font-bold ${daysLeft !== null && daysLeft < 15 ? 'text-red-500' : ''}`}>
+                        {daysLeft === null ? '—' : `${daysLeft}d`}
+                      </td>
+                    </tr>
+                  );
+                })}
+              {!loading && jobs.length === 0 && (
+                <tr>
+                  <td colSpan={6} className="p-8 text-center text-slate-500">
+                    No jobs yet — start with <Link className="text-blue-600 underline" to="/new-job">New Job Entry</Link>
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
