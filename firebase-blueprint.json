@@ -2,7 +2,7 @@
   "entities": {
     "Job": {
       "title": "Transformer Repair Job",
-      "description": "Represents a transformer repair job.",
+      "description": "Represents a transformer repair job received via MR from a division office.",
       "type": "object",
       "properties": {
         "jobNo": { "type": "string", "maxLength": 50 },
@@ -15,6 +15,17 @@
         "repairType": { "type": "string", "maxLength": 50 },
         "division": { "type": "string", "maxLength": 100 },
         "status": { "type": "string", "maxLength": 50 },
+        "kv": { "type": "string", "maxLength": 10 },
+        "transformerCore": { "type": "string", "maxLength": 50 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "originalJobId": { "type": "string", "maxLength": 128 },
+        "guaranteeStartDate": { "type": "string", "maxLength": 20 },
+        "guaranteeEndDate": { "type": "string", "maxLength": 20 },
+        "estimateApprovedAt": { "type": "number" },
+        "estimateId": { "type": "string", "maxLength": 128 },
+        "isNonRepairable": { "type": "boolean" },
+        "challanNo": { "type": "string", "maxLength": 50 },
+        "billId": { "type": "string", "maxLength": 128 },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
         "ownerId": { "type": "string", "maxLength": 128 }
@@ -28,12 +39,122 @@
       "properties": {
         "jobId": { "type": "string", "maxLength": 128 },
         "type": { "type": "string", "maxLength": 20 },
-        "data": { "type": "string", "maxLength": 5000 },
+        "data": { "type": "object" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
         "ownerId": { "type": "string", "maxLength": 128 }
       },
-      "required": ["jobId", "type", "createdAt", "updatedAt", "ownerId"]
+      "required": ["jobId", "type", "data", "createdAt", "updatedAt", "ownerId"]
+    },
+    "Agency": {
+      "title": "Repair Agency",
+      "description": "Agency profile with division prefixes and letterhead.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 100 },
+        "letterheadUrl": { "type": "string" },
+        "prefixes": { "type": "object" },
+        "lastJobNumbers": { "type": "object" },
+        "gstNo": { "type": "string", "maxLength": 30 },
+        "panNo": { "type": "string", "maxLength": 20 },
+        "address": { "type": "string", "maxLength": 500 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 100 },
+        "bankName": { "type": "string", "maxLength": 100 },
+        "bankAccNo": { "type": "string", "maxLength": 50 },
+        "bankIfsc": { "type": "string", "maxLength": 20 },
+        "orderNo": { "type": "string", "maxLength": 200 },
+        "circleOfficeLimits": { "type": "object" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["name", "prefixes", "lastJobNumbers", "ownerId"]
+    },
+    "Estimate": {
+      "title": "Estimate Report",
+      "description": "Combined estimate from external + internal inspection for MR jobs.",
+      "type": "object",
+      "properties": {
+        "estimateNo": { "type": "string", "maxLength": 50 },
+        "estimateDate": { "type": "string", "maxLength": 20 },
+        "division": { "type": "string", "maxLength": 100 },
+        "mrNo": { "type": "string", "maxLength": 50 },
+        "orderNo": { "type": "string", "maxLength": 200 },
+        "status": { "type": "string", "maxLength": 30 },
+        "lines": { "type": "array" },
+        "grandTotal": { "type": "number" },
+        "approvedAt": { "type": "number" },
+        "approvalRef": { "type": "string", "maxLength": 100 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["estimateNo", "estimateDate", "division", "mrNo", "status", "lines", "grandTotal", "createdAt", "updatedAt", "ownerId"]
+    },
+    "Bill": {
+      "title": "Tax Invoice Bill",
+      "description": "Bill generated after estimate approval.",
+      "type": "object",
+      "properties": {
+        "billNo": { "type": "string", "maxLength": 50 },
+        "billDate": { "type": "string", "maxLength": 20 },
+        "division": { "type": "string", "maxLength": 100 },
+        "orderNo": { "type": "string", "maxLength": 200 },
+        "lines": { "type": "array" },
+        "subTotal": { "type": "number" },
+        "cgstPct": { "type": "number" },
+        "sgstPct": { "type": "number" },
+        "cgstAmt": { "type": "number" },
+        "sgstAmt": { "type": "number" },
+        "advanceStamp": { "type": "number" },
+        "netTotal": { "type": "number" },
+        "amountInWords": { "type": "string", "maxLength": 500 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["billNo", "billDate", "division", "lines", "subTotal", "netTotal", "createdAt", "updatedAt", "ownerId"]
+    },
+    "OilAccount": {
+      "title": "Oil Account Sheet",
+      "description": "Oil shortage accounting with 5% filtration loss, MR and transformer wise.",
+      "type": "object",
+      "properties": {
+        "billNo": { "type": "string", "maxLength": 50 },
+        "billDate": { "type": "string", "maxLength": 20 },
+        "division": { "type": "string", "maxLength": 100 },
+        "openingBalance": { "type": "number" },
+        "oilReceived": { "type": "number" },
+        "total": { "type": "number" },
+        "lessAsPerBill": { "type": "number" },
+        "scrapTransOil": { "type": "number" },
+        "closingBalance": { "type": "number" },
+        "debitCreditBalance": { "type": "number" },
+        "receipts": { "type": "array" },
+        "lines": { "type": "array" },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["billNo", "billDate", "lines", "createdAt", "updatedAt", "ownerId"]
+    },
+    "Challan": {
+      "title": "Delivery Challan",
+      "description": "Return challan when repaired transformer is sent back to division office.",
+      "type": "object",
+      "properties": {
+        "challanNo": { "type": "string", "maxLength": 50 },
+        "challanDate": { "type": "string", "maxLength": 20 },
+        "division": { "type": "string", "maxLength": 100 },
+        "lines": { "type": "array" },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" },
+        "ownerId": { "type": "string", "maxLength": 128 }
+      },
+      "required": ["challanNo", "challanDate", "division", "lines", "createdAt", "updatedAt", "ownerId"]
     }
   },
   "firestore": {
@@ -44,6 +165,26 @@
     "/inspections/{inspectionId}": {
       "schema": { "$ref": "#/entities/Inspection" },
       "description": "Stores inspection reports."
+    },
+    "/agencies/{agencyId}": {
+      "schema": { "$ref": "#/entities/Agency" },
+      "description": "Stores repair agency profiles."
+    },
+    "/estimates/{estimateId}": {
+      "schema": { "$ref": "#/entities/Estimate" },
+      "description": "Stores estimates and approval status."
+    },
+    "/bills/{billId}": {
+      "schema": { "$ref": "#/entities/Bill" },
+      "description": "Stores tax invoice bills."
+    },
+    "/oilAccounts/{oilId}": {
+      "schema": { "$ref": "#/entities/OilAccount" },
+      "description": "Stores oil account sheets."
+    },
+    "/challans/{challanId}": {
+      "schema": { "$ref": "#/entities/Challan" },
+      "description": "Stores delivery challans."
     }
   }
 }

@@ -1,207 +1,234 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
+import { collection, query, where, getDocs, orderBy, limit } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Loader2 } from 'lucide-react';
-
-interface Job {
-  id: string;
-  jobNo: string;
-  mrNo: string;
-  dateOfIssue: string;
-  capacityKva: number;
-  make: string;
-  status: string;
-  repairType: string;
-  createdAt: number;
-}
+import { Loader2, ClipboardPlus, Search, FileSpreadsheet, FileText, Droplet, Truck } from 'lucide-react';
+import { daysLeftFrom, getCircleOfficeLimit } from '../lib/contractRates';
+import { SLA_DAYS, GUARANTEE_MONTHS } from '../lib/types';
+import type { Job } from '../lib/types';
+import { useAgency } from '../lib/AgencyContext';
 
 export default function Dashboard() {
+  const { activeAgency } = useAgency();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [oilShortage, setOilShortage] = useState(0);
 
   useEffect(() => {
-    async function fetchJobs() {
+    async function fetchData() {
       if (!auth.currentUser) return;
       try {
         const q = query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid),
           orderBy('createdAt', 'desc'),
-          limit(5)
+          limit(40)
         );
         const snapshot = await getDocs(q);
-        const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
+        const fetchedJobs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Job));
         setJobs(fetchedJobs);
+
+        const iq = query(
+          collection(db, 'inspections'),
+          where('ownerId', '==', auth.currentUser.uid),
+          where('type', '==', 'External')
+        );
+        const is = await getDocs(iq);
+        let short = 0;
+        is.forEach((d) => {
+          const data = d.data().data;
+          const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+          short += Number(parsed?.netShortage) || 0;
+        });
+        setOilShortage(Number(short.toFixed(2)));
       } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'jobs');
+        // orderBy may need index — fallback
+        try {
+          const q2 = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser!.uid));
+          const snapshot = await getDocs(q2);
+          const fetchedJobs = snapshot.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Job))
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .slice(0, 40);
+          setJobs(fetchedJobs);
+        } catch (err2) {
+          handleFirestoreError(err2, OperationType.LIST, 'jobs');
+        }
       } finally {
         setLoading(false);
       }
     }
-    fetchJobs();
+    fetchData();
   }, []);
 
-  const getStatusColor = (status: string, repairType: string) => {
-    if (repairType === 'GP') return 'text-purple-600 bg-purple-50';
-    if (status.includes('Internal')) return 'text-blue-600 bg-blue-50';
-    if (status.includes('External') || status === 'Received') return 'text-slate-600 bg-slate-50';
-    return 'text-green-600 bg-green-50';
-  };
+  const active = jobs.filter((j) => !['Dispatched', 'Completed', 'Non-Repairable'].includes(j.status));
+  const pendingExt = jobs.filter((j) => j.repairType === 'OGP' && j.status === 'Received').length;
+  const pendingInt = jobs.filter((j) =>
+    (j.repairType === 'GP' && j.status === 'Received') || j.status === 'External Done'
+  ).length;
+  const pendingEst = jobs.filter((j) => j.status === 'Internal Done').length;
+  const pendingApr = jobs.filter((j) => j.status === 'Estimate Sent' || j.status === 'Estimate Prepared').length;
+  const slaRisk = active.filter((j) => {
+    const left = daysLeftFrom(j.estimateApprovedAt || null, SLA_DAYS);
+    return left !== null && left < 15;
+  }).length;
 
-  const calculateDaysLeft = (createdAt: number) => {
-    const daysPassed = Math.floor((Date.now() - createdAt) / (1000 * 60 * 60 * 24));
-    return 45 - daysPassed;
+  const getStatusColor = (status: string, repairType: string) => {
+    if (status === 'Non-Repairable') return 'text-red-700 bg-red-50';
+    if (repairType === 'GP') return 'text-violet-700 bg-violet-50';
+    if (status.includes('Approved') || status === 'Dispatched' || status === 'Billed') return 'text-emerald-700 bg-emerald-50';
+    if (status.includes('Internal') || status.includes('Estimate')) return 'text-blue-700 bg-blue-50';
+    return 'text-slate-600 bg-slate-50';
   };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-      <div className="lg:col-span-8 space-y-6">
-        
-        <section className="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
-          <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Active Repair Queue (SLA: 45 Days)</h2>
-            <span className="text-[10px] bg-slate-200 px-2 py-0.5 rounded">Viewing {jobs.length} Items</span>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-white text-slate-400 uppercase text-[10px] font-bold">
-                <tr>
-                  <th className="p-4">Job No</th>
-                  <th className="p-4">MR No / Date</th>
-                  <th className="p-4">KVA / Make</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Days Left</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400 mx-auto" /></td>
-                  </tr>
-                ) : jobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500">No active jobs found.</td>
-                  </tr>
-                ) : (
-                  jobs.map(job => {
-                    const daysLeft = calculateDaysLeft(job.createdAt);
-                    return (
-                      <tr key={job.id} className="hover:bg-slate-50">
-                        <td className={`p-4 font-mono font-bold ${job.repairType === 'GP' ? 'text-orange-600' : ''}`}>
-                          {job.jobNo}{job.repairType === 'GP' ? '*' : ''}
-                        </td>
-                        <td className="p-4">{job.mrNo} / {job.dateOfIssue.slice(5)}</td>
-                        <td className="p-4">{job.capacityKva} / {job.make}</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-1 rounded-full text-[10px] ${getStatusColor(job.status, job.repairType)}`}>
-                            {job.repairType === 'GP' ? 'Guarantee Return' : job.status}
-                          </span>
-                        </td>
-                        <td className={`p-4 font-bold ${daysLeft < 15 ? 'text-red-500' : 'text-slate-700'}`}>
-                          {daysLeft} Days
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <section className="bg-white border border-slate-200 rounded p-4">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-4">Oil Accounting Ledger</h3>
-            <div className="space-y-3">
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">Received Qty:</span>
-                <span className="font-mono">1,200 Litres</span>
-              </div>
-              <div className="flex justify-between text-xs">
-                <span className="text-slate-500">Filtration Loss (5%):</span>
-                <span className="font-mono text-red-500">-60.0 Litres</span>
-              </div>
-              <div className="flex justify-between text-xs pt-2 border-t border-dashed">
-                <span className="font-bold">Adjusted Receivable:</span>
-                <span className="font-mono font-bold">1,140 Litres</span>
-              </div>
-              <Link to="/oil-inward" className="block w-full mt-2 bg-slate-900 text-white text-[10px] py-2 rounded font-bold uppercase text-center hover:bg-slate-800 transition-colors">
-                View Oil Shortage Report
-              </Link>
-            </div>
-          </section>
-          
-          <section className="bg-white border border-slate-200 rounded p-4">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-4">Guarantee Monitoring</h3>
-            <div className="flex items-end gap-2">
-              <span className="text-3xl font-bold">18</span>
-              <span className="text-xs text-slate-500 mb-1">Months Fixed Period</span>
-            </div>
-            <p className="text-[10px] text-slate-400 mt-2 leading-tight">GP Return Policy: Use existing Job No. Internal inspection required only for scrap declaration.</p>
-          </section>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900">
+            {activeAgency?.name || 'TR Rep Agency'}
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Transformer repair workflow · SLA {SLA_DAYS} days from estimate approval · Guarantee {GUARANTEE_MONTHS} months
+          </p>
         </div>
+        <Link to="/new-job"
+          className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded hover:bg-blue-700">
+          <ClipboardPlus className="w-4 h-4" /> New MR Intake
+        </Link>
       </div>
 
-      <aside className="lg:col-span-4 space-y-6">
-        <section className="bg-slate-900 text-white rounded p-5 shadow-lg relative overflow-hidden">
-          <div className="relative z-10">
-            <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Circle Office Approval</h3>
-            <p className="text-xl font-bold mt-2">$12,450.00</p>
-            <p className="text-[10px] opacity-60">Estimate Power Limit: $15,000.00</p>
-            <div className="mt-4 h-1 w-full bg-slate-700 rounded-full">
-              <div className="h-full bg-blue-500 rounded-full w-[83%]"></div>
-            </div>
-            <Link to="/estimates/new" className="block text-center mt-6 w-full border border-blue-400 text-blue-400 py-2 rounded text-[10px] font-bold uppercase hover:bg-blue-400 hover:text-slate-900 transition-colors">
-              Generate New Estimate
-            </Link>
-          </div>
-          <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-blue-500 opacity-10 rounded-full"></div>
-        </section>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        {[
+          { label: 'Ext. Pending', value: pendingExt, to: '/external-inspection', color: 'border-slate-200' },
+          { label: 'Int. Pending', value: pendingInt, to: '/internal-inspection', color: 'border-slate-200' },
+          { label: 'Est. Ready', value: pendingEst, to: '/estimates/new', color: 'border-blue-200' },
+          { label: 'Awaiting Approval', value: pendingApr, to: '/estimates/new', color: 'border-amber-200' },
+          { label: 'SLA Risk', value: slaRisk, to: '/', color: 'border-red-200' },
+        ].map((c) => (
+          <Link key={c.label} to={c.to} className={`bg-white border ${c.color} rounded p-4 hover:shadow-sm transition-shadow`}>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500">{c.label}</p>
+            <p className="text-2xl font-bold mt-1 font-mono">{c.value}</p>
+          </Link>
+        ))}
+      </div>
 
-        <section className="bg-white border border-slate-200 rounded p-4">
-          <h3 className="text-xs font-bold uppercase text-slate-500 mb-3">Pending Tasks</h3>
-          <div className="space-y-4">
-            <div className="flex gap-3">
-              <div className="w-1 bg-orange-400 rounded"></div>
-              <div>
-                <p className="text-xs font-bold">Upload SP Estimate.pdf</p>
-                <p className="text-[10px] text-slate-400">Job: TR-2023-892 • North Division</p>
-              </div>
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <div className="lg:col-span-8 space-y-6">
+          <section className="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
+            <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
+              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                Active Repair Queue (SLA from Estimate Approval)
+              </h2>
+              <span className="text-[10px] bg-slate-200 px-2 py-0.5 rounded">{active.length} active</span>
             </div>
-            <div className="flex gap-3">
-              <div className="w-1 bg-blue-400 rounded"></div>
-              <div>
-                <p className="text-xs font-bold">Create Dispatch Challan</p>
-                <p className="text-[10px] text-slate-400">MR-5510 • Completed Unit</p>
-              </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead className="bg-white text-slate-400 uppercase text-[10px] font-bold">
+                  <tr>
+                    <th className="p-3">Job No</th>
+                    <th className="p-3">MR / Div</th>
+                    <th className="p-3">KVA / Make</th>
+                    <th className="p-3">Status</th>
+                    <th className="p-3">Circle Limit</th>
+                    <th className="p-3">Days Left</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr><td colSpan={6} className="p-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400 mx-auto" /></td></tr>
+                  ) : active.length === 0 ? (
+                    <tr><td colSpan={6} className="p-8 text-center text-slate-500">No active jobs. Start with MR Intake.</td></tr>
+                  ) : (
+                    active.slice(0, 20).map((job) => {
+                      const daysLeft = daysLeftFrom(job.estimateApprovedAt || null, SLA_DAYS);
+                      const limit = activeAgency?.circleOfficeLimits?.[job.capacityKva.toString()] ?? getCircleOfficeLimit(job.capacityKva);
+                      return (
+                        <tr key={job.id} className="hover:bg-slate-50">
+                          <td className={`p-3 font-mono font-bold ${job.repairType === 'GP' ? 'text-violet-700' : ''}`}>
+                            {job.jobNo}{job.repairType === 'GP' ? '*' : ''}
+                          </td>
+                          <td className="p-3">{job.mrNo}<div className="text-[10px] text-slate-400">{job.division}</div></td>
+                          <td className="p-3">{job.capacityKva} / {job.make}</td>
+                          <td className="p-3">
+                            <span className={`px-2 py-1 rounded text-[10px] font-semibold ${getStatusColor(job.status, job.repairType)}`}>
+                              {job.status}
+                            </span>
+                          </td>
+                          <td className="p-3 font-mono text-slate-600">₹{limit.toLocaleString()}</td>
+                          <td className={`p-3 font-bold ${daysLeft !== null && daysLeft < 15 ? 'text-red-500' : 'text-slate-700'}`}>
+                            {daysLeft === null ? '—' : `${daysLeft}d`}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
             </div>
-            <div className="flex gap-3">
-              <div className="w-1 bg-red-400 rounded"></div>
-              <div>
-                <p className="text-xs font-bold">Declare Non-Repairable</p>
-                <p className="text-[10px] text-slate-400">GP-2022-104 • Scrap Report Needed</p>
-              </div>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section className="bg-blue-50 border border-blue-100 rounded p-4">
-          <div className="flex justify-between items-start">
-            <div>
-              <h4 className="text-blue-800 text-xs font-bold">Quick Billing</h4>
-              <p className="text-[10px] text-blue-600 mt-1">Generate SP Bill & Letter for approved estimates.</p>
-              <Link to="/bills/new" className="mt-3 inline-block text-[10px] font-bold text-blue-700 uppercase hover:underline">
-                Create Bill &rarr;
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+            {[
+              { to: '/external-inspection', icon: Search, label: 'External Inspection', desc: 'Physical + oil' },
+              { to: '/internal-inspection', icon: Search, label: 'Internal Inspection', desc: 'Winding / scrap' },
+              { to: '/estimates/new', icon: FileSpreadsheet, label: 'Estimates', desc: 'Pre-fill + letter' },
+              { to: '/bills/new', icon: FileText, label: 'Bills', desc: 'Tax invoice' },
+              { to: '/oil-inward', icon: Droplet, label: 'Oil Ledger', desc: '5% filtration' },
+              { to: '/challans/new', icon: Truck, label: 'Challan', desc: 'Return to division' },
+            ].map((a) => (
+              <Link key={a.to} to={a.to} className="bg-white border border-slate-200 rounded p-4 hover:border-blue-300 transition-colors">
+                <a.icon className="w-5 h-5 text-blue-600 mb-2" />
+                <p className="text-sm font-bold text-slate-900">{a.label}</p>
+                <p className="text-[10px] text-slate-500 mt-0.5">{a.desc}</p>
               </Link>
-            </div>
-            <div className="text-blue-200">
-              <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"></path></svg>
-            </div>
+            ))}
           </div>
-        </section>
-      </aside>
+        </div>
+
+        <aside className="lg:col-span-4 space-y-4">
+          <section className="bg-slate-900 text-white rounded p-5">
+            <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Oil Receivable</h3>
+            <p className="text-3xl font-bold mt-2 font-mono">{oilShortage.toFixed(1)}</p>
+            <p className="text-[10px] opacity-60">Litres (shortage + 5% filtration) from external inspections</p>
+            <Link to="/oil-inward" className="mt-4 block text-center border border-blue-400 text-blue-300 py-2 rounded text-[10px] font-bold uppercase hover:bg-blue-400 hover:text-slate-900 transition-colors">
+              Open Oil Account
+            </Link>
+          </section>
+
+          <section className="bg-white border border-slate-200 rounded p-4">
+            <h3 className="text-xs font-bold uppercase text-slate-500 mb-3">Guarantee Policy</h3>
+            <div className="flex items-end gap-2 mb-2">
+              <span className="text-3xl font-bold font-mono">{GUARANTEE_MONTHS}</span>
+              <span className="text-xs text-slate-500 mb-1">months from first dispatch</span>
+            </div>
+            <ul className="text-[11px] text-slate-600 space-y-1.5 list-disc ml-4">
+              <li>GP return: new MR, same Job No, skip external</li>
+              <li>Internal only if declaring non-repairable</li>
+              <li>Guarantee date never resets on GP jobs</li>
+            </ul>
+          </section>
+
+          <section className="bg-white border border-slate-200 rounded p-4">
+            <h3 className="text-xs font-bold uppercase text-slate-500 mb-3">Circle Office Limits (prefix)</h3>
+            <div className="grid grid-cols-2 gap-1 text-[10px] font-mono">
+              {Object.entries(
+                activeAgency?.circleOfficeLimits && Object.keys(activeAgency.circleOfficeLimits).length
+                  ? activeAgency.circleOfficeLimits
+                  : { '10': 8716, '16': 8696, '25': 10124, '63': 20423, '100': 24609 }
+              ).map(([kva, lim]) => (
+                <div key={kva} className="flex justify-between bg-slate-50 px-2 py-1 rounded">
+                  <span>{kva} KVA</span>
+                  <span>₹{Number(lim).toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
+            <Link to="/agency-settings" className="mt-3 inline-block text-[10px] font-bold uppercase text-blue-600 hover:underline">
+              Edit in Agency Settings →
+            </Link>
+          </section>
+        </aside>
+      </div>
     </div>
   );
 }
