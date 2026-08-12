@@ -1,115 +1,50 @@
-import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { collection, query, where, getDocs, limit, orderBy } from 'firebase/firestore';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { Loader2 } from 'lucide-react';
-
-interface Job {
-  id: string;
-  jobNo: string;
-  mrNo: string;
-  dateOfIssue: string;
-  capacityKva: number;
-  make: string;
-  status: string;
-  repairType: string;
-  createdAt: number;
-}
+import { useAgency, AtMaster } from '../lib/AgencyContext';
+import { AllotmentWidget } from './AllotmentWidget';
 
 export default function Dashboard() {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { activeAgency, activeAtMaster } = useAgency();
+  
+  const divisions = activeAgency ? Object.keys(activeAgency.prefixes || {}) : [];
 
-  useEffect(() => {
-    async function fetchJobs() {
-      if (!auth.currentUser) return;
-      try {
-        const q = query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          orderBy('createdAt', 'desc'),
-          limit(5)
-        );
-        const snapshot = await getDocs(q);
-        const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
-        setJobs(fetchedJobs);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'jobs');
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchJobs();
-  }, []);
-
-  const getStatusColor = (status: string, repairType: string) => {
-    if (repairType === 'GP') return 'text-purple-600 bg-purple-50';
-    if (status.includes('Internal')) return 'text-blue-600 bg-blue-50';
-    if (status.includes('External') || status === 'Received') return 'text-slate-600 bg-slate-50';
-    return 'text-green-600 bg-green-50';
-  };
-
-  const calculateDaysLeft = (createdAt: number) => {
-    const daysPassed = Math.floor((Date.now() - createdAt) / (1000 * 60 * 60 * 24));
-    return 45 - daysPassed;
-  };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1400px] mx-auto">
       <div className="lg:col-span-8 space-y-6">
-        
-        <section className="bg-white border border-slate-200 rounded shadow-sm overflow-hidden">
-          <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-slate-500">Active Repair Queue (SLA: 45 Days)</h2>
-            <span className="text-[10px] bg-slate-200 px-2 py-0.5 rounded">Viewing {jobs.length} Items</span>
-          </div>
+        <div className="bg-white border border-slate-200 rounded p-6 shadow-sm">
+          <h2 className="text-xl font-bold text-slate-800 mb-2">Welcome to {activeAgency?.name || 'TR Rep Agency'}</h2>
+          <p className="text-sm text-slate-600 mb-6">Manage your repair jobs, track material receipts, and generate reports.</p>
           
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs text-left">
-              <thead className="bg-white text-slate-400 uppercase text-[10px] font-bold">
-                <tr>
-                  <th className="p-4">Job No</th>
-                  <th className="p-4">MR No / Date</th>
-                  <th className="p-4">KVA / Make</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Days Left</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {loading ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center"><Loader2 className="w-5 h-5 animate-spin text-slate-400 mx-auto" /></td>
-                  </tr>
-                ) : jobs.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500">No active jobs found.</td>
-                  </tr>
-                ) : (
-                  jobs.map(job => {
-                    const daysLeft = calculateDaysLeft(job.createdAt);
-                    return (
-                      <tr key={job.id} className="hover:bg-slate-50">
-                        <td className={`p-4 font-mono font-bold ${job.repairType === 'GP' ? 'text-orange-600' : ''}`}>
-                          {job.jobNo}{job.repairType === 'GP' ? '*' : ''}
-                        </td>
-                        <td className="p-4">{job.mrNo} / {job.dateOfIssue.slice(5)}</td>
-                        <td className="p-4">{job.capacityKva} / {job.make}</td>
-                        <td className="p-4">
-                          <span className={`px-2 py-1 rounded-full text-[10px] ${getStatusColor(job.status, job.repairType)}`}>
-                            {job.repairType === 'GP' ? 'Guarantee Return' : job.status}
-                          </span>
-                        </td>
-                        <td className={`p-4 font-bold ${daysLeft < 15 ? 'text-red-500' : 'text-slate-700'}`}>
-                          {daysLeft} Days
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
+            <Link to="/mr-ledger" className="block p-4 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group">
+              <h3 className="font-bold text-blue-800 text-sm mb-1 group-hover:underline">MR Ledger</h3>
+              <p className="text-xs text-blue-600">View and search Material Receipts (MR)</p>
+            </Link>
+            
+            <Link to="/new-job" className="block p-4 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors group">
+              <h3 className="font-bold text-emerald-800 text-sm mb-1 group-hover:underline">Intake (New MR)</h3>
+              <p className="text-xs text-emerald-600">Register incoming transformers</p>
+            </Link>
+
+            <Link to="/estimates/new" className="block p-4 border border-amber-200 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors group">
+              <h3 className="font-bold text-amber-800 text-sm mb-1 group-hover:underline">Generate Estimate</h3>
+              <p className="text-xs text-amber-600">Create repair cost estimates</p>
+            </Link>
+            <Link to="/challan/new" className="block p-4 border border-purple-200 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors group">
+              <h3 className="font-bold text-purple-800 text-sm mb-1 group-hover:underline">Delivery Challan</h3>
+              <p className="text-xs text-purple-600">Dispatch tested transformers</p>
+            </Link>
+            <Link to="/reports" className="block p-4 border border-rose-200 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors group">
+              <h3 className="font-bold text-rose-800 text-sm mb-1 group-hover:underline">Reports & Excel</h3>
+              <p className="text-xs text-rose-600">Export Div-wise testing/delivery</p>
+            </Link>
           </div>
-        </section>
+        </div>
+
+        {/* Allotment Status Widget */}
+        {activeAtMaster && divisions.length > 0 && (
+          <AllotmentWidget atMaster={activeAtMaster} />
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <section className="bg-white border border-slate-200 rounded p-4">

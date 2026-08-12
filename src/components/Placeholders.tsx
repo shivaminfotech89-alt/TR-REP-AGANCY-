@@ -19,20 +19,3 @@ export function BillGenerate() {
   );
 }
 
-export function OilInward() {
-  return (
-    <div className="max-w-4xl mx-auto">
-      <div className="mb-6 flex items-center space-x-4">
-        <Link to="/" className="p-2 bg-white rounded-full shadow-sm border border-slate-200 hover:bg-slate-50">
-          <ArrowLeft className="w-4 h-4 text-slate-600" />
-        </Link>
-        <h1 className="text-xl font-bold text-slate-900 tracking-tight">Oil Account Details</h1>
-      </div>
-      <div className="bg-white p-12 rounded shadow-sm border border-slate-200 text-center">
-        <Droplet className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-        <h2 className="text-lg font-bold text-slate-900 mb-2">Oil Measurement & Shortage</h2>
-        <p className="text-sm text-slate-500 max-w-md mx-auto">Track inward oil, 5% filtration loss, and total oil received against MR No and capacities.</p>
-      </div>
-    </div>
-  );
-}

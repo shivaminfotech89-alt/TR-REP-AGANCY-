@@ -1,0 +1,184 @@
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!auth.currentUser) return;
+    
+    setLoading(true);
+    try {
+
+      
+      const now = Date.now();
+      const batch = writeBatch(db);
+
+      // Check MR No duplication using simpler query to avoid composite index errors
+      
+      // Check MR No duplication using simpler query to avoid composite index errors
+      const mrQuery = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid), where('mrNo', '==', commonData.mrNo));
+      const mrDocs = await getDocs(mrQuery);
+      
+      let isDuplicateMR = false;
+      mrDocs.forEach(doc => {
+         const d = doc.data();
+         if (d.ownerId === auth.currentUser.uid && d.division === commonData.division && d.agencyId === activeAgency.id) {
+            isDuplicateMR = true;
+         }
+      });
+      
+      if (isDuplicateMR) {
+         alert(`MR No ${commonData.mrNo} already exists for division ${commonData.division}. Duplication not allowed.`);
+         setLoading(false);
+         return;
+      }
+      
+
+      
+      
+      // Check Allotment limits
+      if (activeAtMaster && activeAgency && commonData.repairType !== 'OH') {
+        const countsToAdd: Record<string, number> = {};
+        for (const t of transformers) {
+          const cType = t.coreType || 'CRGO';
+          if (cType === 'OH') continue;
+          countsToAdd[cType] = (countsToAdd[cType] || 0) + 1;
+        }
+        
+        for (const [cType, countToAdd] of Object.entries(countsToAdd)) {
+          const allowed = Number(activeAgency.allotments?.[commonData.division]?.[cType]) || 0;
+          if (allowed > 0) {
+            // Use simpler query to avoid composite index requirement, filter in memory
+            const snap = await getDocs(query(
+              collection(db, 'jobs'),
+              where('ownerId', '==', auth.currentUser.uid),
+              where('atId', '==', activeAtMaster.id)
+            ));
+            
+            let used = 0;
+            snap.forEach(doc => {
+              const data = doc.data();
+              if (data.ownerId !== auth.currentUser.uid || data.division !== commonData.division) return;
+              const docType = data.coreType || 'CRGO';
+              if (docType === 'OH' || data.repairType === 'OH') return;
+              if (docType === cType) {
+                used++;
+              }
+            });
+            
+            if (used + countToAdd > allowed) {
+              alert(`Cannot receive job. ${cType} allotment exceeded for ${commonData.division}.\nAllowed: ${allowed}\nUsed: ${used}\nTrying to add: ${countToAdd}`);
+              setLoading(false);
+              return;
+            }
+          } else if (allowed === 0 && countToAdd > 0) {
+             // If they set it to 0 or didn't set it, we could block it, but maybe we shouldn't force them?
+             // Actually, if it's 0 (not set), let's assume no limit for now to prevent breaking existing usage if they haven't configured it.
+             // If we must block, we can change this later.
+          }
+        }
+      }
+
+      
+      const jobNos = transformers.map(t => t.jobNo).filter(j => j);
+      if (jobNos.length > 0) {
+        // Check local duplication within the form itself
+        const uniqueJobNos = new Set(jobNos);
+        if (uniqueJobNos.size !== jobNos.length) {
+           alert("Duplicate Job Numbers entered in the form.");
+           setLoading(false);
+           return;
+        }
+
+        if (!activeAtMaster) {
+           alert("Please configure and select an Active AT/Tender period in Settings first.");
+           setLoading(false);
+           return;
+        }
+
+        // We check every jobNo entered
+        for (const jn of jobNos) {
+           // We are only concerned with duplicates in the current AT period
+           const jnQuery = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid), where('jobNo', '==', jn));
+           const jnDocs = await getDocs(jnQuery);
+           
+           if (!jnDocs.empty) {
+             const jnDocsFiltered = jnDocs.docs.filter(d => {
+               const data = d.data();
+               return data.ownerId === auth.currentUser.uid && data.agencyId === activeAgency.id && data.atId === activeAtMaster.id;
+             });
+             if (jnDocsFiltered.length > 0) {
+                 const activeCycles = jnDocsFiltered.filter(d => d.data().isClosed !== true);
+                 if (activeCycles.length > 0) {
+                   alert(`Job No ${jn} already exists and is still active in the current AT period. Duplication not allowed until previous cycle is closed.`);
+                   setLoading(false);
+                   return;
+                 }
+             }
+           }
+           
+           
+      if (commonData.repairType === 'GP') {
+             // For GP, we check ALL history for this JobNo to ensure the last delivery was within 18 months
+             const allJnQuery = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid), where('jobNo', '==', jn));
+             const allJnDocs = await getDocs(allJnQuery);
+             
+             if (allJnDocs.empty) {
+               // Technically allowed to receive GP if not in system, but normally GP means previously OGP.
+               // We will allow it but maybe warn in real life.
+             } else {
+               // Sort by deliveryDate or createdAt
+               const allJnDocsFiltered = allJnDocs.docs.filter(d => d.data().ownerId === auth.currentUser.uid && d.data().agencyId === activeAgency.id);
+               const closedCycles = allJnDocsFiltered
+                 .map(d => d.data())
+                 .filter(d => d.isClosed === true)
+                 .sort((a, b) => (b.deliveryDate || b.createdAt) - (a.deliveryDate || a.createdAt));
+                 
+               if (closedCycles.length > 0) {
+                  const lastCycle = closedCycles[0];
+                  const lastDeliveryDate = lastCycle.deliveryDate || lastCycle.updatedAt || lastCycle.createdAt;
+                  
+                  const validationMonths = activeAgency?.gpValidationMonths || 18;
+                  const validationPeriodInMs = validationMonths * 30 * 24 * 60 * 60 * 1000;
+                  if (now - lastDeliveryDate > validationPeriodInMs) {
+                    alert(`Job No ${jn} cannot be received as GP. The previous OGP delivery was more than ${validationMonths} months ago.`);
+                    setLoading(false);
+                    return;
+                  }
+               }
+             }
+           }
+           
+        }
+      }
+
+      let maxJobNoNumber = 0;
+
+      for (const t of transformers) {
+        if (!t.jobNo) continue;
+        
+        // Basic logic to find highest assigned number for counter increment if auto-filled
+        const parts = t.jobNo.split('-');
+        if (parts.length > 1) {
+          const num = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(num) && num > maxJobNoNumber) {
+            maxJobNoNumber = num;
+          }
+        }
+
+        const newJobRef = doc(collection(db, 'jobs'));
+        const jobData = {
+          mrNo: commonData.mrNo,
+          dateOfIssue: commonData.dateOfIssue,
+          type: commonData.type,
+          repairType: commonData.repairType,
+          division: commonData.division,
+          jobNo: t.jobNo,
+          capacityKva: Number(t.capacityKva),
+          make: t.make,
+          serialNo: t.serialNo,
+          coreType: t.coreType,
+          status: 'Received',
+          isClosed: false,
+          atId: activeAtMaster ? activeAtMaster.id : '',
+          createdAt: now,
+          updatedAt: now,
+          ownerId: auth.currentUser.uid,
+          agencyId: activeAgency.id,
+        };

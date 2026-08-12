@@ -21,69 +21,44 @@ service cloud.firestore {
       return resource.data;
     }
 
-    function isValidJob(data) {
-      return data.keys().hasAll(['jobNo', 'mrNo', 'capacityKva', 'make', 'serialNo', 'createdAt', 'updatedAt', 'ownerId']) &&
-             data.jobNo is string && data.jobNo.size() <= 50 &&
-             data.mrNo is string && data.mrNo.size() <= 50 &&
-             data.capacityKva is number &&
-             data.make is string && data.make.size() <= 100 &&
-             data.serialNo is string && data.serialNo.size() <= 100 &&
-             data.createdAt is number &&
-             data.updatedAt is number &&
-             data.ownerId == request.auth.uid &&
-             (data.get('dateOfIssue', '') is string && data.get('dateOfIssue', '').size() <= 20) &&
-             (data.get('type', '') is string && data.get('type', '').size() <= 50) &&
-             (data.get('repairType', '') is string && data.get('repairType', '').size() <= 50) &&
-             (data.get('division', '') is string && data.get('division', '').size() <= 100) &&
-             (data.get('status', '') is string && data.get('status', '').size() <= 50);
-    }
-
     match /jobs/{jobId} {
-      allow read: if isSignedIn() && isValidId(jobId) && existing().ownerId == request.auth.uid;
+      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(jobId) && isValidJob(incoming());
-      allow update: if isSignedIn() && isValidId(jobId) && isValidJob(incoming()) &&
-                    incoming().ownerId == existing().ownerId &&
-                    incoming().createdAt == existing().createdAt;
-      allow delete: if isSignedIn() && isValidId(jobId) && existing().ownerId == request.auth.uid;
-    }
-
-    function isValidInspection(data) {
-      return data.keys().hasAll(['jobId', 'type', 'createdAt', 'updatedAt', 'ownerId']) &&
-             data.jobId is string && data.jobId.size() <= 128 &&
-             data.type is string && data.type.size() <= 20 &&
-             data.createdAt is number &&
-             data.updatedAt is number &&
-             data.ownerId == request.auth.uid &&
-             (data.get('data', '') is string && data.get('data', '').size() <= 5000);
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
     }
 
     match /inspections/{inspectionId} {
-      allow read: if isSignedIn() && isValidId(inspectionId) && existing().ownerId == request.auth.uid;
+      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(inspectionId) && isValidInspection(incoming());
-      allow update: if isSignedIn() && isValidId(inspectionId) && isValidInspection(incoming()) &&
-                    incoming().ownerId == existing().ownerId &&
-                    incoming().jobId == existing().jobId &&
-                    incoming().createdAt == existing().createdAt;
-      allow delete: if isSignedIn() && isValidId(inspectionId) && existing().ownerId == request.auth.uid;
-    }
-    function isValidAgency(data) {
-      return data.keys().hasAll(['name', 'letterheadUrl', 'prefixes', 'lastJobNumbers', 'ownerId']) &&
-             data.name is string && data.name.size() <= 100 &&
-             data.letterheadUrl is string &&
-             data.prefixes is map &&
-             data.lastJobNumbers is map &&
-             data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
     }
 
     match /agencies/{agencyId} {
-      allow read: if isSignedIn() && isValidId(agencyId) && existing().ownerId == request.auth.uid;
+      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
       allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && isValidId(agencyId) && isValidAgency(incoming());
-      allow update: if isSignedIn() && isValidId(agencyId) && isValidAgency(incoming()) &&
-                    incoming().ownerId == existing().ownerId;
-      allow delete: if isSignedIn() && isValidId(agencyId) && existing().ownerId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+    }
+
+    match /atMasters/{atMasterId} {
+      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+    }
+
+    match /oilTransactions/{txId} {
+      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
+      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
     }
   }
 }
