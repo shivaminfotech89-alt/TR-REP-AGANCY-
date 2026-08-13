@@ -29,6 +29,7 @@ export interface OilTransaction {
   id?: string;
   agencyId: string;
   mrNo: string;
+  mrDate?: string;
   date: number;
   division: string;
   oilType: "Fresh" | "Used";
@@ -50,17 +51,42 @@ export default function OilInward() {
     "transactions",
   );
   const [filterDivision, setFilterDivision] = useState<string>("All");
+  const [filterMrDate, setFilterMrDate] = useState<string>("All");
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     mrNo: "",
+    mrDate: new Date().toISOString().split("T")[0],
     date: new Date().toISOString().split("T")[0],
     division: "",
     oilType: "Fresh" as "Fresh" | "Used",
     barrels: 1,
     grossLiters: 210,
   });
+
+  const getMrDate = (mrNo: string) => {
+    if (!mrNo) return "-";
+    const matchingJob = jobs.find((j) => j.mrNo === mrNo);
+    if (matchingJob?.dateOfIssue) return matchingJob.dateOfIssue;
+    if (matchingJob?.mrDate) return matchingJob.mrDate;
+    if (matchingJob?.createdAt) {
+      const d = new Date(matchingJob.createdAt);
+      if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    }
+    const tx = transactions.find((t) => t.mrNo === mrNo && t.mrDate);
+    if (tx?.mrDate) return tx.mrDate;
+    return "-";
+  };
+
+  const handleMrNoChange = (newMrNo: string) => {
+    const derivedDate = getMrDate(newMrNo);
+    setFormData((prev) => ({
+      ...prev,
+      mrNo: newMrNo,
+      mrDate: derivedDate !== "-" ? derivedDate : prev.mrDate,
+    }));
+  };
 
   const divisions = activeAgency ? Object.keys((activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) ? activeAtMaster.prefixes : (activeAgency.prefixes || {})) : [];
 
@@ -166,6 +192,7 @@ export default function OilInward() {
         const txRef = doc(db, "oilTransactions", editingId);
         await updateDoc(txRef, {
           mrNo: formData.mrNo,
+          mrDate: formData.mrDate,
           date: new Date(formData.date).getTime(),
           division: formData.division,
           oilType: formData.oilType,
@@ -179,6 +206,7 @@ export default function OilInward() {
           agencyId: activeAgency.id,
           ownerId: auth.currentUser.uid,
           mrNo: formData.mrNo,
+          mrDate: formData.mrDate,
           date: new Date(formData.date).getTime(),
           division: formData.division,
           oilType: formData.oilType,
@@ -201,6 +229,7 @@ export default function OilInward() {
   const handleEdit = (tx: OilTransaction) => {
     setFormData({
       mrNo: tx.mrNo,
+      mrDate: tx.mrDate || getMrDate(tx.mrNo),
       date: new Date(tx.date).toISOString().split("T")[0],
       division: tx.division,
       oilType: tx.oilType,
@@ -218,6 +247,7 @@ export default function OilInward() {
     setEditingId(null);
     setFormData({
       mrNo: "",
+      mrDate: new Date().toISOString().split("T")[0],
       date: new Date().toISOString().split("T")[0],
       division: divisions[0] || "",
       oilType: "Fresh",
@@ -226,16 +256,12 @@ export default function OilInward() {
     });
   };
 
-  const filteredTransactions = useMemo(() => {
-    if (filterDivision === "All") return transactions;
-    return transactions.filter((t) => t.division === filterDivision);
-  }, [transactions, filterDivision]);
-
   const mrSummary = useMemo(() => {
     const summary: Record<
       string,
       {
         mrNo: string;
+        mrDate: string;
         division: string;
         totalShortage: number;
         totalReceived: number;
@@ -246,13 +272,17 @@ export default function OilInward() {
     jobs.forEach((job) => {
       const mrNo = job.mrNo;
       if (!mrNo) return;
+      const mrDate = job.dateOfIssue || job.mrDate || (job.createdAt ? new Date(job.createdAt).toISOString().split("T")[0] : "-");
       if (!summary[mrNo]) {
         summary[mrNo] = {
           mrNo,
+          mrDate,
           division: job.division || "",
           totalShortage: 0,
           totalReceived: 0,
         };
+      } else if (summary[mrNo].mrDate === "-" && mrDate !== "-") {
+        summary[mrNo].mrDate = mrDate;
       }
 
       const insp = inspections.find((i) => i.jobId === job.id);
@@ -265,13 +295,17 @@ export default function OilInward() {
     transactions.forEach((tx) => {
       const mrNo = tx.mrNo;
       if (!mrNo) return;
+      const txMrDate = tx.mrDate || getMrDate(tx.mrNo);
       if (!summary[mrNo]) {
         summary[mrNo] = {
           mrNo,
+          mrDate: txMrDate,
           division: tx.division || "",
           totalShortage: 0,
           totalReceived: 0,
         };
+      } else if (summary[mrNo].mrDate === "-" && txMrDate !== "-") {
+        summary[mrNo].mrDate = txMrDate;
       }
       summary[mrNo].totalReceived += tx.netLiters;
     });
@@ -281,27 +315,56 @@ export default function OilInward() {
     );
   }, [jobs, inspections, transactions]);
 
+  const availableMrDates = useMemo(() => {
+    const dates = new Set<string>();
+    mrSummary.forEach((s) => {
+      if (s.mrDate && s.mrDate !== "-") dates.add(s.mrDate);
+    });
+    return Array.from(dates).sort((a, b) => b.localeCompare(a));
+  }, [mrSummary]);
+
   const filteredSummary = useMemo(() => {
-    if (filterDivision === "All") return mrSummary;
-    return mrSummary.filter((s) => s.division === filterDivision);
-  }, [mrSummary, filterDivision]);
+    return mrSummary.filter((s) => {
+      if (filterDivision !== "All" && s.division !== filterDivision) return false;
+      if (filterMrDate !== "All" && filterMrDate.trim() !== "") {
+        const target = filterMrDate.trim();
+        if (!s.mrDate || s.mrDate === "-") return false;
+        if (s.mrDate !== target && !s.mrDate.includes(target)) return false;
+      }
+      return true;
+    });
+  }, [mrSummary, filterDivision, filterMrDate]);
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter((t) => {
+      if (filterDivision !== "All" && t.division !== filterDivision) return false;
+      if (filterMrDate !== "All" && filterMrDate.trim() !== "") {
+        const target = filterMrDate.trim();
+        const txMrDate = t.mrDate || getMrDate(t.mrNo);
+        if (!txMrDate || txMrDate === "-") return false;
+        if (txMrDate !== target && !txMrDate.includes(target)) return false;
+      }
+      return true;
+    });
+  }, [transactions, filterDivision, filterMrDate, jobs]);
 
   const exportToExcel = () => {
     let csvContent = "";
 
     if (viewMode === "transactions") {
       csvContent +=
-        "Date,MR No.,Division,Oil Type,Barrels,Gross (LTR),Loss %,Net (LTR)\n";
+        "Receive Date,MR No.,MR Date,Division,Oil Type,Barrels,Gross (LTR),Loss %,Net (LTR)\n";
       filteredTransactions.forEach((tx) => {
         const date = new Date(tx.date).toLocaleDateString();
-        csvContent += `"${date}","${tx.mrNo}","${tx.division}","${tx.oilType}","${tx.barrels}","${tx.grossLiters.toFixed(2)}","${tx.filtrationLossPercent}","${tx.netLiters.toFixed(2)}"\n`;
+        const mrDate = tx.mrDate || getMrDate(tx.mrNo);
+        csvContent += `"${date}","${tx.mrNo}","${mrDate}","${tx.division}","${tx.oilType}","${tx.barrels}","${tx.grossLiters.toFixed(2)}","${tx.filtrationLossPercent}","${tx.netLiters.toFixed(2)}"\n`;
       });
     } else {
       csvContent +=
-        "MR No.,Division,Total Shortage (LTR),Oil Received (LTR),Net Pending (LTR)\n";
+        "MR No.,MR Date,Division,Total Shortage (LTR),Oil Received (LTR),Net Pending (LTR)\n";
       filteredSummary.forEach((summary) => {
         const pending = summary.totalShortage - summary.totalReceived;
-        csvContent += `"${summary.mrNo}","${summary.division}","${summary.totalShortage.toFixed(2)}","${summary.totalReceived.toFixed(2)}","${pending.toFixed(2)}"\n`;
+        csvContent += `"${summary.mrNo}","${summary.mrDate}","${summary.division}","${summary.totalShortage.toFixed(2)}","${summary.totalReceived.toFixed(2)}","${pending.toFixed(2)}"\n`;
       });
       const totalShortage = filteredSummary
         .reduce((sum, item) => sum + item.totalShortage, 0)
@@ -315,7 +378,7 @@ export default function OilInward() {
           0,
         )
         .toFixed(2);
-      csvContent += `"Overall Totals","","${totalShortage}","${totalReceived}","${totalPending}"\n`;
+      csvContent += `"Overall Totals","","","${totalShortage}","${totalReceived}","${totalPending}"\n`;
     }
 
     const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
@@ -358,10 +421,10 @@ export default function OilInward() {
           </p>
         </div>
 
-        <div className="flex items-center space-x-4 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
           <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded px-3 py-2">
             <span className="text-[10px] uppercase font-bold text-slate-500">
-              Division Filter:
+              Division:
             </span>
             <select
               value={filterDivision}
@@ -375,6 +438,35 @@ export default function OilInward() {
                 </option>
               ))}
             </select>
+          </div>
+
+          <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded px-3 py-2">
+            <Calendar className="w-4 h-4 text-blue-600" />
+            <span className="text-[10px] uppercase font-bold text-slate-500">
+              MR Date Filter:
+            </span>
+            <select
+              value={filterMrDate}
+              onChange={(e) => setFilterMrDate(e.target.value)}
+              className="text-sm border-none bg-transparent font-bold text-slate-700 focus:ring-0 cursor-pointer outline-none max-w-[150px]"
+            >
+              <option value="All">All MR Dates</option>
+              {availableMrDates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+            {filterMrDate !== "All" && (
+              <button
+                type="button"
+                onClick={() => setFilterMrDate("All")}
+                className="p-0.5 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600"
+                title="Clear MR Date Filter"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
 
           <div className="bg-blue-50 border border-blue-100 rounded px-4 py-2 text-right">
@@ -465,11 +557,25 @@ export default function OilInward() {
                     required
                     type="text"
                     value={formData.mrNo}
-                    onChange={(e) =>
-                      setFormData({ ...formData, mrNo: e.target.value })
-                    }
+                    onChange={(e) => handleMrNoChange(e.target.value)}
                     className="w-full pl-9 pr-3 py-2 text-sm border rounded focus:ring-1 focus:ring-blue-500"
                     placeholder="e.g. MR-1234"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
+                  MR Date
+                </label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <input
+                    type="date"
+                    value={formData.mrDate}
+                    onChange={(e) =>
+                      setFormData({ ...formData, mrDate: e.target.value })
+                    }
+                    className="w-full pl-9 pr-3 py-2 text-sm border rounded focus:ring-1 focus:ring-blue-500"
                   />
                 </div>
               </div>
@@ -568,7 +674,7 @@ export default function OilInward() {
                 />
               </div>
 
-              <div className="col-span-1 md:col-span-2 lg:col-span-2 flex items-end">
+              <div className="col-span-1 md:col-span-2 lg:col-span-1 flex items-end">
                 <div className="bg-slate-100 p-3 rounded border border-slate-200 w-full flex justify-between items-center">
                   <div>
                     <span className="text-[10px] uppercase font-bold text-slate-500 block">
@@ -619,8 +725,9 @@ export default function OilInward() {
             <table className="w-full text-left text-sm text-slate-600">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-3">Date</th>
+                  <th className="px-4 py-3">Receive Date</th>
                   <th className="px-4 py-3">MR No.</th>
+                  <th className="px-4 py-3">MR Date</th>
                   <th className="px-4 py-3">Division</th>
                   <th className="px-4 py-3">Oil Type</th>
                   <th className="px-4 py-3 text-right">Barrels</th>
@@ -636,7 +743,7 @@ export default function OilInward() {
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={9}
+                      colSpan={10}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       Loading records...
@@ -644,65 +751,70 @@ export default function OilInward() {
                   </tr>
                 ) : filteredTransactions.length === 0 ? (
                   <tr>
-
                     <td
-                      colSpan={9}
+                      colSpan={10}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No oil inward records found for this selection.
                     </td>
                   </tr>
                 ) : (
-                  filteredTransactions.map((tx, idx) => (
-                    <tr
-                      key={tx.id || idx}
-                      className={`hover:bg-slate-50 ${editingId === tx.id ? "bg-blue-50/50" : ""}`}
-                    >
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {new Date(tx.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 font-medium text-slate-900">
-                        {tx.mrNo}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        {tx.division}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${tx.oilType === "Fresh" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}
-                        >
-                          {tx.oilType}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">
-                        {tx.barrels}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono">
-                        {tx.grossLiters.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono text-slate-400">
-                        {tx.filtrationLossPercent}%
-                      </td>
-                      <td className="px-4 py-3 text-right font-mono font-bold text-green-700">
-                        {tx.netLiters.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => handleEdit(tx)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
-                          title="Edit transaction"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                  filteredTransactions.map((tx, idx) => {
+                    const mrDateVal = tx.mrDate || getMrDate(tx.mrNo);
+                    return (
+                      <tr
+                        key={tx.id || idx}
+                        className={`hover:bg-slate-50 ${editingId === tx.id ? "bg-blue-50/50" : ""}`}
+                      >
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {new Date(tx.date).toLocaleDateString()}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-slate-900">
+                          {tx.mrNo}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-slate-700">
+                          {mrDateVal}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {tx.division}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${tx.oilType === "Fresh" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}
+                          >
+                            {tx.oilType}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono">
+                          {tx.barrels}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono">
+                          {tx.grossLiters.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono text-slate-400">
+                          {tx.filtrationLossPercent}%
+                        </td>
+                        <td className="px-4 py-3 text-right font-mono font-bold text-green-700">
+                          {tx.netLiters.toFixed(2)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={() => handleEdit(tx)}
+                            className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                            title="Edit transaction"
+                          >
+                            <Edit2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
                 {/* Aggregate Totals for Transactions */}
                 {!loading && filteredTransactions.length > 0 && (
                   <tr className="bg-slate-100 font-bold text-slate-900">
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
                       Filtered Totals:
@@ -728,6 +840,7 @@ export default function OilInward() {
               <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
                 <tr>
                   <th className="px-4 py-3">MR No.</th>
+                  <th className="px-4 py-3">MR Date</th>
                   <th className="px-4 py-3">Division</th>
                   <th className="px-4 py-3 text-right text-amber-700">
                     Total Shortage (LTR)
@@ -744,7 +857,7 @@ export default function OilInward() {
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       Loading summary...
@@ -753,7 +866,7 @@ export default function OilInward() {
                 ) : filteredSummary.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No external inspections or oil records found for this
@@ -768,6 +881,9 @@ export default function OilInward() {
                       <tr key={idx} className="hover:bg-slate-50">
                         <td className="px-4 py-3 font-medium text-slate-900">
                           {summary.mrNo}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap text-slate-700">
+                          {summary.mrDate}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           {summary.division}
@@ -795,7 +911,7 @@ export default function OilInward() {
                 {!loading && filteredSummary.length > 0 && (
                   <tr className="bg-slate-100 font-bold text-slate-900">
                     <td
-                      colSpan={2}
+                      colSpan={3}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
                       Filtered Totals:

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets } from 'lucide-react';
+import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar } from 'lucide-react';
 import { defaultEstimateData } from '../lib/estimateData';
 
 // Helper to convert number to Indian Rupees in words
@@ -55,6 +55,15 @@ export default function BillingSystem() {
   const [apprDate, setApprDate] = useState('');
   const [divisionGstin, setDivisionGstin] = useState('');
 
+  // Modal State for Pending Delivery Alert
+  const [pendingAlertModal, setPendingAlertModal] = useState<{
+    isOpen: boolean;
+    mrNo: string;
+    totalCount: number;
+    deliveredCount: number;
+    pendingCount: number;
+  } | null>(null);
+
   const masterData = activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData;
 
   useEffect(() => {
@@ -66,8 +75,7 @@ export default function BillingSystem() {
           getDocs(query(
             collection(db, 'jobs'),
             where('ownerId', '==', auth.currentUser.uid),
-            where('agencyId', '==', activeAgency.id),
-            where('status', '==', 'Dispatched')
+            where('agencyId', '==', activeAgency.id)
           )),
           getDocs(query(
             collection(db, 'inspections'),
@@ -106,7 +114,7 @@ export default function BillingSystem() {
     return Array.from(set).sort();
   }, [jobs]);
 
-  // Group dispatched jobs by MR
+  // Group all jobs by MR
   const mrGroups = useMemo(() => {
     const groups: Record<string, any[]> = {};
     jobs.forEach(j => {
@@ -133,21 +141,51 @@ export default function BillingSystem() {
     }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [mrGroups, searchQuery, selectedDivision, billTypeFilter]);
 
-  // Selected jobs for the active bill
+  // Selected DELIVERED jobs for the active bill
   const selectedJobsData = useMemo(() => {
     if (!selectedMrNo) return [];
     const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
     return mrJobs.filter(j => {
+      if (j.status !== 'Dispatched') return false; // Must be delivered/dispatched
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     }).sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
   }, [jobs, selectedMrNo, billTypeFilter]);
 
+  // Selected MR pending jobs count
+  const selectedMrPendingCount = useMemo(() => {
+    if (!selectedMrNo) return 0;
+    const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
+    const targetJobs = mrJobs.filter(j => {
+      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      return billTypeFilter === 'scrap' ? isScrap : !isScrap;
+    });
+    return targetJobs.filter(j => j.status !== 'Dispatched').length;
+  }, [jobs, selectedMrNo, billTypeFilter]);
+
   // Selected MR Division Name
   const currentDivision = useMemo(() => {
     if (selectedJobsData.length > 0) return selectedJobsData[0].division || 'SABARMATI';
+    const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
+    if (mrJobs.length > 0) return mrJobs[0].division || 'SABARMATI';
     return 'SABARMATI';
-  }, [selectedJobsData]);
+  }, [selectedJobsData, jobs, selectedMrNo]);
+
+  // Selected MR Date
+  const selectedMrDate = useMemo(() => {
+    if (!selectedMrNo) return billDate;
+    const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
+    const sample = mrJobs[0];
+    if (sample?.dateOfIssue) return sample.dateOfIssue;
+    if (sample?.mrDate) return sample.mrDate;
+    if (sample?.createdAt) {
+      const d = new Date(sample.createdAt);
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    }
+    const tx = oilTransactions.find(t => t.mrNo === selectedMrNo && t.mrDate);
+    if (tx?.mrDate) return tx.mrDate;
+    return billDate;
+  }, [selectedMrNo, jobs, oilTransactions, billDate]);
 
   // Set default bill metadata when an MR is picked
   const handleSelectMr = (mr: string) => {
@@ -160,6 +198,33 @@ export default function BillingSystem() {
     setApprNo(orderNum);
     setApprDate('02.03.2026');
     setDivisionGstin('24AAACU6551F1ZI');
+  };
+
+  const handleGenerateClick = (mr: string) => {
+    const allMrJobs = jobs.filter(j => j.mrNo === mr);
+    const targetJobs = allMrJobs.filter(j => {
+      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      return billTypeFilter === 'scrap' ? isScrap : !isScrap;
+    });
+    const delJobs = targetJobs.filter(j => j.status === 'Dispatched');
+    const pendJobs = targetJobs.filter(j => j.status !== 'Dispatched');
+
+    if (delJobs.length === 0) {
+      alert(`No delivered transformers found for MR ${mr}. Please create delivery challans and dispatch jobs first.`);
+      return;
+    }
+
+    if (pendJobs.length > 0) {
+      setPendingAlertModal({
+        isOpen: true,
+        mrNo: mr,
+        totalCount: targetJobs.length,
+        deliveredCount: delJobs.length,
+        pendingCount: pendJobs.length,
+      });
+    } else {
+      handleSelectMr(mr);
+    }
   };
 
   // Calculate job estimate / bill amount
@@ -201,7 +266,7 @@ export default function BillingSystem() {
   const sgst = useMemo(() => subTotal * 0.09, [subTotal]);
   const grandTotal = useMemo(() => subTotal + cgst + sgst, [subTotal, cgst, sgst]);
 
-  // Oil Data Calculations for Oil Account Document
+  // Oil Data Calculations for Oil Account Document (Page 4)
   const jobOilDetails = useMemo(() => {
     return selectedJobsData.map(job => {
       const insp = inspections.find(i => i.jobId === job.id);
@@ -212,25 +277,200 @@ export default function BillingSystem() {
       const oilCap = Number(insp?.data?.oilCapLtrs) || defaultCap;
       const lessOil = Number(insp?.data?.lessOilLtrs) || 0;
       const oilRecd = Math.max(0, oilCap - lessOil);
-      const oilRequired = oilCap - oilRecd;
+      const baseShortage = oilCap - oilRecd;
+      const filterLoss = oilRecd * 0.05; // 5% filtration loss on received oil
+
+      const netShortage = (insp && insp.data && typeof insp.data.netShortage === 'number')
+        ? insp.data.netShortage
+        : (baseShortage + filterLoss);
 
       return {
         job,
         oilCap,
         oilRecd,
-        oilRequired
+        baseShortage,
+        filterLoss,
+        netShortage
       };
     });
   }, [selectedJobsData, inspections]);
 
   const totalOilCapacity = useMemo(() => jobOilDetails.reduce((a, b) => a + b.oilCap, 0), [jobOilDetails]);
   const totalOilReceived = useMemo(() => jobOilDetails.reduce((a, b) => a + b.oilRecd, 0), [jobOilDetails]);
-  const totalOilRequired = useMemo(() => jobOilDetails.reduce((a, b) => a + b.oilRequired, 0), [jobOilDetails]);
+  const totalBaseShortage = useMemo(() => jobOilDetails.reduce((a, b) => a + b.baseShortage, 0), [jobOilDetails]);
+  const totalFilterLoss = useMemo(() => jobOilDetails.reduce((a, b) => a + b.filterLoss, 0), [jobOilDetails]);
+  const totalNetShortage = useMemo(() => jobOilDetails.reduce((a, b) => a + b.netShortage, 0), [jobOilDetails]);
+
+  // Helpers for date parsing and division filtering
+  const parseDateToTimestamp = (dateVal: any): number => {
+    if (!dateVal) return 0;
+    if (typeof dateVal === 'number') return dateVal;
+    if (dateVal.seconds) return dateVal.seconds * 1000;
+    if (typeof dateVal === 'string') {
+      const s = dateVal.trim();
+      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+        const [y, m, d] = s.split('T')[0].split('-').map(Number);
+        return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      }
+      if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(s)) {
+        const parts = s.split(/[-/]/);
+        const day = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        const year = parseInt(parts[2], 10);
+        return new Date(year, month, day, 23, 59, 59, 999).getTime();
+      }
+      const parsed = new Date(s).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  };
+
+  const formatDateStr = (dateVal: any): string => {
+    if (!dateVal) return '';
+    if (typeof dateVal === 'string') return dateVal;
+    if (typeof dateVal === 'number') {
+      const d = new Date(dateVal);
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    }
+    if (dateVal?.seconds) {
+      const d = new Date(dateVal.seconds * 1000);
+      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+    }
+    return '';
+  };
 
   const mrOilTxList = useMemo(() => {
     if (!selectedMrNo) return [];
-    return oilTransactions.filter(t => t.mrNo === selectedMrNo);
-  }, [oilTransactions, selectedMrNo]);
+    const cleanSelectedMr = selectedMrNo.trim().toLowerCase();
+    return oilTransactions.filter(t => {
+      // If transaction specifies division, ensure it matches currentDivision or allow if matching explicit MR No
+      if (t.division && currentDivision && t.division !== currentDivision) {
+        if (!t.mrNo || t.mrNo.trim().toLowerCase() !== cleanSelectedMr) return false;
+      }
+
+      // Match explicit MR No
+      if (t.mrNo && t.mrNo.trim().toLowerCase() === cleanSelectedMr) return true;
+
+      // Or if no MR specified, match by MR date or date matching selected MR Date
+      if (!t.mrNo || t.mrNo.trim() === '') {
+        const tDateStr = t.mrDate || formatDateStr(t.date);
+        if (tDateStr && selectedMrDate && tDateStr === selectedMrDate) return true;
+      }
+      return false;
+    });
+  }, [oilTransactions, selectedMrNo, currentDivision, selectedMrDate]);
+
+  const mrInwardOilTotal = useMemo(() => {
+    return mrOilTxList.reduce((acc, tx) => acc + (Number(tx.netLiters) || 0), 0);
+  }, [mrOilTxList]);
+
+  // Previous MR & Oil Shortage Balance
+  const previousMrLedger = useMemo(() => {
+    if (!selectedMrNo || !selectedMrDate) {
+      return {
+        prevMrNo: '',
+        prevMrDate: '',
+        prevBillNo: '',
+        prevBillDate: '',
+        prevNetShortage: 0
+      };
+    }
+
+    const currentMrTime = parseDateToTimestamp(selectedMrDate);
+
+    // Map all distinct MRs in system for currentDivision except current
+    const mrMap: Record<string, { mrNo: string; mrDate: string }> = {};
+
+    jobs.forEach(j => {
+      if (!j.mrNo || j.mrNo === selectedMrNo) return;
+      if (j.division && currentDivision && j.division !== currentDivision) return; // Specific division only
+      if (!mrMap[j.mrNo]) {
+        const d = j.dateOfIssue || j.mrDate || (j.createdAt ? formatDateStr(j.createdAt) : '');
+        mrMap[j.mrNo] = { mrNo: j.mrNo, mrDate: d };
+      }
+    });
+
+    oilTransactions.forEach(t => {
+      if (!t.mrNo || t.mrNo === selectedMrNo) return;
+      if (t.division && currentDivision && t.division !== currentDivision) return; // Specific division only
+      if (!mrMap[t.mrNo]) {
+        mrMap[t.mrNo] = { mrNo: t.mrNo, mrDate: t.mrDate || '' };
+      } else if (!mrMap[t.mrNo].mrDate && t.mrDate) {
+        mrMap[t.mrNo].mrDate = t.mrDate;
+      }
+    });
+
+    const prevMrs = Object.values(mrMap).filter(m => {
+      if (!m.mrDate) return false;
+      const t = parseDateToTimestamp(m.mrDate);
+      return t < currentMrTime || (t === currentMrTime && m.mrNo < selectedMrNo);
+    }).sort((a, b) => {
+      const tA = parseDateToTimestamp(a.mrDate);
+      const tB = parseDateToTimestamp(b.mrDate);
+      if (tA !== tB) return tB - tA;
+      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
+    });
+
+    const mostRecentPrevMr = prevMrs[0] || null;
+
+    if (!mostRecentPrevMr) {
+      return {
+        prevMrNo: '',
+        prevMrDate: '',
+        prevBillNo: '',
+        prevBillDate: '',
+        prevNetShortage: 0
+      };
+    }
+
+    const prevMrSet = new Set(prevMrs.map(m => m.mrNo));
+
+    // Calculate cumulative net required oil for previous dispatched jobs in currentDivision
+    const prevDispatchedJobs = jobs.filter(j => {
+      if (!j.mrNo || !prevMrSet.has(j.mrNo)) return false;
+      if (j.division && currentDivision && j.division !== currentDivision) return false;
+      if (j.status !== 'Dispatched') return false;
+      return true;
+    });
+
+    const prevTotalNetRequired = prevDispatchedJobs.reduce((sum, j) => {
+      const insp = inspections.find(i => i.jobId === j.id);
+      const kva = Number(j.capacityKva) || 25;
+      const defaultCap = kva <= 16 ? 140 : kva <= 25 ? 184 : kva <= 63 ? 240 : 323;
+      const oilCap = Number(insp?.data?.oilCapLtrs) || defaultCap;
+      const lessOil = Number(insp?.data?.lessOilLtrs) || 0;
+      const oilRecd = Math.max(0, oilCap - lessOil);
+      const baseShortage = oilCap - oilRecd;
+      const filterLoss = oilRecd * 0.05;
+      const netShortage = (insp && insp.data && typeof insp.data.netShortage === 'number')
+        ? insp.data.netShortage
+        : (baseShortage + filterLoss);
+      return sum + netShortage;
+    }, 0);
+
+    // Calculate cumulative inward oil received on previous MRs
+    const prevInwardTx = oilTransactions.filter(t => {
+      if (!t.mrNo || !prevMrSet.has(t.mrNo)) return false;
+      if (t.division && currentDivision && t.division !== currentDivision) return false;
+      return true;
+    });
+
+    const prevTotalInward = prevInwardTx.reduce((sum, t) => sum + (Number(t.netLiters) || 0), 0);
+
+    const prevNetShortage = prevTotalNetRequired - prevTotalInward;
+
+    return {
+      prevMrNo: mostRecentPrevMr.mrNo,
+      prevMrDate: mostRecentPrevMr.mrDate,
+      prevBillNo: `HE/T-${mostRecentPrevMr.mrNo}/26-27`,
+      prevBillDate: mostRecentPrevMr.mrDate,
+      prevNetShortage
+    };
+  }, [selectedMrNo, selectedMrDate, currentDivision, jobs, inspections, oilTransactions]);
+
+  const netOilDue = useMemo(() => {
+    return totalNetShortage + previousMrLedger.prevNetShortage - mrInwardOilTotal;
+  }, [totalNetShortage, previousMrLedger.prevNetShortage, mrInwardOilTotal]);
 
   const handlePrint = () => {
     window.print();
@@ -336,28 +576,49 @@ export default function BillingSystem() {
                         const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
                         return billTypeFilter === 'scrap' ? isScrap : !isScrap;
                       });
+                      const deliveredJobs = matchingJobs.filter(j => j.status === 'Dispatched');
+                      const pendingJobs = matchingJobs.filter(j => j.status !== 'Dispatched');
+
                       const divName = groupJobs[0]?.division || '-';
-                      const challans = Array.from(new Set(matchingJobs.map(j => j.challanNo).filter(Boolean))).join(', ');
-                      const dates = Array.from(new Set(matchingJobs.map(j => j.deliveryDate || j.challanDate).filter(Boolean))).join(', ');
+                      const challans = Array.from(new Set(deliveredJobs.map(j => j.challanNo).filter(Boolean))).join(', ');
+                      const dates = Array.from(new Set(deliveredJobs.map(j => j.deliveryDate || j.challanDate).filter(Boolean))).join(', ');
 
                       return (
                         <tr key={mr} className="hover:bg-slate-50">
                           <td className="px-4 py-3 font-mono font-bold text-slate-800">{mr}</td>
                           <td className="px-4 py-3 font-medium text-slate-600">{divName}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-700">{matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Jobs</td>
+                          <td className="px-4 py-3 font-semibold text-slate-700">
+                            <div>
+                              {deliveredJobs.length} of {matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Delivered
+                            </div>
+                            {pendingJobs.length > 0 && (
+                              <div className="text-xs text-amber-600 font-bold">
+                                ({pendingJobs.length} Pending Delivery)
+                              </div>
+                            )}
+                          </td>
                           <td className="px-4 py-3 text-xs text-slate-500">
-                            <div><span className="font-bold text-slate-700">Challan:</span> {challans || 'Dispatched'}</div>
+                            <div><span className="font-bold text-slate-700">Challan:</span> {challans || (deliveredJobs.length > 0 ? 'Dispatched' : 'None')}</div>
                             <div><span className="font-bold text-slate-700">Date:</span> {dates || '-'}</div>
                           </td>
                           <td className="px-4 py-3">
-                            <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                              <CheckCircle2 className="w-3 h-3 mr-1" /> Delivered & Ready
-                            </span>
+                            {pendingJobs.length > 0 ? (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+                                <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600" />
+                                {deliveredJobs.length > 0 ? `${pendingJobs.length} Job(s) Pending` : 'All Pending Delivery'}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <CheckCircle2 className="w-3 h-3 mr-1" /> All Delivered & Ready
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <button
-                              onClick={() => handleSelectMr(mr)}
-                              className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors shadow-sm"
+                              onClick={() => handleGenerateClick(mr)}
+                              className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white rounded transition-colors shadow-sm ${
+                                pendingJobs.length > 0 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+                              }`}
                             >
                               Generate Bill
                             </button>
@@ -370,6 +631,61 @@ export default function BillingSystem() {
               </table>
             </div>
           </div>
+
+          {/* Pending Delivery Alert Modal */}
+          {pendingAlertModal && pendingAlertModal.isOpen && (
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+              <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+                <div className="bg-amber-500 p-4 text-white flex justify-between items-center">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="w-6 h-6" />
+                    <h3 className="font-bold text-base md:text-lg">Delivery Pending Alert: MR {pendingAlertModal.mrNo}</h3>
+                  </div>
+                  <button onClick={() => setPendingAlertModal(null)} className="text-amber-100 hover:text-white p-1 rounded">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
+                    <p className="font-bold text-amber-950 text-base mb-1">
+                      ⚠️ {pendingAlertModal.pendingCount} Transformer(s) Pending Delivery for MR {pendingAlertModal.mrNo}
+                    </p>
+                    <p className="text-amber-800 leading-relaxed text-xs md:text-sm">
+                      Out of total <strong>{pendingAlertModal.totalCount}</strong> repairable transformer(s) under MR <strong>{pendingAlertModal.mrNo}</strong>, only <strong>{pendingAlertModal.deliveredCount}</strong> transformer(s) have been delivered/dispatched, while <strong>{pendingAlertModal.pendingCount}</strong> transformer(s) are still pending delivery.
+                    </p>
+                  </div>
+
+                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+                    <p className="font-bold text-slate-700">Official MR-Wise Billing Rule:</p>
+                    <p>
+                      Agencies prepare bills <strong>ONE TIME MR-wise</strong> after all repairable transformers in the MR are delivered. Generating a bill now will only include the {pendingAlertModal.deliveredCount} delivered transformer(s).
+                    </p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2 border-t border-slate-100">
+                    <button
+                      onClick={() => setPendingAlertModal(null)}
+                      className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors border border-slate-300"
+                    >
+                      Wait for Remaining Deliveries
+                    </button>
+                    <button
+                      onClick={() => {
+                        const targetMr = pendingAlertModal.mrNo;
+                        setPendingAlertModal(null);
+                        handleSelectMr(targetMr);
+                      }}
+                      className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow"
+                    >
+                      Proceed with Partial Bill ({pendingAlertModal.deliveredCount} Jobs)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
         </div>
       ) : (
         /* Bill Documents Editor & Multi-Page View */
@@ -405,6 +721,21 @@ export default function BillingSystem() {
               </button>
             </div>
           </div>
+
+          {/* Pending Delivery Warning Banner inside Editor */}
+          {selectedMrPendingCount > 0 && (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-lg text-amber-900 flex items-start gap-3 print:hidden shadow-sm">
+              <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-bold text-amber-950">
+                  ⚠️ Partial Bill Notice: {selectedMrPendingCount} Transformer(s) Pending Delivery
+                </p>
+                <p className="mt-0.5 text-amber-800 text-xs">
+                  MR <strong>{selectedMrNo}</strong> has <strong>{selectedMrPendingCount}</strong> transformer(s) still pending delivery. This bill is generated for the <strong>{selectedJobsData.length}</strong> delivered transformer(s).
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Editable Metadata Form */}
           <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm space-y-4 print:hidden">
@@ -755,30 +1086,31 @@ export default function BillingSystem() {
                 <div className="text-center border-b-2 border-black pb-3">
                   <h1 className="text-xl font-black uppercase tracking-wide">{activeAgency?.name || 'POWER TRANSMISSION COMPANY'}</h1>
                   <p className="text-[11px] font-medium">{activeAgency?.address || 'Plot No. C1-39/31-B, Phase-3, GIDC Estate, Naroda, Ahmedabad'}</p>
-                  <h2 className="text-base font-black uppercase mt-2 tracking-widest underline underline-offset-4">OIL ACCOUNT</h2>
+                  <h2 className="text-base font-black uppercase mt-2 tracking-widest underline underline-offset-4">OIL ACCOUNT SHEET</h2>
                 </div>
 
                 {/* Sub Metadata */}
-                <div className="grid grid-cols-2 gap-2 font-semibold text-[11px] border-b border-black pb-2">
+                <div className="grid grid-cols-3 gap-2 font-semibold text-[11px] border-b border-black pb-2">
                   <div>Order no. <span className="font-mono font-bold">{apprNo}</span></div>
-                  <div className="text-right">Bill No. <span className="font-mono font-bold">{billNo}</span></div>
-                  <div>Division: <span className="font-bold">{currentDivision}</span></div>
-                  <div className="text-right">Dated: <span className="font-mono">{billDate}</span></div>
+                  <div className="text-center">MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | MR Date: <span className="font-mono font-bold">{selectedMrDate}</span></div>
+                  <div className="text-right">Bill No. <span className="font-mono font-bold">{billNo}</span> (Dated: {billDate})</div>
                 </div>
 
                 {/* Table 1: Delivered Transformers Oil Table */}
-                <table className="w-full text-center border-collapse border border-black text-[10px]">
+                <table className="w-full text-center border-collapse border border-black text-[9px]">
                   <thead>
                     <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                      <th className="border border-black p-1 w-8">Sr. No</th>
+                      <th className="border border-black p-1 w-6">Sr.</th>
                       <th className="border border-black p-1">Job No.</th>
                       <th className="border border-black p-1">Make</th>
                       <th className="border border-black p-1">Serial No.</th>
-                      <th className="border border-black p-1 w-10">KVA</th>
-                      <th className="border border-black p-1 w-8">KV</th>
+                      <th className="border border-black p-1 w-8">KVA</th>
+                      <th className="border border-black p-1 w-6">KV</th>
                       <th className="border border-black p-1">Oil Capacity</th>
-                      <th className="border border-black p-1">Oil received with transformer</th>
-                      <th className="border border-black p-1">Oil Actually Required</th>
+                      <th className="border border-black p-1">Oil Received</th>
+                      <th className="border border-black p-1">Base Shortage</th>
+                      <th className="border border-black p-1">Filter Loss (5%)</th>
+                      <th className="border border-black p-1 font-bold">Net Oil Required</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -792,21 +1124,27 @@ export default function BillingSystem() {
                         <td className="border border-black p-1">11</td>
                         <td className="border border-black p-1 font-mono">{detail.oilCap.toFixed(2)}</td>
                         <td className="border border-black p-1 font-mono">{detail.oilRecd.toFixed(2)}</td>
-                        <td className="border border-black p-1 font-mono font-bold">{detail.oilRequired.toFixed(2)}</td>
+                        <td className="border border-black p-1 font-mono">{detail.baseShortage.toFixed(2)}</td>
+                        <td className="border border-black p-1 font-mono">{detail.filterLoss.toFixed(2)}</td>
+                        <td className="border border-black p-1 font-mono font-bold">{detail.netShortage.toFixed(2)}</td>
                       </tr>
                     ))}
                     <tr className="font-bold border-t-2 border-black bg-slate-50 print:bg-white">
                       <td colSpan={6} className="border border-black p-1 text-right">Total:</td>
                       <td className="border border-black p-1 font-mono">{totalOilCapacity.toFixed(2)}</td>
                       <td className="border border-black p-1 font-mono">{totalOilReceived.toFixed(2)}</td>
-                      <td className="border border-black p-1 font-mono">{totalOilRequired.toFixed(2)}</td>
+                      <td className="border border-black p-1 font-mono">{totalBaseShortage.toFixed(2)}</td>
+                      <td className="border border-black p-1 font-mono">{totalFilterLoss.toFixed(2)}</td>
+                      <td className="border border-black p-1 font-mono font-bold">{totalNetShortage.toFixed(2)}</td>
                     </tr>
                   </tbody>
                 </table>
 
                 {/* Table 2: Oil Inward Log for MR */}
                 <div className="pt-2">
-                  <h4 className="font-bold text-[11px] mb-1 uppercase">Inward Oil Received Log for MR: {selectedMrNo}</h4>
+                  <h4 className="font-bold text-[11px] mb-1 uppercase">
+                    Inward Oil Received Log for MR: {selectedMrNo}
+                  </h4>
                   <table className="w-full text-center border-collapse border border-black text-[10px]">
                     <thead>
                       <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
@@ -841,17 +1179,77 @@ export default function BillingSystem() {
                   </table>
                 </div>
 
-                {/* Summary Box */}
-                <div className="grid grid-cols-2 gap-4 border border-black p-3 font-semibold text-[11px]">
+                {/* Summary Box with Filtration Loss & Previous Shortage Balance */}
+                <div className="grid grid-cols-2 gap-3 border border-black p-3 font-semibold text-[11px]">
+                  {/* Left Box: Current MR Oil Requirement */}
                   <div className="space-y-1">
-                    <div className="flex justify-between"><span>Trans Oil Capacity:</span> <span className="font-mono">{totalOilCapacity.toFixed(2)}</span></div>
-                    <div className="flex justify-between"><span>Oil Received with Transformer:</span> <span className="font-mono">{totalOilReceived.toFixed(2)}</span></div>
-                    <div className="flex justify-between border-t border-slate-300 pt-1"><span>Shortage of Oil:</span> <span className="font-mono font-bold">{totalOilRequired.toFixed(2)}</span></div>
+                    <h4 className="font-bold border-b border-black pb-1 mb-1 uppercase text-[10px]">
+                      Current MR {selectedMrNo} Requirement
+                    </h4>
+                    <div className="flex justify-between"><span>Trans Oil Capacity:</span> <span className="font-mono">{totalOilCapacity.toFixed(2)} Ltr</span></div>
+                    <div className="flex justify-between"><span>Oil Received with Transformer:</span> <span className="font-mono">{totalOilReceived.toFixed(2)} Ltr</span></div>
+                    <div className="flex justify-between text-slate-700"><span>Base Oil Shortage:</span> <span className="font-mono">{totalBaseShortage.toFixed(2)} Ltr</span></div>
+                    <div className="flex justify-between text-slate-700"><span>Filtration Loss (5% on Received):</span> <span className="font-mono">+{totalFilterLoss.toFixed(2)} Ltr</span></div>
+                    <div className="flex justify-between border-t border-black pt-1 font-bold text-amber-950">
+                      <span>Net Requirement of Oil (Current MR):</span>
+                      <span className="font-mono">{totalNetShortage.toFixed(2)} Ltr</span>
+                    </div>
+                    <div className="flex justify-between pt-1 text-blue-900">
+                      <span>Inward Oil Received for MR {selectedMrNo}:</span>
+                      <span className="font-mono font-bold">{mrInwardOilTotal.toFixed(2)} Ltr</span>
+                    </div>
                   </div>
+
+                  {/* Right Box: Ledger & Previous Shortage Balance */}
                   <div className="space-y-1 border-l border-black pl-3">
-                    <div className="flex justify-between"><span>Requirement of oil:</span> <span className="font-mono">{totalOilRequired.toFixed(2)}</span></div>
-                    <div className="flex justify-between"><span>Pending Oil Litre:</span> <span className="font-mono">-{totalOilRequired.toFixed(2)}</span></div>
-                    <div className="flex justify-between border-t border-slate-300 pt-1"><span>Status:</span> <span className="font-bold text-slate-800">BALANCED</span></div>
+                    <h4 className="font-bold border-b border-black pb-1 mb-1 uppercase text-[10px]">
+                      Oil Account & Previous Balance
+                    </h4>
+
+                    <div className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-300 space-y-0.5 mb-1">
+                      <div className="flex justify-between">
+                        <span>Previous Billed MR:</span>
+                        <span className="font-mono font-bold">{previousMrLedger.prevMrNo ? `MR ${previousMrLedger.prevMrNo}` : 'N/A (First MR)'}</span>
+                      </div>
+                      {previousMrLedger.prevMrNo && (
+                        <div className="flex justify-between text-[9px] text-slate-600">
+                          <span>Previous Bill No. & Date:</span>
+                          <span className="font-mono">{previousMrLedger.prevBillNo} ({previousMrLedger.prevBillDate})</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>Net Oil Req. (Current MR):</span>
+                      <span className="font-mono font-bold">+{totalNetShortage.toFixed(2)} Ltr</span>
+                    </div>
+
+                    <div className="flex justify-between">
+                      <span>Balance Previous Oil Shortage:</span>
+                      <span className={`font-mono font-bold ${previousMrLedger.prevNetShortage >= 0 ? 'text-amber-900' : 'text-emerald-900'}`}>
+                        {previousMrLedger.prevNetShortage >= 0 ? '+' : ''}{previousMrLedger.prevNetShortage.toFixed(2)} Ltr
+                      </span>
+                    </div>
+                    <div className="text-[9px] text-slate-600 text-right -mt-1 italic">
+                      ({previousMrLedger.prevNetShortage >= 0 ? 'Pending to be received' : 'Credited / Surplus in hand'})
+                    </div>
+
+                    <div className="flex justify-between text-blue-900 font-bold border-t border-slate-200 pt-1">
+                      <span>Less Inward Oil Received (MR {selectedMrNo}):</span>
+                      <span className="font-mono">-{mrInwardOilTotal.toFixed(2)} Ltr</span>
+                    </div>
+
+                    <div className="flex justify-between border-t-2 border-black pt-1 font-bold text-sm">
+                      <span>Net Oil Due:</span>
+                      <span className="font-mono">{netOilDue >= 0 ? '+' : ''}{netOilDue.toFixed(2)} Ltr</span>
+                    </div>
+
+                    <div className="bg-slate-100 p-1.5 border border-black rounded mt-1 flex justify-between items-center text-xs">
+                      <span className="font-bold uppercase">Final Oil Status:</span>
+                      <span className={`font-black font-mono px-2 py-0.5 rounded text-white ${netOilDue > 0 ? 'bg-amber-800' : netOilDue < 0 ? 'bg-emerald-800' : 'bg-slate-800'}`}>
+                        {netOilDue < 0 ? `${Math.abs(netOilDue).toFixed(2)} Ltr Credited` : netOilDue > 0 ? `${netOilDue.toFixed(2)} Ltr Due` : '0.00 Ltr (Balanced)'}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
