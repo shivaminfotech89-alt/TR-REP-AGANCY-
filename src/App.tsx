@@ -5,6 +5,7 @@ import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut 
 import { AgencyProvider } from './lib/AgencyContext';
 import { Loader2 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
+import Logo from './components/Logo';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -40,8 +41,12 @@ export default function App() {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
         <div className="max-w-md w-full p-8 bg-white shadow-lg rounded-xl border border-gray-100 text-center">
-          <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+          <div className="flex justify-center mb-6">
+            <Logo
+              variant="light"
+              showWordmark={false}
+              markClassName="w-16 h-16"
+            />
           </div>
           <h1 className="text-2xl font-bold text-gray-900 mb-2">TR Rep Agency</h1>
           <p className="text-gray-500 mb-8">Transformer Repair Management System</p>

@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 96" role="img" aria-label="TR Rep Agency">
+  <defs>
+    <linearGradient id="markBg" x1="8" y1="8" x2="88" y2="88" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E3A5F"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="coilHi" x1="24" y1="28" x2="72" y2="70" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="96" height="96" rx="24" fill="url(#markBg)"/>
+  <rect x="28" y="18" width="40" height="8" rx="2" fill="#E2E8F0"/>
+  <rect x="28" y="70" width="40" height="8" rx="2" fill="#E2E8F0"/>
+  <rect x="30" y="22" width="9" height="52" rx="1.5" fill="#CBD5E1"/>
+  <rect x="43.5" y="22" width="9" height="52" rx="1.5" fill="#CBD5E1"/>
+  <rect x="57" y="22" width="9" height="52" rx="1.5" fill="#CBD5E1"/>
+  <rect x="27" y="32" width="15" height="32" rx="5" fill="url(#coilHi)"/>
+  <rect x="54" y="32" width="15" height="32" rx="5" fill="url(#coilHi)"/>
+  <path d="M29 38h11M29 45h11M29 52h11M29 59h11" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+  <path d="M56 38h11M56 45h11M56 52h11M56 59h11" stroke="#93C5FD" stroke-width="1.5" stroke-linecap="round" opacity="0.7"/>
+  <circle cx="48" cy="48" r="4" fill="#F8FAFC"/>
+  <text x="116" y="44" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" letter-spacing="2" fill="#0F172A">TR REP AGENCY</text>
+  <text x="116" y="70" font-family="Arial, Helvetica, sans-serif" font-size="12" font-weight="600" letter-spacing="3.5" fill="#64748B">TRANSFORMER REPAIR MANAGEMENT</text>
+</svg>
