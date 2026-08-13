@@ -15,7 +15,7 @@ import DispatchChallan from './DispatchChallan';
 import Reports from './Reports';
 import EstimateMaster from './EstimateMaster';
 import AgencySettings from './AgencySettings';
-import { BillGenerate } from './Placeholders';
+import BillingSystem from './BillingSystem';
 import OilInward from './OilInward';
 
 
@@ -36,7 +36,8 @@ export default function AppLayout({ user }: { user: User }) {
     { to: '/testing-report', label: 'Testing Report' },
     { to: '/estimate-master', label: 'Estimate Master' },
     { to: '/estimates/new', label: 'Estimate Generate' },
-    { to: '/bills/new', label: 'Bills & Dispatch' },
+    { to: '/challan/new', label: 'Delivery Challans' },
+    { to: '/bills/new', label: 'Billing System' },
     { to: '/oil-inward', label: 'Oil Ledger' },
   ];
 
@@ -154,7 +155,7 @@ export default function AppLayout({ user }: { user: User }) {
             <Route path="/estimates/new" element={<EstimateGenerate />} />
             <Route path="/challan/new" element={<DispatchChallan />} />
             <Route path="/reports" element={<Reports />} />
-            <Route path="/bills/new" element={<BillGenerate />} />
+            <Route path="/bills/new" element={<BillingSystem />} />
             <Route path="/oil-inward" element={<OilInward />} />
             <Route path="/agency-settings" element={<AgencySettings />} />
             <Route path="*" element={<Navigate to="/" replace />} />
