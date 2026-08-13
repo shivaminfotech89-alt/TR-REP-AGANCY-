@@ -1,36 +1,29 @@
-import React, { useState } from 'react';
+const fs = require('fs');
+
+const code = `import React, { useState } from 'react';
 import { useAgency, AtMaster, AllotmentRecord } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, Save, FileText, History } from 'lucide-react';
 
 export function AtAllotments({ at }: { at: AtMaster }) {
-  const { activeAgency, updateAtMaster, updateAgency } = useAgency();
+  const { activeAgency, updateAtMaster } = useAgency();
   const [isSaving, setIsSaving] = useState(false);
   
-  // State for manual net allotments (sync from AT or fallback to Agency)
-  const [allotments, setAllotments] = useState<Record<string, Record<string, number>>>(
-      at.allotments || activeAgency?.allotments || {}
-  );
+  // State for manual net allotments
+  const [allotments, setAllotments] = useState<Record<string, Record<string, number>>>(at.allotments || {});
   
   // State for adding a new allotment letter
   const [showAddForm, setShowAddForm] = useState(false);
   const [newLetterDate, setNewLetterDate] = useState(new Date().toISOString().split('T')[0]);
   const [newLetterNo, setNewLetterNo] = useState('');
   
+  // To allow adding multiple items per letter, we could have an array, 
+  // but for simplicity let's allow them to add one line at a time, or multiple.
   const [letterDivision, setLetterDivision] = useState(Object.keys(activeAgency?.prefixes || {})[0] || '');
   const [letterCoreType, setLetterCoreType] = useState('CRGO');
   const [letterQuantity, setLetterQuantity] = useState('');
   
   if (!activeAgency) return null;
-  const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency.prefixes || {});
-  const divisions = Object.keys(currentPrefixes);
-  
-  React.useEffect(() => {
-    if (!letterDivision && divisions.length > 0) {
-        setLetterDivision(divisions[0]);
-    } else if (letterDivision && !divisions.includes(letterDivision) && divisions.length > 0) {
-        setLetterDivision(divisions[0]);
-    }
-  }, [divisions, letterDivision]);
+  const divisions = Object.keys(activeAgency.prefixes || {});
 
   const handleAllotmentChange = (division: string, type: string, value: string) => {
     const num = parseInt(value, 10);
@@ -46,10 +39,8 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   const handleSaveNetAllotment = async () => {
     setIsSaving(true);
     try {
-      // Auto update in division with prefix (Agency Level)
-      await updateAgency(activeAgency.id, { allotments });
       await updateAtMaster(at.id, { allotments });
-      alert("Net Allotments updated across Agency & AT successfully");
+      alert("Net Allotments updated successfully");
     } catch (e) {
       alert("Failed to update allotments");
     } finally {
@@ -85,9 +76,6 @@ export function AtAllotments({ at }: { at: AtMaster }) {
         const currentNet = updatedAllotments[letterDivision][letterCoreType] || 0;
         updatedAllotments[letterDivision][letterCoreType] = currentNet + qty;
         
-        // AUTO UPDATE IN DIVISION WITH PREFIX (Agency Settings)
-        await updateAgency(activeAgency.id, { allotments: updatedAllotments });
-        
         await updateAtMaster(at.id, { 
             allotmentHistory: history,
             allotments: updatedAllotments
@@ -96,23 +84,12 @@ export function AtAllotments({ at }: { at: AtMaster }) {
         setAllotments(updatedAllotments);
         setLetterQuantity('');
         setShowAddForm(false);
-        alert("Allotment Letter added and auto-updated in Division Configurations!");
+        alert("Allotment Letter added and net total updated successfully!");
     } catch (err) {
         alert("Failed to add allotment letter");
     } finally {
         setIsSaving(false);
     }
-  };
-
-  const getPrefixString = (divName: string, coreType: string) => {
-     const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency.prefixes || {});
-     const prefixData = currentPrefixes[divName];
-     if (!prefixData) return '';
-     if (typeof prefixData === 'string') return prefixData;
-     if (coreType === 'CRGO') return prefixData.CRGO;
-     if (coreType === 'Amorphous') return prefixData.Amorphous || prefixData.CRGO;
-     if (coreType === 'Wound Core') return prefixData['Wound Core'] || prefixData.CRGO;
-     return '';
   };
 
   return (
@@ -144,17 +121,13 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                         <input type="text" required value={newLetterNo} onChange={e => setNewLetterNo(e.target.value)} placeholder="e.g. LTR/2026/01" className="w-full px-2 py-1 text-xs border rounded" />
                     </div>
                     <div>
-                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Division (with Prefix)</label>
-                        <select required value={letterDivision} onChange={e => setLetterDivision(e.target.value)} className="w-full px-2 py-1 text-xs border rounded font-semibold text-slate-700">
-                            {divisions.map(d => (
-                                <option key={d} value={d}>
-                                    {d} (Prefix: {getPrefixString(d, letterCoreType) || 'N/A'})
-                                </option>
-                            ))}
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Division</label>
+                        <select required value={letterDivision} onChange={e => setLetterDivision(e.target.value)} className="w-full px-2 py-1 text-xs border rounded">
+                            {divisions.map(d => <option key={d} value={d}>{d}</option>)}
                         </select>
                     </div>
                     <div>
-                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Core Type</label>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Type</label>
                         <select required value={letterCoreType} onChange={e => setLetterCoreType(e.target.value)} className="w-full px-2 py-1 text-xs border rounded">
                             <option value="CRGO">CRGO</option>
                             <option value="Amorphous">Amorphous</option>
@@ -169,7 +142,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                 <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
                     <button type="button" onClick={() => setShowAddForm(false)} className="px-3 py-1 text-xs font-bold text-slate-500 hover:bg-slate-100 rounded uppercase">Cancel</button>
                     <button type="submit" disabled={isSaving} className="flex items-center px-3 py-1 text-xs font-bold uppercase bg-blue-600 text-white rounded hover:bg-blue-700">
-                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />} Save & Auto Update
+                        {isSaving ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Save className="w-3 h-3 mr-1" />} Save & Add to Net Total
                     </button>
                 </div>
             </form>
@@ -184,8 +157,8 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                             <tr>
                                 <th className="p-2 border-b font-bold text-slate-600">Date</th>
                                 <th className="p-2 border-b font-bold text-slate-600">Letter No</th>
-                                <th className="p-2 border-b font-bold text-slate-600">Division (Prefix)</th>
-                                <th className="p-2 border-b font-bold text-slate-600">Core Type</th>
+                                <th className="p-2 border-b font-bold text-slate-600">Division</th>
+                                <th className="p-2 border-b font-bold text-slate-600">Type</th>
                                 <th className="p-2 border-b font-bold text-slate-600 text-right">Qty Added</th>
                             </tr>
                         </thead>
@@ -194,7 +167,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                                 <tr key={record.id} className="border-b last:border-0 hover:bg-slate-50">
                                     <td className="p-2 text-slate-700">{record.date}</td>
                                     <td className="p-2 font-mono text-slate-800">{record.letterNo}</td>
-                                    <td className="p-2 font-bold text-slate-700">{record.division} ({getPrefixString(record.division, record.coreType)})</td>
+                                    <td className="p-2 font-bold text-slate-700">{record.division}</td>
                                     <td className="p-2 text-slate-600">{record.coreType}</td>
                                     <td className="p-2 text-right font-bold text-green-600">+{record.quantity}</td>
                                 </tr>
@@ -207,14 +180,14 @@ export function AtAllotments({ at }: { at: AtMaster }) {
       </div>
 
       {/* SECTION 2: Net Allotment Table (Editable Override) */}
-      <h4 className="text-sm font-bold text-slate-700 mb-2">Current Net Allotment (Agency & AT Synchronized)</h4>
-      <p className="text-xs text-slate-500 mb-3">These values automatically update when you receive a letter, and auto-sync to your Agency Division configs.</p>
+      <h4 className="text-sm font-bold text-slate-700 mb-2">Current Net Allotment (For AT: {at.atNumber})</h4>
+      <p className="text-xs text-slate-500 mb-3">These values represent the total allowed quantity for receiving jobs. Adding a letter automatically increases these numbers.</p>
       
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider">
-              <th className="p-2 border border-slate-200 font-bold">Division & Prefix</th>
+              <th className="p-2 border border-slate-200 font-bold">Division</th>
               <th className="p-2 border border-slate-200 font-bold">CRGO</th>
               <th className="p-2 border border-slate-200 font-bold">Amorphous</th>
               <th className="p-2 border border-slate-200 font-bold">Wound Core</th>
@@ -226,10 +199,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
               const divAllot = allotments[div] || {};
               return (
                 <tr key={div} className="text-sm">
-                  <td className="p-2 border border-slate-200">
-                    <span className="font-semibold block">{div}</span>
-                    <span className="text-[10px] text-slate-500 block">Pref: {getPrefixString(div, 'CRGO')}</span>
-                  </td>
+                  <td className="p-2 border border-slate-200 font-semibold">{div}</td>
                   <td className="p-2 border border-slate-200">
                     <input type="number" value={divAllot['CRGO'] || ''} onChange={(e) => handleAllotmentChange(div, 'CRGO', e.target.value)} className="w-full px-2 py-1 text-xs border rounded font-bold" placeholder="Net CRGO" />
                   </td>
@@ -256,3 +226,5 @@ export function AtAllotments({ at }: { at: AtMaster }) {
     </div>
   );
 }
+`
+fs.writeFileSync('src/components/AtAllotments.tsx', code);

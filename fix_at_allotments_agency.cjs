@@ -1,4 +1,6 @@
-import React, { useState } from 'react';
+const fs = require('fs');
+
+const code = `import React, { useState } from 'react';
 import { useAgency, AtMaster, AllotmentRecord } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, Save, FileText, History } from 'lucide-react';
 
@@ -21,16 +23,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   const [letterQuantity, setLetterQuantity] = useState('');
   
   if (!activeAgency) return null;
-  const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency.prefixes || {});
-  const divisions = Object.keys(currentPrefixes);
-  
-  React.useEffect(() => {
-    if (!letterDivision && divisions.length > 0) {
-        setLetterDivision(divisions[0]);
-    } else if (letterDivision && !divisions.includes(letterDivision) && divisions.length > 0) {
-        setLetterDivision(divisions[0]);
-    }
-  }, [divisions, letterDivision]);
+  const divisions = Object.keys(activeAgency.prefixes || {});
 
   const handleAllotmentChange = (division: string, type: string, value: string) => {
     const num = parseInt(value, 10);
@@ -105,8 +98,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   };
 
   const getPrefixString = (divName: string, coreType: string) => {
-     const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency.prefixes || {});
-     const prefixData = currentPrefixes[divName];
+     const prefixData = activeAgency.prefixes?.[divName];
      if (!prefixData) return '';
      if (typeof prefixData === 'string') return prefixData;
      if (coreType === 'CRGO') return prefixData.CRGO;
@@ -256,3 +248,5 @@ export function AtAllotments({ at }: { at: AtMaster }) {
     </div>
   );
 }
+`
+fs.writeFileSync('src/components/AtAllotments.tsx', code);

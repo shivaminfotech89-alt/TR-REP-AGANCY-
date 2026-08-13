@@ -25,6 +25,16 @@ export interface Agency {
   phone?: string;
 }
 
+export interface AllotmentRecord {
+  id: string;
+  date: string;
+  letterNo: string;
+  division: string;
+  coreType: string;
+  quantity: number;
+  addedAt: number;
+}
+
 export interface AtMaster {
   id: string;
   atNumber: string;
@@ -37,6 +47,8 @@ export interface AtMaster {
   ownerId?: string;
   atPercentage?: number;
   allotments?: Record<string, Record<string, number>>;
+  allotmentHistory?: AllotmentRecord[];
+  prefixes?: Record<string, string | Record<string, string>>;
 }
 
 interface AgencyContextType {
@@ -184,7 +196,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const getNextJobNoInfo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
     if (!activeAgency) return { prefix: 'JOB', nextNum: 1 };
     
-    const divPrefixInfo = activeAgency.prefixes[division];
+    const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
+        ? activeAtMaster.prefixes 
+        : activeAgency.prefixes || {};
+        
+    const divPrefixInfo = currentPrefixes[division];
     let prefix = 'JOB';
     if (typeof divPrefixInfo === 'string') prefix = divPrefixInfo;
     else if (divPrefixInfo && typeof divPrefixInfo === 'object') {

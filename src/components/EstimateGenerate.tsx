@@ -45,7 +45,7 @@ export default function EstimateGenerate() {
     return groups;
   }, [jobs]);
 
-  const mrJobs = useMemo(() => {
+  const selectedJobsData = useMemo(() => {
     if (!selectedMrNo) return [];
     return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
   }, [jobs, selectedMrNo]);
@@ -74,15 +74,17 @@ export default function EstimateGenerate() {
         <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden print:hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-center gap-4">
             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">Select MR to Generate Estimate</h2>
-            <div className="relative flex-1 md:w-64">
-              <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-              <input
-                type="text"
-                placeholder="Search MR No..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-9 pr-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white"
-              />
+            <div className="flex flex-wrap gap-4 items-center">
+              <div className="relative flex-1 md:w-64">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search MR No..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 pr-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white"
+                />
+              </div>
             </div>
           </div>
           
@@ -99,7 +101,7 @@ export default function EstimateGenerate() {
                 {filteredMrNos.map(mr => (
                   <tr key={mr} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-mono font-bold">{mr}</td>
-                    <td className="px-4 py-3">{mrGroups[mr].length} Jobs</td>
+                    <td className="px-4 py-3">{mrGroups[mr].length} Jobs (Repairable & Scrap)</td>
                     <td className="px-4 py-3">
                       <button 
                         onClick={() => setSelectedMrNo(mr)}
@@ -120,7 +122,7 @@ export default function EstimateGenerate() {
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Selected MR</p>
               <p className="text-lg font-mono font-bold">{selectedMrNo}</p>
-              <p className="text-xs text-slate-300 mt-1">{mrJobs.length} Transformers in this MR</p>
+              <p className="text-xs text-slate-300 mt-1">{selectedJobsData.length} Transformers in this MR</p>
             </div>
             <div className="flex space-x-2">
               <button 
@@ -151,8 +153,8 @@ export default function EstimateGenerate() {
 
             <div className="flex justify-between items-center text-[10px] font-bold uppercase text-black mb-2 border-b-2 border-black pb-2">
               <div>
-                <p>DIVISION : {mrJobs[0]?.division || 'SABARMATI'}</p>
-                <p className="mt-1">ORDER NO : {activeAgency?.prefixes?.[mrJobs[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
+                <p>DIVISION : {selectedJobsData[0]?.division || 'SABARMATI'}</p>
+                <p className="mt-1">ORDER NO : {activeAgency?.prefixes?.[selectedJobsData[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
               </div>
               <div className="text-center text-sm underline decoration-2 underline-offset-4">
                 ESTIMATE REPORT
@@ -167,43 +169,43 @@ export default function EstimateGenerate() {
               <tbody>
                 <tr className="border-b-2 border-black font-bold">
                   <td className="p-1 border-r-2 border-black">TRANS TYPE</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">{job.coreType || 'CRGO'}</td>
                   ))}
                 </tr>
                 <tr className="border-b border-black font-bold">
                   <td className="p-1 border-r-2 border-black">JOB NO</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">{job.jobNo}</td>
                   ))}
                 </tr>
                 <tr className="border-b border-black font-bold">
                   <td className="p-1 border-r-2 border-black">MAKE</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">{job.make}</td>
                   ))}
                 </tr>
                 <tr className="border-b border-black font-bold">
                   <td className="p-1 border-r-2 border-black">KVA / KV</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">{job.capacityKva} / 11</td>
                   ))}
                 </tr>
                 <tr className="border-b border-black font-bold">
                   <td className="p-1 border-r-2 border-black">TSR NO.</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">{job.serialNo}</td>
                   ))}
                 </tr>
                 <tr className="border-b border-black font-bold">
                   <td className="p-1 border-r-2 border-black">MR NO. & DATE</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">{job.mrNo}</td>
                   ))}
                 </tr>
                 <tr className="border-b-2 border-black font-bold">
                   <td className="p-1 border-r-2 border-black">Oil Cap / Less Oil / Filter Oil</td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-1 border-r border-black text-center">- / - / -</td>
                   ))}
                 </tr>
@@ -214,7 +216,7 @@ export default function EstimateGenerate() {
                     <span>As Per AT Sr</span>
                     <span className="text-center flex-1">ITEM</span>
                   </td>
-                  {mrJobs.map(job => (
+                  {selectedJobsData.map(job => (
                     <td key={job.id} className="p-0 border-r border-black">
                       <table className="w-full text-center">
                         <tbody>
@@ -236,7 +238,7 @@ export default function EstimateGenerate() {
                       <span className="w-8">{item.itemCode}</span>
                       <span>{item.itemName}</span>
                     </td>
-                    {mrJobs.map(job => {
+                    {selectedJobsData.map(job => {
                       const kva = String(job.capacityKva);
                       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
@@ -244,7 +246,10 @@ export default function EstimateGenerate() {
                       let qty = 0;
                       let qtyDisplay = '0';
                       
-                      if (rate > 0) {
+                      const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+                      const isScrapJob = job.status === 'Scrap';
+                      
+                      if (isScrapItem === isScrapJob && rate > 0) {
                         if (item.unit === 'Y') {
                            qtyDisplay = 'Y';
                            qty = 1;
@@ -261,7 +266,7 @@ export default function EstimateGenerate() {
                         }
                       }
                       
-                      if (item.itemCode === '16' || item.itemCode === '17' || item.itemCode === '18' || item.itemCode === '6' || item.itemCode === '3') {
+                      if (item.unit === 'N') {
                           qtyDisplay = 'N';
                           qty = 0;
                       }
@@ -288,9 +293,9 @@ export default function EstimateGenerate() {
                 {/* Totals */}
                 <tr className="border-t-2 border-black font-bold">
                   <td className="p-2 border-r-2 border-black text-right">Total</td>
-                  {mrJobs.map(job => {
-                     const kva = String(job.capacityKva);
+                  {selectedJobsData.map(job => {
                      let jobTotal = 0;
+                     const kva = String(job.capacityKva);
                      masterData.forEach(item => {
                         const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
@@ -307,20 +312,19 @@ export default function EstimateGenerate() {
                              qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
                           }
                         }
-                        if (item.itemCode === '16' || item.itemCode === '17' || item.itemCode === '18' || item.itemCode === '6' || item.itemCode === '3') {
+                        if (item.unit === 'N') {
                             qty = 0;
                         }
                         jobTotal += (qty * rate);
                      });
-                     
                     return <td key={job.id} className="p-2 border-r border-black text-right">{jobTotal.toFixed(2)}</td>
                   })}
                 </tr>
                 <tr className="border-t border-black font-bold">
                   <td className="p-2 border-r-2 border-black text-right">4.00 % Rise Total</td>
-                  {mrJobs.map(job => {
-                     const kva = String(job.capacityKva);
+                  {selectedJobsData.map(job => {
                      let jobTotal = 0;
+                     const kva = String(job.capacityKva);
                      masterData.forEach(item => {
                         const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
@@ -337,7 +341,7 @@ export default function EstimateGenerate() {
                              qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
                           }
                         }
-                        if (item.itemCode === '16' || item.itemCode === '17' || item.itemCode === '18' || item.itemCode === '6' || item.itemCode === '3') {
+                        if (item.unit === 'N') {
                             qty = 0;
                         }
                         jobTotal += (qty * rate);
@@ -347,9 +351,9 @@ export default function EstimateGenerate() {
                 </tr>
                 <tr className="border-t-2 border-black font-bold text-[10px]">
                   <td className="p-2 border-r-2 border-black text-right">Grand Total</td>
-                  {mrJobs.map(job => {
-                     const kva = String(job.capacityKva);
+                  {selectedJobsData.map(job => {
                      let jobTotal = 0;
+                     const kva = String(job.capacityKva);
                      masterData.forEach(item => {
                         const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
@@ -366,7 +370,7 @@ export default function EstimateGenerate() {
                              qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
                           }
                         }
-                        if (item.itemCode === '16' || item.itemCode === '17' || item.itemCode === '18' || item.itemCode === '6' || item.itemCode === '3') {
+                        if (item.unit === 'N') {
                             qty = 0;
                         }
                         jobTotal += (qty * rate);
@@ -379,7 +383,7 @@ export default function EstimateGenerate() {
             
             <div className="flex justify-between items-end mt-8 text-black text-sm font-bold pb-16">
               <div>
-                <p className="underline underline-offset-4">Note -</p>
+                <p className="underline underline-offset-4">Note - {selectedJobsData.some(j => j.status === 'Scrap') ? 'Scrap Included' : ''}</p>
               </div>
               <div className="text-center">
                 <p className="mb-12">For, {activeAgency?.name || 'Ideal Engineering Co.'}</p>
@@ -419,7 +423,7 @@ Circle Office : SABARMATI`}
 
             <p className="text-sm mb-6">Dear Sir,</p>
             <p className="text-sm mb-8 leading-relaxed ml-8">
-              With reference to the abvoe subject , we are submitting you inspection reports and estimates of following transformers received from {mrJobs[0]?.division || 'SABARMATI'}
+              With reference to the abvoe subject , we are submitting you inspection reports and estimates of following transformers received from {selectedJobsData[0]?.division || 'SABARMATI'}
             </p>
 
             <table className="w-full text-center text-sm border-collapse border border-black mb-8">
@@ -433,18 +437,22 @@ Circle Office : SABARMATI`}
                   <th className="p-2 border-r border-black">KV</th>
                   <th className="p-2 border-r border-black">TRANS. TYPE</th>
                   <th className="p-2 border-r border-black">OGP/ GP</th>
-                  <th className="p-2">EST. AMT.</th>
+                  <th className="p-2 border-r border-black">EST. AMT.</th>
+                  <th className="p-2">REMARK</th>
                 </tr>
               </thead>
               <tbody>
-                {mrJobs.map((job, idx) => {
-                   const kva = String(job.capacityKva);
+                {selectedJobsData.map((job, idx) => {
                    let jobTotal = 0;
+                   const kva = String(job.capacityKva);
                    masterData.forEach(item => {
                       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
                       let qty = 0;
-                      if (rate > 0) {
+                      const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+                      const isScrapJob = job.status === 'Scrap';
+                      
+                      if (isScrapItem === isScrapJob && rate > 0) {
                         if (item.unit === 'Y') qty = 1;
                         else if (item.unit === 'QTY') {
                            qty = 1;
@@ -456,7 +464,7 @@ Circle Office : SABARMATI`}
                            qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
                         }
                       }
-                      if (item.itemCode === '16' || item.itemCode === '17' || item.itemCode === '18' || item.itemCode === '6' || item.itemCode === '3') {
+                      if (item.unit === 'N') {
                           qty = 0;
                       }
                       jobTotal += (qty * rate);
@@ -473,21 +481,25 @@ Circle Office : SABARMATI`}
                       <td className="p-2 border-r border-black">11</td>
                       <td className="p-2 border-r border-black">{job.coreType || 'CRGO'}</td>
                       <td className="p-2 border-r border-black">OGP</td>
-                      <td className="p-2 text-right">{finalAmt}</td>
+                      <td className="p-2 border-r border-black text-right">{finalAmt}</td>
+                      <td className="p-2 text-center text-xs font-bold whitespace-nowrap">{job.status === 'Scrap' ? 'SCRAP INCLUDED' : 'REPAIRABLE'}</td>
                     </tr>
                   )
                 })}
                 <tr className="font-bold border-black">
                   <td colSpan={8} className="p-2 border-r border-black text-right">TOTAL</td>
-                  <td className="p-2 text-right">
-                    {mrJobs.reduce((acc, job) => {
-                       const kva = String(job.capacityKva);
+                  <td className="p-2 border-r border-black text-right">
+                    {selectedJobsData.reduce((acc, job) => {
                        let jobTotal = 0;
+                       const kva = String(job.capacityKva);
                        masterData.forEach(item => {
                           const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
                           let qty = 0;
-                          if (rate > 0) {
+                          const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+                          const isScrapJob = job.status === 'Scrap';
+                          
+                          if (isScrapItem === isScrapJob && rate > 0) {
                             if (item.unit === 'Y') qty = 1;
                             else if (item.unit === 'QTY') {
                                qty = 1;
@@ -499,7 +511,7 @@ Circle Office : SABARMATI`}
                                qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
                             }
                           }
-                          if (item.itemCode === '16' || item.itemCode === '17' || item.itemCode === '18' || item.itemCode === '6' || item.itemCode === '3') {
+                          if (item.unit === 'N') {
                               qty = 0;
                           }
                           jobTotal += (qty * rate);
@@ -507,6 +519,7 @@ Circle Office : SABARMATI`}
                        return acc + (jobTotal * 1.04);
                     }, 0).toFixed(2)}
                   </td>
+                  <td></td>
                 </tr>
               </tbody>
             </table>

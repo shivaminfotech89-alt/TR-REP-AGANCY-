@@ -41,7 +41,7 @@ export interface OilTransaction {
 }
 
 export default function OilInward() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster } = useAgency();
   const [transactions, setTransactions] = useState<OilTransaction[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
@@ -62,7 +62,7 @@ export default function OilInward() {
     grossLiters: 210,
   });
 
-  const divisions = activeAgency ? Object.keys(activeAgency.prefixes) : [];
+  const divisions = activeAgency ? Object.keys((activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) ? activeAtMaster.prefixes : (activeAgency.prefixes || {})) : [];
 
   useEffect(() => {
     if (activeAgency && !formData.division && divisions.length > 0) {

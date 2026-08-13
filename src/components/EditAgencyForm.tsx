@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgency } from '../lib/AgencyContext';
-import { Loader2, Plus, Trash2, FileUp } from 'lucide-react';
+import { Loader2, Plus, Trash2, FileUp, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function EditAgencyForm({ agency }: { agency: any }) {
   const { updateAgency } = useAgency();
   const [agencyName, setAgencyName] = useState(agency.name);
   const [gpValidationMonths, setGpValidationMonths] = useState(agency.gpValidationMonths ?? 18);
+  
+  const [isDivisionsExpanded, setIsDivisionsExpanded] = useState(false);
+  const [isForwardingExpanded, setIsForwardingExpanded] = useState(false);
   
   const [forwardingToText, setForwardingToText] = useState(agency.forwardingToText || 'Superintending Engineer (O & M),\nUttar Gujarat Vij Company Ltd.,\nCircle Office : SABARMATI');
   const [forwardingSubject, setForwardingSubject] = useState(agency.forwardingSubject || 'Submiting Inspection Report & Estimate of Transformer');
@@ -130,9 +133,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         name: agencyName,
         letterheadUrl: letterheadBase64,
         gpValidationMonths,
-        prefixes,
-        lastJobNumbers,
-        allotments,
         forwardingToText,
         forwardingSubject,
         forwardingCcText,
@@ -227,111 +227,18 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         </div>
       </div>
       
-      <div>
-        <div className="flex justify-between items-end mb-2 border-b border-slate-100 pb-2">
-          <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Divisions & Prefixes</label>
-          <button type="button" onClick={handleAddDivision} className="text-[10px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 flex items-center bg-blue-50 px-2 py-1 rounded">
-            <Plus className="w-3 h-3 mr-1" /> Add Division
-          </button>
-        </div>
-        <div className="space-y-3">
-          {divisions.map((div, index) => (
-            <div key={index} className="flex items-start space-x-3 p-3 bg-slate-50 border border-slate-200 rounded">
-              <div className="flex-1 space-y-2">
-                <input 
-                  required 
-                  type="text" 
-                  value={div.name} 
-                  onChange={e => handleDivisionChange(index, 'name', e.target.value)} 
-                  className="w-full px-4 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" 
-                  placeholder="Division Name (e.g. SABARMATI)" 
-                />
-                <div className="space-y-3 border-t border-slate-200 pt-3 mt-3">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="bg-slate-100 p-2 rounded">
-                      <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">CRGO Config</label>
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Prefix *</label>
-                          <input required type="text" value={div.prefixCRGO} onChange={e => handleDivisionChange(index, 'prefixCRGO', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. 21 IS" />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Job Allotment No.</label>
-                          <input type="number" value={div.allotmentCRGO || ''} onChange={e => handleDivisionChange(index, 'allotmentCRGO', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. 20" />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-slate-100 p-2 rounded">
-                      <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">Amorphous Config</label>
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Prefix</label>
-                          <input type="text" value={div.prefixAmorphous} onChange={e => handleDivisionChange(index, 'prefixAmorphous', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. AM21 IS" />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Job Allotment No.</label>
-                          <input type="number" value={div.allotmentAmorphous || ''} onChange={e => handleDivisionChange(index, 'allotmentAmorphous', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. 15" />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-slate-100 p-2 rounded">
-                      <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">Wound Core Config</label>
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Prefix</label>
-                          <input type="text" value={div.prefixWoundCore} onChange={e => handleDivisionChange(index, 'prefixWoundCore', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. WC21 IS" />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Job Allotment No.</label>
-                          <input type="number" value={div.allotmentWoundCore || ''} onChange={e => handleDivisionChange(index, 'allotmentWoundCore', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. 10" />
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-slate-100 p-2 rounded">
-                      <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">LSTC Config</label>
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Prefix</label>
-                          <input type="text" value={div.prefixLSTC} onChange={e => handleDivisionChange(index, 'prefixLSTC', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. LS21 IS" />
-                        </div>
-                        <div>
-                          <span className="block text-[9px] text-slate-400 mt-4 italic">No fixed allotment</span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    <div className="bg-slate-100 p-2 rounded">
-                      <label className="block text-[10px] uppercase font-bold text-slate-700 mb-1">Overhauling (OH) Config</label>
-                      <div className="space-y-2">
-                        <div>
-                          <label className="block text-[9px] uppercase text-slate-500 mb-0.5">Prefix</label>
-                          <input type="text" value={div.prefixOH} onChange={e => handleDivisionChange(index, 'prefixOH', e.target.value)} className="w-full px-2 py-1 text-xs border rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. OH21 IS" />
-                        </div>
-                        <div>
-                          <span className="block text-[9px] text-slate-400 mt-4 italic">No fixed allotment</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              {divisions.length > 1 && (
-                <button type="button" onClick={() => handleRemoveDivision(index)} className="p-2 mt-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-      
-      
       <div className="pt-4 border-t border-slate-200">
-        <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-2">Forwarding Letter Configuration</label>
-        <div className="space-y-4 bg-slate-50 p-4 border border-slate-200 rounded">
+        <button 
+          type="button"
+          onClick={() => setIsForwardingExpanded(!isForwardingExpanded)}
+          className="flex items-center text-xs font-bold uppercase tracking-widest text-slate-500 hover:text-slate-700 mb-2"
+        >
+          {isForwardingExpanded ? <ChevronUp className="w-4 h-4 mr-1" /> : <ChevronDown className="w-4 h-4 mr-1" />}
+          Forwarding Letter Configuration
+        </button>
+        
+        {isForwardingExpanded && (
+          <div className="space-y-4 bg-slate-50 p-4 border border-slate-200 rounded">
           <div>
             <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">To Address</label>
             <textarea rows={3} value={forwardingToText} onChange={e => setForwardingToText(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. Superintending Engineer..." />
@@ -345,6 +252,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
             <textarea rows={2} value={forwardingCcText} onChange={e => setForwardingCcText(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" placeholder="e.g. E. E. (O & M) DIVISION..." />
           </div>
         </div>
+        )}
       </div>
 
             <div className="pt-4 border-t border-slate-100 flex justify-end space-x-2">

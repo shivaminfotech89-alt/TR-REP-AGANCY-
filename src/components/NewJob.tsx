@@ -29,8 +29,12 @@ export default function NewJob() {
   });
 
   React.useEffect(() => {
-    if (activeAgency && Object.keys(activeAgency.prefixes).length > 0) {
-      const firstDiv = Object.keys(activeAgency.prefixes)[0];
+    const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
+        ? activeAtMaster.prefixes 
+        : (activeAgency?.prefixes || {});
+    
+    if (Object.keys(currentPrefixes).length > 0) {
+      const firstDiv = Object.keys(currentPrefixes)[0];
       setCommonData(prev => ({
         ...prev,
         division: firstDiv
@@ -253,22 +257,36 @@ export default function NewJob() {
           countsToAdd[cType] = (countsToAdd[cType] || 0) + 1;
         }
         
+        // Optimize querying by fetching all relevant AT jobs just once
+        const snap = await getDocs(query(
+            collection(db, 'jobs'),
+            where('ownerId', '==', auth.currentUser.uid),
+            where('atId', '==', activeAtMaster.id)
+        ));
+        
+        const existingJobsData = snap.docs.map(d => d.data());
+
         for (const [cType, countToAdd] of Object.entries(countsToAdd)) {
-          const allowed = Number(activeAtMaster.allotments?.[commonData.division]?.[cType]) || 0;
+          let allowed = Number(activeAtMaster.allotments?.[commonData.division]?.[cType]);
+          
+          if (!allowed || allowed === 0) {
+             allowed = Number(activeAgency.allotments?.[commonData.division]?.[cType]) || 0;
+          }
+          
+          allowed = allowed || 0;
+          
           if (allowed > 0) {
-            // Use simpler query to avoid composite index requirement, filter in memory
-            const snap = await getDocs(query(
-              collection(db, 'jobs'),
-              where('ownerId', '==', auth.currentUser.uid),
-              where('atId', '==', activeAtMaster.id)
-            ));
-            
             let used = 0;
-            snap.forEach(doc => {
-              const data = doc.data();
+            existingJobsData.forEach(data => {
               if (data.ownerId !== auth.currentUser.uid || data.division !== commonData.division) return;
+              
+              // Only count if it's NOT an OH repair
+              if (data.repairType === 'OH') return;
+              
               const docType = data.coreType || 'CRGO';
-              if (docType === 'OH' || data.repairType === 'OH') return;
+              if (docType === 'OH') return;
+              
+              // ONLY check the exact coreType currently being looped
               if (docType === cType) {
                 used++;
               }
@@ -511,7 +529,7 @@ export default function NewJob() {
                   className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50"
                 >
                   {activeAgency ? (
-                    Object.keys(activeAgency.prefixes).map(div => (
+                    Object.keys((activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) ? activeAtMaster.prefixes : (activeAgency.prefixes || {})).map(div => (
                       <option key={div} value={div}>{div}</option>
                     ))
                   ) : (

@@ -42,6 +42,25 @@ export default function EstimateMaster() {
     );
   }
 
+  const handleItemDetailsChange = (index: number, field: 'itemCode' | 'itemName' | 'unit', value: string) => {
+    const newData = [...data];
+    newData[index] = { ...newData[index], [field]: value };
+    setData(newData);
+  };
+
+  const handleAddItem = () => {
+    setData([
+      ...data,
+      {
+        itemCode: '',
+        itemName: '',
+        unit: 'Y',
+        rates: { "5": null, "10": null, "16": null, "25": null, "50": null, "63": null, "100": null, "200": null, "315": null, "500": null }
+      }
+    ]);
+    if (!isEditing) setIsEditing(true);
+  };
+
   const handleRateChange = (index: number, kva: KvaType, value: string) => {
     const newData = [...data];
     if (value.trim() === '') {
@@ -94,6 +113,12 @@ export default function EstimateMaster() {
           </p>
         </div>
         <div className="flex space-x-2">
+          <button 
+            onClick={handleAddItem}
+            className="flex items-center px-4 py-2 text-sm font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded transition-colors"
+          >
+            Add Item
+          </button>
           {!isEditing ? (
             <button 
               onClick={() => setIsEditing(true)}
@@ -143,9 +168,46 @@ export default function EstimateMaster() {
             <tbody className="divide-y divide-slate-100">
               {data.map((item, idx) => (
                 <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                  <td className="px-4 py-2 font-medium text-slate-900 whitespace-nowrap sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-100">{item.itemCode}</td>
-                  <td className="px-4 py-2 whitespace-nowrap sticky left-[60px] bg-white group-hover:bg-slate-50 border-r border-slate-100">{item.itemName}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{item.unit}</td>
+                  <td className="px-4 py-2 font-medium text-slate-900 whitespace-nowrap sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-100">
+                    {isEditing ? (
+                      <input 
+                        type="text" 
+                        value={item.itemCode} 
+                        onChange={(e) => handleItemDetailsChange(idx, 'itemCode', e.target.value)}
+                        className="w-16 px-2 py-1 text-sm border border-slate-300 rounded"
+                      />
+                    ) : (
+                      item.itemCode
+                    )}
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap sticky left-[60px] bg-white group-hover:bg-slate-50 border-r border-slate-100">
+                    {isEditing ? (
+                      <input 
+                        type="text" 
+                        value={item.itemName} 
+                        onChange={(e) => handleItemDetailsChange(idx, 'itemName', e.target.value)}
+                        className="w-48 px-2 py-1 text-sm border border-slate-300 rounded"
+                      />
+                    ) : (
+                      item.itemName
+                    )}
+                  </td>
+                  <td className="px-4 py-2 whitespace-nowrap">
+                    {isEditing ? (
+                      <select 
+                        value={item.unit} 
+                        onChange={(e) => handleItemDetailsChange(idx, 'unit', e.target.value)}
+                        className="px-2 py-1 text-sm border border-slate-300 rounded"
+                      >
+                        <option value="Y">Y</option>
+                        <option value="N">N</option>
+                        <option value="QTY">QTY</option>
+                        <option value="KG">KG</option>
+                      </select>
+                    ) : (
+                      item.unit
+                    )}
+                  </td>
                   {kvaColumns.map(kva => (
                     <td key={kva} className="px-4 py-2 text-right font-mono text-slate-700">
                       {isEditing ? (

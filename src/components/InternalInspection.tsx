@@ -26,6 +26,7 @@ export interface InternalData {
   dc: string;
   insula: string;
   inspectionId?: string;
+  condition?: string;
 }
 
 export default function InternalInspection() {
@@ -84,6 +85,7 @@ export default function InternalInspection() {
       if (existingInsp && existingInsp.data) {
         initialForms[j.id] = {
           windingType: existingInsp.data.windingType || 'AL',
+          condition: existingInsp.data.condition || 'Repairable',
           hvCoilLimb: existingInsp.data.hvCoilLimb || '',
           damR: existingInsp.data.damR || '',
           damY: existingInsp.data.damY || '',
@@ -106,6 +108,7 @@ export default function InternalInspection() {
       } else {
         initialForms[j.id] = {
           windingType: 'AL',
+          condition: 'Repairable',
           hvCoilLimb: '4',
           damR: '',
           damY: '',
@@ -243,6 +246,7 @@ export default function InternalInspection() {
           type: 'Internal',
           data: {
             windingType: jobData.windingType,
+            condition: jobData.condition || 'Repairable',
             hvCoilLimb: jobData.hvCoilLimb,
             damR: jobData.damR,
             damY: jobData.damY,
@@ -273,9 +277,9 @@ export default function InternalInspection() {
 
         // Update Job Status
         const jobRef = doc(db, 'jobs', job.id);
-        if (job.status === 'External Done' || job.status === 'Received') {
+        if (job.status === 'External Done' || job.status === 'Received' || job.status === 'Internal Done' || job.status === 'Scrap') {
           batch.update(jobRef, {
-            status: 'Internal Done',
+            status: jobData.condition === 'Scrap' ? 'Scrap' : 'Internal Done',
             updatedAt: now
           });
         }
@@ -360,6 +364,11 @@ export default function InternalInspection() {
       </div>
     );
   }
+
+  const scrapJobs = mrJobs.filter(job => formsData[job.id]?.condition === 'Scrap').map(j => j.jobNo);
+  const scrapNote = scrapJobs.length > 0 
+    ? `NOTE : JOB NO ${scrapJobs.join(' & ')} FOUND HEAVILY DAMAGED WITH CORE & LT, HENCE PROPOSED FOR SCRAP ONLY`
+    : null;
 
   return (
     <div className="space-y-6 print:space-y-0">
@@ -518,6 +527,7 @@ export default function InternalInspection() {
                       <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>Dc</th>
                       <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>In<br/>su<br/>la</th>
                       <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>Job<br/>Type</th>
+                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[50px] print:hidden" rowSpan={2}>Condition</th>
                     </tr>
                     <tr>
                       <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center border-l border-slate-200 min-w-[32px]">R</th>
@@ -560,11 +570,18 @@ export default function InternalInspection() {
                         <td className="p-1">{renderSelectField(job.id, 'dc', ['Y', 'N', '-'], 'min-w-[40px]')}</td>
                         <td className="p-1">{renderSelectField(job.id, 'insula', ['Y', 'N', '-'], 'min-w-[40px]')}</td>
                         <td className="p-1 text-[10px] text-slate-700 print:text-black font-bold text-center bg-slate-50 print:bg-transparent">{job.coreType || '-'}</td>
+                        <td className="p-1 print:hidden">{renderSelectField(job.id, 'condition', ['Repairable', 'Scrap'], 'min-w-[70px]')}</td>
                       </tr>
                     )})}
                   </tbody>
                 </table>
               </div>
+              
+              {scrapNote && (
+                <div className="p-4 text-xs font-bold text-slate-800 print:text-black uppercase tracking-widest border-t border-slate-200">
+                  {scrapNote}
+                </div>
+              )}
               
               <div className="p-6 bg-slate-50 print:bg-transparent border-t border-slate-200 flex justify-end print:hidden">
                 <button 

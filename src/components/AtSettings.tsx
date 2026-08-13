@@ -1,12 +1,15 @@
 import React, { useState } from 'react';
 import { useAgency, AtMaster } from '../lib/AgencyContext';
-import { Plus, Check, Loader2, Calendar } from 'lucide-react';
+import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp } from 'lucide-react';
+import { AtAllotments } from './AtAllotments';
+import { AtDivisions } from './AtDivisions';
 
 
 export function AtSettings() {
   const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isExpanded, setIsExpanded] = useState(false);
   
   const [newAt, setNewAt] = useState({
     atNumber: '',
@@ -60,11 +63,19 @@ export function AtSettings() {
   return (
     <div className="space-y-8">
       <div className="bg-white p-6 rounded shadow-sm border border-slate-200">
-        <h2 className="text-lg font-bold text-slate-900 mb-4">AT / Tender Periods</h2>
+        <button 
+          onClick={() => setIsExpanded(!isExpanded)}
+          className="flex items-center text-lg font-bold text-slate-900 mb-4 hover:text-slate-700"
+        >
+          {isExpanded ? <ChevronUp className="w-5 h-5 mr-2" /> : <ChevronDown className="w-5 h-5 mr-2" />}
+          AT / Tender Periods
+        </button>
         
-        {atMasters.filter(at => at.agencyId === activeAgency?.id).length === 0 ? (
-          <p className="text-sm text-slate-500 mb-4">No AT periods defined yet.</p>
-        ) : (
+        {isExpanded && (
+          <>
+            {atMasters.filter(at => at.agencyId === activeAgency?.id).length === 0 ? (
+              <p className="text-sm text-slate-500 mb-4">No AT periods defined yet.</p>
+            ) : (
           <div className="space-y-3 mb-6">
             {atMasters.filter(at => at.agencyId === activeAgency?.id).map(at => (
               <React.Fragment key={at.id}>
@@ -96,7 +107,12 @@ export function AtSettings() {
                   {activeAtMaster?.id === at.id && <span className="flex items-center text-xs font-bold text-blue-600 bg-blue-100 px-2 py-1 rounded"><Check className="w-3 h-3 mr-1"/> Active AT</span>}
                 </div>
               </div>
-              
+              {activeAtMaster?.id === at.id && (
+                <div className="border border-t-0 border-blue-500 bg-white p-4 rounded-b space-y-4">
+                  <AtDivisions at={at} />
+                  <AtAllotments at={at} />
+                </div>
+              )}
               </React.Fragment>
             ))}
           </div>
@@ -137,6 +153,8 @@ export function AtSettings() {
               </button>
             </div>
           </form>
+        )}
+        </>
         )}
       </div>
     </div>

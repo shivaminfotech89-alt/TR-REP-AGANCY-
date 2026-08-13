@@ -41,7 +41,7 @@ export default function AppLayout({ user }: { user: User }) {
   ];
 
   return (
-    <div className="h-screen bg-slate-50 flex overflow-hidden font-sans text-slate-900">
+    <div className="h-screen bg-slate-50 flex overflow-hidden print:h-auto print:overflow-visible font-sans text-slate-900">
       
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 flex flex-col h-full border-r border-slate-800 shrink-0 print:hidden">

@@ -6,7 +6,7 @@ import { auth } from '../lib/firebase';
 import { collection as fsCollection, query as fsQuery, where as fsWhere, getDocs as fsGetDocs } from 'firebase/firestore';
 
 export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster } = useAgency();
   const [counts, setCounts] = useState<Record<string, Record<string, number>>>({});
   
   useEffect(() => {
@@ -46,7 +46,7 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
   }, [activeAgency, atMaster]);
 
   if (!activeAgency) return null;
-  const divisions = Object.keys(activeAgency.prefixes || {});
+  const divisions = Object.keys((activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) ? activeAtMaster.prefixes : (activeAgency?.prefixes || {}));
   if (divisions.length === 0) return null;
 
   return (

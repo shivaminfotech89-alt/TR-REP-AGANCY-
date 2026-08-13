@@ -5,7 +5,10 @@ import { AllotmentWidget } from './AllotmentWidget';
 export default function Dashboard() {
   const { activeAgency, activeAtMaster } = useAgency();
   
-  const divisions = activeAgency ? Object.keys(activeAgency.prefixes || {}) : [];
+  const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
+      ? activeAtMaster.prefixes 
+      : (activeAgency?.prefixes || {});
+  const divisions = Object.keys(currentPrefixes);
 
 
   return (
