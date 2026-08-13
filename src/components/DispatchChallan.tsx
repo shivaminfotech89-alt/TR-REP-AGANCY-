@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { Loader2, Printer, Search, Truck, CheckCircle2, History } from 'lucide-react';
+import { Loader2, Printer, Search, Truck, CheckCircle2, History, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export default function DispatchChallan() {
   const { activeAgency } = useAgency();
@@ -219,6 +220,52 @@ export default function DispatchChallan() {
     }, 100);
   };
 
+  const handleExportExcel = (cNo?: string, data?: any) => {
+    const wsData: any[][] = [];
+    if (cNo && data) {
+      wsData.push([`DELIVERY CHALLAN - ${cNo}`]);
+      wsData.push([`Challan Date: ${data.challanDate}`, `Vehicle No: ${data.vehicleNo}`, `Delivery Date: ${data.deliveryDate}`]);
+      wsData.push([]);
+      wsData.push(['S.N.', 'Job No', 'MR No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division']);
+      data.jobs.forEach((job: any, idx: number) => {
+        wsData.push([
+          idx + 1,
+          job.jobNo,
+          job.mrNo,
+          job.capacityKva,
+          job.make,
+          job.serialNo,
+          job.division
+        ]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Delivery Challan");
+      XLSX.writeFile(wb, `Delivery_Challan_${cNo}.xlsx`);
+    } else {
+      if (selectedJobs.length === 0) return;
+      wsData.push([`DELIVERY CHALLAN PREVIEW - ${challanNo || 'Pending'}`]);
+      wsData.push([`Challan Date: ${challanDate}`, `Vehicle No: ${vehicleNo}`, `Delivery Date: ${deliveryDate}`]);
+      wsData.push([]);
+      wsData.push(['S.N.', 'Job No', 'MR No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division']);
+      selectedJobs.forEach((job: any, idx: number) => {
+        wsData.push([
+          idx + 1,
+          job.jobNo,
+          job.mrNo,
+          job.capacityKva,
+          job.make,
+          job.serialNo,
+          job.division
+        ]);
+      });
+      const ws = XLSX.utils.aoa_to_sheet(wsData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Challan");
+      XLSX.writeFile(wb, `Delivery_Challan_${challanNo || 'Pending'}.xlsx`);
+    }
+  };
+
   if (loading && allJobs.length === 0) {
     return (
       <div className="flex justify-center items-center h-64">
@@ -260,35 +307,45 @@ export default function DispatchChallan() {
             <div className="bg-white p-6 rounded shadow-sm border border-slate-200">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-sm font-bold uppercase text-slate-500">Challan Details</h3>
-                    <button 
-                        onClick={() => {
-                            if (selectedJobs.length > 0) {
-                                setPrintData({
-                                    jobs: selectedJobs,
-                                    challanNo,
-                                    challanDate,
-                                    vehicleNo,
-                                    deliveryDate,
-                                    uniqueDivisions,
-                                    uniqueMrNos
-                                });
-                                setTimeout(() => {
-                                    setIsPrinting(true);
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => {
+                                if (selectedJobs.length > 0) {
+                                    setPrintData({
+                                        jobs: selectedJobs,
+                                        challanNo,
+                                        challanDate,
+                                        vehicleNo,
+                                        deliveryDate,
+                                        uniqueDivisions,
+                                        uniqueMrNos
+                                    });
                                     setTimeout(() => {
-                                        window.print();
-                                        setIsPrinting(false);
-                                    }, 500);
-                                }, 100);
-                            } else {
-                                alert("Select jobs first to preview challan.");
-                            }
-                        }}
-                        disabled={selectedJobIds.size === 0}
-                        className="flex items-center gap-2 px-3 py-1 bg-slate-100 text-slate-700 rounded font-bold hover:bg-slate-200 disabled:opacity-50 text-sm"
-                    >
-                    <Printer className="w-4 h-4" />
-                    Preview
-                    </button>
+                                        setIsPrinting(true);
+                                        setTimeout(() => {
+                                            window.print();
+                                            setIsPrinting(false);
+                                        }, 500);
+                                    }, 100);
+                                } else {
+                                    alert("Select jobs first to preview challan.");
+                                }
+                            }}
+                            disabled={selectedJobIds.size === 0}
+                            className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-700 rounded font-bold hover:bg-slate-200 disabled:opacity-50 text-xs"
+                        >
+                            <Printer className="w-3.5 h-3.5" />
+                            Preview / Print
+                        </button>
+                        <button
+                            onClick={() => handleExportExcel()}
+                            disabled={selectedJobIds.size === 0}
+                            className="flex items-center gap-1.5 px-3 py-1 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700 disabled:opacity-50 text-xs shadow-sm"
+                        >
+                            <FileSpreadsheet className="w-3.5 h-3.5" />
+                            Export Excel
+                        </button>
+                    </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                     <div>
@@ -411,13 +468,22 @@ export default function DispatchChallan() {
                                     <span>Jobs: {data.jobs.length}</span>
                                 </p>
                             </div>
-                            <button
-                                onClick={() => handlePrintPastChallan(cNo, data)}
-                                className="flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded font-bold hover:bg-slate-700 transition-colors text-sm"
-                            >
-                                <Printer className="w-4 h-4" />
-                                Print Challan
-                            </button>
+                            <div className="flex items-center gap-2">
+                                <button
+                                    onClick={() => handlePrintPastChallan(cNo, data)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 text-white rounded font-bold hover:bg-slate-700 transition-colors text-xs"
+                                >
+                                    <Printer className="w-3.5 h-3.5" />
+                                    Print Challan
+                                </button>
+                                <button
+                                    onClick={() => handleExportExcel(cNo, data)}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white rounded font-bold hover:bg-emerald-700 transition-colors text-xs shadow-sm"
+                                >
+                                    <FileSpreadsheet className="w-3.5 h-3.5" />
+                                    Export Excel
+                                </button>
+                            </div>
                         </div>
                         <div className="p-4">
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">

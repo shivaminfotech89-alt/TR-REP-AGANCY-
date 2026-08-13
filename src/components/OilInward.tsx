@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useAgency } from "../lib/AgencyContext";
 import { db, auth, handleFirestoreError, OperationType } from "../lib/firebase";
+import * as XLSX from "xlsx";
 import {
   collection,
   query,
@@ -349,49 +350,48 @@ export default function OilInward() {
   }, [transactions, filterDivision, filterMrDate, jobs]);
 
   const exportToExcel = () => {
-    let csvContent = "";
+    const wsData: any[][] = [];
 
     if (viewMode === "transactions") {
-      csvContent +=
-        "Receive Date,MR No.,MR Date,Division,Oil Type,Barrels,Gross (LTR),Loss %,Net (LTR)\n";
+      wsData.push(["Receive Date", "MR No.", "MR Date", "Division", "Oil Type", "Barrels", "Gross (LTR)", "Loss %", "Net (LTR)"]);
       filteredTransactions.forEach((tx) => {
         const date = new Date(tx.date).toLocaleDateString();
         const mrDate = tx.mrDate || getMrDate(tx.mrNo);
-        csvContent += `"${date}","${tx.mrNo}","${mrDate}","${tx.division}","${tx.oilType}","${tx.barrels}","${tx.grossLiters.toFixed(2)}","${tx.filtrationLossPercent}","${tx.netLiters.toFixed(2)}"\n`;
+        wsData.push([
+          date,
+          tx.mrNo,
+          mrDate,
+          tx.division,
+          tx.oilType,
+          tx.barrels,
+          Number(tx.grossLiters.toFixed(2)),
+          tx.filtrationLossPercent,
+          Number(tx.netLiters.toFixed(2))
+        ]);
       });
     } else {
-      csvContent +=
-        "MR No.,MR Date,Division,Total Shortage (LTR),Oil Received (LTR),Net Pending (LTR)\n";
+      wsData.push(["MR No.", "MR Date", "Division", "Total Shortage (LTR)", "Oil Received (LTR)", "Net Pending (LTR)"]);
       filteredSummary.forEach((summary) => {
         const pending = summary.totalShortage - summary.totalReceived;
-        csvContent += `"${summary.mrNo}","${summary.mrDate}","${summary.division}","${summary.totalShortage.toFixed(2)}","${summary.totalReceived.toFixed(2)}","${pending.toFixed(2)}"\n`;
+        wsData.push([
+          summary.mrNo,
+          summary.mrDate,
+          summary.division,
+          Number(summary.totalShortage.toFixed(2)),
+          Number(summary.totalReceived.toFixed(2)),
+          Number(pending.toFixed(2))
+        ]);
       });
-      const totalShortage = filteredSummary
-        .reduce((sum, item) => sum + item.totalShortage, 0)
-        .toFixed(2);
-      const totalReceived = filteredSummary
-        .reduce((sum, item) => sum + item.totalReceived, 0)
-        .toFixed(2);
-      const totalPending = filteredSummary
-        .reduce(
-          (sum, item) => sum + (item.totalShortage - item.totalReceived),
-          0,
-        )
-        .toFixed(2);
-      csvContent += `"Overall Totals","","","${totalShortage}","${totalReceived}","${totalPending}"\n`;
+      const totalShortage = filteredSummary.reduce((sum, item) => sum + item.totalShortage, 0);
+      const totalReceived = filteredSummary.reduce((sum, item) => sum + item.totalReceived, 0);
+      const totalPending = filteredSummary.reduce((sum, item) => sum + (item.totalShortage - item.totalReceived), 0);
+      wsData.push(["Overall Totals", "", "", Number(totalShortage.toFixed(2)), Number(totalReceived.toFixed(2)), Number(totalPending.toFixed(2))]);
     }
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute(
-      "download",
-      `oil_ledger_${viewMode}_${filterDivision}.csv`,
-    );
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Oil Ledger");
+    XLSX.writeFile(wb, `Oil_Ledger_${viewMode}_${filterDivision}.xlsx`);
   };
 
   if (!activeAgency) {

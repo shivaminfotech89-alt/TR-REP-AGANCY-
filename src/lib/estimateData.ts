@@ -22,6 +22,19 @@ const defaultRates: EstimateRates = {
   "5": null, "10": null, "16": null, "25": null, "50": null, "63": null, "100": null, "200": null, "315": null, "500": null 
 };
 
+export const defaultAmorphousEstimateData: EstimateItem[] = [
+  { itemCode: "1a", itemName: "Repairing of 25 KVA Transformer (AL)", unit: "QTY", rates: { ...defaultRates, "25": 0.00 } },
+  { itemCode: "1b", itemName: "Repairing of 63 KVA Transformer (AL)", unit: "QTY", rates: { ...defaultRates, "63": 0.00 } },
+  { itemCode: "1c", itemName: "Repairing of 100 KVA Transformer (AL)", unit: "QTY", rates: { ...defaultRates, "100": 0.00 } },
+  { itemCode: "1d", itemName: "Repairing of 100 KVA Transformer (CU)", unit: "QTY", rates: { ...defaultRates, "100": 0.00 } },
+  { itemCode: "1e", itemName: "Repairing of 200 KVA Transformer (AL)", unit: "QTY", rates: { ...defaultRates, "200": 0.00 } },
+  { itemCode: "2", itemName: "Labour charge per transformer", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "3", itemName: "Tank Replacement of same size & Thickness (per KG)", unit: "KG", rates: { ...defaultRates } },
+  { itemCode: "4", itemName: "Conservator Tank Replacement of Same Size (Per KG)", unit: "KG", rates: { ...defaultRates } },
+  { itemCode: "5", itemName: "Complete Radiator Replacement of Same Size (Per No)", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "6", itemName: "Labour charge per transformer", unit: "QTY", rates: { ...defaultRates } },
+];
+
 export const defaultEstimateData: EstimateItem[] = [
   { itemCode: "1a", itemName: "Dismentaling", unit: "QTY", rates: { ...defaultRates, "10": 1603.00, "16": 1603.00, "25": 2061.00, "63": 2061.00 } },
   { itemCode: "1b", itemName: "Repl. of Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 40.00, "16": 40.00, "25": 46.00, "63": 46.00 } },

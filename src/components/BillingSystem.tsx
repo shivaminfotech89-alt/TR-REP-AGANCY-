@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar } from 'lucide-react';
+import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { defaultEstimateData } from '../lib/estimateData';
 
 // Helper to convert number to Indian Rupees in words
@@ -232,8 +233,9 @@ export default function BillingSystem() {
     let jobTotal = 0;
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+    const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
 
-    masterData.forEach(item => {
+    jobMasterData.forEach(item => {
       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
       const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
       let qty = 0;
@@ -254,7 +256,9 @@ export default function BillingSystem() {
       if (item.unit === 'N') qty = 0;
       jobTotal += (qty * rate);
     });
-    return jobTotal * 1.04; // 4% rise included
+
+    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+    return jobTotal * (1 + atPct / 100);
   };
 
   // Billing Financial Calculations
@@ -474,6 +478,64 @@ export default function BillingSystem() {
 
   const handlePrint = () => {
     window.print();
+  };
+
+  const handleExportExcel = () => {
+    if (!selectedMrNo || selectedJobsData.length === 0) return;
+
+    const wsData: any[][] = [];
+    wsData.push([`TAX INVOICE / REPAIR BILL - MR NO: ${selectedMrNo}`]);
+    wsData.push([`Bill No: ${billNo}`, `Bill Date: ${billDate}`, `Division: ${currentDivision}`]);
+    wsData.push([`Appr No: ${apprNo}`, `Appr Date: ${apprDate}`, `Division GSTIN: ${divisionGstin}`]);
+    wsData.push([]);
+
+    // Table Header
+    wsData.push(['SR.', 'JOB NO', 'KVA', 'MAKE', 'SERIAL NO', 'CORE TYPE', 'BASE COST', 'AT % RISE/FALL', 'TOTAL AMOUNT']);
+
+    let subTotal = 0;
+    selectedJobsData.forEach((job, idx) => {
+      const baseAmt = calculateJobTotal(job);
+      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      const grandAmt = baseAmt * (1 + atPct / 100);
+      subTotal += grandAmt;
+
+      wsData.push([
+        idx + 1,
+        job.jobNo,
+        `${job.capacityKva} KVA`,
+        job.make,
+        job.serialNo,
+        job.coreType || 'CRGO',
+        Number(baseAmt.toFixed(2)),
+        `${atPct >= 0 ? '+' : ''}${atPct.toFixed(2)}%`,
+        Number(grandAmt.toFixed(2))
+      ]);
+    });
+
+    const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
+    const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
+    const cgstAmount = subTotal * (cgstRate / 100);
+    const sgstAmount = subTotal * (sgstRate / 100);
+    const grandTotal = subTotal + cgstAmount + sgstAmount;
+
+    wsData.push([]);
+    wsData.push(['', '', '', '', '', '', 'SUB TOTAL', '', Number(subTotal.toFixed(2))]);
+    wsData.push(['', '', '', '', '', '', `CGST (${cgstRate.toFixed(1)}%)`, '', Number(cgstAmount.toFixed(2))]);
+    wsData.push(['', '', '', '', '', '', `SGST (${sgstRate.toFixed(1)}%)`, '', Number(sgstAmount.toFixed(2))]);
+    wsData.push(['', '', '', '', '', '', 'GRAND TOTAL', '', Number(grandTotal.toFixed(2))]);
+    
+    if (netOilDue > 0) {
+      const oilRatePerLtr = 110;
+      const netOilCostDeduction = netOilDue * oilRatePerLtr;
+      const netPayableAfterOil = grandTotal - netOilCostDeduction;
+      wsData.push(['', '', '', '', '', '', 'LESS: OIL SHORTAGE DEDUCTION', '', Number(netOilCostDeduction.toFixed(2))]);
+      wsData.push(['', '', '', '', '', '', 'NET PAYABLE AMOUNT', '', Number(netPayableAfterOil.toFixed(2))]);
+    }
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Tax Invoice");
+    XLSX.writeFile(wb, `Tax_Invoice_MR_${selectedMrNo}_Bill_${billNo}.xlsx`);
   };
 
   if (loading) {
@@ -712,6 +774,12 @@ export default function BillingSystem() {
                 className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors shadow"
               >
                 <Printer className="w-4 h-4 mr-1.5" /> Print Bill Package (4 Pages)
+              </button>
+              <button
+                onClick={handleExportExcel}
+                className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded transition-colors shadow"
+              >
+                <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Export Excel
               </button>
               <button
                 onClick={() => setSelectedMrNo(null)}

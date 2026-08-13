@@ -2,8 +2,9 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency } from '../lib/AgencyContext';
-import { Loader2, Search, Download, ChevronDown, ChevronRight, Edit } from 'lucide-react';
+import { Loader2, Search, Download, ChevronDown, ChevronRight, Edit, FileSpreadsheet } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 
 interface Job {
   id: string;
@@ -93,35 +94,30 @@ export default function MrLedger() {
     });
   };
 
-  const generateCsv = () => {
-    const headers = ['MR No', 'Date of Issue', 'Division', 'Job No', 'KVA', 'Make', 'Serial No', 'Status', 'Repair Type'];
-    const rows: string[] = [];
+  const exportToExcel = () => {
+    const wsData: any[][] = [];
+    wsData.push(['MR No', 'Date of Issue', 'Division', 'Job No', 'KVA', 'Make', 'Serial No', 'Status', 'Repair Type']);
     
     mrGroups.forEach(group => {
       group.jobs.forEach(job => {
-        rows.push([
+        wsData.push([
           group.mrNo,
           group.dateOfIssue,
           group.division,
           job.jobNo,
-          job.capacityKva.toString(),
+          job.capacityKva,
           job.make,
           job.serialNo,
           job.status,
           job.repairType
-        ].map(val => `"${val}"`).join(','));
+        ]);
       });
     });
-    
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', `MR_Ledger_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "MR Ledger");
+    XLSX.writeFile(wb, `MR_Ledger_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const filteredGroups = mrGroups.filter(group => 
@@ -133,11 +129,11 @@ export default function MrLedger() {
       <div className="flex justify-between items-center bg-white p-4 rounded shadow-sm border border-slate-200">
         <h1 className="text-lg font-bold text-slate-900">MR Ledger (Material Receipts)</h1>
         <button 
-          onClick={generateCsv}
-          className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors"
+          onClick={exportToExcel}
+          className="flex items-center space-x-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded text-xs font-bold uppercase tracking-widest transition-colors shadow-sm"
         >
-          <Download className="w-4 h-4" />
-          <span>Export Excel/CSV</span>
+          <FileSpreadsheet className="w-4 h-4" />
+          <span>Export Excel</span>
         </button>
       </div>
 

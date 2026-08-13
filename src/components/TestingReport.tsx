@@ -4,7 +4,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
-import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit } from 'lucide-react';
+import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 interface Job {
   id: string;
@@ -199,6 +200,57 @@ export default function TestingReport() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleExportExcel = () => {
+    const jobsToExport = selectedJobIds.size > 0 
+      ? jobs.filter(j => selectedJobIds.has(j.id))
+      : filteredJobs;
+
+    if (jobsToExport.length === 0) return;
+
+    const wsData: any[][] = [];
+    wsData.push(['TESTING REPORT - ' + (activeAgency?.name || 'IDEAL ENGINEERING CO.')]);
+    wsData.push(['Date: ' + new Date().toLocaleDateString()]);
+    wsData.push([]);
+
+    wsData.push([
+      'S.N.', 'Job No', 'MR No', 'KVA', 'Make', 'Repair Type',
+      'No Load Volts', 'Excit Curr', 'No Load Loss', 'Full Load Curr',
+      'Imp Volts', 'Load Loss', 'Neut Curr', 'HV Test', 'DVDF Test',
+      'Insulation Res', 'Oil BDV', 'Ratio Test', '% Impedance', 'Remarks'
+    ]);
+
+    jobsToExport.forEach((job, idx) => {
+      const data = job.testingDetails || defaultTestingData;
+      wsData.push([
+        idx + 1,
+        job.jobNo,
+        job.mrNo,
+        job.capacityKva,
+        job.make,
+        job.repairType || '-',
+        data.noLoadVoltage || '',
+        data.excitationCurrent || '',
+        data.noLoadLoss || '',
+        data.fullLoadCurrent || '',
+        data.impedanceVoltage || '',
+        data.loadLoss || '',
+        data.neutralCurrent || '',
+        data.highVoltageTest || '',
+        data.dvdfTest || '',
+        data.insulationResistance || '',
+        data.oilBdv || '',
+        data.ratioTest || '',
+        data.percentageImpedance || '',
+        data.remarks || ''
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Testing Reports");
+    XLSX.writeFile(wb, `Testing_Reports_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const formatDate = (dateString: string) => {
@@ -397,13 +449,22 @@ export default function TestingReport() {
                   {tab === 'Pending' ? 'Proceed with' : 'Edit'} {selectedJobIds.size} Job{selectedJobIds.size > 1 ? 's' : ''}
                 </button>
                 {tab === 'Completed' && (
-                  <button
-                    onClick={openPrint}
-                    className="px-4 py-2 bg-slate-800 text-white text-[10px] font-bold uppercase tracking-widest rounded hover:bg-slate-900 transition-colors shadow-sm flex items-center whitespace-nowrap"
-                  >
-                    <Printer className="w-3 h-3 mr-2" />
-                    Print {selectedJobIds.size} Job{selectedJobIds.size > 1 ? 's' : ''}
-                  </button>
+                  <>
+                    <button
+                      onClick={openPrint}
+                      className="px-4 py-2 bg-slate-800 text-white text-[10px] font-bold uppercase tracking-widest rounded hover:bg-slate-900 transition-colors shadow-sm flex items-center whitespace-nowrap"
+                    >
+                      <Printer className="w-3 h-3 mr-2" />
+                      Print {selectedJobIds.size} Job{selectedJobIds.size > 1 ? 's' : ''}
+                    </button>
+                    <button
+                      onClick={handleExportExcel}
+                      className="px-4 py-2 bg-emerald-600 text-white text-[10px] font-bold uppercase tracking-widest rounded hover:bg-emerald-700 transition-colors shadow-sm flex items-center whitespace-nowrap"
+                    >
+                      <FileSpreadsheet className="w-3 h-3 mr-2" />
+                      Export Excel
+                    </button>
+                  </>
                 )}
               </div>
             )}

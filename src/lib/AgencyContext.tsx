@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
-import { EstimateItem } from './estimateData';
+import { defaultEstimateData, defaultAmorphousEstimateData, EstimateItem } from './estimateData';
 
 export interface Agency {
   id: string;
@@ -15,6 +15,9 @@ export interface Agency {
   forwardingSubject?: string;
   forwardingCcText?: string;
   estimateMaster?: EstimateItem[];
+  estimateMasterCRGO?: EstimateItem[];
+  estimateMasterAmorphous?: EstimateItem[];
+  estimateMasterWoundCore?: EstimateItem[];
   address?: string;
   gstin?: string;
   pan?: string;
@@ -46,9 +49,65 @@ export interface AtMaster {
   lastJobNumbers: Record<string, number>;
   ownerId?: string;
   atPercentage?: number;
+  atPercentageCRGO?: number;
+  atPercentageAmorphous?: number;
+  atPercentageWoundCore?: number;
   allotments?: Record<string, Record<string, number>>;
   allotmentHistory?: AllotmentRecord[];
   prefixes?: Record<string, string | Record<string, string>>;
+}
+
+export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType: string = 'CRGO'): number {
+  if (!at) return 4;
+  const type = (coreType || 'CRGO').trim().toUpperCase();
+  if (type.includes('AMORPHOUS') || type.includes('AM')) {
+    if (at.atPercentageAmorphous !== undefined && !isNaN(Number(at.atPercentageAmorphous))) {
+      return Number(at.atPercentageAmorphous);
+    }
+  } else if (type.includes('WOUND') || type.includes('WC')) {
+    if (at.atPercentageWoundCore !== undefined && !isNaN(Number(at.atPercentageWoundCore))) {
+      return Number(at.atPercentageWoundCore);
+    }
+  } else {
+    if (at.atPercentageCRGO !== undefined && !isNaN(Number(at.atPercentageCRGO))) {
+      return Number(at.atPercentageCRGO);
+    }
+  }
+  return at.atPercentage !== undefined && !isNaN(Number(at.atPercentage)) ? Number(at.atPercentage) : 4;
+}
+
+export function getEstimateMasterForCore(agency: Agency | null | undefined, coreType: string = 'CRGO'): EstimateItem[] {
+  if (!agency) return defaultEstimateData;
+  const type = (coreType || 'CRGO').trim().toUpperCase();
+
+  if (type.includes('AMORPHOUS') || type.includes('AM')) {
+    if (agency.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0) {
+      return agency.estimateMasterAmorphous;
+    }
+    return defaultAmorphousEstimateData;
+  }
+
+  if (type.includes('WOUND') || type.includes('WC')) {
+    if (agency.estimateMasterWoundCore && agency.estimateMasterWoundCore.length > 0) {
+      return agency.estimateMasterWoundCore;
+    }
+    if (agency.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
+      return agency.estimateMasterCRGO;
+    }
+    if (agency.estimateMaster && agency.estimateMaster.length > 0) {
+      return agency.estimateMaster;
+    }
+    return defaultEstimateData;
+  }
+
+  // CRGO
+  if (agency.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
+    return agency.estimateMasterCRGO;
+  }
+  if (agency.estimateMaster && agency.estimateMaster.length > 0) {
+    return agency.estimateMaster;
+  }
+  return defaultEstimateData;
 }
 
 interface AgencyContextType {

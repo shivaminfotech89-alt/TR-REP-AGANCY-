@@ -1,14 +1,15 @@
 
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Loader2, Printer, Search } from 'lucide-react';
+import { Loader2, Printer, Search, FileSpreadsheet, Download } from 'lucide-react';
+import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
 import { ExternalData } from './ExternalInspection';
 
 export default function EstimateGenerate() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -71,16 +72,97 @@ export default function EstimateGenerate() {
     window.print();
   };
 
+  const handleExportExcel = () => {
+    if (!selectedMrNo || selectedJobsData.length === 0) return;
+
+    const wsData: any[][] = [];
+    wsData.push([`ESTIMATE REPORT - MR NO: ${selectedMrNo}`]);
+    wsData.push([`Division: ${selectedJobsData[0]?.division || 'SABARMATI'}`, `Date: ${dateString}`]);
+    wsData.push([]);
+
+    // Header row
+    const headerRow = ['SR.', 'ITEM DESCRIPTION', ...selectedJobsData.map(j => `JOB ${j.jobNo} (${j.capacityKva} KVA)`)];
+    wsData.push(headerRow);
+
+    // Items
+    const itemsList = selectedJobsData.length > 0 
+      ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
+      : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData);
+
+    itemsList.forEach((item) => {
+      const row = [item.itemCode, item.itemName];
+      selectedJobsData.forEach((job) => {
+        const kva = String(job.capacityKva);
+        const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+        const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
+        const rawRate = itemForJob.rates[kva as keyof typeof itemForJob.rates] || 0;
+        const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
+        
+        let qty = 0;
+        const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+        const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+        
+        if (isScrapItem === isScrapJob && rate > 0) {
+          if (item.unit === 'Y') qty = 1;
+          else if (item.unit === 'QTY') {
+            qty = 1;
+            if (item.itemCode === '1c') qty = 7;
+            if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
+            if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
+            if (item.itemCode === '15') qty = 6;
+          } else if (item.unit === 'KG') {
+            qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
+          }
+        }
+        if (item.unit === 'N') qty = 0;
+
+        const amt = qty * rate;
+        row.push(amt.toFixed(2));
+      });
+      wsData.push(row);
+    });
+
+    // Totals
+    const baseTotalsRow = ['-', 'BASE REPAIR COST'];
+    selectedJobsData.forEach(job => {
+      baseTotalsRow.push(calculateJobTotal(job).toFixed(2));
+    });
+    wsData.push(baseTotalsRow);
+
+    const riseTotalsRow = ['-', 'AT % RISE / FALL TOTAL'];
+    selectedJobsData.forEach(job => {
+      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      const baseTot = calculateJobTotal(job);
+      const riseAmt = baseTot * (atPct / 100);
+      riseTotalsRow.push(riseAmt.toFixed(2));
+    });
+    wsData.push(riseTotalsRow);
+
+    const grandTotalsRow = ['-', 'GRAND TOTAL'];
+    selectedJobsData.forEach(job => {
+      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      const baseTot = calculateJobTotal(job);
+      const grandTot = baseTot * (1 + atPct / 100);
+      grandTotalsRow.push(grandTot.toFixed(2));
+    });
+    wsData.push(grandTotalsRow);
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Estimate");
+    XLSX.writeFile(wb, `Estimate_Report_MR_${selectedMrNo}.xlsx`);
+  };
+
   const today = new Date();
   const dateString = today.toLocaleDateString('en-GB'); // dd/mm/yyyy
-  const masterData = activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData;
 
   const calculateJobTotal = (job: any) => {
     let jobTotal = 0;
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+    const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
 
-    masterData.forEach(item => {
+    jobMasterData.forEach(item => {
       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
       let qty = 0;
@@ -220,13 +302,19 @@ export default function EstimateGenerate() {
             <div className="flex space-x-2">
               <button 
                 onClick={handlePrint}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-300 border border-slate-400/30 px-3 py-1.5 rounded transition-colors"
+                className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-1.5 rounded transition-colors shadow-sm"
               >
-                <Printer className="w-3 h-3 mr-1" /> Print / PDF
+                <Printer className="w-3.5 h-3.5 mr-1.5" /> Print / PDF
+              </button>
+              <button 
+                onClick={handleExportExcel}
+                className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded transition-colors shadow-sm"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5 mr-1.5" /> Export Excel
               </button>
               <button 
                 onClick={() => setSelectedMrNo(null)}
-                className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors"
+                className="text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3.5 py-1.5 rounded transition-colors"
               >
                 Change MR
               </button>
@@ -325,7 +413,10 @@ export default function EstimateGenerate() {
                 </tr>
 
                 {/* Items */}
-                {masterData.map((item, idx) => (
+                {(selectedJobsData.length > 0 
+                  ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
+                  : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
+                ).map((item, idx) => (
                   <tr key={idx} className="border-b border-slate-400">
                     <td className="p-1 border-r-2 border-black flex gap-2">
                       <span className="w-8">{item.itemCode}</span>
@@ -333,7 +424,9 @@ export default function EstimateGenerate() {
                     </td>
                     {selectedJobsData.map(job => {
                       const kva = String(job.capacityKva);
-                      const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
+                      const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+                      const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
+                      const rawRate = itemForJob.rates[kva as keyof typeof itemForJob.rates] || 0;
                       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
                       
                       let qty = 0;
@@ -391,16 +484,39 @@ export default function EstimateGenerate() {
                   ))}
                 </tr>
                 <tr className="border-t border-black font-bold">
-                  <td className="p-2 border-r-2 border-black text-right">4.00 % Rise Total</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-2 border-r border-black text-right">{(calculateJobTotal(job) * 0.04).toFixed(2)}</td>
-                  ))}
+                  <td className="p-2 border-r-2 border-black text-right">
+                    {(() => {
+                      if (selectedJobsData.length === 0) return 'Rise / Fall Total';
+                      const pcts = selectedJobsData.map(j => getAtPercentageForCore(activeAtMaster, j.coreType));
+                      const allSame = pcts.every(p => p === pcts[0]);
+                      if (allSame) {
+                        const p = pcts[0];
+                        return p >= 0 ? `${p.toFixed(2)} % Rise Total` : `${Math.abs(p).toFixed(2)} % Fall Total`;
+                      }
+                      return 'AT % Rise / Fall Total';
+                    })()}
+                  </td>
+                  {selectedJobsData.map(job => {
+                    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                    const baseTot = calculateJobTotal(job);
+                    const riseAmt = baseTot * (atPct / 100);
+                    return (
+                      <td key={job.id} className="p-2 border-r border-black text-right">
+                        {riseAmt.toFixed(2)}
+                      </td>
+                    );
+                  })}
                 </tr>
                 <tr className="border-t-2 border-black font-bold text-[10px]">
                   <td className="p-2 border-r-2 border-black text-right">Grand Total</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-2 border-r border-black text-right">{(calculateJobTotal(job) * 1.04).toFixed(2)}</td>
-                  ))}
+                  {selectedJobsData.map(job => {
+                    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                    const baseTot = calculateJobTotal(job);
+                    const grandTot = baseTot * (1 + atPct / 100);
+                    return (
+                      <td key={job.id} className="p-2 border-r border-black text-right">{grandTot.toFixed(2)}</td>
+                    );
+                  })}
                 </tr>
               </tbody>
             </table>
@@ -469,8 +585,9 @@ Circle Office : SABARMATI`}
               </thead>
               <tbody>
                 {selectedJobsData.map((job, idx) => {
-                   const jobTotal = calculateJobTotal(job);
-                   const finalAmt = (jobTotal * 1.04).toFixed(2);
+                   const jobBaseTotal = calculateJobTotal(job);
+                   const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                   const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
                    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
                    
                   return (
@@ -491,7 +608,11 @@ Circle Office : SABARMATI`}
                 <tr className="font-bold border-black">
                   <td colSpan={8} className="p-2 border-r border-black text-right">TOTAL</td>
                   <td className="p-2 border-r border-black text-right">
-                    {selectedJobsData.reduce((acc, job) => acc + (calculateJobTotal(job) * 1.04), 0).toFixed(2)}
+                    {selectedJobsData.reduce((acc, job) => {
+                      const baseAmt = calculateJobTotal(job);
+                      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                      return acc + (baseAmt * (1 + atPct / 100));
+                    }, 0).toFixed(2)}
                   </td>
                   <td></td>
                 </tr>
