@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="TR">
+  <defs>
+    <linearGradient id="bg" x1="4" y1="2" x2="60" y2="62" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1E3A5F"/>
+      <stop offset="1" stop-color="#0F172A"/>
+    </linearGradient>
+    <linearGradient id="coil" x1="14" y1="16" x2="50" y2="48" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#60A5FA"/>
+      <stop offset="1" stop-color="#2563EB"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)"/>
+  <rect x="18" y="12" width="28" height="5" rx="1.5" fill="#E2E8F0"/>
+  <rect x="18" y="47" width="28" height="5" rx="1.5" fill="#E2E8F0"/>
+  <rect x="19" y="15" width="6" height="34" rx="1" fill="#CBD5E1"/>
+  <rect x="29" y="15" width="6" height="34" rx="1" fill="#CBD5E1"/>
+  <rect x="39" y="15" width="6" height="34" rx="1" fill="#CBD5E1"/>
+  <rect x="17" y="21" width="10" height="22" rx="3" fill="url(#coil)"/>
+  <rect x="37" y="21" width="10" height="22" rx="3" fill="url(#coil)"/>
+  <path d="M18 25h8M18 30h8M18 35h8M18 40h8" stroke="#93C5FD" stroke-width="1.2" stroke-linecap="round" opacity="0.75"/>
+  <path d="M38 25h8M38 30h8M38 35h8M38 40h8" stroke="#93C5FD" stroke-width="1.2" stroke-linecap="round" opacity="0.75"/>
+  <circle cx="32" cy="32" r="3" fill="#F8FAFC"/>
+</svg>

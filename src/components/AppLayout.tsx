@@ -17,6 +17,7 @@ import EstimateMaster from './EstimateMaster';
 import AgencySettings from './AgencySettings';
 import BillingSystem from './BillingSystem';
 import OilInward from './OilInward';
+import Logo from './Logo';
 
 
 export default function AppLayout({ user }: { user: User }) {
@@ -47,8 +48,7 @@ export default function AppLayout({ user }: { user: User }) {
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 flex flex-col h-full border-r border-slate-800 shrink-0 print:hidden">
         <div className="p-6 border-b border-slate-800">
-          <h1 className="text-white font-bold text-lg tracking-wider">TR REP AGANCY</h1>
-          <p className="text-slate-400 text-xs uppercase tracking-widest mt-1">Repair Management</p>
+          <Logo variant="dark" markClassName="w-10 h-10" />
           <div className="mt-4 flex flex-col space-y-2 bg-slate-800/50 p-3 rounded border border-slate-700/50">
             <span className="text-[10px] uppercase font-bold text-slate-400">Current Workspace</span>
             <div className="flex items-center space-x-2">
