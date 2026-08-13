@@ -3,6 +3,7 @@ import { useAgency } from '../lib/AgencyContext';
 import { LogOut, Settings, Building2 } from 'lucide-react';
 import { User, signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
+import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 import Dashboard from './Dashboard';
 import NewJob from './NewJob';
 import EditJob from './EditJob';
@@ -17,7 +18,6 @@ import EstimateMaster from './EstimateMaster';
 import AgencySettings from './AgencySettings';
 import BillingSystem from './BillingSystem';
 import OilInward from './OilInward';
-
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster } = useAgency();
@@ -46,19 +46,30 @@ export default function AppLayout({ user }: { user: User }) {
       
       {/* Sidebar */}
       <aside className="w-64 bg-slate-900 flex flex-col h-full border-r border-slate-800 shrink-0 print:hidden">
-        <div className="p-6 border-b border-slate-800">
-          <h1 className="text-white font-bold text-lg tracking-wider">TR REP AGANCY</h1>
-          <p className="text-slate-400 text-xs uppercase tracking-widest mt-1">Repair Management</p>
+        <div className="p-5 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <img 
+              src={appLogo} 
+              alt="Transformer Logo" 
+              className="w-10 h-10 rounded-lg object-cover border border-blue-500/30 shadow-sm" 
+              referrerPolicy="no-referrer"
+            />
+            <div>
+              <h1 className="text-white font-bold text-base tracking-wide leading-none">TR REP AGENCY</h1>
+              <p className="text-slate-400 text-[10px] uppercase tracking-wider mt-1">Transformer Repair Portal</p>
+            </div>
+          </div>
+
           <div className="mt-4 flex flex-col space-y-2 bg-slate-800/50 p-3 rounded border border-slate-700/50">
             <span className="text-[10px] uppercase font-bold text-slate-400">Current Workspace</span>
             <div className="flex items-center space-x-2">
-              <Building2 className="w-4 h-4 text-blue-400" />
-              <span className="text-sm font-bold text-white truncate" title={activeAgency?.name || 'No Agency Selected'}>
+              <Building2 className="w-4 h-4 text-blue-400 shrink-0" />
+              <span className="text-xs font-bold text-white truncate" title={activeAgency?.name || 'No Agency Selected'}>
                 {activeAgency?.name || 'No Agency Selected'}
               </span>
             </div>
             {activeAgency && (
-              <div className="flex items-center space-x-2 mt-1">
+              <div className="flex items-center space-x-2 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
                 <span className="text-[10px] font-medium text-slate-300">Active</span>
               </div>
@@ -100,9 +111,12 @@ export default function AppLayout({ user }: { user: User }) {
           <div className="flex gap-4 items-center">
             {activeAgency ? (
               <div className="flex items-center space-x-3">
-                <div className="w-8 h-8 rounded bg-blue-100 flex items-center justify-center text-blue-700 font-bold">
-                  {activeAgency.name.charAt(0)}
-                </div>
+                <img 
+                  src={appLogo} 
+                  alt="Logo" 
+                  className="w-9 h-9 rounded-lg object-cover border border-blue-200 shadow-sm"
+                  referrerPolicy="no-referrer"
+                />
                 <div>
                   <h2 className="text-sm font-bold text-slate-900 leading-tight">{activeAgency.name}</h2>
                   <p className="text-xs text-slate-500">

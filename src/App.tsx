@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { auth } from './lib/firebase';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider, signOut } from 'firebase/auth';
+import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { AgencyProvider } from './lib/AgencyContext';
 import { Loader2 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
+import appLogo from './assets/images/transformer_app_logo_1786648240128.jpg';
+import heroBg from './assets/images/transformer_hero_bg_1786648256385.jpg';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -30,27 +32,58 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center bg-gray-50">
-        <div className="max-w-md w-full p-8 bg-white shadow-lg rounded-xl border border-gray-100 text-center">
-          <div className="w-16 h-16 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto mb-6">
-             <svg className="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 relative overflow-hidden p-4">
+        {/* Background Image Overlay */}
+        <div className="absolute inset-0 opacity-30 mix-blend-overlay pointer-events-none">
+          <img 
+            src={heroBg} 
+            alt="Transformer Repair Workshop" 
+            className="w-full h-full object-cover object-center" 
+            referrerPolicy="no-referrer"
+          />
+        </div>
+        
+        {/* Login Card */}
+        <div className="max-w-md w-full bg-slate-900/90 backdrop-blur-md shadow-2xl rounded-2xl border border-slate-800 p-8 text-center relative z-10">
+          <div className="relative inline-block mb-6">
+            <img 
+              src={appLogo} 
+              alt="TR Rep Agency Logo" 
+              className="w-24 h-24 rounded-2xl mx-auto border-2 border-blue-500/40 shadow-xl object-cover" 
+              referrerPolicy="no-referrer"
+            />
+            <span className="absolute -bottom-2 -right-2 bg-blue-600 text-white text-[9px] font-black uppercase px-2 py-0.5 rounded-full border border-slate-900">
+              PRO v2
+            </span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900 mb-2">TR Rep Agency</h1>
-          <p className="text-gray-500 mb-8">Transformer Repair Management System</p>
+
+          <h1 className="text-2xl font-black text-white tracking-tight mb-1">TR REP AGENCY</h1>
+          <p className="text-blue-400 text-xs font-bold uppercase tracking-wider mb-2">Transformer Repair Management System</p>
+          <p className="text-slate-400 text-xs mb-8 leading-relaxed">
+            Distribution Transformer Overhaul • Electrical Testing • AT Rate Calculations • Oil Account & GST Tax Invoicing
+          </p>
+
           <button
             onClick={handleLogin}
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors"
+            className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3.5 px-4 rounded-xl shadow-lg transition-all flex items-center justify-center gap-3 text-sm tracking-wide"
           >
-            Sign in with Google
+            <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
+              <path d="M12.545,10.239v3.821h5.445c-0.712,2.315-2.647,3.972-5.445,3.972c-3.332,0-6.033-2.701-6.033-6.032s2.701-6.032,6.033-6.032c1.498,0,2.866,0.549,3.921,1.453l2.814-2.814C17.503,2.988,15.139,2,12.545,2C7.021,2,2.543,6.477,2.543,12s4.478,10,10.002,10c8.396,0,10.249-7.85,9.426-11.761H12.545z"/>
+            </svg>
+            <span>Sign in with Google</span>
           </button>
+
+          <p className="text-[10px] text-slate-500 mt-6">
+            Authorized Personnel Access Only • Secure Firebase Authentication
+          </p>
         </div>
       </div>
     );
@@ -64,3 +97,4 @@ export default function App() {
     </AgencyProvider>
   );
 }
+

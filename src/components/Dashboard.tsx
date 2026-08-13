@@ -1,6 +1,8 @@
 import { Link } from 'react-router-dom';
-import { useAgency, AtMaster } from '../lib/AgencyContext';
+import { useAgency } from '../lib/AgencyContext';
 import { AllotmentWidget } from './AllotmentWidget';
+import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
+import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
 
 export default function Dashboard() {
   const { activeAgency, activeAtMaster } = useAgency();
@@ -10,9 +12,57 @@ export default function Dashboard() {
       : (activeAgency?.prefixes || {});
   const divisions = Object.keys(currentPrefixes);
 
-
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1400px] mx-auto">
+      {/* Landing Banner Header */}
+      <div className="lg:col-span-12 bg-slate-900 rounded-xl overflow-hidden shadow-lg relative border border-slate-800">
+        <div className="absolute inset-0 opacity-25 mix-blend-overlay">
+          <img 
+            src={heroBg} 
+            alt="Transformer Workshop" 
+            className="w-full h-full object-cover object-center" 
+            referrerPolicy="no-referrer"
+          />
+        </div>
+        <div className="relative z-10 p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 bg-gradient-to-r from-slate-950 via-slate-900/90 to-transparent">
+          <div className="flex items-center gap-5">
+            <img 
+              src={appLogo} 
+              alt="Transformer Logo" 
+              className="w-20 h-20 rounded-2xl border-2 border-blue-500/30 shadow-md object-cover" 
+              referrerPolicy="no-referrer"
+            />
+            <div>
+              <div className="inline-flex items-center gap-2 bg-blue-500/10 border border-blue-500/20 px-3 py-1 rounded-full text-blue-400 text-xs font-semibold mb-2">
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                Distribution Transformer Repair & Overhaul Portal
+              </div>
+              <h1 className="text-2xl md:text-3xl font-extrabold text-white tracking-tight">
+                {activeAgency?.name || 'TR REP AGENCY'}
+              </h1>
+              <p className="text-slate-300 text-xs md:text-sm mt-1 max-w-xl">
+                Comprehensive Management System for Distribution Transformer Inspection, Winding, Core Repair, Electrical Testing, Oil Shortage Accounting & Tax Billing.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-3 w-full md:w-auto">
+            <Link 
+              to="/new-job" 
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-lg shadow transition-all text-center flex-1 md:flex-none"
+            >
+              + Register New MR Intake
+            </Link>
+            <Link 
+              to="/estimates/new" 
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs uppercase tracking-wider rounded-lg border border-slate-700 transition-all text-center flex-1 md:flex-none"
+            >
+              Generate Estimate
+            </Link>
+          </div>
+        </div>
+      </div>
+
       <div className="lg:col-span-8 space-y-6">
         <div className="bg-white border border-slate-200 rounded p-6 shadow-sm">
           <h2 className="text-xl font-bold text-slate-800 mb-2">Welcome to {activeAgency?.name || 'TR Rep Agency'}</h2>
@@ -86,8 +136,8 @@ export default function Dashboard() {
         <section className="bg-slate-900 text-white rounded p-5 shadow-lg relative overflow-hidden">
           <div className="relative z-10">
             <h3 className="text-[10px] font-bold uppercase tracking-widest text-blue-400">Circle Office Approval</h3>
-            <p className="text-xl font-bold mt-2">$12,450.00</p>
-            <p className="text-[10px] opacity-60">Estimate Power Limit: $15,000.00</p>
+            <p className="text-xl font-bold mt-2">₹1,24,500.00</p>
+            <p className="text-[10px] opacity-60">Estimate Power Limit: ₹1,50,000.00</p>
             <div className="mt-4 h-1 w-full bg-slate-700 rounded-full">
               <div className="h-full bg-blue-500 rounded-full w-[83%]"></div>
             </div>
@@ -143,3 +193,4 @@ export default function Dashboard() {
     </div>
   );
 }
+
