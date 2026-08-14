@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, query, where, getDocs, doc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
 import { defaultEstimateData, defaultAmorphousEstimateData, EstimateItem } from './estimateData';
 
 export interface Agency {
@@ -196,6 +196,7 @@ interface AgencyContextType {
 
   getNextJobNoInfo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
   incrementJobNoCounter: (counterKey: string, count: number) => Promise<void>;
+  syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
 }
 
 const AgencyContext = createContext<AgencyContextType | undefined>(undefined);
@@ -410,14 +411,43 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   const incrementJobNoCounter = async (counterKey: string, count: number) => {
-    if (activeAtMaster) {
-      const currentLastNum = (activeAtMaster.lastJobNumbers && activeAtMaster.lastJobNumbers[counterKey]) || 0;
-      const newLastJobNumbers = { ...activeAtMaster.lastJobNumbers, [counterKey]: currentLastNum + count };
-      await updateAtMaster(activeAtMaster.id, { lastJobNumbers: newLastJobNumbers });
-    } else if (activeAgency) {
-      const currentLastNum = (activeAgency.lastJobNumbers && activeAgency.lastJobNumbers[counterKey]) || 0;
-      const newLastJobNumbers = { ...activeAgency.lastJobNumbers, [counterKey]: currentLastNum + count };
-      await updateAgency(activeAgency.id, { lastJobNumbers: newLastJobNumbers });
+    try {
+      if (activeAtMaster) {
+        const atRef = doc(db, 'atMasters', activeAtMaster.id);
+        let updatedLastJobNumbers: Record<string, number> = {};
+        await runTransaction(db, async (transaction) => {
+          const atDoc = await transaction.get(atRef);
+          if (!atDoc.exists()) throw new Error("Active AT Master document not found");
+          const data = atDoc.data() as AtMaster;
+          const currentLastNum = (data.lastJobNumbers && data.lastJobNumbers[counterKey]) || 0;
+          updatedLastJobNumbers = { ...(data.lastJobNumbers || {}), [counterKey]: currentLastNum + count };
+          transaction.update(atRef, { lastJobNumbers: updatedLastJobNumbers });
+        });
+        setAtMasters(prev => prev.map(a => a.id === activeAtMaster.id ? { ...a, lastJobNumbers: updatedLastJobNumbers } : a));
+      } else if (activeAgency) {
+        const agencyRef = doc(db, 'agencies', activeAgency.id);
+        let updatedLastJobNumbers: Record<string, number> = {};
+        await runTransaction(db, async (transaction) => {
+          const agDoc = await transaction.get(agencyRef);
+          if (!agDoc.exists()) throw new Error("Active Agency document not found");
+          const data = agDoc.data() as Agency;
+          const currentLastNum = (data.lastJobNumbers && data.lastJobNumbers[counterKey]) || 0;
+          updatedLastJobNumbers = { ...(data.lastJobNumbers || {}), [counterKey]: currentLastNum + count };
+          transaction.update(agencyRef, { lastJobNumbers: updatedLastJobNumbers });
+        });
+        setAgencies(prev => prev.map(a => a.id === activeAgency.id ? { ...a, lastJobNumbers: updatedLastJobNumbers } : a));
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, activeAtMaster ? 'atMasters' : 'agencies');
+      throw err;
+    }
+  };
+
+  const syncCountersState = (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => {
+    if (isAtMaster) {
+      setAtMasters(prev => prev.map(a => a.id === id ? { ...a, lastJobNumbers: newCounters } : a));
+    } else {
+      setAgencies(prev => prev.map(a => a.id === id ? { ...a, lastJobNumbers: newCounters } : a));
     }
   };
 
@@ -426,7 +456,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       agencies, activeAgency, setActiveAgencyId,
       atMasters, activeAtMaster, setActiveAtMasterId,
       loading, addAgency, updateAgency, updateAllAgenciesEstimateMaster, addAtMaster, updateAtMaster,
-      getNextJobNoInfo, incrementJobNoCounter
+      getNextJobNoInfo, incrementJobNoCounter, syncCountersState
     }}>
       {children}
     </AgencyContext.Provider>

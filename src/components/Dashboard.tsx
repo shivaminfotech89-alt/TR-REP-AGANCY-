@@ -14,18 +14,21 @@ import {
   Droplet, 
   Clock, 
   CheckCircle2, 
-  AlertCircle, 
-  ArrowRight, 
   RefreshCw, 
-  Layers, 
   Activity,
-  Calendar,
-  Sparkles,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  Building2,
+  Filter,
+  CheckSquare,
+  RotateCcw,
+  BarChart3,
+  PackageCheck,
+  Layers,
+  ArrowUpRight,
+  Sparkles
 } from 'lucide-react';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
-import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
 
 export default function Dashboard() {
   const { activeAgency, activeAtMaster } = useAgency();
@@ -33,6 +36,8 @@ export default function Dashboard() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedDivision, setSelectedDivision] = useState<string>('All');
+  const [activeKvaTab, setActiveKvaTab] = useState<'repaired' | 'under_repair' | 'scrap'>('repaired');
 
   // Fetch real jobs & oil transactions from Firestore
   const fetchDashboardData = async () => {
@@ -80,72 +85,188 @@ export default function Dashboard() {
     fetchDashboardData();
   }, [activeAgency?.id]);
 
-  const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
-      ? activeAtMaster.prefixes 
-      : (activeAgency?.prefixes || {});
-  const divisions = Object.keys(currentPrefixes);
+  // Extract all available divisions from prefixes and real jobs
+  const availableDivisions = useMemo(() => {
+    const set = new Set<string>();
+    const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
+        ? activeAtMaster.prefixes 
+        : (activeAgency?.prefixes || {});
+    
+    Object.keys(currentPrefixes).forEach(d => {
+      if (d && d.trim()) set.add(d.trim());
+    });
 
-  // 1. Real Pipeline Calculations
+    jobs.forEach(j => {
+      if (j.division && j.division.trim()) set.add(j.division.trim());
+    });
+
+    return Array.from(set).sort();
+  }, [activeAtMaster, activeAgency, jobs]);
+
+  // Filter jobs based on selected Division on top
+  const filteredJobs = useMemo(() => {
+    if (selectedDivision === 'All') return jobs;
+    return jobs.filter(j => (j.division || '').trim().toLowerCase() === selectedDivision.trim().toLowerCase());
+  }, [jobs, selectedDivision]);
+
+  // Primary Metrics and Pipeline Calculations
   const stats = useMemo(() => {
     let pendingExternal = 0;
     let pendingInternal = 0;
     let pendingTesting = 0;
     let readyForDispatch = 0;
-    let dispatched = 0;
-    let scrap = 0;
+    let dispatchedRepairable = 0;
 
-    // Unique MR Count
+    let scrapDeclared = 0;
+    let scrapPendingDelivery = 0;
+    let scrapDelivered = 0;
+
+    let gpTotal = 0;
+    let gpPending = 0;
+    let gpDispatched = 0;
+    let ogpTotal = 0;
+    let ogpPending = 0;
+    let ogpDispatched = 0;
+
+    // Capacity mappings
+    const repairedByKva: Record<number, { ready: number; dispatched: number; total: number }> = {};
+    const underRepairByKva: Record<number, { awaitingExt: number; awaitingInt: number; awaitingTest: number; total: number }> = {};
+    const scrapByKva: Record<number, { pendingDelivery: number; delivered: number; total: number }> = {};
+
     const mrSet = new Set<string>();
 
-    // Capacity distribution map
-    const capacityCounts: Record<number, number> = {};
-
-    jobs.forEach(j => {
+    filteredJobs.forEach(j => {
       if (j.mrNo) mrSet.add(j.mrNo);
-      if (j.capacityKva) {
-        const cap = Number(j.capacityKva);
-        capacityCounts[cap] = (capacityCounts[cap] || 0) + 1;
+      const cap = Number(j.capacityKva) || 0;
+      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isGP = j.repairType === 'GP';
+
+      // GP / OGP counters
+      if (isGP) {
+        gpTotal++;
+        if (j.status === 'Dispatched') {
+          gpDispatched++;
+        } else if (!isScrap) {
+          gpPending++;
+        }
+      } else {
+        ogpTotal++;
+        if (j.status === 'Dispatched') {
+          ogpDispatched++;
+        } else if (!isScrap) {
+          ogpPending++;
+        }
       }
 
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       if (isScrap) {
-        scrap++;
+        scrapDeclared++;
+        const isDispatched = j.status === 'Dispatched' || j.isClosed === true;
+        if (isDispatched) {
+          scrapDelivered++;
+        } else {
+          scrapPendingDelivery++;
+        }
+
+        if (cap > 0) {
+          if (!scrapByKva[cap]) scrapByKva[cap] = { pendingDelivery: 0, delivered: 0, total: 0 };
+          scrapByKva[cap].total++;
+          if (isDispatched) scrapByKva[cap].delivered++;
+          else scrapByKva[cap].pendingDelivery++;
+        }
       } else if (j.status === 'Dispatched') {
-        dispatched++;
+        dispatchedRepairable++;
+        if (cap > 0) {
+          if (!repairedByKva[cap]) repairedByKva[cap] = { ready: 0, dispatched: 0, total: 0 };
+          repairedByKva[cap].dispatched++;
+          repairedByKva[cap].total++;
+        }
       } else if (j.status === 'Tested - Ready for Dispatch') {
         readyForDispatch++;
+        if (cap > 0) {
+          if (!repairedByKva[cap]) repairedByKva[cap] = { ready: 0, dispatched: 0, total: 0 };
+          repairedByKva[cap].ready++;
+          repairedByKva[cap].total++;
+        }
       } else if (j.status === 'Internal Done') {
         pendingTesting++;
+        if (cap > 0) {
+          if (!underRepairByKva[cap]) underRepairByKva[cap] = { awaitingExt: 0, awaitingInt: 0, awaitingTest: 0, total: 0 };
+          underRepairByKva[cap].awaitingTest++;
+          underRepairByKva[cap].total++;
+        }
       } else if (j.status === 'External Done') {
         pendingInternal++;
+        if (cap > 0) {
+          if (!underRepairByKva[cap]) underRepairByKva[cap] = { awaitingExt: 0, awaitingInt: 0, awaitingTest: 0, total: 0 };
+          underRepairByKva[cap].awaitingInt++;
+          underRepairByKva[cap].total++;
+        }
       } else {
         pendingExternal++;
+        if (cap > 0) {
+          if (!underRepairByKva[cap]) underRepairByKva[cap] = { awaitingExt: 0, awaitingInt: 0, awaitingTest: 0, total: 0 };
+          underRepairByKva[cap].awaitingExt++;
+          underRepairByKva[cap].total++;
+        }
       }
     });
 
+    const totalRepaired = readyForDispatch + dispatchedRepairable;
+    const totalUnderRepair = pendingExternal + pendingInternal + pendingTesting;
+
     return {
-      totalJobs: jobs.length,
+      totalJobs: filteredJobs.length,
       totalMrs: mrSet.size,
+      totalRepaired,
+      totalUnderRepair,
       pendingExternal,
       pendingInternal,
       pendingTesting,
       readyForDispatch,
-      dispatched,
-      scrap,
-      capacityCounts
+      dispatchedRepairable,
+      scrapDeclared,
+      scrapPendingDelivery,
+      scrapDelivered,
+      gpTotal,
+      gpPending,
+      gpDispatched,
+      ogpTotal,
+      ogpPending,
+      ogpDispatched,
+      repairedByKva,
+      underRepairByKva,
+      scrapByKva
     };
+  }, [filteredJobs]);
+
+  // Division-wise distribution
+  const divisionDistribution = useMemo(() => {
+    const map: Record<string, { total: number; repaired: number; underRepair: number; scrap: number }> = {};
+    jobs.forEach(j => {
+      const div = (j.division || 'Unassigned').trim();
+      if (!map[div]) map[div] = { total: 0, repaired: 0, underRepair: 0, scrap: 0 };
+      map[div].total++;
+
+      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      if (isScrap) {
+        map[div].scrap++;
+      } else if (j.status === 'Dispatched' || j.status === 'Tested - Ready for Dispatch') {
+        map[div].repaired++;
+      } else {
+        map[div].underRepair++;
+      }
+    });
+    return map;
   }, [jobs]);
 
-  // 2. Real Oil Accounting Summary (Sum from real Firestore records)
+  // Oil Accounting Summary
   const oilMetrics = useMemo(() => {
     let totalGrossLiters = 0;
     let totalBarrels = 0;
 
     oilTransactions.forEach((tx: any) => {
-      const gross = Number(tx.grossLiters || 0);
-      const barrels = Number(tx.barrels || 0);
-      totalGrossLiters += gross;
-      totalBarrels += barrels;
+      totalGrossLiters += Number(tx.grossLiters || 0);
+      totalBarrels += Number(tx.barrels || 0);
     });
 
     const filtrationLoss = totalGrossLiters * 0.05;
@@ -160,13 +281,13 @@ export default function Dashboard() {
     };
   }, [oilTransactions]);
 
-  // 3. Real Guarantee Monitoring
+  // Guarantee Monitoring
   const guaranteeStats = useMemo(() => {
     const now = Date.now();
     const eighteenMonthsMs = 18 * 30.4375 * 24 * 60 * 60 * 1000;
     let activeGuaranteeCount = 0;
 
-    jobs.forEach(j => {
+    filteredJobs.forEach(j => {
       if (j.status === 'Dispatched') {
         const dispatchTime = j.dispatchDate 
           ? new Date(j.dispatchDate).getTime() 
@@ -177,503 +298,757 @@ export default function Dashboard() {
       }
     });
 
-    return {
-      activeGuaranteeCount,
-      fixedMonths: 18
-    };
-  }, [jobs]);
+    return { activeGuaranteeCount };
+  }, [filteredJobs]);
 
-  // 4. Real Pending Backlog Items (Active jobs needing action)
+  // Pending Backlog Items
   const pendingBacklog = useMemo(() => {
-    return jobs
+    return filteredJobs
       .filter(j => j.status !== 'Dispatched' && j.status !== 'Scrap')
       .slice(0, 5);
-  }, [jobs]);
+  }, [filteredJobs]);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-[1400px] mx-auto pb-10">
+    <div className="space-y-4 max-w-[1440px] mx-auto pb-10 px-1 sm:px-2">
       
-      {/* Landing Banner Header */}
-      <div className="lg:col-span-12 bg-slate-900 rounded-2xl overflow-hidden shadow-xl relative border border-slate-800">
-        <div className="absolute inset-0 opacity-25 mix-blend-overlay">
-          <img 
-            src={heroBg} 
-            alt="Transformer Workshop" 
-            className="w-full h-full object-cover object-center" 
-            referrerPolicy="no-referrer"
-          />
-        </div>
-        <div className="relative z-10 p-6 md:p-8 flex flex-col md:flex-row items-center justify-between gap-6 bg-gradient-to-r from-slate-950 via-slate-900/95 to-slate-900/80">
-          <div className="flex items-center gap-5">
+      {/* 1. COMPACT HEADER & TOP DIVISION SELECTOR BAR */}
+      <div className="bg-slate-900 rounded-xl sm:rounded-2xl p-3.5 sm:p-4 text-white shadow-md border border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
             <img 
               src={appLogo} 
-              alt="Transformer Logo" 
-              className="w-20 h-20 rounded-2xl border-2 border-blue-500/40 shadow-md object-cover shrink-0" 
+              alt="Logo" 
+              className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-blue-400/40 object-cover shrink-0" 
               referrerPolicy="no-referrer"
             />
-            <div>
-              <div className="inline-flex items-center gap-2 bg-blue-500/20 border border-blue-500/30 px-3 py-1 rounded-full text-blue-300 text-xs font-bold mb-2">
-                <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
-                Live Workshop Portal &bull; Real Database Sync
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <h1 className="text-base sm:text-lg font-black text-white truncate tracking-tight">
+                  {activeAgency?.name || 'TR REP AGENCY'}
+                </h1>
+                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  Circle: {activeAgency?.circleOfficeName || 'SABARMATI'}
+                </span>
               </div>
-              <h1 className="text-2xl md:text-3xl font-black text-white tracking-tight">
-                {activeAgency?.name || 'TR REP AGENCY'}
-              </h1>
-              <p className="text-slate-300 text-xs md:text-sm mt-1 max-w-xl">
-                Distribution Transformer Repair & Testing &bull; Circle: <span className="text-white font-semibold">{activeAgency?.circleOfficeName || 'SABARMATI'}</span> &bull; {divisions.length} Division Zones
+              <p className="text-xs text-slate-400 truncate">
+                Live Workshop Dashboard &bull; {stats.totalJobs} Units ({stats.totalMrs} MRs)
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-3 w-full md:w-auto shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             <Link 
               to="/new-job" 
-              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-xl shadow-lg transition-all text-center flex-1 md:flex-none flex items-center justify-center gap-2"
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-lg shadow-sm transition-all flex items-center justify-center gap-1.5 flex-1 sm:flex-none"
             >
-              <PlusCircle className="w-4 h-4" />
-              + Register New MR Intake
+              <PlusCircle className="w-3.5 h-3.5" />
+              <span>+ New MR</span>
             </Link>
             <button 
               type="button"
               onClick={fetchDashboardData}
-              className="px-3.5 py-2.5 bg-slate-800/90 hover:bg-slate-700 text-slate-200 font-bold text-xs rounded-xl border border-slate-700 transition-all flex items-center justify-center gap-2"
-              title="Refresh Real Data"
+              className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-all flex items-center justify-center"
+              title="Refresh Data"
             >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              <span>Refresh</span>
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             </button>
           </div>
         </div>
+
+        {/* COMPACT SCROLLABLE DIVISION FILTER */}
+        <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center gap-2 overflow-hidden">
+          <div className="flex items-center gap-1 text-[11px] font-bold text-slate-400 shrink-0 uppercase tracking-wider">
+            <Filter className="w-3 h-3 text-cyan-400" />
+            <span className="hidden xs:inline">Division:</span>
+          </div>
+
+          <div className="flex items-center gap-1.5 overflow-x-auto py-1 scrollbar-none text-xs flex-1 no-scrollbar">
+            <button
+              type="button"
+              onClick={() => setSelectedDivision('All')}
+              className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 ${
+                selectedDivision === 'All'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+              }`}
+            >
+              <span>All Divisions</span>
+              <span className="text-[10px] px-1.5 py-0.2 bg-black/30 rounded-full font-mono">
+                {jobs.length}
+              </span>
+            </button>
+
+            {availableDivisions.map(div => {
+              const count = jobs.filter(j => (j.division || '').trim().toLowerCase() === div.toLowerCase()).length;
+              const isSelected = selectedDivision.toLowerCase() === div.toLowerCase();
+              return (
+                <button
+                  key={div}
+                  type="button"
+                  onClick={() => setSelectedDivision(div)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 ${
+                    isSelected
+                      ? 'bg-cyan-600 text-white shadow-xs'
+                      : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
+                  }`}
+                >
+                  <span>{div}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-400'}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedDivision !== 'All' && (
+            <button
+              type="button"
+              onClick={() => setSelectedDivision('All')}
+              className="text-[10px] text-cyan-400 hover:text-cyan-300 font-bold flex items-center gap-0.5 bg-cyan-950/60 border border-cyan-800/60 px-2 py-1 rounded-lg shrink-0"
+              title="Reset Division Filter"
+            >
+              <RotateCcw className="w-2.5 h-2.5" /> Clear
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Main Real Content Column (8 cols) */}
-      <div className="lg:col-span-8 space-y-6">
-
-        {/* Real Live Workshop Stage Stats */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="text-base sm:text-lg font-black text-slate-900 flex items-center gap-2">
-                <Activity className="w-5 h-5 text-blue-600" />
-                Live Workshop Transformer Pipeline
-              </h2>
-              <p className="text-xs text-slate-500">Live counts calculated from active Firestore records for {activeAgency?.name}</p>
+      {/* 2. THE 4 HERO OPERATIONAL METRIC CARDS (COMPACT MOBILE 2x2 / DESKTOP 4-COL) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
+        
+        {/* 1. TRANSFORMER REPAIRED */}
+        <div className="bg-white border border-emerald-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] sm:text-xs font-black uppercase text-emerald-800 flex items-center gap-1 truncate">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <span className="truncate">TRANSFORMER REPAIRED</span>
+              </span>
             </div>
-            <span className="text-xs font-bold px-3 py-1 bg-slate-100 text-slate-700 rounded-full border border-slate-200">
-              {stats.totalJobs} Total Units ({stats.totalMrs} MR Lots)
-            </span>
+
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black text-emerald-950 font-mono">{stats.totalRepaired}</span>
+              <span className="text-[10px] text-slate-400">units</span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-emerald-100 text-[10px]">
+              <div className="bg-emerald-50/70 p-1.5 rounded">
+                <span className="text-slate-500 block leading-none">Ready</span>
+                <span className="font-bold text-emerald-900 font-mono text-xs">{stats.readyForDispatch}</span>
+              </div>
+              <div className="bg-emerald-50/70 p-1.5 rounded">
+                <span className="text-slate-500 block leading-none">Dispatched</span>
+                <span className="font-bold text-emerald-900 font-mono text-xs">{stats.dispatchedRepairable}</span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3">
-            {/* Intake / Pending External */}
-            <Link 
-              to="/external-inspection" 
-              className="p-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-all group flex flex-col justify-between"
-            >
-              <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Awaiting Ext.</span>
-              <div className="my-1">
-                <span className="text-2xl font-black text-slate-800">{stats.pendingExternal}</span>
-              </div>
-              <span className="text-[10px] text-blue-600 font-bold flex items-center gap-1 group-hover:underline">
-                Inspect <ChevronRight className="w-3 h-3" />
-              </span>
-            </Link>
+          <Link to="/challan/new" className="mt-2.5 pt-1.5 border-t border-slate-100 text-[11px] text-emerald-700 font-bold flex items-center justify-between hover:underline">
+            <span>Challan</span>
+            <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
 
-            {/* Awaiting Internal */}
-            <Link 
-              to="/internal-inspection" 
-              className="p-3 bg-amber-50/80 hover:bg-amber-100/90 border border-amber-200 rounded-xl transition-all group flex flex-col justify-between"
-            >
-              <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider">Internal Insp.</span>
-              <div className="my-1">
-                <span className="text-2xl font-black text-amber-900">{stats.pendingInternal}</span>
-              </div>
-              <span className="text-[10px] text-amber-700 font-bold flex items-center gap-1 group-hover:underline">
-                Core & Wind <ChevronRight className="w-3 h-3" />
+        {/* 2. TRANSFORMER UNDER REPAIRING */}
+        <div className="bg-white border border-blue-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] sm:text-xs font-black uppercase text-blue-800 flex items-center gap-1 truncate">
+                <Wrench className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span className="truncate">UNDER REPAIRING</span>
               </span>
-            </Link>
+            </div>
 
-            {/* Awaiting Testing */}
-            <Link 
-              to="/testing-report" 
-              className="p-3 bg-teal-50/80 hover:bg-teal-100/90 border border-teal-200 rounded-xl transition-all group flex flex-col justify-between"
-            >
-              <span className="text-[10px] font-bold text-teal-700 uppercase tracking-wider">Awaiting Test</span>
-              <div className="my-1">
-                <span className="text-2xl font-black text-teal-900">{stats.pendingTesting}</span>
-              </div>
-              <span className="text-[10px] text-teal-700 font-bold flex items-center gap-1 group-hover:underline">
-                Electrical <ChevronRight className="w-3 h-3" />
-              </span>
-            </Link>
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black text-blue-950 font-mono">{stats.totalUnderRepair}</span>
+              <span className="text-[10px] text-slate-400">units WIP</span>
+            </div>
 
-            {/* Ready for Dispatch */}
-            <Link 
-              to="/challan/new" 
-              className="p-3 bg-blue-50/80 hover:bg-blue-100/90 border border-blue-200 rounded-xl transition-all group flex flex-col justify-between"
-            >
-              <span className="text-[10px] font-bold text-blue-700 uppercase tracking-wider">Ready Dispatch</span>
-              <div className="my-1">
-                <span className="text-2xl font-black text-blue-900">{stats.readyForDispatch}</span>
+            <div className="grid grid-cols-3 gap-1 mt-2 pt-2 border-t border-blue-100 text-[10px] text-center">
+              <div className="bg-blue-50/70 p-1 rounded">
+                <span className="text-slate-500 block text-[9px] leading-none">Ext</span>
+                <span className="font-bold text-blue-900 font-mono">{stats.pendingExternal}</span>
               </div>
-              <span className="text-[10px] text-blue-700 font-bold flex items-center gap-1 group-hover:underline">
-                Challan <ChevronRight className="w-3 h-3" />
-              </span>
-            </Link>
+              <div className="bg-amber-50/70 p-1 rounded">
+                <span className="text-amber-700 block text-[9px] leading-none">Core</span>
+                <span className="font-bold text-amber-900 font-mono">{stats.pendingInternal}</span>
+              </div>
+              <div className="bg-teal-50/70 p-1 rounded">
+                <span className="text-teal-700 block text-[9px] leading-none">Test</span>
+                <span className="font-bold text-teal-900 font-mono">{stats.pendingTesting}</span>
+              </div>
+            </div>
+          </div>
 
-            {/* Dispatched */}
-            <Link 
-              to="/reports" 
-              className="p-3 bg-emerald-50/80 hover:bg-emerald-100/90 border border-emerald-200 rounded-xl transition-all group flex flex-col justify-between"
-            >
-              <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider">Dispatched</span>
-              <div className="my-1">
-                <span className="text-2xl font-black text-emerald-900">{stats.dispatched}</span>
-              </div>
-              <span className="text-[10px] text-emerald-700 font-bold flex items-center gap-1 group-hover:underline">
-                Delivered <ChevronRight className="w-3 h-3" />
-              </span>
-            </Link>
+          <Link to="/internal-inspection" className="mt-2.5 pt-1.5 border-t border-slate-100 text-[11px] text-blue-700 font-bold flex items-center justify-between hover:underline">
+            <span>Floor WIP</span>
+            <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
 
-            {/* Scrap */}
-            <Link 
-              to="/reports" 
-              className="p-3 bg-rose-50/80 hover:bg-rose-100/90 border border-rose-200 rounded-xl transition-all group flex flex-col justify-between"
-            >
-              <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider">Scrap / GP</span>
-              <div className="my-1">
-                <span className="text-2xl font-black text-rose-900">{stats.scrap}</span>
-              </div>
-              <span className="text-[10px] text-rose-700 font-bold flex items-center gap-1 group-hover:underline">
-                Declared <ChevronRight className="w-3 h-3" />
+        {/* 3. SCRAP DECLARED */}
+        <div className="bg-white border border-rose-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] sm:text-xs font-black uppercase text-rose-800 flex items-center gap-1 truncate">
+                <ShieldAlert className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                <span className="truncate">SCRAP DECLARED</span>
               </span>
-            </Link>
+            </div>
+
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black text-rose-950 font-mono">{stats.scrapDeclared}</span>
+              <span className="text-[10px] text-slate-400">
+                ({filteredJobs.length > 0 ? ((stats.scrapDeclared / filteredJobs.length) * 100).toFixed(0) : 0}%)
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-rose-100 text-[10px]">
+              <div className="bg-amber-50/70 p-1.5 rounded">
+                <span className="text-amber-800 block leading-none">In Yard</span>
+                <span className="font-bold text-amber-950 font-mono text-xs">{stats.scrapPendingDelivery}</span>
+              </div>
+              <div className="bg-slate-100 p-1.5 rounded">
+                <span className="text-slate-600 block leading-none">Returned</span>
+                <span className="font-bold text-slate-900 font-mono text-xs">{stats.scrapDelivered}</span>
+              </div>
+            </div>
+          </div>
+
+          <Link to="/reports" className="mt-2.5 pt-1.5 border-t border-slate-100 text-[11px] text-rose-700 font-bold flex items-center justify-between hover:underline">
+            <span>Scrap Report</span>
+            <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
+
+        {/* 4. SCRAP PENDING TO DELIVERED */}
+        <div className="bg-white border-2 border-amber-300 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between bg-gradient-to-b from-amber-50/30 to-white">
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] sm:text-xs font-black uppercase text-amber-900 flex items-center gap-1 truncate">
+                <Truck className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                <span className="truncate">SCRAP PENDING DELIVERY</span>
+              </span>
+            </div>
+
+            <div className="flex items-baseline gap-1.5">
+              <span className="text-2xl sm:text-3xl font-black text-amber-950 font-mono">{stats.scrapPendingDelivery}</span>
+              <span className="text-[10px] text-amber-700">units to DISCOM</span>
+            </div>
+
+            <div className="mt-2 pt-2 border-t border-amber-200/60 text-[10px] text-amber-900 leading-tight">
+              {stats.scrapPendingDelivery > 0 
+                ? 'Condemned units in workshop awaiting return challan.'
+                : 'All scrap units dispatched back to store.'}
+            </div>
+          </div>
+
+          <Link to="/challan/new" className="mt-2.5 pt-1.5 border-t border-amber-200 text-[11px] text-amber-900 font-bold flex items-center justify-between hover:underline">
+            <span>Generate Return Challan</span>
+            <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
+
+      </div>
+
+      {/* 3. COMPACT LIVE WORKSHOP PIPELINE */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+        <div className="flex items-center justify-between mb-2.5">
+          <h2 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <Activity className="w-4 h-4 text-blue-600" />
+            <span>Live Workshop Lifecycle Stages</span>
+          </h2>
+          <span className="text-[11px] text-slate-500 font-mono font-bold">
+            {stats.totalJobs} Active TRs
+          </span>
+        </div>
+
+        <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 text-center">
+          {/* 1. Intake */}
+          <Link to="/external-inspection" className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">
+            <span className="text-[9px] text-slate-500 uppercase block font-bold truncate">Ext. Insp</span>
+            <span className="text-lg font-black text-slate-800 font-mono">{stats.pendingExternal}</span>
+          </Link>
+
+          {/* 2. Core/Wind */}
+          <Link to="/internal-inspection" className="p-2 rounded-lg bg-amber-50/70 hover:bg-amber-100 border border-amber-200 transition-colors">
+            <span className="text-[9px] text-amber-700 uppercase block font-bold truncate">Internal</span>
+            <span className="text-lg font-black text-amber-900 font-mono">{stats.pendingInternal}</span>
+          </Link>
+
+          {/* 3. Testing */}
+          <Link to="/testing-report" className="p-2 rounded-lg bg-teal-50/70 hover:bg-teal-100 border border-teal-200 transition-colors">
+            <span className="text-[9px] text-teal-700 uppercase block font-bold truncate">Testing</span>
+            <span className="text-lg font-black text-teal-900 font-mono">{stats.pendingTesting}</span>
+          </Link>
+
+          {/* 4. Ready */}
+          <Link to="/challan/new" className="p-2 rounded-lg bg-blue-50/70 hover:bg-blue-100 border border-blue-200 transition-colors">
+            <span className="text-[9px] text-blue-700 uppercase block font-bold truncate">Ready</span>
+            <span className="text-lg font-black text-blue-900 font-mono">{stats.readyForDispatch}</span>
+          </Link>
+
+          {/* 5. Dispatched */}
+          <Link to="/reports" className="p-2 rounded-lg bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 transition-colors">
+            <span className="text-[9px] text-emerald-700 uppercase block font-bold truncate">Delivered</span>
+            <span className="text-lg font-black text-emerald-900 font-mono">{stats.dispatchedRepairable}</span>
+          </Link>
+
+          {/* 6. GP Guarantee */}
+          <Link to="/mr-ledger" className="p-2 rounded-lg bg-amber-100/60 hover:bg-amber-200/60 border border-amber-300 transition-colors">
+            <span className="text-[9px] text-amber-900 uppercase block font-bold truncate">GP (Wty)</span>
+            <span className="text-lg font-black text-amber-950 font-mono">{stats.gpTotal}</span>
+          </Link>
+
+          {/* 7. Scrap */}
+          <Link to="/reports" className="p-2 rounded-lg bg-rose-50/70 hover:bg-rose-100 border border-rose-200 transition-colors col-span-2 sm:col-span-1">
+            <span className="text-[9px] text-rose-700 uppercase block font-bold truncate">Scrap</span>
+            <span className="text-lg font-black text-rose-900 font-mono">{stats.scrapDeclared}</span>
+          </Link>
+        </div>
+      </div>
+
+      {/* 4. TABBED KVA BREAKDOWN MATRIX (COMPACT & MOBILE-FIRST) */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 border-b border-slate-100 pb-2.5">
+          <div>
+            <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+              <BarChart3 className="w-4 h-4 text-indigo-600" />
+              <span>KVA Capacity Breakdown Matrix</span>
+            </h3>
+          </div>
+
+          <div className="flex items-center bg-slate-100 p-0.5 rounded-lg self-start sm:self-auto">
+            <button
+              type="button"
+              onClick={() => setActiveKvaTab('repaired')}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
+                activeKvaTab === 'repaired'
+                  ? 'bg-emerald-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <CheckCircle2 className="w-3 h-3" />
+              <span>Repaired ({stats.totalRepaired})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveKvaTab('under_repair')}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
+                activeKvaTab === 'under_repair'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Wrench className="w-3 h-3" />
+              <span>Under Repair ({stats.totalUnderRepair})</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveKvaTab('scrap')}
+              className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
+                activeKvaTab === 'scrap'
+                  ? 'bg-rose-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShieldAlert className="w-3 h-3" />
+              <span>Scrap ({stats.scrapDeclared})</span>
+            </button>
           </div>
         </div>
 
-        {/* Quick Operations Module Grid */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-5 sm:p-6 shadow-xs">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-bold text-slate-900">Workshop Modules & Operations</h2>
-            <Link to="/reports" className="text-xs font-bold text-blue-600 hover:underline flex items-center gap-1">
-              View Master Report Hub &rarr;
-            </Link>
+        {/* TAB 1: REPAIRED TABLE */}
+        {activeKvaTab === 'repaired' && (
+          <div className="overflow-x-auto">
+            {Object.keys(stats.repairedByKva).length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-lg">
+                No Repaired transformers recorded yet.
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-emerald-50/70 text-emerald-900 border-b border-emerald-200">
+                    <th className="py-2 px-2.5 font-bold">Capacity</th>
+                    <th className="py-2 px-2.5 font-bold text-center">Ready in Workshop</th>
+                    <th className="py-2 px-2.5 font-bold text-center">Dispatched</th>
+                    <th className="py-2 px-2.5 font-bold text-right">Total</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(Object.entries(stats.repairedByKva) as [string, { ready: number; dispatched: number; total: number }][])
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([kva, data]) => (
+                      <tr key={kva} className="hover:bg-emerald-50/30">
+                        <td className="py-1.5 px-2.5 font-bold text-slate-900 font-mono">{kva} KVA</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-blue-700">{data.ready}</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-emerald-700">{data.dispatched}</td>
+                        <td className="py-1.5 px-2.5 text-right font-black font-mono text-emerald-950">{data.total}</td>
+                      </tr>
+                    ))}
+                  <tr className="bg-emerald-100/60 font-black text-emerald-950 border-t-2 border-emerald-300">
+                    <td className="py-2 px-2.5">TOTAL</td>
+                    <td className="py-2 px-2.5 text-center font-mono">{stats.readyForDispatch}</td>
+                    <td className="py-2 px-2.5 text-center font-mono">{stats.dispatchedRepairable}</td>
+                    <td className="py-2 px-2.5 text-right font-mono">{stats.totalRepaired} units</td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
           </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-            <Link to="/new-job" className="p-3.5 border border-emerald-200 bg-emerald-50/60 hover:bg-emerald-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/60 px-1.5 py-0.5 rounded">INTAKE</span>
-                <h3 className="font-bold text-emerald-900 text-xs mt-1.5 group-hover:underline">MR Entry</h3>
-                <p className="text-[11px] text-emerald-700 mt-0.5 leading-tight">Intake damaged TRs</p>
-              </div>
-            </Link>
-
-            <Link to="/mr-ledger" className="p-3.5 border border-slate-200 bg-slate-50/60 hover:bg-slate-100 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-1.5 py-0.5 rounded">REGISTER</span>
-                <h3 className="font-bold text-slate-800 text-xs mt-1.5 group-hover:underline">MR Register</h3>
-                <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">Search & filter logs</p>
-              </div>
-            </Link>
-
-            <Link to="/external-inspection" className="p-3.5 border border-cyan-200 bg-cyan-50/60 hover:bg-cyan-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-cyan-700 bg-cyan-200/60 px-1.5 py-0.5 rounded">INSPECTION</span>
-                <h3 className="font-bold text-cyan-900 text-xs mt-1.5 group-hover:underline">External Insp.</h3>
-                <p className="text-[11px] text-cyan-700 mt-0.5 leading-tight">Accessories & oil</p>
-              </div>
-            </Link>
-
-            <Link to="/internal-inspection" className="p-3.5 border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-200/60 px-1.5 py-0.5 rounded">CORE/WIND</span>
-                <h3 className="font-bold text-indigo-900 text-xs mt-1.5 group-hover:underline">Internal Insp.</h3>
-                <p className="text-[11px] text-indigo-700 mt-0.5 leading-tight">HT/LT winding, core</p>
-              </div>
-            </Link>
-
-            <Link to="/testing-report" className="p-3.5 border border-teal-200 bg-teal-50/60 hover:bg-teal-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-teal-700 bg-teal-200/60 px-1.5 py-0.5 rounded">TESTING</span>
-                <h3 className="font-bold text-teal-900 text-xs mt-1.5 group-hover:underline">Testing Report</h3>
-                <p className="text-[11px] text-teal-700 mt-0.5 leading-tight">Losses, IR, Megger</p>
-              </div>
-            </Link>
-
-            <Link to="/estimates/new" className="p-3.5 border border-amber-200 bg-amber-50/60 hover:bg-amber-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-amber-700 bg-amber-200/60 px-1.5 py-0.5 rounded">ESTIMATE</span>
-                <h3 className="font-bold text-amber-900 text-xs mt-1.5 group-hover:underline">Estimate Gen.</h3>
-                <p className="text-[11px] text-amber-700 mt-0.5 leading-tight">AT rates & forward</p>
-              </div>
-            </Link>
-
-            <Link to="/challan/new" className="p-3.5 border border-purple-200 bg-purple-50/60 hover:bg-purple-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-purple-700 bg-purple-200/60 px-1.5 py-0.5 rounded">DISPATCH</span>
-                <h3 className="font-bold text-purple-900 text-xs mt-1.5 group-hover:underline">Delivery Challan</h3>
-                <p className="text-[11px] text-purple-700 mt-0.5 leading-tight">Dispatch tested TRs</p>
-              </div>
-            </Link>
-
-            <Link to="/bills/new" className="p-3.5 border border-blue-200 bg-blue-50/60 hover:bg-blue-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-blue-700 bg-blue-200/60 px-1.5 py-0.5 rounded">BILLING</span>
-                <h3 className="font-bold text-blue-900 text-xs mt-1.5 group-hover:underline">Billing System</h3>
-                <p className="text-[11px] text-blue-700 mt-0.5 leading-tight">GST Invoices & covering</p>
-              </div>
-            </Link>
-
-            <Link to="/oil-inward" className="p-3.5 border border-sky-200 bg-sky-50/60 hover:bg-sky-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-sky-700 bg-sky-200/60 px-1.5 py-0.5 rounded">OIL LEDGER</span>
-                <h3 className="font-bold text-sky-900 text-xs mt-1.5 group-hover:underline">Oil Account</h3>
-                <p className="text-[11px] text-sky-700 mt-0.5 leading-tight">Inward & 5% filtration</p>
-              </div>
-            </Link>
-
-            <Link to="/reports" className="p-3.5 border border-rose-200 bg-rose-50/60 hover:bg-rose-100/80 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-rose-700 bg-rose-200/60 px-1.5 py-0.5 rounded">REPORTS</span>
-                <h3 className="font-bold text-rose-900 text-xs mt-1.5 group-hover:underline">Report Hub</h3>
-                <p className="text-[11px] text-rose-700 mt-0.5 leading-tight">DISCOM analytics</p>
-              </div>
-            </Link>
-
-            <Link to="/estimate-master" className="p-3.5 border border-slate-300 bg-slate-100/80 hover:bg-slate-200 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-700 bg-slate-300/70 px-1.5 py-0.5 rounded">MASTER</span>
-                <h3 className="font-bold text-slate-900 text-xs mt-1.5 group-hover:underline">Estimate Master</h3>
-                <p className="text-[11px] text-slate-600 mt-0.5 leading-tight">KVA rates & schedules</p>
-              </div>
-            </Link>
-
-            <Link to="/agency-settings" className="p-3.5 border border-slate-200 bg-white hover:bg-slate-50 rounded-xl transition-all group shadow-2xs flex flex-col justify-between">
-              <div>
-                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">SETTINGS</span>
-                <h3 className="font-bold text-slate-800 text-xs mt-1.5 group-hover:underline">Agencies & AT</h3>
-                <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">Tender prefixes & logos</p>
-              </div>
-            </Link>
-          </div>
-        </div>
-
-        {/* Allotment Status Widget */}
-        {activeAtMaster && divisions.length > 0 && (
-          <AllotmentWidget atMaster={activeAtMaster} />
         )}
 
-        {/* Real Oil Accounting & Real Guarantee Tracking Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {/* 1. Real Oil Accounting */}
-          <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-sky-50 text-sky-600 rounded-lg border border-sky-100">
-                  <Droplet className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Real Oil Accounting Ledger</h3>
-                  <p className="text-[10px] text-slate-400">Calculated from {oilMetrics.transactionCount} inward entries</p>
-                </div>
+        {/* TAB 2: UNDER REPAIR TABLE */}
+        {activeKvaTab === 'under_repair' && (
+          <div className="overflow-x-auto">
+            {Object.keys(stats.underRepairByKva).length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-lg">
+                No transformers currently under repair.
               </div>
-              <Link to="/oil-inward" className="text-xs font-bold text-sky-600 hover:underline">
-                Manage &rarr;
+            ) : (
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-blue-50/70 text-blue-900 border-b border-blue-200">
+                    <th className="py-2 px-2.5 font-bold">Capacity</th>
+                    <th className="py-2 px-2.5 font-bold text-center">Ext. Insp</th>
+                    <th className="py-2 px-2.5 font-bold text-center">Core & Wind</th>
+                    <th className="py-2 px-2.5 font-bold text-center">Testing</th>
+                    <th className="py-2 px-2.5 font-bold text-right">Total WIP</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(Object.entries(stats.underRepairByKva) as [string, { awaitingExt: number; awaitingInt: number; awaitingTest: number; total: number }][])
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([kva, data]) => (
+                      <tr key={kva} className="hover:bg-blue-50/30">
+                        <td className="py-1.5 px-2.5 font-bold text-slate-900 font-mono">{kva} KVA</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono text-slate-700">{data.awaitingExt}</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono text-amber-700 font-bold">{data.awaitingInt}</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono text-teal-700 font-bold">{data.awaitingTest}</td>
+                        <td className="py-1.5 px-2.5 text-right font-black font-mono text-blue-950">{data.total}</td>
+                      </tr>
+                    ))}
+                  <tr className="bg-blue-100/60 font-black text-blue-950 border-t-2 border-blue-300">
+                    <td className="py-2 px-2.5">TOTAL WIP</td>
+                    <td className="py-2 px-2.5 text-center font-mono">{stats.pendingExternal}</td>
+                    <td className="py-2 px-2.5 text-center font-mono">{stats.pendingInternal}</td>
+                    <td className="py-2 px-2.5 text-center font-mono">{stats.pendingTesting}</td>
+                    <td className="py-2 px-2.5 text-right font-mono">{stats.totalUnderRepair} units</td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: SCRAP TABLE */}
+        {activeKvaTab === 'scrap' && (
+          <div className="overflow-x-auto">
+            {Object.keys(stats.scrapByKva).length === 0 ? (
+              <div className="p-4 text-center text-xs text-slate-400 bg-slate-50 rounded-lg">
+                Zero Scrap transformers recorded.
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-rose-50/70 text-rose-900 border-b border-rose-200">
+                    <th className="py-2 px-2.5 font-bold">Capacity</th>
+                    <th className="py-2 px-2.5 font-bold text-center text-amber-900">Scrap Pending Delivery</th>
+                    <th className="py-2 px-2.5 font-bold text-center">Returned Store</th>
+                    <th className="py-2 px-2.5 font-bold text-right">Total Scrap</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(Object.entries(stats.scrapByKva) as [string, { pendingDelivery: number; delivered: number; total: number }][])
+                    .sort(([a], [b]) => Number(a) - Number(b))
+                    .map(([kva, data]) => (
+                      <tr key={kva} className="hover:bg-rose-50/30">
+                        <td className="py-1.5 px-2.5 font-bold text-slate-900 font-mono">{kva} KVA</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-amber-900 bg-amber-100/50">{data.pendingDelivery}</td>
+                        <td className="py-1.5 px-2.5 text-center font-mono text-slate-700">{data.delivered}</td>
+                        <td className="py-1.5 px-2.5 text-right font-black font-mono text-rose-950">{data.total}</td>
+                      </tr>
+                    ))}
+                  <tr className="bg-rose-100/60 font-black text-rose-950 border-t-2 border-rose-300">
+                    <td className="py-2 px-2.5">TOTAL SCRAP</td>
+                    <td className="py-2 px-2.5 text-center font-mono text-amber-900">{stats.scrapPendingDelivery}</td>
+                    <td className="py-2 px-2.5 text-center font-mono">{stats.scrapDelivered}</td>
+                    <td className="py-2 px-2.5 text-right font-mono">{stats.scrapDeclared} units</td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* 5. COMPACT WORKSHOP SHORTCUTS (Mobile 3-col / Desktop 6-col) */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+        <div className="flex items-center justify-between mb-2.5">
+          <h2 className="text-xs sm:text-sm font-bold text-slate-800">Quick Workshop Actions</h2>
+          <Link to="/reports" className="text-[11px] font-bold text-blue-600 hover:underline">
+            All Reports &rarr;
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+          <Link to="/new-job" className="p-2.5 bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-emerald-800 block">MR INTAKE</span>
+            <span className="text-[11px] text-emerald-950 font-bold block truncate mt-0.5">New Job</span>
+          </Link>
+
+          <Link to="/mr-ledger" className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-slate-600 block">REGISTER</span>
+            <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">MR Ledger</span>
+          </Link>
+
+          <Link to="/external-inspection" className="p-2.5 bg-cyan-50/70 hover:bg-cyan-100 border border-cyan-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-cyan-800 block">INSPECTION</span>
+            <span className="text-[11px] text-cyan-950 font-bold block truncate mt-0.5">External</span>
+          </Link>
+
+          <Link to="/internal-inspection" className="p-2.5 bg-amber-50/70 hover:bg-amber-100 border border-amber-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-amber-800 block">WINDING</span>
+            <span className="text-[11px] text-amber-950 font-bold block truncate mt-0.5">Internal</span>
+          </Link>
+
+          <Link to="/testing-report" className="p-2.5 bg-teal-50/70 hover:bg-teal-100 border border-teal-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-teal-800 block">TESTING</span>
+            <span className="text-[11px] text-teal-950 font-bold block truncate mt-0.5">Report</span>
+          </Link>
+
+          <Link to="/estimates/new" className="p-2.5 bg-purple-50/70 hover:bg-purple-100 border border-purple-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-purple-800 block">ESTIMATE</span>
+            <span className="text-[11px] text-purple-950 font-bold block truncate mt-0.5">Rates</span>
+          </Link>
+
+          <Link to="/challan/new" className="p-2.5 bg-blue-50/70 hover:bg-blue-100 border border-blue-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-blue-800 block">DELIVERY</span>
+            <span className="text-[11px] text-blue-950 font-bold block truncate mt-0.5">Challan</span>
+          </Link>
+
+          <Link to="/bills/new" className="p-2.5 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-indigo-800 block">INVOICE</span>
+            <span className="text-[11px] text-indigo-950 font-bold block truncate mt-0.5">Billing</span>
+          </Link>
+
+          <Link to="/oil-inward" className="p-2.5 bg-sky-50/70 hover:bg-sky-100 border border-sky-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-sky-800 block">OIL</span>
+            <span className="text-[11px] text-sky-950 font-bold block truncate mt-0.5">Ledger</span>
+          </Link>
+
+          <Link to="/reports" className="p-2.5 bg-rose-50/70 hover:bg-rose-100 border border-rose-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-rose-800 block">REPORTS</span>
+            <span className="text-[11px] text-rose-950 font-bold block truncate mt-0.5">Hub</span>
+          </Link>
+
+          <Link to="/estimate-master" className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-slate-700 block">MASTER</span>
+            <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">AT Rates</span>
+          </Link>
+
+          <Link to="/agency-settings" className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-slate-600 block">SETTINGS</span>
+            <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">Agency</span>
+          </Link>
+        </div>
+      </div>
+
+      {/* 6. SECONDARY INSIGHTS GRID (ALLOTMENT, OIL, WARRANTY, DIVISION DISTRIBUTION & BACKLOG) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
+
+        {/* Card 1: Allotment Status */}
+        {activeAtMaster && (
+          <div className="md:col-span-2 lg:col-span-3">
+            <AllotmentWidget atMaster={activeAtMaster} />
+          </div>
+        )}
+
+        {/* Card 2: Guarantee Period (GP) & Warranty */}
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-amber-600" />
+                <h3 className="text-xs font-bold text-slate-800">Guarantee Period (GP) & Warranty</h3>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded">
+                18 Months
+              </span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-1.5 p-2 bg-amber-50/60 rounded-lg border border-amber-100 text-center mb-2.5">
+              <div>
+                <span className="text-[9px] text-slate-500 uppercase block">GP Intake</span>
+                <span className="font-mono font-black text-amber-950 text-sm">{stats.gpTotal}</span>
+              </div>
+              <div className="border-x border-amber-200">
+                <span className="text-[9px] text-amber-700 uppercase block">In Shop</span>
+                <span className="font-mono font-black text-amber-700 text-sm">{stats.gpPending}</span>
+              </div>
+              <div>
+                <span className="text-[9px] text-emerald-700 uppercase block">Delivered</span>
+                <span className="font-mono font-black text-emerald-700 text-sm">{stats.gpDispatched}</span>
+              </div>
+            </div>
+
+            <div className="space-y-1 text-[11px]">
+              <div className="flex justify-between">
+                <span className="text-slate-500">Active Warranty Cover:</span>
+                <span className="font-bold text-slate-900">{guaranteeStats.activeGuaranteeCount} Units</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-slate-500">Standard OGP Intake:</span>
+                <span className="font-bold text-slate-700">{stats.ogpTotal} Units ({stats.ogpPending} WIP)</span>
+              </div>
+            </div>
+          </div>
+
+          <Link to="/mr-ledger" className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-amber-800 font-bold flex items-center justify-between hover:underline">
+            <span>Filter GP Jobs in Ledger</span>
+            <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
+
+        {/* Card 3: Oil Accounting */}
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Droplet className="w-4 h-4 text-sky-600" />
+                <h3 className="text-xs font-bold text-slate-800">Oil Account Ledger</h3>
+              </div>
+              <Link to="/oil-inward" className="text-[10px] font-bold text-sky-600 hover:underline">
+                Manage
               </Link>
             </div>
 
             {oilMetrics.transactionCount === 0 ? (
-              <div className="bg-slate-50 p-4 rounded-xl border border-dashed border-slate-200 text-center">
-                <p className="text-xs text-slate-500">No Oil Inward records entered yet for this agency.</p>
-                <Link to="/oil-inward" className="inline-block mt-2 px-3 py-1.5 bg-sky-600 text-white rounded-lg text-xs font-bold hover:bg-sky-500 transition-colors">
-                  + Record Oil Inward
-                </Link>
+              <div className="bg-slate-50 p-3 rounded-lg text-center text-xs text-slate-400">
+                No oil records logged yet.
               </div>
             ) : (
-              <div className="space-y-2.5">
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">Total Received Oil:</span>
-                  <span className="font-mono font-bold text-slate-900">{oilMetrics.totalGrossLiters.toLocaleString()} Litres ({oilMetrics.totalBarrels} Barrels)</span>
+              <div className="space-y-1.5 text-[11px]">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Total Received:</span>
+                  <span className="font-mono font-bold text-slate-900">{oilMetrics.totalGrossLiters.toLocaleString()} L ({oilMetrics.totalBarrels} bbl)</span>
                 </div>
-                <div className="flex justify-between text-xs">
-                  <span className="text-slate-500">Filtration Loss (5% Norm):</span>
-                  <span className="font-mono text-red-600 font-bold">-{oilMetrics.filtrationLoss.toFixed(1)} Litres</span>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">5% Filtration Norm:</span>
+                  <span className="font-mono text-red-600 font-bold">-{oilMetrics.filtrationLoss.toFixed(1)} L</span>
                 </div>
-                <div className="flex justify-between text-xs pt-2 border-t border-dashed border-slate-200">
-                  <span className="font-bold text-slate-900">Adjusted Usable Balance:</span>
-                  <span className="font-mono font-black text-emerald-600">{oilMetrics.netUsableLiters.toFixed(1)} Litres</span>
+                <div className="flex justify-between pt-1 border-t border-slate-100">
+                  <span className="font-bold text-slate-900">Net Usable:</span>
+                  <span className="font-mono font-black text-emerald-600">{oilMetrics.netUsableLiters.toFixed(1)} L</span>
                 </div>
-                <Link to="/oil-inward" className="block w-full mt-3 bg-slate-900 text-white text-[11px] py-2 rounded-xl font-bold uppercase text-center hover:bg-slate-800 transition-colors">
-                  Open Oil Ledger & Shortage Statements
-                </Link>
               </div>
             )}
-          </section>
-          
-          {/* 2. Real Guarantee Monitoring */}
-          <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-lg border border-emerald-100">
-                  <ShieldCheck className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Guarantee Period Tracker</h3>
-                  <p className="text-[10px] text-slate-400">18-Month Standard DISCOM Warranty</p>
-                </div>
-              </div>
-              <span className="text-[10px] font-bold px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full">
-                Active Policy
-              </span>
-            </div>
-
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-black text-slate-900">{guaranteeStats.activeGuaranteeCount}</span>
-              <span className="text-xs text-slate-500">Units currently under active guarantee window</span>
-            </div>
-            
-            <div className="mt-3 pt-3 border-t border-slate-100">
-              <p className="text-[11px] text-slate-500 leading-normal">
-                {stats.dispatched > 0 
-                  ? `${stats.dispatched} units total have been dispatched from this workshop. All dispatched units are tracked against their 18-month guarantee period.`
-                  : `No transformers have been dispatched yet. Once units are dispatched via Delivery Challan, their 18-month guarantee timer is tracked automatically.`}
-              </p>
-            </div>
-          </section>
-        </div>
-      </div>
-
-      {/* Sidebar Real Activity & Pending Work Column (4 cols) */}
-      <aside className="lg:col-span-4 space-y-6">
-
-        {/* Real Pending Action Items */}
-        <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-1.5">
-              <Clock className="w-4 h-4 text-amber-500" />
-              Active Job Backlog ({pendingBacklog.length})
-            </h3>
-            <Link to="/mr-ledger" className="text-[11px] text-blue-600 font-semibold hover:underline">
-              View All
-            </Link>
           </div>
 
-          {pendingBacklog.length === 0 ? (
-            <div className="p-4 bg-emerald-50/60 border border-emerald-200/80 rounded-xl text-center">
-              <CheckCircle2 className="w-6 h-6 text-emerald-600 mx-auto mb-1" />
-              <p className="text-xs font-bold text-emerald-900">All Caught Up!</p>
-              <p className="text-[11px] text-emerald-700 mt-0.5">No pending inspection or testing backlog in this agency.</p>
+          <Link to="/oil-inward" className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-sky-700 font-bold flex items-center justify-between hover:underline">
+            <span>Open Oil Statements</span>
+            <ChevronRight className="w-3 h-3" />
+          </Link>
+        </div>
+
+        {/* Card 4: Division Workload */}
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Building2 className="w-4 h-4 text-cyan-600" />
+                <h3 className="text-xs font-bold text-slate-800">Division Distribution</h3>
+              </div>
+              <span className="text-[10px] text-slate-400 font-mono">{availableDivisions.length} Divs</span>
             </div>
-          ) : (
-            <div className="space-y-2.5">
-              {pendingBacklog.map((job) => {
-                let badgeColor = 'bg-slate-100 text-slate-800 border-slate-300';
-                let nextLink = '/external-inspection';
-                let actionLabel = 'External Inspection';
 
-                if (job.status === 'External Done') {
-                  badgeColor = 'bg-amber-100 text-amber-800 border-amber-300';
-                  nextLink = '/internal-inspection';
-                  actionLabel = 'Internal Inspection';
-                } else if (job.status === 'Internal Done') {
-                  badgeColor = 'bg-teal-100 text-teal-800 border-teal-300';
-                  nextLink = '/testing-report';
-                  actionLabel = 'Testing Report';
-                } else if (job.status === 'Tested - Ready for Dispatch') {
-                  badgeColor = 'bg-blue-100 text-blue-800 border-blue-300';
-                  nextLink = '/challan/new';
-                  actionLabel = 'Generate Challan';
-                }
-
+            <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+              {availableDivisions.map(div => {
+                const data = divisionDistribution[div] || { total: 0, repaired: 0, underRepair: 0, scrap: 0 };
+                const isCurrent = selectedDivision.toLowerCase() === div.toLowerCase();
                 return (
-                  <Link 
-                    key={job.id} 
-                    to={nextLink}
-                    className="p-3 bg-slate-50 hover:bg-slate-100/80 rounded-xl border border-slate-200/80 block transition-all group"
+                  <div
+                    key={div}
+                    onClick={() => setSelectedDivision(selectedDivision === div ? 'All' : div)}
+                    className={`p-1.5 rounded-lg border text-xs cursor-pointer flex items-center justify-between transition-colors ${
+                      isCurrent ? 'bg-cyan-50 border-cyan-300' : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                    }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-xs text-slate-900 group-hover:text-blue-600">
-                        {job.jobNo || 'Unassigned'} ({job.capacityKva || '-'} KVA)
-                      </span>
-                      <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${badgeColor}`}>
-                        {job.status || 'Received'}
-                      </span>
+                    <span className="font-bold text-slate-800 truncate">{div}</span>
+                    <div className="flex items-center gap-1 text-[10px]">
+                      <span className="text-emerald-700 font-bold">{data.repaired}R</span>
+                      <span className="text-blue-700 font-bold">{data.underRepair}W</span>
+                      <span className="text-rose-700 font-bold">{data.scrap}S</span>
+                      <span className="font-mono font-bold bg-white px-1 border rounded">{data.total}</span>
                     </div>
-                    <div className="flex items-center justify-between text-[11px] text-slate-500 mt-1">
-                      <span>MR: {job.mrNo || '-'} &bull; {job.division || 'Unknown'}</span>
-                      <span className="text-blue-600 font-bold text-[10px] group-hover:underline">
-                        Next: {actionLabel} &rarr;
-                      </span>
-                    </div>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
-          )}
-        </section>
+          </div>
 
-        {/* Real Workshop Capacity Breakdown */}
-        <section className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3 flex items-center gap-1.5">
-            <Layers className="w-4 h-4 text-blue-500" />
-            Transformer Capacities in Workshop
-          </h3>
+          <div className="mt-2 pt-1 text-[10px] text-slate-400 text-center">
+            Tap any division to filter entire dashboard
+          </div>
+        </div>
 
-          {Object.keys(stats.capacityCounts).length === 0 ? (
-            <p className="text-xs text-slate-400 italic">No capacity records registered yet.</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              {Object.entries(stats.capacityCounts)
-                .sort(([a], [b]) => Number(a) - Number(b))
-                .map(([kva, count]) => (
-                  <div key={kva} className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-700">{kva} KVA</span>
-                    <span className="text-xs font-black bg-blue-100 text-blue-800 px-2 py-0.5 rounded-md">
-                      {count} {count === 1 ? 'unit' : 'units'}
-                    </span>
+      </div>
+
+      {/* 7. ACTIVE BACKLOG ACTION QUEUE */}
+      {pendingBacklog.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+          <div className="flex items-center justify-between mb-2.5">
+            <h3 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+              <Clock className="w-4 h-4 text-amber-500" />
+              <span>Pending Action Backlog</span>
+            </h3>
+            <Link to="/mr-ledger" className="text-[11px] font-bold text-blue-600 hover:underline">
+              View All &rarr;
+            </Link>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2">
+            {pendingBacklog.map((job) => {
+              let badgeColor = 'bg-slate-100 text-slate-800';
+              let nextLink = '/external-inspection';
+              let actionLabel = 'External';
+
+              if (job.status === 'External Done') {
+                badgeColor = 'bg-amber-100 text-amber-800';
+                nextLink = '/internal-inspection';
+                actionLabel = 'Internal';
+              } else if (job.status === 'Internal Done') {
+                badgeColor = 'bg-teal-100 text-teal-800';
+                nextLink = '/testing-report';
+                actionLabel = 'Testing';
+              } else if (job.status === 'Tested - Ready for Dispatch') {
+                badgeColor = 'bg-blue-100 text-blue-800';
+                nextLink = '/challan/new';
+                actionLabel = 'Challan';
+              }
+
+              return (
+                <Link 
+                  key={job.id} 
+                  to={nextLink}
+                  className="p-2.5 bg-slate-50 hover:bg-slate-100 rounded-lg border border-slate-200 flex flex-col justify-between transition-colors group"
+                >
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-900 truncate">{job.jobNo || 'TR'}</span>
+                    <span className="text-[10px] font-mono text-slate-500 font-bold">{job.capacityKva || '-'} KVA</span>
                   </div>
-                ))}
-            </div>
-          )}
-        </section>
-
-        {/* Real Agency Profile Card */}
-        <section className="bg-gradient-to-br from-slate-900 to-slate-950 text-white rounded-2xl p-5 shadow-md border border-slate-800">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-[10px] font-extrabold uppercase tracking-widest text-cyan-400">Active Workshop Profile</span>
-            <span className="text-[10px] bg-white/10 text-white px-2 py-0.5 rounded-full border border-white/20">
-              Live Agency
-            </span>
+                  <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
+                    <span className="truncate">{job.division || 'DISCOM'}</span>
+                    <span className={`px-1 rounded font-bold ${badgeColor}`}>{actionLabel}</span>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
+        </div>
+      )}
 
-          <h4 className="text-base font-bold text-white">{activeAgency?.name}</h4>
-          <p className="text-xs text-slate-400 mt-1">{activeAgency?.address || 'Address configured in Agency Settings'}</p>
-
-          <div className="mt-4 pt-3 border-t border-slate-800 space-y-1.5 text-xs text-slate-300">
-            <div className="flex justify-between">
-              <span className="text-slate-400">GSTIN:</span>
-              <span className="font-mono text-white">{activeAgency?.gstin || 'Not set'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Circle Office:</span>
-              <span className="text-white font-medium">{activeAgency?.circleOfficeName || 'SABARMATI'}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-slate-400">Assigned Divisions:</span>
-              <span className="text-cyan-300 font-bold">{divisions.length} Division(s)</span>
-            </div>
-          </div>
-
-          <Link 
-            to="/agency-settings" 
-            className="mt-4 block text-center w-full py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold uppercase tracking-wider rounded-xl transition-colors shadow-sm"
-          >
-            Manage Agency Config
-          </Link>
-        </section>
-
-      </aside>
     </div>
   );
 }

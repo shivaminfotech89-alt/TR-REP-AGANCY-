@@ -2,38 +2,153 @@
   "entities": {
     "Job": {
       "title": "Transformer Repair Job",
-      "description": "Represents a transformer repair job.",
+      "description": "Represents a transformer repair job record with status, specs, and owner.",
       "type": "object",
       "properties": {
-        "jobNo": { "type": "string", "maxLength": 50 },
-        "mrNo": { "type": "string", "maxLength": 50 },
-        "dateOfIssue": { "type": "string", "maxLength": 20 },
+        "jobNo": { "type": "string", "maxLength": 50, "minLength": 1 },
+        "mrNo": { "type": "string", "maxLength": 50, "minLength": 1 },
+        "dateOfIssue": { "type": "string", "maxLength": 30 },
         "capacityKva": { "type": "number" },
-        "make": { "type": "string", "maxLength": 100 },
-        "serialNo": { "type": "string", "maxLength": 100 },
+        "make": { "type": "string", "maxLength": 100, "minLength": 1 },
+        "serialNo": { "type": "string", "maxLength": 100, "minLength": 1 },
         "type": { "type": "string", "maxLength": 50 },
         "repairType": { "type": "string", "maxLength": 50 },
         "division": { "type": "string", "maxLength": 100 },
+        "coreType": { "type": "string", "maxLength": 50 },
         "status": { "type": "string", "maxLength": 50 },
+        "isClosed": { "type": "boolean" },
+        "atId": { "type": "string", "maxLength": 128 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "testingDetails": { "type": "object" },
+        "testingDate": { "type": "string", "maxLength": 50 },
+        "challanNo": { "type": "string", "maxLength": 50 },
+        "challanDate": { "type": "string", "maxLength": 50 },
+        "vehicleNo": { "type": "string", "maxLength": 50 },
+        "deliveryDate": { "type": "string", "maxLength": 50 },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
-        "ownerId": { "type": "string", "maxLength": 128 }
+        "ownerId": { "type": "string", "maxLength": 128, "minLength": 1 }
       },
-      "required": ["jobNo", "mrNo", "capacityKva", "make", "serialNo", "createdAt", "updatedAt", "ownerId"]
+      "required": ["jobNo", "mrNo", "capacityKva", "make", "serialNo", "ownerId"]
     },
     "Inspection": {
       "title": "Inspection Report",
-      "description": "External or Internal Inspection data for a job.",
+      "description": "External or Internal Inspection data for a transformer repair job.",
       "type": "object",
       "properties": {
-        "jobId": { "type": "string", "maxLength": 128 },
-        "type": { "type": "string", "maxLength": 20 },
-        "data": { "type": "string", "maxLength": 5000 },
+        "jobId": { "type": "string", "maxLength": 128, "minLength": 1 },
+        "type": { "type": "string", "maxLength": 20, "enum": ["External", "Internal"] },
+        "data": { "type": "object" },
         "createdAt": { "type": "number" },
         "updatedAt": { "type": "number" },
-        "ownerId": { "type": "string", "maxLength": 128 }
+        "ownerId": { "type": "string", "maxLength": 128, "minLength": 1 }
       },
-      "required": ["jobId", "type", "createdAt", "updatedAt", "ownerId"]
+      "required": ["jobId", "type", "data", "ownerId"]
+    },
+    "Agency": {
+      "title": "Agency Workspace",
+      "description": "Transformer repair agency workspace profile and estimate master configurations.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "maxLength": 150, "minLength": 1 },
+        "address": { "type": "string", "maxLength": 500 },
+        "contact": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "maxLength": 150 },
+        "atNumber": { "type": "string", "maxLength": 100 },
+        "gstin": { "type": "string", "maxLength": 50 },
+        "bankDetails": { "type": "string", "maxLength": 500 },
+        "prefixes": { "type": "object" },
+        "lastJobNumbers": { "type": "object" },
+        "divisions": { "type": "array" },
+        "estimateMaster": { "type": "array" },
+        "estimateMasterCRGO": { "type": "array" },
+        "estimateMasterAmorphous": { "type": "array" },
+        "estimateMasterWoundCore": { "type": "array" },
+        "ownerId": { "type": "string", "maxLength": 128, "minLength": 1 }
+      },
+      "required": ["name", "ownerId"]
+    },
+    "AtMaster": {
+      "title": "AT Master Agreement",
+      "description": "Agreement Tender and work order configuration for an agency.",
+      "type": "object",
+      "properties": {
+        "atNumber": { "type": "string", "maxLength": 100, "minLength": 1 },
+        "workOrderNo": { "type": "string", "maxLength": 100 },
+        "dateOfAgreement": { "type": "string", "maxLength": 50 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "prefixes": { "type": "object" },
+        "lastJobNumbers": { "type": "object" },
+        "ownerId": { "type": "string", "maxLength": 128, "minLength": 1 }
+      },
+      "required": ["atNumber", "ownerId"]
+    },
+    "OilTransaction": {
+      "title": "Oil Transaction",
+      "description": "Oil inward stock entry and filtration loss accounting record.",
+      "type": "object",
+      "properties": {
+        "agencyId": { "type": "string", "maxLength": 128, "minLength": 1 },
+        "ownerId": { "type": "string", "maxLength": 128, "minLength": 1 },
+        "mrNo": { "type": "string", "maxLength": 50, "minLength": 1 },
+        "mrDate": { "type": "string", "maxLength": 50 },
+        "date": { "type": "number" },
+        "division": { "type": "string", "maxLength": 100, "minLength": 1 },
+        "oilType": { "type": "string", "maxLength": 50 },
+        "barrels": { "type": "number" },
+        "grossLiters": { "type": "number" },
+        "filtrationLossPercent": { "type": "number" },
+        "netLiters": { "type": "number" },
+        "createdAt": { "type": "object" }
+      },
+      "required": ["agencyId", "ownerId", "mrNo", "division", "grossLiters"]
+    },
+    "SupportTicket": {
+      "title": "Support Ticket",
+      "description": "Customer support desk issue or ticket submitted by a workshop user.",
+      "type": "object",
+      "properties": {
+        "ticketNo": { "type": "string", "maxLength": 50, "minLength": 1 },
+        "userId": { "type": "string", "maxLength": 128, "minLength": 1 },
+        "userEmail": { "type": "string", "maxLength": 150, "minLength": 1 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "agencyName": { "type": "string", "maxLength": 150 },
+        "subject": { "type": "string", "maxLength": 200, "minLength": 1 },
+        "category": { "type": "string", "maxLength": 50 },
+        "priority": { "type": "string", "maxLength": 50 },
+        "status": { "type": "string", "maxLength": 50 },
+        "description": { "type": "string", "maxLength": 5000, "minLength": 1 },
+        "adminReply": { "type": "string", "maxLength": 5000 },
+        "repliedAt": { "type": "number" },
+        "repliedBy": { "type": "string", "maxLength": 150 },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["ticketNo", "userId", "userEmail", "subject", "description"]
+    },
+    "UserRole": {
+      "title": "User Role Record",
+      "description": "Admin authorization mapping for agency users.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 150 },
+        "email": { "type": "string", "maxLength": 150, "minLength": 1 },
+        "role": { "type": "string", "maxLength": 50, "minLength": 1 },
+        "agencyId": { "type": "string", "maxLength": 128 },
+        "agencyName": { "type": "string", "maxLength": 150 },
+        "status": { "type": "string", "maxLength": 50 },
+        "updatedAt": { "type": "number" },
+        "updatedBy": { "type": "string", "maxLength": 150 }
+      },
+      "required": ["email", "role"]
+    },
+    "SystemConfig": {
+      "title": "System Configuration",
+      "description": "Global workshop settings and payment gateway configuration.",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "number" }
+      }
     }
   },
   "firestore": {
@@ -44,6 +159,30 @@
     "/inspections/{inspectionId}": {
       "schema": { "$ref": "#/entities/Inspection" },
       "description": "Stores inspection reports."
+    },
+    "/agencies/{agencyId}": {
+      "schema": { "$ref": "#/entities/Agency" },
+      "description": "Stores agency workspace profiles."
+    },
+    "/atMasters/{atMasterId}": {
+      "schema": { "$ref": "#/entities/AtMaster" },
+      "description": "Stores AT agreements and series prefixes."
+    },
+    "/oilTransactions/{txId}": {
+      "schema": { "$ref": "#/entities/OilTransaction" },
+      "description": "Stores transformer oil inventory entries."
+    },
+    "/support_tickets/{ticketId}": {
+      "schema": { "$ref": "#/entities/SupportTicket" },
+      "description": "Stores user support inquiries and admin replies."
+    },
+    "/user_roles/{roleId}": {
+      "schema": { "$ref": "#/entities/UserRole" },
+      "description": "Stores role authorization records managed by Super Admin."
+    },
+    "/system_config/{configId}": {
+      "schema": { "$ref": "#/entities/SystemConfig" },
+      "description": "Stores system configurations."
     }
   }
 }

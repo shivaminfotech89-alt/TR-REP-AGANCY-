@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, doc, setDoc, writeBatch, query, where, getDocs } from 'firebase/firestore';
-import { Loader2, ArrowLeft, Plus, Trash2, Zap } from 'lucide-react';
+import { collection, doc, query, where, getDocs, runTransaction } from 'firebase/firestore';
+import { Loader2, ArrowLeft, Plus, Trash2, Zap, Search, CheckCircle2, History, X, Sparkles } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAgency } from '../lib/AgencyContext';
 
@@ -12,13 +12,21 @@ interface TransformerEntry {
   make: string;
   serialNo: string;
   coreType: string;
+  autoFilledFrom?: string;
 }
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, getNextJobNoInfo, incrementJobNoCounter } = useAgency();
+  const { activeAgency, activeAtMaster, getNextJobNoInfo, incrementJobNoCounter, syncCountersState } = useAgency();
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
+
+  // Past jobs cache for GP quick auto-fill lookup
+  const [pastJobs, setPastJobs] = useState<any[]>([]);
+  const [pastJobsLoading, setPastJobsLoading] = useState(false);
+  const [showPastPickerRowIndex, setShowPastPickerRowIndex] = useState<number | null>(null);
+  const [pastSearchTerm, setPastSearchTerm] = useState('');
   
   const [commonData, setCommonData] = useState({
     mrNo: '',
@@ -49,6 +57,31 @@ export default function NewJob() {
       });
     }
   }, [activeAgency]); // eslint-disable-line
+
+  // When repairType changes to GP, load past jobs for quick 1-click selection & instant auto-lookup
+  useEffect(() => {
+    if (commonData.repairType === 'GP' && auth.currentUser && activeAgency) {
+      const loadPastJobs = async () => {
+        setPastJobsLoading(true);
+        try {
+          const q = query(
+            collection(db, 'jobs'),
+            where('ownerId', '==', auth.currentUser!.uid),
+            where('agencyId', '==', activeAgency.id)
+          );
+          const snap = await getDocs(q);
+          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+          list.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
+          setPastJobs(list);
+        } catch (err) {
+          console.error('Error loading past jobs for GP auto-fill:', err);
+        } finally {
+          setPastJobsLoading(false);
+        }
+      };
+      loadPastJobs();
+    }
+  }, [commonData.repairType, activeAgency]);
 
   const [transformers, setTransformers] = useState<TransformerEntry[]>([
     { jobNo: '', capacityKva: '', make: '', serialNo: '', coreType: 'CRGO' }
@@ -90,41 +123,69 @@ export default function NewJob() {
     }
   };
 
-  const handleJobNoBlur = async (index: number, jobNo: string) => {
-    if (commonData.repairType !== 'GP' || !jobNo.trim() || !activeAgency || !auth.currentUser) return;
+  const applyPastJobToRow = (index: number, pastJob: any) => {
+    setTransformers(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        capacityKva: String(pastJob.capacityKva || ''),
+        make: pastJob.make || '',
+        serialNo: pastJob.serialNo || updated[index].serialNo,
+        coreType: pastJob.coreType || updated[index].coreType || 'CRGO',
+        autoFilledFrom: pastJob.jobNo || pastJob.serialNo
+      };
+      return updated;
+    });
+
+    setAutoFillNotice(`✓ GP Transformer details auto-filled from Job #${pastJob.jobNo || 'Record'} (S/N: ${pastJob.serialNo}, ${pastJob.capacityKva} KVA, Make: ${pastJob.make}, Core: ${pastJob.coreType || 'CRGO'})`);
+    setTimeout(() => setAutoFillNotice(null), 6000);
+    setShowPastPickerRowIndex(null);
+  };
+
+  const handleGpAutoLookup = async (index: number, lookupField: 'jobNo' | 'serialNo', queryVal: string) => {
+    if (commonData.repairType !== 'GP' || !queryVal.trim() || !activeAgency || !auth.currentUser) return;
     
+    const trimmed = queryVal.trim().toLowerCase();
+    
+    // Check in-memory list first
+    const match = pastJobs.find(j => 
+      lookupField === 'jobNo'
+        ? (j.jobNo && j.jobNo.toLowerCase() === trimmed)
+        : (j.serialNo && j.serialNo.toLowerCase() === trimmed)
+    );
+
+    if (match) {
+      applyPastJobToRow(index, match);
+      return;
+    }
+
     try {
       const q = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
-        where('jobNo', '==', jobNo.trim()),
         where('agencyId', '==', activeAgency.id),
-        where('repairType', '==', 'OGP')
+        where(lookupField, '==', queryVal.trim())
       );
       
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        // Sort by createdAt descending to get the latest OGP job
-        const ogpJobs = snapshot.docs.map(d => d.data()).sort((a, b) => b.createdAt - a.createdAt);
-        const latestJob = ogpJobs[0];
-        
-        // Auto-fill Make, SNo, KVA, and coreType
-        handleTransformerChange(index, 'capacityKva', String(latestJob.capacityKva));
-        handleTransformerChange(index, 'make', latestJob.make);
-        handleTransformerChange(index, 'serialNo', latestJob.serialNo);
-        if (latestJob.coreType) {
-          handleTransformerChange(index, 'coreType', latestJob.coreType);
-        }
-        
-        if (latestJob.isClosed !== true) {
-           setErrorMsg(`Warning: The OGP job ${jobNo} is still marked as '${latestJob.status}'. It should be delivered before it can be received as a GP job.`);
-        }
-      } else {
-        setErrorMsg(`No previous OGP job found for Job No: ${jobNo}`);
+        const jobsList = snapshot.docs.map(d => d.data() as any).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        const latestJob = jobsList[0];
+        applyPastJobToRow(index, latestJob);
       }
     } catch (err) {
-      console.error('Error fetching OGP job details:', err);
+      console.error('Error fetching GP job details:', err);
     }
+  };
+
+  const handleJobNoBlur = async (index: number, jobNo: string) => {
+    if (commonData.repairType !== 'GP') return;
+    await handleGpAutoLookup(index, 'jobNo', jobNo);
+  };
+
+  const handleSerialNoBlur = async (index: number, serialNo: string) => {
+    if (commonData.repairType !== 'GP') return;
+    await handleGpAutoLookup(index, 'serialNo', serialNo);
   };
 
   const handleTransformerChange = (index: number, field: keyof TransformerEntry, value: string) => {
@@ -232,7 +293,6 @@ export default function NewJob() {
 
       
       const now = Date.now();
-      const batch = writeBatch(db);
 
       // Check MR No duplication using simpler query to avoid composite index errors
       
@@ -387,63 +447,104 @@ export default function NewJob() {
         }
       }
 
-      const maxJobNoMap: Record<string, number> = {};
+      let updatedLastJobNumbers: Record<string, number> | null = null;
+      let targetDocId: string | null = null;
+      let isAtMasterTarget = false;
 
-      for (const t of transformers) {
-        if (!t.jobNo) continue;
-        
-        const info = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
-        const counterKey = info.counterKey;
+      await runTransaction(db, async (transaction) => {
+        // --- 1. READS MUST COME FIRST IN FIRESTORE TRANSACTIONS ---
+        let currentCounters: Record<string, number> = {};
+        let masterDocRef: any = null;
 
-        const parts = t.jobNo.split('-');
-        if (parts.length > 1) {
-          const num = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(num)) {
-            if (!maxJobNoMap[counterKey] || num > maxJobNoMap[counterKey]) {
-              maxJobNoMap[counterKey] = num;
+        if (activeAtMaster) {
+          masterDocRef = doc(db, 'atMasters', activeAtMaster.id);
+          const atDocSnap = await transaction.get(masterDocRef);
+          if (atDocSnap.exists()) {
+            const data = atDocSnap.data() as Record<string, any>;
+            currentCounters = { ...(data?.lastJobNumbers || {}) };
+          }
+          isAtMasterTarget = true;
+          targetDocId = activeAtMaster.id;
+        } else if (activeAgency) {
+          masterDocRef = doc(db, 'agencies', activeAgency.id);
+          const agencyDocSnap = await transaction.get(masterDocRef);
+          if (agencyDocSnap.exists()) {
+            const data = agencyDocSnap.data() as Record<string, any>;
+            currentCounters = { ...(data?.lastJobNumbers || {}) };
+          }
+          isAtMasterTarget = false;
+          targetDocId = activeAgency.id;
+        }
+
+        // --- 2. CALCULATIONS ---
+        const maxJobNoMap: Record<string, number> = {};
+        const jobEntries: { ref: any; data: any }[] = [];
+
+        for (const t of transformers) {
+          if (!t.jobNo) continue;
+
+          const info = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
+          const counterKey = info.counterKey;
+
+          const parts = t.jobNo.split('-');
+          if (parts.length > 1) {
+            const num = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(num)) {
+              if (!maxJobNoMap[counterKey] || num > maxJobNoMap[counterKey]) {
+                maxJobNoMap[counterKey] = num;
+              }
             }
+          }
+
+          const newJobRef = doc(collection(db, 'jobs'));
+          const jobData = {
+            mrNo: commonData.mrNo,
+            dateOfIssue: commonData.dateOfIssue,
+            type: commonData.type,
+            repairType: commonData.repairType,
+            division: commonData.division,
+            jobNo: t.jobNo,
+            capacityKva: Number(t.capacityKva),
+            make: t.make,
+            serialNo: t.serialNo,
+            coreType: t.coreType,
+            status: 'Received',
+            isClosed: false,
+            atId: activeAtMaster ? activeAtMaster.id : '',
+            createdAt: now,
+            updatedAt: now,
+            ownerId: auth.currentUser.uid,
+            agencyId: activeAgency.id,
+          };
+          jobEntries.push({ ref: newJobRef, data: jobData });
+        }
+
+        const nextCounters = { ...currentCounters };
+        let hasCounterChange = false;
+
+        for (const [counterKey, maxNum] of Object.entries(maxJobNoMap)) {
+          const currentLast = currentCounters[counterKey] || 0;
+          if (maxNum > currentLast) {
+            nextCounters[counterKey] = maxNum;
+            hasCounterChange = true;
           }
         }
 
-        const newJobRef = doc(collection(db, 'jobs'));
-        const jobData = {
-          mrNo: commonData.mrNo,
-          dateOfIssue: commonData.dateOfIssue,
-          type: commonData.type,
-          repairType: commonData.repairType,
-          division: commonData.division,
-          jobNo: t.jobNo,
-          capacityKva: Number(t.capacityKva),
-          make: t.make,
-          serialNo: t.serialNo,
-          coreType: t.coreType,
-          status: 'Received',
-          isClosed: false,
-          atId: activeAtMaster ? activeAtMaster.id : '',
-          createdAt: now,
-          updatedAt: now,
-          ownerId: auth.currentUser.uid,
-          agencyId: activeAgency.id,
-        };
-        batch.set(newJobRef, jobData);
+        // --- 3. WRITES SECOND ---
+        for (const entry of jobEntries) {
+          transaction.set(entry.ref, entry.data);
+        }
+
+        if (masterDocRef && hasCounterChange) {
+          transaction.update(masterDocRef, { lastJobNumbers: nextCounters });
+          updatedLastJobNumbers = nextCounters;
+        }
+      });
+
+      if (updatedLastJobNumbers && targetDocId) {
+        syncCountersState(isAtMasterTarget, targetDocId, updatedLastJobNumbers);
       }
 
-      for (const [counterKey, maxNum] of Object.entries(maxJobNoMap)) {
-        let currentLast = 0;
-        if (activeAtMaster && activeAtMaster.lastJobNumbers) {
-           currentLast = activeAtMaster.lastJobNumbers[counterKey] || 0;
-        } else if (activeAgency && activeAgency.lastJobNumbers) {
-           currentLast = activeAgency.lastJobNumbers[counterKey] || 0;
-        }
-        
-        if (maxNum > currentLast) {
-          const diff = maxNum - currentLast;
-          await incrementJobNoCounter(counterKey, diff);
-        }
-      }
-
-      
-      await batch.commit();
       navigate('/');
     } catch (err) {
       setErrorMsg("Submission Error: " + (err instanceof Error ? err.stack : String(err)));
@@ -556,6 +657,23 @@ export default function NewJob() {
 
           {/* Transformer Details */}
           <div>
+             {commonData.repairType === 'GP' && (
+               <div className="mb-4 p-3.5 bg-amber-50/90 border border-amber-200 rounded-xl flex items-start gap-3">
+                 <Sparkles className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                 <div className="text-xs text-amber-900 flex-1">
+                   <span className="font-bold block text-amber-950 mb-0.5">GP (Guarantee Period) Auto-Fill Active:</span>
+                   Enter the original <strong>Job No</strong> or <strong>Serial No</strong> in any row (or click <strong>"Pick Past TR"</strong>) to automatically retrieve and fill KVA rating, Make, Serial Number, and Core Type from past records.
+                 </div>
+               </div>
+             )}
+
+             {autoFillNotice && (
+               <div className="mb-4 p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-medium rounded-lg flex items-center gap-2 animate-in fade-in">
+                 <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                 <span>{autoFillNotice}</span>
+               </div>
+             )}
+
              <div className="flex justify-between items-end mb-4 border-b border-slate-100 pb-2">
                 <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">Transformer Details</h3>
                 <div className="flex items-center space-x-2">
@@ -574,7 +692,22 @@ export default function NewJob() {
                     <div className="text-xs font-mono font-bold text-slate-400 mt-2 w-6">{index + 1}.</div>
                     <div className="grid grid-cols-2 md:grid-cols-5 gap-4 flex-1">
                       <div>
-                        {index === 0 && <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Job No.</label>}
+                        <div className="flex items-center justify-between mb-1">
+                          {index === 0 && <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Job No.</label>}
+                          {commonData.repairType === 'GP' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setShowPastPickerRowIndex(index);
+                                setPastSearchTerm('');
+                              }}
+                              className="text-[10px] font-bold text-amber-700 hover:text-amber-900 bg-amber-100/70 hover:bg-amber-200 px-1.5 py-0.5 rounded flex items-center gap-1 transition-colors"
+                              title="Pick previous transformer from database"
+                            >
+                              <History className="w-3 h-3" /> Pick Past TR
+                            </button>
+                          )}
+                        </div>
                         <div className="relative">
                           <input
                             required
@@ -586,6 +719,11 @@ export default function NewJob() {
                             placeholder="e.g. 21 IS-48"
                           />
                         </div>
+                        {t.autoFilledFrom && (
+                          <span className="text-[10px] text-emerald-600 font-medium block mt-0.5">
+                            Linked: #{t.autoFilledFrom}
+                          </span>
+                        )}
                       </div>
                       <div>
                          {index === 0 && <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">KVA</label>}
@@ -616,6 +754,7 @@ export default function NewJob() {
                           type="text"
                           value={t.serialNo}
                           onChange={(e) => handleTransformerChange(index, 'serialNo', e.target.value)}
+                          onBlur={() => handleSerialNoBlur(index, t.serialNo)}
                           className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50"
                           placeholder="e.g. 13602"
                         />
@@ -630,8 +769,8 @@ export default function NewJob() {
                           <option value="CRGO">CRGO</option>
                           <option value="Amorphous">Amorphous</option>
                           <option value="Wound Core">Wound Core</option>
-                          <option value="LSTC">LSTC</option>\n                          <option value="OH">OH (Overhauling)</option>
-                          
+                          <option value="LSTC">LSTC</option>
+                          <option value="OH">OH (Overhauling)</option>
                         </select>
                       </div>
                     </div>
@@ -649,6 +788,122 @@ export default function NewJob() {
                 ))}
              </div>
           </div>
+
+          {/* Past Transformer Quick-Select Modal for GP */}
+          {showPastPickerRowIndex !== null && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4">
+              <div className="bg-white rounded-2xl shadow-2xl max-w-2xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-150">
+                <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <History className="w-5 h-5 text-amber-400" />
+                    <div>
+                      <h3 className="font-bold text-sm">Select Previous Transformer for GP Row #{showPastPickerRowIndex + 1}</h3>
+                      <p className="text-[11px] text-slate-300">Click any past transformer to automatically populate KVA, Make, S.No, and Core Type</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPastPickerRowIndex(null)}
+                    className="p-1 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="p-4 border-b border-slate-100 bg-slate-50">
+                  <div className="relative">
+                    <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      value={pastSearchTerm}
+                      onChange={(e) => setPastSearchTerm(e.target.value)}
+                      placeholder="Search by Job No, Serial No, Make, or KVA..."
+                      className="w-full pl-9 pr-4 py-2 text-xs border border-slate-300 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:outline-hidden"
+                      autoFocus
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-y-auto p-4 space-y-2 flex-1">
+                  {pastJobsLoading ? (
+                    <div className="py-8 text-center text-slate-500 text-xs flex items-center justify-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin text-blue-600" /> Loading past transformer history...
+                    </div>
+                  ) : pastJobs.length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-xs">
+                      No historical transformer records found in this agency.
+                    </div>
+                  ) : (
+                    (() => {
+                      const filtered = pastJobs.filter(j => {
+                        if (!pastSearchTerm.trim()) return true;
+                        const term = pastSearchTerm.toLowerCase();
+                        return (
+                          (j.jobNo && j.jobNo.toLowerCase().includes(term)) ||
+                          (j.serialNo && j.serialNo.toLowerCase().includes(term)) ||
+                          (j.make && j.make.toLowerCase().includes(term)) ||
+                          (String(j.capacityKva).includes(term)) ||
+                          (j.mrNo && j.mrNo.toLowerCase().includes(term))
+                        );
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="py-8 text-center text-slate-400 text-xs">
+                            No matching past transformers found for "{pastSearchTerm}".
+                          </div>
+                        );
+                      }
+
+                      return filtered.map((pj) => (
+                        <div
+                          key={pj.id}
+                          onClick={() => applyPastJobToRow(showPastPickerRowIndex, pj)}
+                          className="p-3 bg-white hover:bg-amber-50/70 border border-slate-200 hover:border-amber-300 rounded-xl cursor-pointer transition-all flex items-center justify-between group shadow-2xs"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-xs text-slate-900 group-hover:text-amber-800">
+                                Job #{pj.jobNo || 'N/A'}
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-800 rounded-md font-bold">
+                                {pj.capacityKva} KVA
+                              </span>
+                              <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md">
+                                {pj.coreType || 'CRGO'}
+                              </span>
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${pj.repairType === 'GP' ? 'bg-amber-100 text-amber-800' : 'bg-slate-100 text-slate-600'}`}>
+                                {pj.repairType || 'OGP'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500">
+                              Make: <strong className="text-slate-700">{pj.make || '-'}</strong> &bull; S/N: <strong className="text-slate-700">{pj.serialNo || '-'}</strong> &bull; MR: {pj.mrNo || '-'} &bull; Status: {pj.status || 'Delivered'}
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="px-3 py-1.5 bg-amber-500 text-white font-bold text-xs rounded-lg group-hover:bg-amber-600 transition-colors shadow-2xs"
+                          >
+                            Auto-Fill
+                          </button>
+                        </div>
+                      ));
+                    })()
+                  )}
+                </div>
+
+                <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setShowPastPickerRowIndex(null)}
+                    className="px-4 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-lg transition-colors"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="pt-6 flex justify-end">
             <button

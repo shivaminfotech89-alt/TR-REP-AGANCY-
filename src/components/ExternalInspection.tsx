@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer } from 'lucide-react';
+import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { LetterheadHeader } from './LetterheadHeader';
@@ -33,6 +33,21 @@ export interface ExternalData {
   transType: string;
   inspectionId?: string; // added to track existing inspection ID
 }
+
+export const getStandardOilCapacity = (kva: number | string): number => {
+  const k = Number(kva) || 25;
+  if (k <= 10) return 140;
+  if (k <= 16) return 140;
+  if (k <= 25) return 184;
+  if (k <= 50) return 220;
+  if (k <= 63) return 240;
+  if (k <= 100) return 323;
+  if (k <= 160) return 410;
+  if (k <= 200) return 450;
+  if (k <= 315) return 620;
+  if (k <= 500) return 950;
+  return Math.round(k * 3.5);
+};
 
 export default function ExternalInspection() {
   const { activeAgency } = useAgency();
@@ -87,12 +102,22 @@ export default function ExternalInspection() {
     const initialForms: Record<string, ExternalData> = {};
     jobsForMr.forEach(j => {
       const existingInsp = allInspections.find(i => i.jobId === j.id);
+      const stdOil = getStandardOilCapacity(j.capacityKva);
+      const isGP = j.repairType === 'GP';
       
       if (existingInsp && existingInsp.data) {
+        const savedOil = existingInsp.data.oilCapLtrs !== undefined && existingInsp.data.oilCapLtrs !== null && String(existingInsp.data.oilCapLtrs) !== '0'
+          ? existingInsp.data.oilCapLtrs.toString()
+          : String(stdOil);
+        
+        const savedLessOil = existingInsp.data.lessOilLtrs !== undefined && existingInsp.data.lessOilLtrs !== null
+          ? existingInsp.data.lessOilLtrs.toString()
+          : '0';
+
         initialForms[j.id] = {
           kv: existingInsp.data.kv || '11',
-          oilCapLtrs: (existingInsp.data.oilCapLtrs || 0).toString(),
-          lessOilLtrs: (existingInsp.data.lessOilLtrs || 0).toString(),
+          oilCapLtrs: savedOil,
+          lessOilLtrs: savedLessOil,
           sealType: existingInsp.data.sealType || 'BL',
           gasket: existingInsp.data.gasket || '1',
           hvLvRod: existingInsp.data.hvLvRod || '7',
@@ -103,8 +128,8 @@ export default function ExternalInspection() {
           oilLevGls: existingInsp.data.oilLevGls || 'Y',
           outsidePaint: existingInsp.data.outsidePaint || 'Y',
           namePlate: existingInsp.data.namePlate || '-',
-          damCtTank: (existingInsp.data.damCtTank || '0').toString(),
-          damRadNo: (existingInsp.data.damRadNo || '0').toString(),
+          damCtTank: (existingInsp.data.damCtTank !== undefined ? existingInsp.data.damCtTank : '0').toString(),
+          damRadNo: (existingInsp.data.damRadNo !== undefined ? existingInsp.data.damRadNo : '0').toString(),
           hvSideHvb: existingInsp.data.hvSideHvb || '3',
           hvSideHvm: existingInsp.data.hvSideHvm || '3',
           hvSideHvCc: existingInsp.data.hvSideHvCc || '3',
@@ -115,10 +140,11 @@ export default function ExternalInspection() {
           inspectionId: existingInsp.id
         };
       } else {
+        // Auto-fill standard oil capacity (e.g., 25 KVA -> 184 L, 63 KVA -> 240 L, 100 KVA -> 323 L) which remains standard & identical across GP jobs
         initialForms[j.id] = {
           kv: '11',
-          oilCapLtrs: '',
-          lessOilLtrs: '',
+          oilCapLtrs: String(stdOil),
+          lessOilLtrs: '0',
           sealType: 'BL',
           gasket: '1',
           hvLvRod: '7',
@@ -541,6 +567,17 @@ export default function ExternalInspection() {
 
           </div>
 
+          {mrJobs.some(j => j.repairType === 'GP') && (
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded-lg text-amber-950 text-xs flex items-center justify-between shadow-2xs print:hidden">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>
+                  <strong>GP (Guarantee Period) Jobs Detected:</strong> Standard oil capacities (140L for ≤16KVA, 184L for 25KVA, 240L for 63KVA, 323L for 100KVA, etc.) and full oil level (0 Less Oil) have been automatically initialized.
+                </span>
+              </div>
+            </div>
+          )}
+
           <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm print:hidden">
             <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
             <span>Blank inspection reports are <strong>NOT acceptable</strong>. You must fill in Oil Capacity (Ltrs), Less Oil (Ltrs), Seal Type, and all inspection fields for every transformer before submitting.</span>
@@ -597,7 +634,16 @@ export default function ExternalInspection() {
                       return (
                       <tr key={job.id} className="hover:bg-slate-50 print:bg-transparent group">
                         <td className="p-1 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 z-10">{index + 1}</td>
-                        <td className="p-1 text-xs font-mono font-bold text-slate-900 print:text-black sticky left-8 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 min-w-[100px] z-10">{job.jobNo}</td>
+                        <td className="p-1 text-xs font-mono font-bold text-slate-900 print:text-black sticky left-8 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 min-w-[100px] z-10">
+                          <div className="flex items-center gap-1.5">
+                            <span>{job.jobNo}</span>
+                            {job.repairType === 'GP' && (
+                              <span className="text-[9px] px-1 py-0.2 bg-amber-100 text-amber-800 rounded font-bold border border-amber-300">
+                                GP
+                              </span>
+                            )}
+                          </div>
+                        </td>
                         <td className="p-1 text-[10px] text-slate-700 print:text-black min-w-[60px] truncate max-w-[80px]" title={job.make}>{job.make}</td>
                         <td className="p-1 text-[10px] text-slate-700 print:text-black font-mono">{job.capacityKva}</td>
                         
