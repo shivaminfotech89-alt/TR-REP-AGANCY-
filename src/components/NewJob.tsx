@@ -505,7 +505,7 @@ export default function NewJob() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Date of Issue</label>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">MR Receive</label>
                 <input
                   required
                   type="date"

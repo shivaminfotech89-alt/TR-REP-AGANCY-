@@ -40,8 +40,10 @@ export function LetterheadHeader({ agency, documentTitle, subtitle, className = 
       <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-[11px] font-bold text-black mt-2">
         {agency?.gstin && <span>GSTIN: {agency.gstin}</span>}
         {agency?.pan && <span>PAN: {agency.pan}</span>}
+        {agency?.agencyState && <span>State: {agency.agencyState}{agency.agencyStateCode ? ` (${agency.agencyStateCode})` : ''}</span>}
         {agency?.phone && <span>Phone: {agency.phone}</span>}
         {agency?.email && <span>Email: {agency.email}</span>}
+        {agency?.msmeNo && <span>MSME: {agency.msmeNo}</span>}
       </div>
       {documentTitle && (
         <div className="mt-3 inline-block bg-black text-white px-6 py-1 rounded-full text-xs font-bold tracking-widest uppercase print:bg-black print:text-white">

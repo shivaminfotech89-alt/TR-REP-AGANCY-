@@ -68,28 +68,94 @@ export default function Dashboard() {
           <h2 className="text-xl font-bold text-slate-800 mb-2">Welcome to {activeAgency?.name || 'TR Rep Agency'}</h2>
           <p className="text-sm text-slate-600 mb-6">Manage your repair jobs, track material receipts, and generate reports.</p>
           
-          <div className="grid grid-cols-1 sm:grid-cols-5 gap-4">
-            <Link to="/mr-ledger" className="block p-4 border border-blue-200 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors group">
-              <h3 className="font-bold text-blue-800 text-sm mb-1 group-hover:underline">MR Ledger</h3>
-              <p className="text-xs text-blue-600">View and search Material Receipts (MR)</p>
-            </Link>
-            
-            <Link to="/new-job" className="block p-4 border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors group">
-              <h3 className="font-bold text-emerald-800 text-sm mb-1 group-hover:underline">Intake (New MR)</h3>
-              <p className="text-xs text-emerald-600">Register incoming transformers</p>
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            <Link to="/new-job" className="p-3.5 border border-emerald-200 bg-emerald-50/80 hover:bg-emerald-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-200/60 px-1.5 py-0.5 rounded">INTAKE</span>
+                <h3 className="font-bold text-emerald-900 text-xs mt-1.5 group-hover:underline">MR Entry</h3>
+                <p className="text-[11px] text-emerald-700 mt-0.5 leading-tight">Intake damaged TRs</p>
+              </div>
             </Link>
 
-            <Link to="/estimates/new" className="block p-4 border border-amber-200 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors group">
-              <h3 className="font-bold text-amber-800 text-sm mb-1 group-hover:underline">Generate Estimate</h3>
-              <p className="text-xs text-amber-600">Create repair cost estimates</p>
+            <Link to="/mr-ledger" className="p-3.5 border border-slate-300 bg-white hover:bg-slate-50 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">REGISTER</span>
+                <h3 className="font-bold text-slate-800 text-xs mt-1.5 group-hover:underline">MR Register</h3>
+                <p className="text-[11px] text-slate-500 mt-0.5 leading-tight">Search & filter intake logs</p>
+              </div>
             </Link>
-            <Link to="/challan/new" className="block p-4 border border-purple-200 bg-purple-50 hover:bg-purple-100 rounded-lg transition-colors group">
-              <h3 className="font-bold text-purple-800 text-sm mb-1 group-hover:underline">Delivery Challan</h3>
-              <p className="text-xs text-purple-600">Dispatch tested transformers</p>
+
+            <Link to="/external-inspection" className="p-3.5 border border-cyan-200 bg-cyan-50/80 hover:bg-cyan-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-cyan-700 bg-cyan-200/60 px-1.5 py-0.5 rounded">INSPECTION</span>
+                <h3 className="font-bold text-cyan-900 text-xs mt-1.5 group-hover:underline">External Insp.</h3>
+                <p className="text-[11px] text-cyan-700 mt-0.5 leading-tight">Physical accessories & oil</p>
+              </div>
             </Link>
-            <Link to="/reports" className="block p-4 border border-rose-200 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors group">
-              <h3 className="font-bold text-rose-800 text-sm mb-1 group-hover:underline">Reports & Excel</h3>
-              <p className="text-xs text-rose-600">Export Div-wise testing/delivery</p>
+
+            <Link to="/internal-inspection" className="p-3.5 border border-indigo-200 bg-indigo-50/80 hover:bg-indigo-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-200/60 px-1.5 py-0.5 rounded">CORE & WINDING</span>
+                <h3 className="font-bold text-indigo-900 text-xs mt-1.5 group-hover:underline">Internal Insp.</h3>
+                <p className="text-[11px] text-indigo-700 mt-0.5 leading-tight">HT/LT winding, core & limbs</p>
+              </div>
+            </Link>
+
+            <Link to="/testing-report" className="p-3.5 border border-teal-200 bg-teal-50/80 hover:bg-teal-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-teal-700 bg-teal-200/60 px-1.5 py-0.5 rounded">TESTING</span>
+                <h3 className="font-bold text-teal-900 text-xs mt-1.5 group-hover:underline">Testing Report</h3>
+                <p className="text-[11px] text-teal-700 mt-0.5 leading-tight">Losses, IR, ratio & megger</p>
+              </div>
+            </Link>
+
+            <Link to="/estimates/new" className="p-3.5 border border-amber-200 bg-amber-50/80 hover:bg-amber-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-amber-700 bg-amber-200/60 px-1.5 py-0.5 rounded">ESTIMATE</span>
+                <h3 className="font-bold text-amber-900 text-xs mt-1.5 group-hover:underline">Estimate Gen.</h3>
+                <p className="text-[11px] text-amber-700 mt-0.5 leading-tight">AT rates & forward letter</p>
+              </div>
+            </Link>
+
+            <Link to="/challan/new" className="p-3.5 border border-purple-200 bg-purple-50/80 hover:bg-purple-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-purple-700 bg-purple-200/60 px-1.5 py-0.5 rounded">DISPATCH</span>
+                <h3 className="font-bold text-purple-900 text-xs mt-1.5 group-hover:underline">Delivery Challan</h3>
+                <p className="text-[11px] text-purple-700 mt-0.5 leading-tight">Dispatch tested TRs</p>
+              </div>
+            </Link>
+
+            <Link to="/bills/new" className="p-3.5 border border-blue-200 bg-blue-50/80 hover:bg-blue-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-blue-700 bg-blue-200/60 px-1.5 py-0.5 rounded">BILLING</span>
+                <h3 className="font-bold text-blue-900 text-xs mt-1.5 group-hover:underline">Billing System</h3>
+                <p className="text-[11px] text-blue-700 mt-0.5 leading-tight">GST Invoices & covering</p>
+              </div>
+            </Link>
+
+            {/* Oil Account placed right after Billing System */}
+            <Link to="/oil-inward" className="p-3.5 border border-sky-200 bg-sky-50/80 hover:bg-sky-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-sky-700 bg-sky-200/60 px-1.5 py-0.5 rounded">OIL LEDGER</span>
+                <h3 className="font-bold text-sky-900 text-xs mt-1.5 group-hover:underline">Oil Account</h3>
+                <p className="text-[11px] text-sky-700 mt-0.5 leading-tight">Inward oil & 5% filtration</p>
+              </div>
+            </Link>
+
+            <Link to="/reports" className="p-3.5 border border-rose-200 bg-rose-50/80 hover:bg-rose-100/90 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-rose-700 bg-rose-200/60 px-1.5 py-0.5 rounded">HUB</span>
+                <h3 className="font-bold text-rose-900 text-xs mt-1.5 group-hover:underline">Report Hub</h3>
+                <p className="text-[11px] text-rose-700 mt-0.5 leading-tight">Monthly DISCOM analytics</p>
+              </div>
+            </Link>
+
+            <Link to="/estimate-master" className="p-3.5 border border-slate-300 bg-slate-100/90 hover:bg-slate-200 rounded-xl transition-all group shadow-xs flex flex-col justify-between">
+              <div>
+                <span className="text-[10px] font-bold text-slate-700 bg-slate-300/70 px-1.5 py-0.5 rounded">MASTER</span>
+                <h3 className="font-bold text-slate-900 text-xs mt-1.5 group-hover:underline">Estimate Master</h3>
+                <p className="text-[11px] text-slate-600 mt-0.5 leading-tight">KVA rates & item schedule</p>
+              </div>
             </Link>
           </div>
         </div>

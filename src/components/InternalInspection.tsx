@@ -5,6 +5,8 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { formatDDMMYYYY } from '../lib/utils';
+import { LetterheadHeader } from './LetterheadHeader';
 
 export interface InternalData {
   windingType: string;
@@ -175,8 +177,9 @@ export default function InternalInspection() {
   
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
+    const mrDateStr = formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt);
     const wsData = [
-      ['MR Number', selectedMrNo],
+      ['MR Number', selectedMrNo, 'MR Date', mrDateStr],
       [],
       [
         '#', 'JOB NO', 'KVA', 'WIND', 'H.V. Coil Limb', 'No. Of Dam. H.V Coil R', 'No. Of Dam. H.V Coil Y', 'No. Of Dam. H.V Coil B', 'Tot. Coil (ht)', 'Wt. of Coil (Kg.) (ht)', 'TOT. Wt. (ht)', 'L.V. COIL DMG. OR RI. R', 'L.V. COIL DMG. OR RI. Y', 'L.V. COIL DMG. OR RI. B', 'WT. OF Coil (Kg.) LT', 'TOT. Wt. (LT)', 'Wasring', 'In. Pnt', 'Tst Trn', 'Dc', 'Insula', 'Job Type'
@@ -467,16 +470,22 @@ export default function InternalInspection() {
               <table className="w-full text-left text-sm text-slate-600">
                 <thead className="bg-slate-100/50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">MR Number</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">MR Number & Date</th>
                     <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Total Jobs</th>
                     <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Job Nos</th>
                     <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Action</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
-                  {filteredMrNos.map(mr => (
+                  {filteredMrNos.map(mr => {
+                    const sampleJob = mrGroups[mr][0];
+                    const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
+                    return (
                     <tr key={mr} className="hover:bg-slate-50 print:bg-transparent transition-colors">
-                      <td className="px-4 py-3 whitespace-nowrap font-mono font-bold text-slate-900 print:text-black">{mr}</td>
+                      <td className="px-4 py-3 whitespace-nowrap">
+                        <div className="font-mono font-bold text-slate-900 print:text-black">{mr}</div>
+                        <div className="text-xs text-slate-500">Date: <span className="font-mono text-slate-700 font-medium">({mrDateStr})</span></div>
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap text-slate-500">{mrGroups[mr].length} Jobs</td>
                       <td className="px-4 py-3 text-xs text-slate-500 max-w-xs truncate" title={mrGroups[mr].map(j => j.jobNo).join(', ')}>
                         {mrGroups[mr].map(j => j.jobNo).join(', ')}
@@ -490,7 +499,8 @@ export default function InternalInspection() {
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                   {filteredMrNos.length === 0 && (
                     <tr>
                       <td colSpan={4} className="px-4 py-8 text-center text-slate-500">No {statusFilter.toLowerCase()} MR numbers found.</td>
@@ -506,7 +516,12 @@ export default function InternalInspection() {
           <div className="bg-slate-900 border border-slate-800 p-4 rounded flex justify-between items-center text-white print:hidden">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Inspecting MR</p>
-              <p className="text-xl font-mono font-bold">{selectedMrNo}</p>
+              <div className="flex items-center gap-3">
+                <p className="text-xl font-mono font-bold">{selectedMrNo}</p>
+                <span className="text-xs bg-slate-800 text-blue-300 font-mono px-2.5 py-1 rounded border border-slate-700">
+                  MR Date: <strong className="text-white">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong>
+                </span>
+              </div>
               <p className="text-xs text-slate-300 mt-1">{mrJobs.length} Transformers in this MR</p>
             </div>
             
@@ -541,6 +556,15 @@ export default function InternalInspection() {
           </div>
 
           <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
+            <div className="hidden print:block mb-3">
+              <LetterheadHeader agency={activeAgency} documentTitle="INTERNAL INSPECTION REPORT" />
+              <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1.5 mb-2">
+                <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
+                <span>MR DATE: <strong className="font-mono">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong></span>
+                <span>DIVISION: <strong className="uppercase">{mrJobs[0]?.division || '-'}</strong></span>
+                <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
+              </div>
+            </div>
             <form onSubmit={handleSubmit}>
               <div className="min-w-max">
                 <table className="w-full text-left print:text-black print:text-[8px]">

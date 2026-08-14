@@ -6,11 +6,15 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { formatDDMMYYYY } from '../lib/utils';
 
 interface Job {
   id: string;
   jobNo: string;
   mrNo: string;
+  dateOfIssue?: string;
+  mrDate?: string;
+  createdAt?: string;
   capacityKva: number;
   make: string;
   repairType: string;
@@ -256,7 +260,7 @@ export default function TestingReport() {
     wsData.push([]);
 
     wsData.push([
-      'S.N.', 'Job No', 'MR No', 'KVA', 'Make', 'Repair Type',
+      'S.N.', 'Job No', 'MR No', 'MR Date', 'KVA', 'Make', 'Repair Type',
       'No Load Volts', 'Excit Curr', 'No Load Loss', 'Full Load Curr',
       'Imp Volts', 'Load Loss', 'Neut Curr', 'HV Test', 'DVDF Test',
       'Insulation Res', 'Oil BDV', 'Ratio Test', '% Impedance', 'Remarks'
@@ -264,10 +268,12 @@ export default function TestingReport() {
 
     jobsToExport.forEach((job, idx) => {
       const data = job.testingDetails || defaultTestingData;
+      const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
       wsData.push([
         idx + 1,
         job.jobNo,
         job.mrNo,
+        mrDateStr,
         job.capacityKva,
         job.make,
         job.repairType || '-',
@@ -377,7 +383,10 @@ export default function TestingReport() {
                   <tr key={job.id} className="border border-black h-8">
                     <td className="border border-black p-1 font-bold">{idx + 1}</td>
                     <td className="border border-black p-1 font-bold uppercase">{job.division || '-'}</td>
-                    <td className="border border-black p-1 font-bold uppercase">{job.jobNo}</td>
+                    <td className="border border-black p-1 font-bold uppercase">
+                      <div>{job.jobNo}</div>
+                      <div className="text-[7px] font-mono font-normal text-slate-700">MR: {job.mrNo || '-'} ({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</div>
+                    </td>
                     <td className="border border-black p-1 font-bold">{job.capacityKva}</td>
                     <td className="border border-black p-1 font-bold uppercase">{job.repairType || 'GP'}</td>
                     
@@ -552,7 +561,10 @@ export default function TestingReport() {
                     </td>
                     <td className="px-4 py-3 text-slate-500">
                       <div>{job.make}</div>
-                      <div className="text-xs">MR: {job.mrNo}</div>
+                      <div className="text-xs">
+                        MR: <span className="font-mono text-slate-700 font-medium">{job.mrNo}</span>{' '}
+                        <span className="text-slate-500 font-mono">({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</span>
+                      </div>
                     </td>
                     {tab === 'Completed' && (
                       <td className="px-4 py-3 text-slate-600 font-mono text-xs">
@@ -628,7 +640,13 @@ export default function TestingReport() {
               return (
                 <div key={jobId} className="bg-white p-5 rounded shadow-sm border border-slate-200">
                   <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
-                    <h3 className="font-mono font-bold text-slate-900 text-lg">{job.jobNo}</h3>
+                    <div>
+                      <h3 className="font-mono font-bold text-slate-900 text-lg">{job.jobNo}</h3>
+                      <p className="text-xs text-slate-500 font-mono">
+                        MR: <span className="text-slate-700 font-semibold">{job.mrNo}</span>{' '}
+                        <span>({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</span>
+                      </p>
+                    </div>
                     <div className="text-right">
                       <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-widest rounded mr-2">{job.capacityKva} KVA</span>
                       <span className="text-xs text-slate-500">{job.make}</span>

@@ -1,13 +1,15 @@
 import { AtSettings } from './AtSettings';
 import React, { useState, useRef } from 'react';
 import { useAgency } from '../lib/AgencyContext';
+import { useTheme } from '../lib/ThemeContext';
 import EditAgencyForm from "./EditAgencyForm";
-import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap } from 'lucide-react';
+import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, Palette, Check, Sparkles } from 'lucide-react';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 
 export default function AgencySettings() {
   const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading } = useAgency();
+  const { currentTheme, themeId, setThemeId, availableThemes } = useTheme();
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAgencyName, setNewAgencyName] = useState('');
   
@@ -135,6 +137,21 @@ export default function AgencySettings() {
       await addAgency({
         name: newAgencyName,
         letterheadUrl: letterheadBase64,
+        agencyState: 'Gujarat',
+        agencyStateCode: '24',
+        discomName: 'Uttar Gujarat Vij Company Ltd.',
+        discomGstin: '24AAACU6551F1ZI',
+        discomPan: 'AAACU6551F',
+        discomAddress: 'Registered Office: Sardar Patel Vidyut Bhavan, Race Course, Vadodara - 390007',
+        discomState: 'Gujarat',
+        discomStateCode: '24',
+        serviceSacCode: '998719',
+        circleOfficeName: 'SABARMATI',
+        circleAuthority: 'Superintending Engineer (O & M)',
+        divisionAuthority: 'The Executive Engineer',
+        estimateCcTemplate: 'E. E. (O & M) DIVISION - {division}',
+        forwardingSubject: 'Submiting Inspection Report & Estimate of Transformer',
+        gpValidationMonths: 18,
         prefixes,
         lastJobNumbers,
         allotments,
@@ -173,6 +190,73 @@ export default function AgencySettings() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {/* Visual Theme Customizer Card */}
+      <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-lg shadow-xs">
+              <Sparkles className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Next-Gen Themes & Appearance</h2>
+              <p className="text-xs text-slate-500">Personalize color theme, cyber accents, and workspace canvas</p>
+            </div>
+          </div>
+          <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1.5">
+            <span 
+              className="w-2.5 h-2.5 rounded-full border border-slate-300 shadow-2xs" 
+              style={{ backgroundColor: currentTheme.previewColors.accent }}
+            />
+            {currentTheme.name}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-4">
+          {availableThemes.map(t => {
+            const isSelected = t.id === themeId;
+            return (
+              <div
+                key={t.id}
+                onClick={() => setThemeId(t.id)}
+                className={`p-3 rounded-lg border-2 cursor-pointer transition-all flex items-center justify-between ${
+                  isSelected 
+                    ? 'border-blue-600 bg-blue-50/50 shadow-xs ring-1 ring-blue-600/30' 
+                    : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white'
+                }`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <div className="flex items-center -space-x-1 shadow-2xs rounded overflow-hidden border border-slate-300 shrink-0 p-0.5 bg-white">
+                    <span className="w-4 h-5 rounded-l-xs" style={{ backgroundColor: t.previewColors.sidebar }} />
+                    <span className="w-3 h-5" style={{ backgroundColor: t.previewColors.accent }} />
+                    <span className="w-3 h-5 rounded-r-xs border-l border-slate-200" style={{ backgroundColor: t.previewColors.canvas }} />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="block text-xs font-bold text-slate-900 truncate">{t.name}</span>
+                      {t.tag && (
+                        <span 
+                          className="text-[8px] font-black px-1 py-0.2 rounded uppercase"
+                          style={{
+                            backgroundColor: `${t.previewColors.accent}20`,
+                            color: t.previewColors.accent
+                          }}
+                        >
+                          {t.tag}
+                        </span>
+                      )}
+                    </div>
+                    <span className="block text-[10px] text-slate-500 truncate">{t.category}</span>
+                  </div>
+                </div>
+                {isSelected && (
+                  <Check className="w-4 h-4 text-blue-600 stroke-[3] shrink-0 ml-1" />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
       <div className="bg-white p-6 rounded shadow-sm border border-slate-200">
         <h2 className="text-lg font-bold text-slate-900 mb-4">Switch Agency</h2>
         {agencies.length === 0 ? (

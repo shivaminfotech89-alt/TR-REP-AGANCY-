@@ -3,6 +3,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { auth } from './lib/firebase';
 import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { AgencyProvider } from './lib/AgencyContext';
+import { ThemeProvider } from './lib/ThemeContext';
 import { Loader2 } from 'lucide-react';
 import AppLayout from './components/AppLayout';
 import appLogo from './assets/images/transformer_app_logo_1786648240128.jpg';
@@ -90,11 +91,13 @@ export default function App() {
   }
 
   return (
-    <AgencyProvider>
-      <BrowserRouter>
-        <AppLayout user={user} />
-      </BrowserRouter>
-    </AgencyProvider>
+    <ThemeProvider>
+      <AgencyProvider>
+        <BrowserRouter>
+          <AppLayout user={user} />
+        </BrowserRouter>
+      </AgencyProvider>
+    </ThemeProvider>
   );
 }
 

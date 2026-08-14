@@ -11,6 +11,39 @@ export interface Agency {
   lastJobNumbers: Record<string, number>;
   allotments?: Record<string, Record<string, number>>;
   gpValidationMonths?: number;
+  
+  // Agency / Supplier Profile (Tax & Identity)
+  address?: string;
+  agencyState?: string; // e.g. "Gujarat"
+  agencyStateCode?: string; // e.g. "24"
+  gstin?: string; // e.g. "24ABCDE1234F1Z5"
+  pan?: string; // e.g. "ABCDE1234F"
+  phone?: string;
+  email?: string;
+  msmeNo?: string; // e.g. "UDYAM-GJ-01-XXXXXXX"
+
+  // Bank & Payment Details
+  bankName?: string;
+  bankBranch?: string;
+  accountNumber?: string;
+  ifscCode?: string;
+
+  // DISCOM / Client (Buyer) & Tax Details
+  discomName?: string; // e.g. "Uttar Gujarat Vij Company Ltd."
+  discomGstin?: string; // e.g. "24AAACU6551F1ZI"
+  discomPan?: string; // e.g. "AAACU6551F"
+  discomAddress?: string; // e.g. "Registered Office: Sardar Patel Vidyut Bhavan, Race Course, Vadodara - 390007"
+  discomState?: string; // e.g. "Gujarat"
+  discomStateCode?: string; // e.g. "24"
+  serviceSacCode?: string; // e.g. "998719"
+
+  // Authority & Document Routing
+  circleOfficeName?: string; // e.g. "SABARMATI"
+  circleAuthority?: string; // e.g. "Superintending Engineer (O & M)"
+  divisionAuthority?: string; // e.g. "The Executive Engineer"
+  estimateCcTemplate?: string; // e.g. "E. E. (O & M) DIVISION - {division}"
+  billCcTemplate?: string;
+
   forwardingToText?: string;
   forwardingSubject?: string;
   forwardingCcText?: string;
@@ -18,14 +51,31 @@ export interface Agency {
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
   estimateMasterWoundCore?: EstimateItem[];
-  address?: string;
-  gstin?: string;
-  pan?: string;
-  bankName?: string;
-  accountNumber?: string;
-  ifscCode?: string;
-  email?: string;
-  phone?: string;
+}
+
+export function getEstimateCircleRecipient(agency?: Agency | null, circleOrDivision?: string): string {
+  const authority = agency?.circleAuthority || 'Superintending Engineer (O & M)';
+  const company = agency?.discomName || 'Uttar Gujarat Vij Company Ltd.';
+  const circle = agency?.circleOfficeName || circleOrDivision || 'SABARMATI';
+  return `TO, ${authority},\n${company}\nCircle Office : ${circle}`;
+}
+
+export function getEstimateCcText(agency?: Agency | null, division?: string): string {
+  const div = division || agency?.circleOfficeName || 'SABARMATI';
+  if (agency?.estimateCcTemplate && agency.estimateCcTemplate.trim()) {
+    return agency.estimateCcTemplate.replace(/{division}/gi, div).replace(/{circle}/gi, agency.circleOfficeName || div);
+  }
+  if (agency?.forwardingCcText && agency.forwardingCcText.trim()) {
+    return agency.forwardingCcText.replace(/{division}/gi, div);
+  }
+  return `E. E. (O & M) DIVISION - ${div}`;
+}
+
+export function getBillDivisionRecipient(agency?: Agency | null, division?: string): string {
+  const div = division || agency?.circleOfficeName || 'SABARMATI';
+  const authority = agency?.divisionAuthority || 'The Executive Engineer ,';
+  const company = agency?.discomName || 'Uttar Gujarat Vij Company Ltd.';
+  return `To\n${authority}\n${company}\nDivision Office : ${div}`;
 }
 
 export interface AllotmentRecord {
@@ -131,6 +181,12 @@ interface AgencyContextType {
   loading: boolean;
   addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<void>;
   updateAgency: (id: string, agencyData: Partial<Agency>) => Promise<void>;
+  updateAllAgenciesEstimateMaster: (payload: {
+    estimateMasterCRGO?: EstimateItem[];
+    estimateMasterAmorphous?: EstimateItem[];
+    estimateMasterWoundCore?: EstimateItem[];
+    estimateMaster?: EstimateItem[];
+  }) => Promise<void>;
   
   atMasters: AtMaster[];
   activeAtMaster: AtMaster | null;
@@ -220,9 +276,25 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     if (!auth.currentUser) return;
     try {
       const newRef = doc(collection(db, 'agencies'));
-      const newAgency = { ...agencyData, ownerId: auth.currentUser.uid };
+      // Inherit estimate master from active agency or existing agencies if not provided
+      const existingWithCRGO = agencies.find(a => a.estimateMasterCRGO && a.estimateMasterCRGO.length > 0);
+      const existingWithAm = agencies.find(a => a.estimateMasterAmorphous && a.estimateMasterAmorphous.length > 0);
+      const existingWithWC = agencies.find(a => a.estimateMasterWoundCore && a.estimateMasterWoundCore.length > 0);
+
+      const defaultCRGO = activeAgency?.estimateMasterCRGO || existingWithCRGO?.estimateMasterCRGO || activeAgency?.estimateMaster || defaultEstimateData;
+      const defaultAmorphous = activeAgency?.estimateMasterAmorphous || existingWithAm?.estimateMasterAmorphous || defaultAmorphousEstimateData;
+      const defaultWoundCore = activeAgency?.estimateMasterWoundCore || existingWithWC?.estimateMasterWoundCore || defaultEstimateData;
+
+      const newAgency = { 
+        estimateMasterCRGO: defaultCRGO,
+        estimateMaster: defaultCRGO,
+        estimateMasterAmorphous: defaultAmorphous,
+        estimateMasterWoundCore: defaultWoundCore,
+        ...agencyData, 
+        ownerId: auth.currentUser.uid 
+      };
       await setDoc(newRef, newAgency);
-      setAgencies(prev => [...prev, { id: newRef.id, ...agencyData }]);
+      setAgencies(prev => [...prev, { id: newRef.id, ...newAgency }]);
       if (!activeAgencyId) setActiveAgencyId(newRef.id);
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'agencies');
@@ -235,6 +307,30 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       const ref = doc(db, 'agencies', id);
       await updateDoc(ref, agencyData);
       setAgencies(prev => prev.map(a => a.id === id ? { ...a, ...agencyData } : a));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'agencies');
+      throw err;
+    }
+  };
+
+  const updateAllAgenciesEstimateMaster = async (payload: {
+    estimateMasterCRGO?: EstimateItem[];
+    estimateMasterAmorphous?: EstimateItem[];
+    estimateMasterWoundCore?: EstimateItem[];
+    estimateMaster?: EstimateItem[];
+  }) => {
+    if (!auth.currentUser || agencies.length === 0) return;
+    try {
+      const updatePromises = agencies.map(async (agency) => {
+        const ref = doc(db, 'agencies', agency.id);
+        await updateDoc(ref, payload);
+      });
+      await Promise.all(updatePromises);
+
+      setAgencies(prev => prev.map(a => ({
+        ...a,
+        ...payload
+      })));
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, 'agencies');
       throw err;
@@ -329,7 +425,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     <AgencyContext.Provider value={{
       agencies, activeAgency, setActiveAgencyId,
       atMasters, activeAtMaster, setActiveAtMasterId,
-      loading, addAgency, updateAgency, addAtMaster, updateAtMaster,
+      loading, addAgency, updateAgency, updateAllAgenciesEstimateMaster, addAtMaster, updateAtMaster,
       getNextJobNoInfo, incrementJobNoCounter
     }}>
       {children}

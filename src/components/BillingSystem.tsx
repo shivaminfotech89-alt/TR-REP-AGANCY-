@@ -1,11 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency, getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save } from 'lucide-react';
+import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save, Edit3, Check } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData } from '../lib/estimateData';
 import { LetterheadHeader } from './LetterheadHeader';
+import { downloadHtmlAsWord } from '../lib/wordExport';
 
 // Helper to convert number to Indian Rupees in words
 export function numberToIndianWords(num: number): string {
@@ -35,7 +36,7 @@ export function numberToIndianWords(num: number): string {
 }
 
 export default function BillingSystem() {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, updateAgency } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
@@ -56,6 +57,16 @@ export default function BillingSystem() {
   const [apprNo, setApprNo] = useState('');
   const [apprDate, setApprDate] = useState('');
   const [divisionGstin, setDivisionGstin] = useState('');
+  const [divisionPan, setDivisionPan] = useState('');
+  const [serviceSacCode, setServiceSacCode] = useState('998719');
+
+  // Customizable Forwarding & Letter Content
+  const [forwardingTo, setForwardingTo] = useState('');
+  const [forwardingSub, setForwardingSub] = useState('');
+  const [forwardingCc, setForwardingCc] = useState('');
+  const [certMonthsText, setCertMonthsText] = useState('Twelve/Eighteen');
+  const [showEditLetterModal, setShowEditLetterModal] = useState(false);
+  const [saveAsDefaultAgency, setSaveAsDefaultAgency] = useState(false);
 
   // Modal State for Pending Delivery Alert
   const [pendingAlertModal, setPendingAlertModal] = useState<{
@@ -189,17 +200,30 @@ export default function BillingSystem() {
     return billDate;
   }, [selectedMrNo, jobs, oilTransactions, billDate]);
 
+  // Sync letter fields whenever activeAgency or currentDivision changes
+  useEffect(() => {
+    if (activeAgency) {
+      setForwardingTo(getBillDivisionRecipient(activeAgency, currentDivision));
+      setForwardingSub('Submission of Bill for Payment');
+      setForwardingCc(activeAgency.billCcTemplate || '');
+    }
+  }, [activeAgency, currentDivision]);
+
   // Set default bill metadata when an MR is picked
   const handleSelectMr = (mr: string) => {
     setSelectedMrNo(mr);
     const mrJobs = jobs.filter(j => j.mrNo === mr);
+    const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
     const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052';
     
     setBillNo(`HE/T-${String(Math.floor(Math.random() * 90 + 10))}/26-27`);
     setBillDate(new Date().toISOString().split('T')[0]);
     setApprNo(orderNum);
     setApprDate('02.03.2026');
-    setDivisionGstin('24AAACU6551F1ZI');
+    setDivisionGstin(activeAgency?.discomGstin || '24AAACU6551F1ZI');
+    setDivisionPan(activeAgency?.discomPan || 'AAACU6551F');
+    setServiceSacCode(activeAgency?.serviceSacCode || '998719');
+    setForwardingTo(getBillDivisionRecipient(activeAgency, div));
   };
 
   const handleGenerateClick = (mr: string) => {
@@ -553,68 +577,67 @@ export default function BillingSystem() {
       {!selectedMrNo ? (
         <div className="space-y-6 print:hidden">
           {/* Header Banner */}
-          <div className="bg-white p-6 rounded shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-xs border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">Billing System</h1>
-              <p className="text-sm text-slate-500">Generate Bills & Tax Invoices for Delivered Transformers (MR-Wise)</p>
+              <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">Billing System</h1>
+              <p className="text-xs sm:text-sm text-slate-500">Generate Official Tax Invoices & Covering Letters for Delivered Transformers (MR-Wise)</p>
             </div>
             
-            <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-lg">
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
               <button
                 onClick={() => setBillTypeFilter('repairable')}
-                className={`px-4 py-1.5 rounded-md text-xs font-bold uppercase transition-colors ${
-                  billTypeFilter === 'repairable' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                  billTypeFilter === 'repairable' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
                 Repairable Delivered
               </button>
               <button
                 onClick={() => setBillTypeFilter('scrap')}
-                className={`px-4 py-1.5 rounded-md text-xs font-bold uppercase transition-colors ${
-                  billTypeFilter === 'scrap' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'
+                className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                  billTypeFilter === 'scrap' ? 'bg-white text-red-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                Scrap Committee Bills
+                Scrap Committee
               </button>
             </div>
           </div>
 
           {/* Explanation Banner for Pending Delivery */}
-          <div className="p-4 bg-blue-50/90 border border-blue-200 rounded-lg text-blue-950 text-xs flex items-start gap-3 shadow-sm">
+          <div className="p-3.5 sm:p-4 bg-blue-50/90 border border-blue-200 rounded-xl text-blue-950 text-xs flex items-start gap-3 shadow-xs">
             <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
             <div className="space-y-1">
-              <p className="font-bold text-sm text-blue-900">💡 Why do jobs show as "Pending" in Billing System?</p>
-              <p className="text-blue-800 leading-relaxed">
+              <p className="font-bold text-xs sm:text-sm text-blue-900">💡 Why do jobs show as "Pending" in Billing System?</p>
+              <p className="text-blue-800 leading-relaxed text-[11px] sm:text-xs">
                 Tax Invoices & Bills are <strong>ONLY</strong> generated for transformers that have been <strong>delivered/dispatched</strong> back to the division via a <strong>Delivery Challan</strong> (Status: <span className="font-bold text-emerald-800 bg-emerald-100 px-1 rounded">Dispatched</span>).
-                If a job has finished Inspection & Testing, its current status is <span className="font-bold text-blue-800 bg-blue-100 px-1 rounded">Tested - Ready for Dispatch</span>.
-                You must go to the <strong>Delivery Challans</strong> tab to dispatch the job first before generating its bill.
+                If a job has finished Inspection & Testing, dispatch it in the <strong>Delivery Challan</strong> tab first before generating its bill.
               </p>
             </div>
           </div>
 
           {/* Search & Filter Toolbar */}
-          <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
-            <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-center gap-4">
-              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest flex items-center gap-2">
-                <FileText className="w-4 h-4 text-blue-600" />
-                Select Delivered MR to Generate Bill
+          <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+            <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+              <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                <span>Select Delivered MR to Generate Bill</span>
               </h2>
-              <div className="flex flex-wrap gap-3 items-center w-full md:w-auto">
+              <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
                 <div className="relative flex-1 md:w-56">
-                  <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                   <input
                     type="text"
                     placeholder="Search MR No..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 pr-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white"
+                    className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
                   />
                 </div>
-                <div className="w-full sm:w-auto">
+                <div className="w-full sm:w-48">
                   <select
                     value={selectedDivision}
                     onChange={(e) => setSelectedDivision(e.target.value)}
-                    className="py-2 px-3 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium"
+                    className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
                   >
                     <option value="All">All Divisions</option>
                     {divisions.map(div => (
@@ -627,7 +650,7 @@ export default function BillingSystem() {
 
             {/* Delivered MR Table */}
             <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
+              <table className="w-full text-left text-sm min-w-[620px]">
                 <thead className="bg-slate-50 border-b border-slate-200">
                   <tr>
                     <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR No</th>
@@ -635,13 +658,13 @@ export default function BillingSystem() {
                     <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Delivered Jobs</th>
                     <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Challan Info</th>
                     <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Status</th>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Action</th>
+                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredMrNos.length === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-slate-500">
+                      <td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
                         No delivered jobs found for this filter. Please dispatch jobs from <strong>Delivery Challans</strong> first.
                       </td>
                     </tr>
@@ -666,15 +689,15 @@ export default function BillingSystem() {
                       const dates = Array.from(new Set(deliveredJobs.map(j => j.deliveryDate || j.challanDate).filter(Boolean))).join(', ');
 
                       return (
-                        <tr key={mr} className="hover:bg-slate-50 border-b border-slate-100">
-                          <td className="px-4 py-3 font-mono font-bold text-slate-800 align-top">{mr}</td>
-                          <td className="px-4 py-3 font-medium text-slate-600 align-top">{divName}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-700 align-top">
+                        <tr key={mr} className="hover:bg-slate-50/80 border-b border-slate-100">
+                          <td className="px-4 py-3 font-mono font-bold text-blue-600 align-top text-xs sm:text-sm">{mr}</td>
+                          <td className="px-4 py-3 font-medium text-slate-700 align-top text-xs sm:text-sm">{divName}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-700 align-top text-xs">
                             <div>
-                              {deliveredJobs.length} of {matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Delivered
+                              <span className="font-bold text-slate-900">{deliveredJobs.length}</span> of {matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Delivered
                             </div>
                             {scrapJobs.length > 0 && billTypeFilter === 'repairable' && (
-                              <div className="text-xs text-rose-700 font-semibold mt-0.5">
+                              <div className="text-[11px] text-rose-700 font-semibold mt-0.5">
                                 ({deliveredScrap.length} of {scrapJobs.length} Scrap Returned - No Repair Bill)
                               </div>
                             )}
@@ -690,7 +713,7 @@ export default function BillingSystem() {
                                   badgeText = 'Tested (Awaiting Delivery Challan)';
                                   badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
                                 } else if (j.status === 'Scrap' || j.condition === 'Scrap') {
-                                  badgeText = 'Scrap (Awaiting Delivery Return)';
+                                  badgeText = 'Scrap (Awaiting Return)';
                                   badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
                                 } else if (j.status === 'Internal Done') {
                                   badgeText = 'Internal Done (Pending Testing)';
@@ -706,7 +729,7 @@ export default function BillingSystem() {
                                 return (
                                   <div key={j.id} className="flex items-center gap-1.5 text-[11px]">
                                     <span className="font-mono font-bold text-slate-800">{j.jobNo}:</span>
-                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${badgeClass}`}>
+                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${badgeClass}`}>
                                       {badgeText}
                                     </span>
                                   </div>
@@ -714,32 +737,32 @@ export default function BillingSystem() {
                               })}
                             </div>
                           </td>
-                          <td className="px-4 py-3 text-xs text-slate-500">
+                          <td className="px-4 py-3 text-xs text-slate-500 align-top">
                             <div><span className="font-bold text-slate-700">Challan:</span> {challans || (deliveredJobs.length > 0 ? 'Dispatched' : 'None')}</div>
                             <div><span className="font-bold text-slate-700">Date:</span> {dates || '-'}</div>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-top">
                             {allGroupDelivered ? (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
-                                {scrapJobs.length > 0 ? `All Delivered with ${scrapJobs.length} Scrap` : 'All Delivered & Ready'}
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600 shrink-0" />
+                                {scrapJobs.length > 0 ? `All Delivered (${scrapJobs.length} Scrap)` : 'Ready for Bill'}
                               </span>
                             ) : pendingJobs.length > 0 ? (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300">
-                                <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600" />
-                                {deliveredJobs.length > 0 ? `${pendingJobs.length} Job(s) Pending` : 'All Pending Delivery'}
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+                                <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
+                                {deliveredJobs.length > 0 ? `${pendingJobs.length} Pending` : 'Pending Dispatch'}
                               </span>
                             ) : (
-                              <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <CheckCircle2 className="w-3 h-3 mr-1" />
-                                {scrapJobs.length > 0 ? `All Repairable Delivered (${deliveredScrap.length}/${scrapJobs.length} Scrap)` : 'All Delivered & Ready'}
+                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <CheckCircle2 className="w-3 h-3 mr-1 shrink-0" />
+                                Ready
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-3 align-top text-right">
                             <button
                               onClick={() => handleGenerateClick(mr)}
-                              className={`px-4 py-2 text-[10px] font-bold uppercase tracking-widest text-white rounded transition-colors shadow-sm ${
+                              className={`px-3.5 py-2 text-[10px] font-bold uppercase tracking-wider text-white rounded-lg transition-colors shadow-xs ${
                                 pendingJobs.length > 0 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
                               }`}
                             >
@@ -815,38 +838,53 @@ export default function BillingSystem() {
         <div className="space-y-6 print:space-y-0">
           
           {/* Top Control Bar */}
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-white print:hidden">
+          <div className="bg-slate-900 border border-slate-800 p-4 sm:p-5 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-white print:hidden shadow-sm">
             <div>
               <div className="flex items-center gap-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">MR BILL GENERATOR</p>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">MR BILL GENERATOR</p>
                 <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-300 rounded uppercase border border-blue-500/30">
                   {billTypeFilter === 'scrap' ? 'Scrap Committee Bill' : 'Repairable Bill'}
                 </span>
               </div>
-              <p className="text-xl font-mono font-bold text-white mt-1">MR No: {selectedMrNo}</p>
+              <p className="text-lg sm:text-xl font-mono font-bold text-white mt-1">MR No: {selectedMrNo}</p>
               <p className="text-xs text-slate-300 mt-0.5">
                 Division: <span className="font-semibold text-white">{currentDivision}</span> • {selectedJobsData.length} Delivered Transformers
               </p>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <button
+                onClick={() => setShowEditLetterModal(true)}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg transition-colors shadow-xs"
+              >
+                <Edit3 className="w-4 h-4 mr-1.5 shrink-0" /> Customize
+              </button>
+              <button
+                onClick={() => {
+                  const el = document.getElementById('printable-billing-container');
+                  if (el) downloadHtmlAsWord(el, `Billing_Package_${selectedMrNo}.doc`, `Tax Invoice & Letter Documents - MR ${selectedMrNo}`);
+                }}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg transition-colors shadow-xs"
+              >
+                <FileText className="w-4 h-4 mr-1.5 shrink-0" /> Word (.doc)
+              </button>
               <button
                 onClick={handlePrint}
-                className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded transition-colors shadow"
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs"
               >
-                <Printer className="w-4 h-4 mr-1.5" /> Print Bill Package (4 Pages)
+                <Printer className="w-4 h-4 mr-1.5 shrink-0" /> Print (4 Pages)
               </button>
               <button
                 onClick={handleExportExcel}
-                className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded transition-colors shadow"
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg transition-colors shadow-xs"
               >
-                <FileSpreadsheet className="w-4 h-4 mr-1.5" /> Export Excel
+                <FileSpreadsheet className="w-4 h-4 mr-1.5 shrink-0" /> Excel
               </button>
               <button
                 onClick={() => setSelectedMrNo(null)}
-                className="flex items-center text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3 py-2 rounded transition-colors"
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3 py-2 rounded-lg transition-colors"
               >
-                <ArrowLeft className="w-4 h-4 mr-1" /> Change MR
+                <ArrowLeft className="w-4 h-4 mr-1 shrink-0" /> Change MR
               </button>
             </div>
           </div>
@@ -883,17 +921,22 @@ export default function BillingSystem() {
 
           {/* Editable Metadata Form */}
           <div className="bg-white p-5 rounded-lg border border-slate-200 shadow-sm space-y-4 print:hidden">
-            <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500 border-b border-slate-100 pb-2">
-              Bill Meta Credentials
-            </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-4 text-xs">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+              <h3 className="text-xs font-bold uppercase tracking-widest text-slate-500">
+                Bill Meta & Tax Credentials
+              </h3>
+              <span className="text-[11px] text-blue-600 font-medium">
+                Auto-populated from {activeAgency?.name || 'Agency'} Profile
+              </span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 text-xs">
               <div>
                 <label className="block font-bold text-slate-600 mb-1">Bill No</label>
                 <input
                   type="text"
                   value={billNo}
                   onChange={(e) => setBillNo(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded font-mono font-bold text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono font-bold text-slate-800"
                 />
               </div>
               <div>
@@ -902,7 +945,7 @@ export default function BillingSystem() {
                   type="text"
                   value={billDate}
                   onChange={(e) => setBillDate(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
                 />
               </div>
               <div>
@@ -911,7 +954,7 @@ export default function BillingSystem() {
                   type="text"
                   value={apprNo}
                   onChange={(e) => setApprNo(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
                 />
               </div>
               <div>
@@ -920,16 +963,37 @@ export default function BillingSystem() {
                   type="text"
                   value={apprDate}
                   onChange={(e) => setApprDate(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
                 />
               </div>
               <div>
-                <label className="block font-bold text-slate-600 mb-1">Division GSTIN</label>
+                <label className="block font-bold text-slate-600 mb-1">DISCOM GSTIN</label>
                 <input
                   type="text"
                   value={divisionGstin}
                   onChange={(e) => setDivisionGstin(e.target.value)}
-                  className="w-full px-3 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  placeholder="DISCOM GST No"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-600 mb-1">DISCOM PAN</label>
+                <input
+                  type="text"
+                  value={divisionPan}
+                  onChange={(e) => setDivisionPan(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  placeholder="DISCOM PAN No"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-600 mb-1">SAC Code</label>
+                <input
+                  type="text"
+                  value={serviceSacCode}
+                  onChange={(e) => setServiceSacCode(e.target.value)}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  placeholder="998719"
                 />
               </div>
             </div>
@@ -980,7 +1044,7 @@ export default function BillingSystem() {
           </div>
 
           {/* PRINTABLE DOCUMENTS CONTAINER */}
-          <div className="space-y-8 print:space-y-0">
+          <div id="printable-billing-container" className="space-y-8 print:space-y-0">
 
             {/* ==================== PAGE 1: FORWARDING LETTER ==================== */}
             <div className={`bg-white p-10 md:p-12 border border-slate-300 shadow-sm rounded print:border-none print:shadow-none print:p-0 print:m-0 print:page-break-after-always ${
@@ -990,45 +1054,49 @@ export default function BillingSystem() {
               <LetterheadHeader agency={activeAgency} />
 
               {/* Recipient */}
-              <div className="mb-6 text-sm text-black space-y-1">
-                <p className="font-bold">EXECUTIVE ENGINEER (O&M)</p>
-                <p>UGVCL, Division Office,</p>
-                <p>{currentDivision},</p>
-                <p>Ahmedabad.</p>
-                <p className="font-bold mt-1">GST No. {divisionGstin}</p>
+              <div className="mb-6 text-sm text-black whitespace-pre-wrap font-medium">
+                {forwardingTo || `To\n${activeAgency?.divisionAuthority || 'The Executive Engineer ,'}\n${activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}\nDivision Office : ${currentDivision}`}
+                {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
               </div>
 
               {/* Subject */}
               <div className="text-center my-6">
                 <p className="text-base font-bold text-black border-b border-black inline-block pb-0.5">
-                  Sub : Submission of Bill for Payment
+                  Sub : {forwardingSub || 'Submission of Bill for Payment'}
                 </p>
               </div>
 
               {/* Salutation & Body */}
               <div className="text-sm text-black space-y-4 leading-relaxed mb-8">
                 <p>Dear Sir,</p>
+                <div className="pl-6 space-y-1">
+                  <p>
+                    Please find enclosed herewith our bill No. - <strong className="font-bold">{billNo}</strong> dated <strong className="font-bold">{billDate}</strong>
+                  </p>
+                  <p>
+                    <strong className="font-bold">Rs. {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-</strong> in words <strong className="font-bold">{numberToIndianWords(grandTotal)}</strong>
+                  </p>
+                </div>
                 <p className="pl-6">
-                  Please find enclosed herewith our <strong className="font-bold">Bill No {billNo}</strong> Dated <strong className="font-bold">{billDate}</strong> sum of <strong className="font-bold">Rs. {grandTotal.toFixed(2)}/-</strong>
+                  Along with our Delivery Challan , Oil Account and relevant Test Certificate.
                 </p>
                 <p className="pl-6">
-                  Along with our Delivery Challan, Oil Account and relevant Test Certificate.
-                  You are requested to pass the above bill at your earliest and arrange to release the payment at the earliest.
+                  You are requested to pass the above bill at your earliest and arrange to release the payment possibly earlier.
                 </p>
-                <p className="pl-6">Thanking you and assuring you of our best services.</p>
+                <p className="pl-6">Thanking you and assuring you of best services.</p>
               </div>
 
               {/* Enclosures & Signatures */}
               <div className="flex justify-between items-end text-sm text-black pt-8">
                 <div className="space-y-1">
-                  <p className="font-bold">End:-</p>
+                  <p className="font-bold">Encl :-</p>
                   <ol className="list-decimal list-inside space-y-0.5 text-xs">
-                    <li>Bill Copy-2 with Advance Stamp receipt and Guarantee Card.</li>
-                    <li>Bill Oil Account- 2.</li>
-                    <li>Delivery Challan- 1.</li>
-                    <li>Test Certificate- 1.</li>
-                    <li>MR Copy-1</li>
-                    <li>Approval Copy- 1.</li>
+                    <li>Bill Copy - 2 with Advance Stamp receipt.</li>
+                    <li>Bill Oil Account - 2.</li>
+                    <li>Delivery Challan - 1.</li>
+                    <li>Test Certificate - 1.</li>
+                    <li>Estimate Copy - 1.</li>
+                    <li>Approval Copy - 1.</li>
                   </ol>
                 </div>
 
@@ -1038,6 +1106,13 @@ export default function BillingSystem() {
                   <p className="text-xs text-slate-500 mt-2">(Auth Sign.)</p>
                 </div>
               </div>
+
+              {forwardingCc && (
+                <div className="mt-8 text-xs font-bold text-slate-800 border-t pt-3">
+                  <p>C . C. to :</p>
+                  <p className="whitespace-pre-wrap font-normal mt-1">{forwardingCc}</p>
+                </div>
+              )}
             </div>
 
             {/* ==================== PAGE 2: CERTIFICATE ==================== */}
@@ -1056,7 +1131,7 @@ export default function BillingSystem() {
                 </div>
 
                 <p className="text-sm text-black leading-loose text-justify font-medium">
-                  We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{billDate}</strong> are Replaced and Fitted, the above Transformers are guaranteed by Twelve/Eighteen months from the date to delivery.
+                  We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{billDate}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certMonthsText || 'Twelve/Eighteen'} months from the date to delivery.
                 </p>
 
                 <div className="text-right mt-16 pt-8">
@@ -1072,40 +1147,80 @@ export default function BillingSystem() {
             }`}>
               <div className="border-2 border-black text-black text-xs">
                 
-                {/* Header Row */}
+                {/* Header Row: Supplier & Invoice Identification */}
                 <div className="grid grid-cols-2 border-b-2 border-black">
-                  <div className="p-3 border-r-2 border-black">
-                    {activeAgency?.letterheadUrl ? (
-                      <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-20 object-contain mb-2" />
-                    ) : (
-                      <h1 className="text-lg font-black uppercase">{activeAgency?.name || 'AGENCY NAME'}</h1>
-                    )}
-                    <p className="font-bold text-[11px]">Repairing of Distribution Transformers</p>
-                    <p className="mt-2">{activeAgency?.address || ''}</p>
-                  </div>
-                  <div className="p-3 relative">
-                    <div className="text-right font-bold text-[10px] uppercase tracking-widest border-b border-black pb-1 mb-2">
-                      TAX INVOICE (Original / Duplicate / Triplicate)
+                  <div className="p-3 border-r-2 border-black flex flex-col justify-between">
+                    <div>
+                      {activeAgency?.letterheadUrl ? (
+                        <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-20 object-contain mb-2" />
+                      ) : (
+                        <h1 className="text-lg font-black uppercase font-serif tracking-wide">{activeAgency?.name || 'AGENCY NAME'}</h1>
+                      )}
+                      <p className="font-bold text-[11px] text-slate-800">Repairing of Distribution Transformers</p>
+                      <p className="mt-1 text-[10px] leading-tight">{activeAgency?.address || ''}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-x-2 gap-y-1">
-                      <div><span className="font-bold">Appr No.:</span> {apprNo}</div>
-                      <div><span className="font-bold">Appr Date:</span> {apprDate}</div>
-                      <div><span className="font-bold">Bill No:</span> <strong className="font-bold">{billNo}</strong></div>
-                      <div><span className="font-bold">Date:</span> {billDate}</div>
-                      <div><span className="font-bold">PAN NO.:</span> {activeAgency?.pan || ''}</div>
-                      <div><span className="font-bold">GST No.:</span> {activeAgency?.gstin || ''}</div>
+                    <div className="mt-2 pt-1 border-t border-slate-200 text-[10px] space-y-0.5">
+                      <div className="flex justify-between">
+                        <span><strong>State:</strong> {activeAgency?.agencyState || 'Gujarat'}</span>
+                        <span><strong>State Code:</strong> {activeAgency?.agencyStateCode || '24'}</span>
+                      </div>
+                      {(activeAgency?.phone || activeAgency?.email) && (
+                        <div>
+                          {activeAgency?.phone && <span><strong>Ph:</strong> {activeAgency.phone} </span>}
+                          {activeAgency?.email && <span><strong>Email:</strong> {activeAgency.email}</span>}
+                        </div>
+                      )}
+                      {activeAgency?.msmeNo && (
+                        <div><strong>MSME Reg No:</strong> {activeAgency.msmeNo}</div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="p-3 relative flex flex-col justify-between">
+                    <div>
+                      <div className="text-right font-bold text-[10px] uppercase tracking-widest border-b border-black pb-1 mb-2">
+                        TAX INVOICE (Original / Duplicate / Triplicate)
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
+                        <div><span className="font-bold">Bill No:</span> <strong className="font-bold font-mono">{billNo}</strong></div>
+                        <div><span className="font-bold">Bill Date:</span> <span className="font-mono">{billDate}</span></div>
+                        <div><span className="font-bold">Order / Appr No:</span> <span className="font-mono">{apprNo}</span></div>
+                        <div><span className="font-bold">Order Date:</span> <span className="font-mono">{apprDate}</span></div>
+                      </div>
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-black bg-slate-50 print:bg-transparent p-1.5 rounded text-[11px] grid grid-cols-2 gap-x-2 gap-y-0.5">
+                      <div><span className="font-bold">Supplier GSTIN:</span> <strong className="font-mono">{activeAgency?.gstin || '-'}</strong></div>
+                      <div><span className="font-bold">Supplier PAN:</span> <strong className="font-mono">{activeAgency?.pan || '-'}</strong></div>
                     </div>
                   </div>
                 </div>
 
-                {/* Customer Details */}
-                <div className="p-3 border-b-2 border-black">
-                  <p className="font-bold">EXECUTIVE ENGINEER (O&M)</p>
-                  <p>UGVCL, Division Office, {currentDivision}, Ahmedabad.</p>
-                  <p><span className="font-bold">GST No.:</span> {divisionGstin}</p>
-                  <div className="flex justify-between items-center mt-1 pt-1 border-t border-slate-300 font-medium">
-                    <span><strong className="font-bold">Order No:</strong> {apprNo}</span>
-                    <span><strong className="font-bold">Description:</strong> Maintenance and repair Service code : 998719</span>
+                {/* Customer (Buyer / Consignee) Details */}
+                <div className="p-3 border-b-2 border-black bg-slate-50/50 print:bg-transparent">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div>
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-0.5">Billed To (Client / Consignee):</span>
+                      <p className="font-bold uppercase text-[11px]">{activeAgency?.divisionAuthority || 'EXECUTIVE ENGINEER (O&M)'}</p>
+                      <p className="font-bold text-black">{activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}</p>
+                      <p className="text-[11px]">Division Office: <strong className="font-bold">{currentDivision}</strong></p>
+                      {activeAgency?.discomAddress && (
+                        <p className="text-[10px] text-slate-700 mt-0.5 leading-tight">{activeAgency.discomAddress}</p>
+                      )}
+                    </div>
+                    <div className="border-t md:border-t-0 md:border-l border-slate-300 md:pl-3 flex flex-col justify-between text-[11px] space-y-1">
+                      <div>
+                        <div><span className="font-bold">DISCOM GSTIN:</span> <strong className="font-mono">{divisionGstin || activeAgency?.discomGstin || '24AAACU6551F1ZI'}</strong></div>
+                        <div><span className="font-bold">DISCOM PAN:</span> <strong className="font-mono">{divisionPan || activeAgency?.discomPan || 'AAACU6551F'}</strong></div>
+                        <div className="flex justify-between text-[10px] text-slate-700 mt-0.5">
+                          <span><strong>State:</strong> {activeAgency?.discomState || 'Gujarat'}</span>
+                          <span><strong>State Code:</strong> {activeAgency?.discomStateCode || '24'}</span>
+                        </div>
+                      </div>
+                      <div className="pt-1 border-t border-slate-200 text-[10px]">
+                        <span className="font-bold">Service Category:</span> Maintenance and repair of Distribution Transformers
+                        <span className="ml-2 font-mono font-bold">(SAC Code: {serviceSacCode || activeAgency?.serviceSacCode || '998719'})</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -1151,7 +1266,7 @@ export default function BillingSystem() {
 
                     {/* Financial Calculations */}
                     <tr className="font-bold border-t-2 border-black">
-                      <td colSpan={9} className="p-1.5 border-r border-black text-right">Total:</td>
+                      <td colSpan={9} className="p-1.5 border-r border-black text-right">Total (Taxable Value):</td>
                       <td className="p-1.5 text-right font-mono">{subTotal.toFixed(2)}</td>
                     </tr>
                     <tr className="font-bold border-t border-black">
@@ -1163,7 +1278,7 @@ export default function BillingSystem() {
                       <td className="p-1.5 text-right font-mono">{sgst.toFixed(2)}</td>
                     </tr>
                     <tr className="font-black border-t-2 border-black bg-slate-100 print:bg-white text-[11px]">
-                      <td colSpan={9} className="p-1.5 border-r border-black text-right">Net Total:</td>
+                      <td colSpan={9} className="p-1.5 border-r border-black text-right">Net Total Invoice Value:</td>
                       <td className="p-1.5 text-right font-mono">{grandTotal.toFixed(2)}</td>
                     </tr>
                   </tbody>
@@ -1172,18 +1287,26 @@ export default function BillingSystem() {
                 {/* Bottom Footer Section */}
                 <div className="grid grid-cols-2 border-t-2 border-black">
                   
-                  {/* Left Side: Receipt & Settlement */}
+                  {/* Left Side: Receipt & Settlement & Bank info */}
                   <div className="p-3 border-r-2 border-black flex flex-col justify-between space-y-3">
                     <div>
-                      <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold">{grandTotal.toFixed(2)}</span></p>
-                      <p className="mt-1 font-semibold italic text-[11px]">{numberToIndianWords(grandTotal)}</p>
-                      <p className="mt-2 text-[10px]">In full settlement of our Bill no <strong className="font-bold">{billNo}</strong> Dated <strong className="font-bold">{billDate}</strong></p>
+                      <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold text-sm">{grandTotal.toFixed(2)}</span></p>
+                      <p className="mt-1 font-semibold italic text-[11px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
+                      <p className="mt-2 text-[10px]">In full settlement of our Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{billDate}</strong></p>
+                      
+                      {(activeAgency?.bankName || activeAgency?.accountNumber) && (
+                        <div className="mt-2.5 pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-800">
+                          <span className="font-bold uppercase tracking-wider block text-[9px] text-slate-500 mb-0.5">Bank Settlement Details:</span>
+                          <div><strong>Bank:</strong> {activeAgency?.bankName || '-'} {activeAgency?.bankBranch ? `(${activeAgency.bankBranch})` : ''}</div>
+                          <div><strong>A/C No:</strong> <span className="font-mono font-bold">{activeAgency?.accountNumber || '-'}</span> | <strong>IFSC:</strong> <span className="font-mono font-bold">{activeAgency?.ifscCode || '-'}</span></div>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="pt-8 text-center">
+                    <div className="pt-6 text-center">
                       <p className="font-bold">For, {activeAgency?.name || ''}</p>
                       <div className="h-8"></div>
-                      <p className="text-[10px] text-slate-500">(Auth Sign / Stamp)</p>
+                      <p className="text-[10px] text-slate-500">(Authorized Signatory / Stamp)</p>
                     </div>
                   </div>
 
@@ -1194,14 +1317,14 @@ export default function BillingSystem() {
                         Guarantee Card
                       </h4>
                       <p className="text-[10px] leading-tight text-justify">
-                        We guarantee the satisfactory performance of the above repaired transformers for 18 months for 11 KV and 12 months for 22 KV for the date of delivery for the repaired and replaced parts only. We certify the material and spares mentioned in the estimate/bill have actually been fitted/used in the above transformer.
+                        We guarantee the satisfactory performance of the above repaired transformers for {activeAgency?.gpValidationMonths || 18} months for 11 KV and 12 months for 22 KV for the date of delivery for the repaired and replaced parts only. We certify the material and spares mentioned in the estimate/bill have actually been fitted/used in the above transformer.
                       </p>
                     </div>
 
                     <div className="pt-6 text-center">
                       <p className="font-bold">For, {activeAgency?.name || ''}</p>
                       <div className="h-8"></div>
-                      <p className="text-[10px] text-slate-500">(Auth Sign.)</p>
+                      <p className="text-[10px] text-slate-500">(Authorized Signatory)</p>
                     </div>
                   </div>
 
@@ -1395,6 +1518,79 @@ export default function BillingSystem() {
 
           </div>
 
+        </div>
+      )}
+
+      {/* EDIT / CUSTOMIZE LETTER MODAL FOR BILLING SYSTEM */}
+      {showEditLetterModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-2xl w-full border border-slate-200 my-8">
+            <div className="flex items-center justify-between pb-4 mb-4 border-b border-slate-200">
+              <div className="flex items-center space-x-2 text-slate-800">
+                <Edit3 className="w-5 h-5 text-amber-600" />
+                <h3 className="font-bold text-base">Customize Letter & Certificate Details</h3>
+              </div>
+              <button onClick={() => setShowEditLetterModal(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Forwarding To (Recipient Address)</label>
+                <textarea rows={3} value={forwardingTo} onChange={e => setForwardingTo(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono text-xs" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Subject (Sub.)</label>
+                <input type="text" value={forwardingSub} onChange={e => setForwardingSub(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Guarantee Certificate Period (Months)</label>
+                <input type="text" value={certMonthsText} onChange={e => setCertMonthsText(e.target.value)} placeholder="e.g. Twelve/Eighteen" className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">C . C. to :</label>
+                <textarea rows={2} value={forwardingCc} onChange={e => setForwardingCc(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono text-xs" />
+              </div>
+
+              <div className="bg-amber-50 border border-amber-200 p-3 rounded flex items-center space-x-2 text-xs text-amber-800">
+                <input
+                  type="checkbox"
+                  id="saveAgencyDefaultBilling"
+                  checked={saveAsDefaultAgency}
+                  onChange={e => setSaveAsDefaultAgency(e.target.checked)}
+                  className="rounded text-amber-600 focus:ring-amber-500 w-4 h-4"
+                />
+                <label htmlFor="saveAgencyDefaultBilling" className="cursor-pointer font-medium">
+                  Save Recipient, Subject & C.C. as default configuration for {activeAgency?.name || 'active agency'}
+                </label>
+              </div>
+            </div>
+
+            <div className="mt-6 pt-4 border-t border-slate-200 flex justify-end space-x-3">
+              <button onClick={() => setShowEditLetterModal(false)} className="px-4 py-2 text-xs font-bold uppercase text-slate-600 hover:text-slate-800 border rounded">
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (saveAsDefaultAgency && activeAgency) {
+                    await updateAgency(activeAgency.id, {
+                      forwardingToText: forwardingTo,
+                      forwardingSubject: forwardingSub,
+                      forwardingCcText: forwardingCc
+                    });
+                  }
+                  setShowEditLetterModal(false);
+                }}
+                className="px-5 py-2 text-xs font-bold uppercase bg-emerald-600 hover:bg-emerald-700 text-white rounded transition-colors flex items-center"
+              >
+                <Check className="w-4 h-4 mr-1.5" /> Confirm & Apply To Document
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
