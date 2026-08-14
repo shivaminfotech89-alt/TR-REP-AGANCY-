@@ -100,7 +100,7 @@ export default function EstimateGenerate() {
         
         let qty = 0;
         const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-        const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+        const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
         
         if (isScrapItem === isScrapJob && rate > 0) {
           if (item.unit === 'Y') qty = 1;
@@ -166,7 +166,7 @@ export default function EstimateGenerate() {
       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
       const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
       let qty = 0;
-      const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+      const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
       
       if (isScrapItem === isScrapJob && rate > 0) {
         if (item.unit === 'Y') qty = 1;
@@ -432,7 +432,7 @@ export default function EstimateGenerate() {
                       let qty = 0;
                       let qtyDisplay = '0';
                       
-                      const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+                      const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
                       const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
                       
                       if (isScrapItem === isScrapJob && rate > 0) {

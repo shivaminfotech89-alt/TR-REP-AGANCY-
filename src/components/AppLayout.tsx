@@ -38,6 +38,7 @@ export default function AppLayout({ user }: { user: User }) {
     { to: '/estimates/new', label: 'Estimate Generate' },
     { to: '/challan/new', label: 'Delivery Challans' },
     { to: '/bills/new', label: 'Billing System' },
+    { to: '/reports', label: 'Reports Hub' },
     { to: '/oil-inward', label: 'Oil Ledger' },
   ];
 

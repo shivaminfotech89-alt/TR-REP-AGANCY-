@@ -132,15 +132,24 @@ export default function NewJob() {
     const oldType = newTransformers[index].coreType;
     newTransformers[index][field] = value;
     
-    // Auto-update prefix if coreType changes
-    if (field === 'coreType' && activeAgency && newTransformers[index].jobNo) {
-      const oldInfo = getNextJobNoInfo(commonData.division, oldType, commonData.repairType);
-      const newInfo = getNextJobNoInfo(commonData.division, value, commonData.repairType);
+    // Auto-update jobNo if coreType changes
+    if (field === 'coreType' && activeAgency) {
+      const newCoreType = value;
+      const info = getNextJobNoInfo(commonData.division, newCoreType, commonData.repairType);
       
-      const currentJobNo = newTransformers[index].jobNo;
-      if (currentJobNo.startsWith(oldInfo.prefix + '-')) {
-        newTransformers[index].jobNo = currentJobNo.replace(oldInfo.prefix + '-', newInfo.prefix + '-');
-      }
+      let highestNum = info.nextNum - 1;
+      newTransformers.forEach((t, i) => {
+        if (i === index) return;
+        const tInfo = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
+        if (tInfo.counterKey === info.counterKey) {
+          const parts = t.jobNo.split('-');
+          if (parts.length > 1) {
+            const num = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(num) && num > highestNum) highestNum = num;
+          }
+        }
+      });
+      newTransformers[index].jobNo = `${info.prefix}-${highestNum + 1}`;
     }
     
     setTransformers(newTransformers);
@@ -378,17 +387,21 @@ export default function NewJob() {
         }
       }
 
-      let maxJobNoNumber = 0;
+      const maxJobNoMap: Record<string, number> = {};
 
       for (const t of transformers) {
         if (!t.jobNo) continue;
         
-        // Basic logic to find highest assigned number for counter increment if auto-filled
+        const info = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
+        const counterKey = info.counterKey;
+
         const parts = t.jobNo.split('-');
         if (parts.length > 1) {
           const num = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(num) && num > maxJobNoNumber) {
-            maxJobNoNumber = num;
+          if (!isNaN(num)) {
+            if (!maxJobNoMap[counterKey] || num > maxJobNoMap[counterKey]) {
+              maxJobNoMap[counterKey] = num;
+            }
           }
         }
 
@@ -415,10 +428,7 @@ export default function NewJob() {
         batch.set(newJobRef, jobData);
       }
 
-      
-      // If we found auto-generated numbers, update the max counter for this division
-      if (maxJobNoNumber > 0) {
-        const counterKey = commonData.repairType === 'OH' ? `${commonData.division}_OH` : commonData.division;
+      for (const [counterKey, maxNum] of Object.entries(maxJobNoMap)) {
         let currentLast = 0;
         if (activeAtMaster && activeAtMaster.lastJobNumbers) {
            currentLast = activeAtMaster.lastJobNumbers[counterKey] || 0;
@@ -426,8 +436,8 @@ export default function NewJob() {
            currentLast = activeAgency.lastJobNumbers[counterKey] || 0;
         }
         
-        if (maxJobNoNumber > currentLast) {
-          const diff = maxJobNoNumber - currentLast;
+        if (maxNum > currentLast) {
+          const diff = maxNum - currentLast;
           await incrementJobNoCounter(counterKey, diff);
         }
       }

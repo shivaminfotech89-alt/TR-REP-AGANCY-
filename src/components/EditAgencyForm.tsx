@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgency } from '../lib/AgencyContext';
-import { Loader2, Plus, Trash2, FileUp, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Plus, Trash2, FileUp, ChevronDown, ChevronUp, Check } from 'lucide-react';
 
 export default function EditAgencyForm({ agency }: { agency: any }) {
   const { updateAgency } = useAgency();
@@ -28,6 +28,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [fileName, setFileName] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const [updatePopupData, setUpdatePopupData] = useState<{
+    agencyName: string;
+    changes: { field: string; oldVal: string; newVal: string }[];
+  } | null>(null);
 
   useEffect(() => {
     setAgencyName(agency.name);
@@ -108,26 +113,92 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       
       divisions.forEach(d => {
         if (d.name.trim() && d.prefixCRGO.trim()) {
-          prefixes[d.name.trim()] = {
+          const divName = d.name.trim();
+          prefixes[divName] = {
             'CRGO': d.prefixCRGO.trim(),
             'Amorphous': d.prefixAmorphous.trim() || d.prefixCRGO.trim(),
             'Wound Core': d.prefixWoundCore.trim() || d.prefixCRGO.trim(),
             'LSTC': d.prefixLSTC.trim() || d.prefixCRGO.trim(),
             'OH': d.prefixOH.trim() || d.prefixCRGO.trim(),
           };
-          allotments[d.name.trim()] = {
+          allotments[divName] = {
             'CRGO': Number(d.allotmentCRGO) || 0,
             'Amorphous': Number(d.allotmentAmorphous) || 0,
             'Wound Core': Number(d.allotmentWoundCore) || 0,
           };
-          if (lastJobNumbers[d.name.trim()] === undefined) {
-            lastJobNumbers[d.name.trim()] = 0;
+          if (lastJobNumbers[`${divName}_CRGO`] === undefined) {
+            lastJobNumbers[`${divName}_CRGO`] = lastJobNumbers[divName] || 0;
           }
-          if (lastJobNumbers[d.name.trim() + '_OH'] === undefined) {
-            lastJobNumbers[d.name.trim() + '_OH'] = 0;
+          if (lastJobNumbers[`${divName}_AMORPHOUS`] === undefined) {
+            lastJobNumbers[`${divName}_AMORPHOUS`] = 0;
+          }
+          if (lastJobNumbers[`${divName}_WOUND_CORE`] === undefined) {
+            lastJobNumbers[`${divName}_WOUND_CORE`] = 0;
+          }
+          if (lastJobNumbers[`${divName}_OH`] === undefined) {
+            lastJobNumbers[`${divName}_OH`] = 0;
+          }
+          if (lastJobNumbers[divName] === undefined) {
+            lastJobNumbers[divName] = 0;
           }
         }
       });
+
+      const changes: { field: string; oldVal: string; newVal: string }[] = [];
+
+      const checkChange = (field: string, oldV: any, newV: any) => {
+        const o = (oldV === undefined || oldV === null) ? '' : String(oldV).trim();
+        const n = (newV === undefined || newV === null) ? '' : String(newV).trim();
+        if (o !== n) {
+          changes.push({
+            field,
+            oldVal: o || '(Empty)',
+            newVal: n || '(Empty)'
+          });
+        }
+      };
+
+      checkChange('Agency Name', agency.name, agencyName);
+      checkChange('Company Address', agency.address, address);
+      checkChange('GSTIN', agency.gstin, gstin);
+      checkChange('PAN Number', agency.pan, pan);
+      checkChange('Bank Name', agency.bankName, bankName);
+      checkChange('Account Number', agency.accountNumber, accountNumber);
+      checkChange('IFSC Code', agency.ifscCode, ifscCode);
+      checkChange('Email Address', agency.email, email);
+      checkChange('Phone Number', agency.phone, phone);
+      checkChange('GP Validation (Months)', agency.gpValidationMonths ?? 18, gpValidationMonths);
+      checkChange('Forwarding Letter "To"', agency.forwardingToText, forwardingToText);
+      checkChange('Forwarding Subject', agency.forwardingSubject, forwardingSubject);
+      checkChange('Forwarding C.C.', agency.forwardingCcText, forwardingCcText);
+
+      if (letterheadBase64 !== (agency.letterheadUrl || '')) {
+        changes.push({
+          field: 'Letterhead PDF Document',
+          oldVal: agency.letterheadUrl ? 'Existing PDF' : '(None)',
+          newVal: letterheadBase64 ? 'New PDF File' : '(Removed)'
+        });
+      }
+
+      const oldPrefixesStr = JSON.stringify(agency.prefixes || {});
+      const newPrefixesStr = JSON.stringify(prefixes);
+      if (oldPrefixesStr !== newPrefixesStr) {
+        changes.push({
+          field: 'Divisions & Core Prefixes',
+          oldVal: `${Object.keys(agency.prefixes || {}).length} Division(s)`,
+          newVal: `${Object.keys(prefixes).length} Division(s) configured`
+        });
+      }
+
+      const oldAllotmentsStr = JSON.stringify(agency.allotments || {});
+      const newAllotmentsStr = JSON.stringify(allotments);
+      if (oldAllotmentsStr !== newAllotmentsStr) {
+        changes.push({
+          field: 'Division Allotment Quotas',
+          oldVal: 'Previous allotment limits',
+          newVal: 'Updated allotment limits'
+        });
+      }
 
       await updateAgency(agency.id, {
         name: agencyName,
@@ -143,9 +214,16 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         accountNumber,
         ifscCode,
         email,
-        phone
+        phone,
+        prefixes,
+        allotments,
+        lastJobNumbers
       });
-      alert('Agency updated successfully!');
+
+      setUpdatePopupData({
+        agencyName: agencyName,
+        changes
+      });
     } catch (err) {
       console.error(err);
       alert('Failed to update agency');
@@ -260,6 +338,57 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           {isSubmitting && <Loader2 className="w-3 h-3 mr-2 animate-spin" />} Update Active Agency
         </button>
       </div>
+
+      {updatePopupData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full border border-slate-200 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center space-x-3 mb-4 pb-3 border-b border-slate-100">
+              <div className="bg-emerald-100 text-emerald-600 p-2.5 rounded-full flex-shrink-0">
+                <Check className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Active Agency Updated</h3>
+                <p className="text-xs text-slate-500">Agency: <span className="font-semibold text-slate-700">{updatePopupData.agencyName}</span></p>
+              </div>
+            </div>
+
+            <div className="my-4">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                {updatePopupData.changes.length > 0 ? 'Summary of Changes Made:' : 'No fields were modified:'}
+              </h4>
+              
+              {updatePopupData.changes.length > 0 ? (
+                <div className="max-h-60 overflow-y-auto space-y-2.5 pr-1 divide-y divide-slate-100">
+                  {updatePopupData.changes.map((ch, idx) => (
+                    <div key={idx} className="pt-2 first:pt-0 text-xs">
+                      <span className="font-bold text-slate-800">{ch.field}</span>
+                      <div className="flex items-center space-x-2 mt-0.5 text-slate-600">
+                        <span className="line-through text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded truncate max-w-[140px]" title={ch.oldVal}>{ch.oldVal}</span>
+                        <span className="text-slate-400 font-bold">➔</span>
+                        <span className="text-emerald-700 font-medium bg-emerald-50 px-1.5 py-0.5 rounded truncate max-w-[180px]" title={ch.newVal}>{ch.newVal}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-600 bg-slate-50 p-3 rounded border border-slate-200">
+                  All agency details were saved. No values were modified.
+                </p>
+              )}
+            </div>
+
+            <div className="mt-6 pt-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setUpdatePopupData(null)}
+                className="px-5 py-2 text-xs font-bold uppercase tracking-wider bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors shadow-sm"
+              >
+                Close & Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </form>
   );
 }

@@ -20,6 +20,8 @@ export default function EditJob() {
     serialNo: ''
   });
   const [jobNo, setJobNo] = useState('');
+  const [isDispatched, setIsDispatched] = useState(false);
+  const [challanNo, setChallanNo] = useState('');
 
   useEffect(() => {
     async function fetchJob() {
@@ -35,6 +37,10 @@ export default function EditJob() {
             return;
           }
           setJobNo(data.jobNo || '');
+          if (data.status === 'Dispatched' || data.isClosed === true) {
+            setIsDispatched(true);
+            setChallanNo(data.challanNo || '');
+          }
           setFormData({
             make: data.make || '',
             capacityKva: data.capacityKva ? String(data.capacityKva) : '',
@@ -53,7 +59,10 @@ export default function EditJob() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!jobId) return;
+    if (!jobId || isDispatched) {
+      alert('Delivered/Dispatched jobs cannot be edited.');
+      return;
+    }
     setLoading(true);
     try {
       const docRef = doc(db, 'jobs', jobId);
@@ -97,52 +106,62 @@ export default function EditJob() {
       </div>
 
       <div className="bg-white p-6 md:p-8 rounded shadow-sm border border-slate-200">
+        {isDispatched && (
+          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-lg text-amber-900 text-xs font-semibold">
+            ⚠️ This job has already been delivered/dispatched to the division {challanNo ? `(Challan No: ${challanNo})` : ''}. No further edits or changes are accepted for delivered jobs.
+          </div>
+        )}
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Make</label>
               <input
                 required
+                disabled={isDispatched}
                 type="text"
                 name="make"
                 value={formData.make}
                 onChange={handleChange}
-                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50"
+                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">KVA</label>
               <input
                 required
+                disabled={isDispatched}
                 type="number"
                 name="capacityKva"
                 value={formData.capacityKva}
                 onChange={handleChange}
-                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50"
+                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Serial No.</label>
               <input
+                disabled={isDispatched}
                 type="text"
                 name="serialNo"
                 value={formData.serialNo}
                 onChange={handleChange}
-                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50"
+                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
               />
             </div>
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Job Type</label>
               <select
+                disabled={isDispatched}
                 name="coreType"
                 value={formData.coreType}
                 onChange={handleChange}
-                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50"
+                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
               >
                 <option value="CRGO">CRGO</option>
                 <option value="Amorphous">Amorphous</option>
                 <option value="Wound Core">Wound Core</option>
-                <option value="LSTC">LSTC</option>\n                <option value="OH">OH (Overhauling)</option>
+                <option value="LSTC">LSTC</option>
+                <option value="OH">OH (Overhauling)</option>
               </select>
             </div>
           </div>
@@ -150,8 +169,8 @@ export default function EditJob() {
           <div className="pt-6 flex justify-end">
             <button
               type="submit"
-              disabled={loading}
-              className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center shadow-sm"
+              disabled={loading || isDispatched}
+              className="px-6 py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Save Changes

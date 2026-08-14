@@ -51,8 +51,7 @@ export default function InternalInspection() {
         const jobsQ = query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id),
-          where('repairType', '==', 'OGP')
+          where('agencyId', '==', activeAgency.id)
         );
         const [jobsSnap, inspSnap] = await Promise.all([
           getDocs(jobsQ),
@@ -232,6 +231,7 @@ export default function InternalInspection() {
       const batch = writeBatch(db);
       
       for (const job of mrJobs) {
+        if (job.status === 'Dispatched' || job.isClosed === true) continue;
         const jobData = formsData[job.id];
         
         let inspectionRef;
@@ -291,8 +291,7 @@ export default function InternalInspection() {
       const jobsQ = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
-        where('agencyId', '==', activeAgency?.id),
-        where('repairType', '==', 'OGP')
+        where('agencyId', '==', activeAgency?.id)
       );
       const [jobsSnap, inspSnap] = await Promise.all([
         getDocs(jobsQ),
@@ -325,7 +324,7 @@ export default function InternalInspection() {
   const uniqueMrNos = Object.keys(mrGroups).filter(mr => {
     const jobsForMr = mrGroups[mr];
     if (statusFilter === 'Pending') {
-      return jobsForMr.some(j => !inspections.some(i => i.jobId === j.id) && (j.status === 'External Done' || j.status === 'Received'));
+      return jobsForMr.some(j => !inspections.some(i => i.jobId === j.id) && (j.status === 'External Done' || j.status === 'Received' || !j.status));
     } else {
       return jobsForMr.some(j => inspections.some(i => i.jobId === j.id));
     }

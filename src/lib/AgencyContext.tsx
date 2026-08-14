@@ -57,6 +57,20 @@ export interface AtMaster {
   prefixes?: Record<string, string | Record<string, string>>;
 }
 
+export function getCounterKey(division: string, coreType: string = 'CRGO'): string {
+  const div = (division || '').trim();
+  const type = (coreType || 'CRGO').trim().toUpperCase();
+  if (type === 'OH') {
+    return `${div}_OH`;
+  } else if (type.includes('AMORPHOUS') || type.includes('AM')) {
+    return `${div}_AMORPHOUS`;
+  } else if (type.includes('WOUND') || type.includes('WC')) {
+    return `${div}_WOUND_CORE`;
+  } else {
+    return `${div}_CRGO`;
+  }
+}
+
 export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType: string = 'CRGO'): number {
   if (!at) return 4;
   const type = (coreType || 'CRGO').trim().toUpperCase();
@@ -253,7 +267,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   const getNextJobNoInfo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
-    if (!activeAgency) return { prefix: 'JOB', nextNum: 1 };
+    if (!activeAgency) return { prefix: 'JOB', nextNum: 1, counterKey: 'JOB' };
     
     const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
         ? activeAtMaster.prefixes 
@@ -261,22 +275,39 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         
     const divPrefixInfo = currentPrefixes[division];
     let prefix = 'JOB';
-    if (typeof divPrefixInfo === 'string') prefix = divPrefixInfo;
-    else if (divPrefixInfo && typeof divPrefixInfo === 'object') {
-      if (coreType === 'OH' && (divPrefixInfo as any)['OH']) {
-        prefix = (divPrefixInfo as any)['OH'];
+    const typeUpper = (coreType || 'CRGO').trim().toUpperCase();
+
+    if (typeof divPrefixInfo === 'string') {
+      prefix = divPrefixInfo;
+    } else if (divPrefixInfo && typeof divPrefixInfo === 'object') {
+      if (typeUpper === 'OH') {
+        prefix = (divPrefixInfo as any)['OH'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+      } else if (typeUpper.includes('AMORPHOUS') || typeUpper.includes('AM')) {
+        prefix = (divPrefixInfo as any)['Amorphous'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+      } else if (typeUpper.includes('WOUND') || typeUpper.includes('WC')) {
+        prefix = (divPrefixInfo as any)['Wound Core'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
       } else {
-        prefix = (divPrefixInfo as any)[coreType] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+        prefix = (divPrefixInfo as any)['CRGO'] || (divPrefixInfo as any)[coreType] || 'JOB';
       }
-    } else if (divPrefixInfo) prefix = String(divPrefixInfo);
+    } else if (divPrefixInfo) {
+      prefix = String(divPrefixInfo);
+    }
     
     let lastNum = 0;
-    const counterKey = coreType === 'OH' ? `${division}_OH` : division;
+    const counterKey = getCounterKey(division, coreType);
     
     if (activeAtMaster && activeAtMaster.lastJobNumbers) {
-      lastNum = activeAtMaster.lastJobNumbers[counterKey] || 0;
-    } else if (activeAgency.lastJobNumbers) {
-      lastNum = activeAgency.lastJobNumbers[counterKey] || 0;
+      if (activeAtMaster.lastJobNumbers[counterKey] !== undefined) {
+        lastNum = activeAtMaster.lastJobNumbers[counterKey];
+      } else if (typeUpper.includes('CRGO') && activeAtMaster.lastJobNumbers[division] !== undefined) {
+        lastNum = activeAtMaster.lastJobNumbers[division];
+      }
+    } else if (activeAgency && activeAgency.lastJobNumbers) {
+      if (activeAgency.lastJobNumbers[counterKey] !== undefined) {
+        lastNum = activeAgency.lastJobNumbers[counterKey];
+      } else if (typeUpper.includes('CRGO') && activeAgency.lastJobNumbers[division] !== undefined) {
+        lastNum = activeAgency.lastJobNumbers[division];
+      }
     }
     
     return { prefix, nextNum: lastNum + 1, counterKey };

@@ -184,6 +184,8 @@ export default function TestingReport() {
     try {
       const batch = writeBatch(db);
       Array.from<string>(selectedJobIds).forEach((id: string) => {
+        const targetJob = jobs.find(j => j.id === id);
+        if (targetJob?.status === 'Dispatched' || targetJob?.isClosed === true) return;
         const docRef = doc(db, 'jobs', id);
         batch.update(docRef, {
           testingDetails: formsData[id],

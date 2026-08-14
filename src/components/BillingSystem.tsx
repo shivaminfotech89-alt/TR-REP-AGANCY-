@@ -239,7 +239,7 @@ export default function BillingSystem() {
       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
       const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
       let qty = 0;
-      const isScrapItem = item.itemName.toLowerCase().includes('scrap');
+      const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
 
       if (isScrapItem === isScrapJob && rate > 0) {
         if (item.unit === 'Y') qty = 1;
@@ -578,6 +578,19 @@ export default function BillingSystem() {
             </div>
           </div>
 
+          {/* Explanation Banner for Pending Delivery */}
+          <div className="p-4 bg-blue-50/90 border border-blue-200 rounded-lg text-blue-950 text-xs flex items-start gap-3 shadow-sm">
+            <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-bold text-sm text-blue-900">💡 Why do jobs show as "Pending" in Billing System?</p>
+              <p className="text-blue-800 leading-relaxed">
+                Tax Invoices & Bills are <strong>ONLY</strong> generated for transformers that have been <strong>delivered/dispatched</strong> back to the division via a <strong>Delivery Challan</strong> (Status: <span className="font-bold text-emerald-800 bg-emerald-100 px-1 rounded">Dispatched</span>).
+                If a job has finished Inspection & Testing, its current status is <span className="font-bold text-blue-800 bg-blue-100 px-1 rounded">Tested - Ready for Dispatch</span>.
+                You must go to the <strong>Delivery Challans</strong> tab to dispatch the job first before generating its bill.
+              </p>
+            </div>
+          </div>
+
           {/* Search & Filter Toolbar */}
           <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-center gap-4">
@@ -634,6 +647,9 @@ export default function BillingSystem() {
                   ) : (
                     filteredMrNos.map(mr => {
                       const groupJobs = mrGroups[mr] || [];
+                      const scrapJobs = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+                      const repairableJobs = groupJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
+
                       const matchingJobs = groupJobs.filter(j => {
                         const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
                         return billTypeFilter === 'scrap' ? isScrap : !isScrap;
@@ -641,37 +657,81 @@ export default function BillingSystem() {
                       const deliveredJobs = matchingJobs.filter(j => j.status === 'Dispatched');
                       const pendingJobs = matchingJobs.filter(j => j.status !== 'Dispatched');
 
+                      const deliveredScrap = scrapJobs.filter(j => j.status === 'Dispatched');
+                      const allGroupDelivered = groupJobs.every(j => j.status === 'Dispatched');
+
                       const divName = groupJobs[0]?.division || '-';
                       const challans = Array.from(new Set(deliveredJobs.map(j => j.challanNo).filter(Boolean))).join(', ');
                       const dates = Array.from(new Set(deliveredJobs.map(j => j.deliveryDate || j.challanDate).filter(Boolean))).join(', ');
 
                       return (
-                        <tr key={mr} className="hover:bg-slate-50">
-                          <td className="px-4 py-3 font-mono font-bold text-slate-800">{mr}</td>
-                          <td className="px-4 py-3 font-medium text-slate-600">{divName}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-700">
+                        <tr key={mr} className="hover:bg-slate-50 border-b border-slate-100">
+                          <td className="px-4 py-3 font-mono font-bold text-slate-800 align-top">{mr}</td>
+                          <td className="px-4 py-3 font-medium text-slate-600 align-top">{divName}</td>
+                          <td className="px-4 py-3 font-semibold text-slate-700 align-top">
                             <div>
                               {deliveredJobs.length} of {matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Delivered
                             </div>
-                            {pendingJobs.length > 0 && (
-                              <div className="text-xs text-amber-600 font-bold">
-                                ({pendingJobs.length} Pending Delivery)
+                            {scrapJobs.length > 0 && billTypeFilter === 'repairable' && (
+                              <div className="text-xs text-rose-700 font-semibold mt-0.5">
+                                ({deliveredScrap.length} of {scrapJobs.length} Scrap Returned - No Repair Bill)
                               </div>
                             )}
+                            {/* Detailed stage breakdown list for each job */}
+                            <div className="mt-2 space-y-1">
+                              {groupJobs.map(j => {
+                                let badgeText = 'Received';
+                                let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+                                if (j.status === 'Dispatched') {
+                                  badgeText = 'Dispatched (Delivered)';
+                                  badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+                                } else if (j.status === 'Tested - Ready for Dispatch') {
+                                  badgeText = 'Tested (Awaiting Delivery Challan)';
+                                  badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
+                                } else if (j.status === 'Scrap' || j.condition === 'Scrap') {
+                                  badgeText = 'Scrap (Awaiting Delivery Return)';
+                                  badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+                                } else if (j.status === 'Internal Done') {
+                                  badgeText = 'Internal Done (Pending Testing)';
+                                  badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+                                } else if (j.status === 'External Done') {
+                                  badgeText = 'External Done (Pending Internal)';
+                                  badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+                                } else {
+                                  badgeText = 'Received (Pending External)';
+                                  badgeClass = 'bg-slate-100 text-slate-800 border-slate-300';
+                                }
+
+                                return (
+                                  <div key={j.id} className="flex items-center gap-1.5 text-[11px]">
+                                    <span className="font-mono font-bold text-slate-800">{j.jobNo}:</span>
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold border ${badgeClass}`}>
+                                      {badgeText}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-xs text-slate-500">
                             <div><span className="font-bold text-slate-700">Challan:</span> {challans || (deliveredJobs.length > 0 ? 'Dispatched' : 'None')}</div>
                             <div><span className="font-bold text-slate-700">Date:</span> {dates || '-'}</div>
                           </td>
                           <td className="px-4 py-3">
-                            {pendingJobs.length > 0 ? (
+                            {allGroupDelivered ? (
+                              <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600" />
+                                {scrapJobs.length > 0 ? `All Delivered with ${scrapJobs.length} Scrap` : 'All Delivered & Ready'}
+                              </span>
+                            ) : pendingJobs.length > 0 ? (
                               <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-300">
                                 <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600" />
                                 {deliveredJobs.length > 0 ? `${pendingJobs.length} Job(s) Pending` : 'All Pending Delivery'}
                               </span>
                             ) : (
                               <span className="inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <CheckCircle2 className="w-3 h-3 mr-1" /> All Delivered & Ready
+                                <CheckCircle2 className="w-3 h-3 mr-1" />
+                                {scrapJobs.length > 0 ? `All Repairable Delivered (${deliveredScrap.length}/${scrapJobs.length} Scrap)` : 'All Delivered & Ready'}
                               </span>
                             )}
                           </td>
@@ -800,6 +860,21 @@ export default function BillingSystem() {
                 </p>
                 <p className="mt-0.5 text-amber-800 text-xs">
                   MR <strong>{selectedMrNo}</strong> has <strong>{selectedMrPendingCount}</strong> transformer(s) still pending delivery. This bill is generated for the <strong>{selectedJobsData.length}</strong> delivered transformer(s).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Scrap Jobs Notice Banner inside Editor */}
+          {billTypeFilter === 'repairable' && jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).length > 0 && (
+            <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-lg text-purple-950 flex items-start gap-3 print:hidden shadow-sm">
+              <AlertCircle className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-bold">
+                  ℹ️ Scrap Transformers Returned ({jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).length} Scrap Job)
+                </p>
+                <p className="mt-0.5 text-purple-800 text-xs">
+                  MR <strong>{selectedMrNo}</strong> includes <strong>{jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).length}</strong> scrap transformer(s) [{jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).map(j => j.jobNo).join(', ')}] delivered back to division. No repair bill is prepared for scrap jobs.
                 </p>
               </div>
             </div>

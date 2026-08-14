@@ -12,6 +12,7 @@ export default function DispatchChallan() {
   
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   const [searchQuery, setSearchQuery] = useState('');
+  const [jobCategoryFilter, setJobCategoryFilter] = useState<'All' | 'Repairable' | 'Scrap'>('All');
   const [selectedDivision, setSelectedDivision] = useState('All');
   
   const [challanNo, setChallanNo] = useState('');
@@ -45,11 +46,23 @@ export default function DispatchChallan() {
     fetchJobs();
   }, [activeAgency]);
 
-  // Derived pending jobs
+  // Derived pending jobs (includes both Tested Repairable jobs and Scrap Jobs ready for return)
   const pendingJobs = useMemo(() => {
-    return allJobs.filter(j => j.status === 'Tested - Ready for Dispatch' && j.isClosed !== true)
-      .sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
+    return allJobs.filter(j => {
+      if (j.status === 'Dispatched' || j.isClosed === true) return false;
+      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isTested = j.status === 'Tested - Ready for Dispatch';
+      return isTested || isScrap;
+    }).sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
   }, [allJobs]);
+
+  const repairableCount = useMemo(() => {
+    return pendingJobs.filter(j => j.status === 'Tested - Ready for Dispatch' && j.condition !== 'Scrap').length;
+  }, [pendingJobs]);
+
+  const scrapCount = useMemo(() => {
+    return pendingJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+  }, [pendingJobs]);
 
   const availableDivisions = useMemo(() => {
     const divs = new Set(pendingJobs.map(j => j.division).filter(Boolean));
@@ -58,6 +71,11 @@ export default function DispatchChallan() {
 
   const filteredPendingJobs = useMemo(() => {
     let result = pendingJobs;
+    if (jobCategoryFilter === 'Repairable') {
+      result = result.filter(j => j.status === 'Tested - Ready for Dispatch' && j.condition !== 'Scrap');
+    } else if (jobCategoryFilter === 'Scrap') {
+      result = result.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+    }
     if (selectedDivision !== 'All') {
         result = result.filter(j => j.division === selectedDivision);
     }
@@ -71,7 +89,7 @@ export default function DispatchChallan() {
         );
     }
     return result;
-  }, [pendingJobs, searchQuery, selectedDivision]);
+  }, [pendingJobs, jobCategoryFilter, searchQuery, selectedDivision]);
 
   // Derived dispatched jobs history
   const challanHistory = useMemo(() => {
@@ -226,8 +244,9 @@ export default function DispatchChallan() {
       wsData.push([`DELIVERY CHALLAN - ${cNo}`]);
       wsData.push([`Challan Date: ${data.challanDate}`, `Vehicle No: ${data.vehicleNo}`, `Delivery Date: ${data.deliveryDate}`]);
       wsData.push([]);
-      wsData.push(['S.N.', 'Job No', 'MR No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division']);
+      wsData.push(['S.N.', 'Job No', 'MR No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division', 'Remarks / Job Condition']);
       data.jobs.forEach((job: any, idx: number) => {
+        const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
         wsData.push([
           idx + 1,
           job.jobNo,
@@ -235,7 +254,8 @@ export default function DispatchChallan() {
           job.capacityKva,
           job.make,
           job.serialNo,
-          job.division
+          job.division,
+          isScrap ? 'Scrap - Returned to Division' : 'Tested OK'
         ]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -247,8 +267,9 @@ export default function DispatchChallan() {
       wsData.push([`DELIVERY CHALLAN PREVIEW - ${challanNo || 'Pending'}`]);
       wsData.push([`Challan Date: ${challanDate}`, `Vehicle No: ${vehicleNo}`, `Delivery Date: ${deliveryDate}`]);
       wsData.push([]);
-      wsData.push(['S.N.', 'Job No', 'MR No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division']);
+      wsData.push(['S.N.', 'Job No', 'MR No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division', 'Remarks / Job Condition']);
       selectedJobs.forEach((job: any, idx: number) => {
+        const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
         wsData.push([
           idx + 1,
           job.jobNo,
@@ -256,7 +277,8 @@ export default function DispatchChallan() {
           job.capacityKva,
           job.make,
           job.serialNo,
-          job.division
+          job.division,
+          isScrap ? 'Scrap - Returned to Division' : 'Tested OK'
         ]);
       });
       const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -368,11 +390,36 @@ export default function DispatchChallan() {
             </div>
 
             <div className="bg-white border border-slate-200 rounded overflow-hidden flex flex-col">
-                <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-center gap-4">
-                    <h2 className="font-bold text-slate-800 flex items-center gap-2">
-                        <CheckCircle2 className="w-5 h-5 text-purple-600" />
-                        Select Ready Jobs
-                    </h2>
+                <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                      <h2 className="font-bold text-slate-800 flex items-center gap-2">
+                          <CheckCircle2 className="w-5 h-5 text-purple-600" />
+                          Select Ready Jobs
+                      </h2>
+                      <div className="flex items-center bg-slate-200/70 p-1 rounded-lg text-xs font-bold">
+                        <button
+                          type="button"
+                          onClick={() => setJobCategoryFilter('All')}
+                          className={`px-3 py-1.5 rounded-md transition-colors ${jobCategoryFilter === 'All' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                          All ({pendingJobs.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setJobCategoryFilter('Repairable')}
+                          className={`px-3 py-1.5 rounded-md transition-colors ${jobCategoryFilter === 'Repairable' ? 'bg-white text-emerald-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                          Repairable ({repairableCount})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setJobCategoryFilter('Scrap')}
+                          className={`px-3 py-1.5 rounded-md transition-colors ${jobCategoryFilter === 'Scrap' ? 'bg-white text-rose-700 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                        >
+                          Scrap Jobs ({scrapCount})
+                        </button>
+                      </div>
+                    </div>
                     <div className="flex flex-col sm:flex-row w-full sm:w-auto gap-3">
                         <select 
                             value={selectedDivision} 
@@ -411,12 +458,14 @@ export default function DispatchChallan() {
                 <div className="p-4">
                     {filteredPendingJobs.length === 0 ? (
                         <div className="text-center py-12 text-slate-400 border-2 border-dashed border-slate-200 rounded">
-                            No ready jobs found. Try adjusting your search.
+                            No matching jobs found. Try adjusting your filters.
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                            {filteredPendingJobs.map(job => (
-                                <label key={job.id} className={`flex items-start gap-3 p-3 rounded border cursor-pointer transition-colors ${selectedJobIds.has(job.id) ? 'border-purple-500 bg-purple-50' : 'border-slate-200 hover:bg-slate-50'}`}>
+                            {filteredPendingJobs.map(job => {
+                                const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                                return (
+                                <label key={job.id} className={`flex items-start gap-3 p-3 rounded border cursor-pointer transition-colors ${selectedJobIds.has(job.id) ? (isScrap ? 'border-rose-500 bg-rose-50' : 'border-purple-500 bg-purple-50') : 'border-slate-200 hover:bg-slate-50'}`}>
                                     <input 
                                         type="checkbox" 
                                         className="mt-1 w-4 h-4 text-purple-600 rounded border-slate-300 focus:ring-purple-500"
@@ -424,7 +473,12 @@ export default function DispatchChallan() {
                                         onChange={() => handleToggleJob(job.id)}
                                     />
                                     <div className="flex-1">
-                                        <div className="font-bold text-sm text-slate-900">{job.jobNo}</div>
+                                        <div className="flex items-center justify-between gap-1 mb-0.5">
+                                          <div className="font-bold text-sm text-slate-900">{job.jobNo}</div>
+                                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${isScrap ? 'bg-rose-100 text-rose-800 border border-rose-200' : 'bg-emerald-100 text-emerald-800 border border-emerald-200'}`}>
+                                            {isScrap ? 'Scrap Job' : 'Tested OK'}
+                                          </span>
+                                        </div>
                                         <div className="text-xs text-slate-500 mb-1">MR: <span className="font-mono text-slate-700">{job.mrNo || 'N/A'}</span></div>
                                         <div className="flex justify-between items-center text-[10px] uppercase font-bold text-slate-400">
                                             <span>{job.division}</span>
@@ -432,7 +486,8 @@ export default function DispatchChallan() {
                                         </div>
                                     </div>
                                 </label>
-                            ))}
+                                );
+                            })}
                         </div>
                     )}
                 </div>
@@ -487,12 +542,18 @@ export default function DispatchChallan() {
                         </div>
                         <div className="p-4">
                             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                                {data.jobs.map(job => (
+                                {data.jobs.map(job => {
+                                    const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                                    return (
                                     <div key={job.id} className="p-2 border border-slate-100 rounded bg-slate-50 text-center">
-                                        <div className="font-bold text-slate-800 text-xs">{job.jobNo}</div>
+                                        <div className="font-bold text-slate-800 text-xs flex items-center justify-center gap-1">
+                                            <span>{job.jobNo}</span>
+                                            {isScrap && <span className="text-[9px] bg-rose-100 text-rose-700 font-bold px-1 rounded">SCRAP</span>}
+                                        </div>
                                         <div className="text-[10px] text-slate-500">{job.capacityKva} KVA</div>
                                     </div>
-                                ))}
+                                    );
+                                })}
                             </div>
                         </div>
                     </div>
@@ -539,16 +600,21 @@ export default function DispatchChallan() {
                     </tr>
                 </thead>
                 <tbody>
-                    {printData.jobs.map((job: any, idx: number) => (
+                    {printData.jobs.map((job: any, idx: number) => {
+                    const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                    return (
                     <tr key={job.id}>
                         <td className="border border-slate-800 p-2 text-center">{idx + 1}</td>
                         <td className="border border-slate-800 p-2 font-mono font-bold">{job.jobNo}</td>
                         <td className="border border-slate-800 p-2">{job.make}</td>
                         <td className="border border-slate-800 p-2 text-center">{job.capacityKva}</td>
                         <td className="border border-slate-800 p-2 font-mono">{job.serialNo || '-'}</td>
-                        <td className="border border-slate-800 p-2 text-center text-xs">Tested OK</td>
+                        <td className="border border-slate-800 p-2 text-center text-xs font-semibold">
+                          {isScrap ? 'Scrap - Returned to Division' : 'Tested OK'}
+                        </td>
                     </tr>
-                    ))}
+                    );
+                    })}
                     {printData.jobs.length === 0 && (
                     <tr>
                         <td colSpan={6} className="border border-slate-800 p-8 text-center text-slate-400">

@@ -54,8 +54,7 @@ export default function ExternalInspection() {
         const jobsQ = query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id),
-          where('repairType', '==', 'OGP')
+          where('agencyId', '==', activeAgency.id)
         );
         const [jobsSnap, inspSnap] = await Promise.all([
           getDocs(jobsQ),
@@ -224,6 +223,7 @@ export default function ExternalInspection() {
       const batch = writeBatch(db);
       
       for (const job of mrJobs) {
+        if (job.status === 'Dispatched' || job.isClosed === true) continue;
         const jobData = formsData[job.id];
         
         let inspectionRef;
@@ -289,8 +289,7 @@ export default function ExternalInspection() {
       const jobsQ = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
-        where('agencyId', '==', activeAgency?.id),
-        where('repairType', '==', 'OGP')
+        where('agencyId', '==', activeAgency?.id)
       );
       const [jobsSnap, inspSnap] = await Promise.all([
         getDocs(jobsQ),
@@ -325,7 +324,7 @@ export default function ExternalInspection() {
   const uniqueMrNos = Object.keys(mrGroups).filter(mr => {
     const jobsForMr = mrGroups[mr];
     if (statusFilter === 'Pending') {
-      return jobsForMr.some(j => j.status === 'Received');
+      return jobsForMr.some(j => !j.status || j.status === 'Received');
     } else {
       // Completed if ALL jobs (or at least some) are past 'Received'. Let's say if it has External Done or beyond
       return jobsForMr.some(j => j.status !== 'Received' && j.status !== 'Pending');
