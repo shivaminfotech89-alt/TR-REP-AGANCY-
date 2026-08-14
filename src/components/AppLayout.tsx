@@ -1,6 +1,6 @@
 import { Link, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useAgency } from '../lib/AgencyContext';
-import { LogOut, Settings, Building2 } from 'lucide-react';
+import { LogOut, Settings, Building2, ShieldCheck, LifeBuoy, Crown } from 'lucide-react';
 import { User, signOut } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
@@ -18,10 +18,14 @@ import EstimateMaster from './EstimateMaster';
 import AgencySettings from './AgencySettings';
 import BillingSystem from './BillingSystem';
 import OilInward from './OilInward';
+import AdminPanel from './AdminPanel';
+import SupportTickets from './SupportTickets';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster } = useAgency();
   const location = useLocation();
+
+  const isSuperAdmin = user.email === 'shivaminfotech89@gmail.com';
 
   const handleLogout = () => {
     signOut(auth);
@@ -94,15 +98,42 @@ export default function AppLayout({ user }: { user: User }) {
             );
           })}
           
-          <Link 
-            to="/agency-settings" 
-            className={`px-4 py-2 rounded flex items-center gap-3 text-sm transition-colors mt-8 border-t border-slate-800 pt-4 ${
-              location.pathname === '/agency-settings' ? 'text-white bg-slate-800 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
-            }`}
-          >
-            <Settings className="w-4 h-4" />
-            <span>Agency Settings</span>
-          </Link>
+          <div className="mt-6 pt-4 border-t border-slate-800 space-y-1">
+            <Link 
+              to="/agency-settings" 
+              className={`px-4 py-2 rounded flex items-center gap-3 text-sm transition-colors ${
+                location.pathname === '/agency-settings' ? 'text-white bg-slate-800 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <Settings className="w-4 h-4 text-slate-400" />
+              <span>Agency Settings</span>
+            </Link>
+
+            <Link 
+              to="/support" 
+              className={`px-4 py-2 rounded flex items-center gap-3 text-sm transition-colors ${
+                location.pathname === '/support' ? 'text-white bg-blue-600 font-medium' : 'text-slate-400 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              <LifeBuoy className="w-4 h-4 text-blue-400" />
+              <span>Support Desk</span>
+            </Link>
+
+            <Link 
+              to="/admin" 
+              className={`px-4 py-2 rounded flex items-center gap-3 text-sm transition-colors font-bold ${
+                location.pathname === '/admin' ? 'bg-amber-500 text-slate-950' : 'text-amber-400 hover:bg-slate-800 hover:text-amber-300'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+              <div className="flex items-center gap-1.5">
+                <span>Admin Portal</span>
+                <span className="text-[9px] bg-amber-400/20 text-amber-300 font-extrabold px-1.5 py-0.2 rounded border border-amber-400/30">
+                  SUPER
+                </span>
+              </div>
+            </Link>
+          </div>
 
         </nav>
       </aside>
@@ -134,6 +165,11 @@ export default function AppLayout({ user }: { user: User }) {
           </div>
           
           <div className="flex items-center space-x-4">
+            {isSuperAdmin && (
+              <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-black px-2.5 py-1 rounded-full flex items-center gap-1 shadow-sm">
+                <Crown className="w-3.5 h-3.5 text-amber-600 fill-amber-500" /> Super Admin
+              </span>
+            )}
             <span className="text-sm font-medium text-slate-700">{user.email}</span>
             <button
               onClick={handleLogout}
@@ -146,7 +182,7 @@ export default function AppLayout({ user }: { user: User }) {
         </header>
 
         <div className="flex-1 overflow-auto print:overflow-visible p-6 print:p-0 relative">
-          {!activeAgency && location.pathname !== '/agency-settings' && (
+          {!activeAgency && location.pathname !== '/agency-settings' && location.pathname !== '/admin' && location.pathname !== '/support' && (
              <div className="absolute inset-0 bg-white/50 backdrop-blur-[1px] z-10 flex items-center justify-center p-6">
                 <div className="bg-white p-6 rounded-lg shadow-xl border border-amber-200 max-w-md w-full text-center">
                    <Building2 className="w-12 h-12 text-amber-500 mx-auto mb-4" />
@@ -173,6 +209,8 @@ export default function AppLayout({ user }: { user: User }) {
             <Route path="/bills/new" element={<BillingSystem />} />
             <Route path="/oil-inward" element={<OilInward />} />
             <Route path="/agency-settings" element={<AgencySettings />} />
+            <Route path="/admin" element={<AdminPanel />} />
+            <Route path="/support" element={<SupportTickets />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </div>

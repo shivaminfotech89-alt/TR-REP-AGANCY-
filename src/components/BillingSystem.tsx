@@ -5,6 +5,7 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
 import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData } from '../lib/estimateData';
+import { LetterheadHeader } from './LetterheadHeader';
 
 // Helper to convert number to Indian Rupees in words
 export function numberToIndianWords(num: number): string {
@@ -986,14 +987,7 @@ export default function BillingSystem() {
               activeDocTab === 'all' || activeDocTab === 'forwarding' ? 'block' : 'hidden print:block'
             }`}>
               {/* Agency Header */}
-              <div className="text-center mb-8 pb-4 border-b-2 border-black">
-                <h1 className="text-2xl font-black text-black tracking-wide uppercase">
-                  {activeAgency?.name || 'HIGH TECH ELECTRICALS'}
-                </h1>
-                <p className="text-sm font-medium text-black mt-1">
-                  {activeAgency?.address || 'Plot No. 1017/A, Phase-4, GIDC Estate, Naroda, Ahmedabad'}
-                </p>
-              </div>
+              <LetterheadHeader agency={activeAgency} />
 
               {/* Recipient */}
               <div className="mb-6 text-sm text-black space-y-1">
@@ -1040,7 +1034,7 @@ export default function BillingSystem() {
 
                 <div className="text-center">
                   <p className="font-bold mb-12">Yours Faithfully,</p>
-                  <p className="font-bold">For, {activeAgency?.name || 'HIGH TECH ELECTRICALS'}</p>
+                  <p className="font-bold">For, {activeAgency?.name || ''}</p>
                   <p className="text-xs text-slate-500 mt-2">(Auth Sign.)</p>
                 </div>
               </div>
@@ -1051,14 +1045,7 @@ export default function BillingSystem() {
               activeDocTab === 'all' || activeDocTab === 'certificate' ? 'block' : 'hidden print:block'
             }`}>
               {/* Agency Header */}
-              <div className="text-center mb-8 pb-4 border-b-2 border-black">
-                <h1 className="text-2xl font-black text-black tracking-wide uppercase">
-                  {activeAgency?.name || 'HIGH TECH ELECTRICALS'}
-                </h1>
-                <p className="text-sm font-medium text-black mt-1">
-                  {activeAgency?.address || 'Plot No. 1017/A, Phase-4, GIDC Estate, Naroda, Ahmedabad'}
-                </p>
-              </div>
+              <LetterheadHeader agency={activeAgency} />
 
               {/* Certificate Container Box */}
               <div className="border-2 border-black p-8 my-12 min-h-[300px] flex flex-col justify-between">
@@ -1073,7 +1060,7 @@ export default function BillingSystem() {
                 </p>
 
                 <div className="text-right mt-16 pt-8">
-                  <p className="font-bold text-sm">For, {activeAgency?.name || 'HIGH TECH ELECTRICALS'}</p>
+                  <p className="font-bold text-sm">For, {activeAgency?.name || ''}</p>
                   <p className="text-xs text-slate-500 mt-8">(Auth Sign.)</p>
                 </div>
               </div>
@@ -1088,9 +1075,13 @@ export default function BillingSystem() {
                 {/* Header Row */}
                 <div className="grid grid-cols-2 border-b-2 border-black">
                   <div className="p-3 border-r-2 border-black">
-                    <h1 className="text-lg font-black uppercase">{activeAgency?.name || 'HIGH TECH ELECTRICALS'}</h1>
+                    {activeAgency?.letterheadUrl ? (
+                      <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-20 object-contain mb-2" />
+                    ) : (
+                      <h1 className="text-lg font-black uppercase">{activeAgency?.name || 'AGENCY NAME'}</h1>
+                    )}
                     <p className="font-bold text-[11px]">Repairing of Distribution Transformers</p>
-                    <p className="mt-2">{activeAgency?.address || 'Plot No. 1017/A, Phase-4, GIDC Estate, Naroda, Ahmedabad'}</p>
+                    <p className="mt-2">{activeAgency?.address || ''}</p>
                   </div>
                   <div className="p-3 relative">
                     <div className="text-right font-bold text-[10px] uppercase tracking-widest border-b border-black pb-1 mb-2">
@@ -1101,8 +1092,8 @@ export default function BillingSystem() {
                       <div><span className="font-bold">Appr Date:</span> {apprDate}</div>
                       <div><span className="font-bold">Bill No:</span> <strong className="font-bold">{billNo}</strong></div>
                       <div><span className="font-bold">Date:</span> {billDate}</div>
-                      <div><span className="font-bold">PAN NO.:</span> {activeAgency?.pan || 'AGHPP3482C'}</div>
-                      <div><span className="font-bold">GST No.:</span> {activeAgency?.gstin || '24AGHPP3482C1ZJ'}</div>
+                      <div><span className="font-bold">PAN NO.:</span> {activeAgency?.pan || ''}</div>
+                      <div><span className="font-bold">GST No.:</span> {activeAgency?.gstin || ''}</div>
                     </div>
                   </div>
                 </div>
@@ -1146,9 +1137,9 @@ export default function BillingSystem() {
                         <tr key={job.id} className="border-b border-black">
                           <td className="p-1.5 border-r border-black">{idx + 1}</td>
                           <td className="p-1.5 border-r border-black font-bold font-mono">{job.jobNo}</td>
-                          <td className="p-1.5 border-r border-black font-mono">{job.challanNo || 'H.E.-07'}</td>
+                          <td className="p-1.5 border-r border-black font-mono">{job.challanNo || ''}</td>
                           <td className="p-1.5 border-r border-black">{job.deliveryDate || job.challanDate || billDate}</td>
-                          <td className="p-1.5 border-r border-black">{job.make || 'VIJAI'}</td>
+                          <td className="p-1.5 border-r border-black">{job.make || ''}</td>
                           <td className="p-1.5 border-r border-black font-bold">{job.capacityKva}</td>
                           <td className="p-1.5 border-r border-black">11</td>
                           <td className="p-1.5 border-r border-black font-mono">{job.serialNo || '-'}</td>
@@ -1190,7 +1181,7 @@ export default function BillingSystem() {
                     </div>
 
                     <div className="pt-8 text-center">
-                      <p className="font-bold">For, {activeAgency?.name || 'HIGH TECH ELECTRICALS'}</p>
+                      <p className="font-bold">For, {activeAgency?.name || ''}</p>
                       <div className="h-8"></div>
                       <p className="text-[10px] text-slate-500">(Auth Sign / Stamp)</p>
                     </div>
@@ -1208,7 +1199,7 @@ export default function BillingSystem() {
                     </div>
 
                     <div className="pt-6 text-center">
-                      <p className="font-bold">For, {activeAgency?.name || 'HIGH TECH ELECTRICALS'}</p>
+                      <p className="font-bold">For, {activeAgency?.name || ''}</p>
                       <div className="h-8"></div>
                       <p className="text-[10px] text-slate-500">(Auth Sign.)</p>
                     </div>
@@ -1226,11 +1217,7 @@ export default function BillingSystem() {
               <div className="border-2 border-black p-4 text-black text-xs space-y-4">
                 
                 {/* Agency Header */}
-                <div className="text-center border-b-2 border-black pb-3">
-                  <h1 className="text-xl font-black uppercase tracking-wide">{activeAgency?.name || 'POWER TRANSMISSION COMPANY'}</h1>
-                  <p className="text-[11px] font-medium">{activeAgency?.address || 'Plot No. C1-39/31-B, Phase-3, GIDC Estate, Naroda, Ahmedabad'}</p>
-                  <h2 className="text-base font-black uppercase mt-2 tracking-widest underline underline-offset-4">OIL ACCOUNT SHEET</h2>
-                </div>
+                <LetterheadHeader agency={activeAgency} documentTitle="OIL ACCOUNT SHEET" />
 
                 {/* Sub Metadata */}
                 <div className="grid grid-cols-3 gap-2 font-semibold text-[11px] border-b border-black pb-2">

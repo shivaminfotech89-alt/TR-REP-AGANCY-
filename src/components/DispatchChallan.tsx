@@ -2,8 +2,9 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { Loader2, Printer, Search, Truck, CheckCircle2, History, FileSpreadsheet } from 'lucide-react';
+import { Loader2, Printer, Search, Truck, CheckCircle2, History, FileSpreadsheet, Download, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
+import { LetterheadHeader } from './LetterheadHeader';
 
 export default function DispatchChallan() {
   const { activeAgency } = useAgency();
@@ -184,7 +185,7 @@ export default function DispatchChallan() {
       }));
 
       // Instead of clearing instantly, show print dialog
-      setPrintData({
+      const dataToPrint = {
           jobs: selectedJobs,
           challanNo,
           challanDate,
@@ -192,19 +193,16 @@ export default function DispatchChallan() {
           deliveryDate,
           uniqueDivisions,
           uniqueMrNos
-      });
+      };
+      setPrintData(dataToPrint);
       
       setSelectedJobIds(new Set());
       setChallanNo('');
       setVehicleNo('');
       
       setTimeout(() => {
-          setIsPrinting(true);
-          setTimeout(() => {
-              window.print();
-              setIsPrinting(false);
-          }, 500);
-      }, 500);
+          window.print();
+      }, 300);
       
     } catch (err: any) {
       console.error("DISPATCH ERROR", err);
@@ -215,27 +213,24 @@ export default function DispatchChallan() {
     }
   };
 
-  const handlePrintPastChallan = (challanNo: string, data: any) => {
+  const handlePrintPastChallan = (cNo: string, data: any) => {
     const divs = [...new Set(data.jobs.map((j: any) => j.division).filter(Boolean))].join(', ');
     const mrs = [...new Set(data.jobs.map((j: any) => j.mrNo).filter(Boolean))].join(', ');
     
-    setPrintData({
+    const dataToPrint = {
         jobs: data.jobs,
-        challanNo: challanNo,
+        challanNo: cNo,
         challanDate: data.challanDate,
         vehicleNo: data.vehicleNo,
         deliveryDate: data.deliveryDate,
         uniqueDivisions: divs,
         uniqueMrNos: mrs
-    });
+    };
+    setPrintData(dataToPrint);
     
     setTimeout(() => {
-        setIsPrinting(true);
-        setTimeout(() => {
-            window.print();
-            setIsPrinting(false);
-        }, 500);
-    }, 100);
+        window.print();
+    }, 200);
   };
 
   const handleExportExcel = (cNo?: string, data?: any) => {
@@ -563,47 +558,73 @@ export default function DispatchChallan() {
       )}
 
       {/* Printable Challan Format */}
-      <div className={`bg-white shadow-sm border border-slate-200 ${isPrinting ? 'print:block print:border-none print:shadow-none' : 'hidden print:block'}`}>
-        {printData ? (
-            <div className="p-8 print:p-0">
-            <div className="text-center mb-8 border-b-2 border-slate-800 pb-4">
-                <h1 className="text-3xl font-bold text-slate-900 uppercase tracking-widest">{activeAgency?.name}</h1>
-                <p className="text-sm text-slate-600 mt-1">{activeAgency?.address}</p>
-                <div className="mt-4 inline-block bg-slate-900 text-white px-6 py-1 rounded-full text-sm font-bold tracking-widest uppercase">
-                Delivery Challan
-                </div>
+      {printData && (
+        <div className="bg-white shadow-lg border border-slate-300 rounded-lg p-6 md:p-8 mt-8 text-black print:m-0 print:p-0 print:border-none print:shadow-none">
+          
+          {/* Action Bar (Screen Only) */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-900 text-white p-4 rounded-lg mb-6 print:hidden shadow-sm">
+            <div>
+              <h3 className="font-bold text-sm">Challan Document Preview: {printData.challanNo}</h3>
+              <p className="text-xs text-slate-300 mt-0.5">{printData.jobs?.length || 0} Transformer(s) Dispatched</p>
             </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => window.print()}
+                className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2 rounded transition-colors shadow-sm"
+              >
+                <Printer className="w-4 h-4" /> Print / PDF
+              </button>
+              <button
+                onClick={() => handleExportExcel(printData.challanNo, printData)}
+                className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-4 py-2 rounded transition-colors shadow-sm"
+              >
+                <FileSpreadsheet className="w-4 h-4" /> Export Excel
+              </button>
+              <button
+                onClick={() => setPrintData(null)}
+                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded transition-colors"
+                title="Close Preview"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* Printable Document Sheet */}
+          <div className="p-8 border border-slate-200 rounded print:border-none print:p-0">
+            {/* Header with Letterhead support */}
+            <LetterheadHeader agency={activeAgency} documentTitle="DELIVERY CHALLAN" />
 
             <div className="flex justify-between items-start mb-8 text-sm">
-                <div className="space-y-1">
+              <div className="space-y-1">
                 <div className="flex"><span className="w-24 font-bold">To:</span> <span className="font-bold uppercase max-w-xs">{printData.uniqueDivisions || 'DIVISION'}</span></div>
                 <div className="flex"><span className="w-24 font-bold">Vehicle No:</span> <span className="font-mono uppercase">{printData.vehicleNo || '________________'}</span></div>
                 <div className="flex"><span className="w-24 font-bold">MR No(s):</span> <span className="font-mono uppercase max-w-xs">{printData.uniqueMrNos}</span></div>
-                </div>
-                <div className="space-y-1 text-right">
+              </div>
+              <div className="space-y-1 text-right">
                 <div className="flex justify-end"><span className="w-28 font-bold text-left">Challan No:</span> <span className="font-mono uppercase">{printData.challanNo || '________________'}</span></div>
                 <div className="flex justify-end"><span className="w-28 font-bold text-left">Date:</span> <span className="font-mono">{printData.challanDate}</span></div>
                 <div className="flex justify-end"><span className="w-28 font-bold text-left">Delivery Date:</span> <span className="font-mono">{printData.deliveryDate}</span></div>
-                </div>
+              </div>
             </div>
 
             <div className="min-h-[400px]">
-                <table className="w-full text-sm border-collapse border border-slate-800">
+              <table className="w-full text-sm border-collapse border border-slate-800">
                 <thead>
-                    <tr className="bg-slate-100 print:bg-slate-100">
+                  <tr className="bg-slate-100 print:bg-slate-100 font-bold">
                     <th className="border border-slate-800 p-2 text-center w-12">Sr.</th>
                     <th className="border border-slate-800 p-2 text-left">Job No.</th>
                     <th className="border border-slate-800 p-2 text-left">Make</th>
                     <th className="border border-slate-800 p-2 text-center">Capacity (KVA)</th>
                     <th className="border border-slate-800 p-2 text-left">Serial No.</th>
                     <th className="border border-slate-800 p-2 text-center">Remarks</th>
-                    </tr>
+                  </tr>
                 </thead>
                 <tbody>
-                    {printData.jobs.map((job: any, idx: number) => {
+                  {printData.jobs?.map((job: any, idx: number) => {
                     const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
                     return (
-                    <tr key={job.id}>
+                      <tr key={job.id || idx}>
                         <td className="border border-slate-800 p-2 text-center">{idx + 1}</td>
                         <td className="border border-slate-800 p-2 font-mono font-bold">{job.jobNo}</td>
                         <td className="border border-slate-800 p-2">{job.make}</td>
@@ -612,40 +633,38 @@ export default function DispatchChallan() {
                         <td className="border border-slate-800 p-2 text-center text-xs font-semibold">
                           {isScrap ? 'Scrap - Returned to Division' : 'Tested OK'}
                         </td>
-                    </tr>
+                      </tr>
                     );
-                    })}
-                    {printData.jobs.length === 0 && (
+                  })}
+                  {(!printData.jobs || printData.jobs.length === 0) && (
                     <tr>
-                        <td colSpan={6} className="border border-slate-800 p-8 text-center text-slate-400">
+                      <td colSpan={6} className="border border-slate-800 p-8 text-center text-slate-400">
                         No jobs selected
-                        </td>
+                      </td>
                     </tr>
-                    )}
+                  )}
                 </tbody>
-                </table>
-                
-                <div className="mt-4 text-sm">
-                    <span className="font-bold">Total Transformers Dispatched: </span> {printData.jobs.length}
-                </div>
+              </table>
+              
+              <div className="mt-4 text-sm font-bold">
+                Total Transformers Dispatched: {printData.jobs?.length || 0}
+              </div>
             </div>
 
             <div className="mt-16 flex justify-between items-end text-sm font-bold">
-                <div className="text-center">
+              <div className="text-center">
                 <div className="w-48 border-b border-slate-800 mb-2"></div>
                 Receiver's Signature
-                </div>
-                <div className="text-center">
+              </div>
+              <div className="text-center">
                 <div className="w-48 border-b border-slate-800 mb-2"></div>
-                For {activeAgency?.name}
-                </div>
+                For {activeAgency?.name || ''}
+              </div>
             </div>
 
-            </div>
-        ) : (
-            <div className="p-8 text-center text-slate-500">Challan not yet generated.</div>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

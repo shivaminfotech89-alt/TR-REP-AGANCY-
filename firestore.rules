@@ -1,64 +1,48 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
-    }
-
     function isSignedIn() {
-      return request.auth != null && request.auth.token.email_verified == true;
+      return request.auth != null;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
-    function incoming() {
-      return request.resource.data;
-    }
-
-    function existing() {
-      return resource.data;
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email == 'shivaminfotech89@gmail.com';
     }
 
     match /jobs/{jobId} {
-      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
-      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow read, write: if isSignedIn();
     }
 
     match /inspections/{inspectionId} {
-      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
-      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow read, write: if isSignedIn();
     }
 
     match /agencies/{agencyId} {
-      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
-      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow read, write: if isSignedIn();
     }
 
     match /atMasters/{atMasterId} {
-      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
-      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow read, write: if isSignedIn();
     }
 
     match /oilTransactions/{txId} {
-      allow read: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid;
-      allow update: if isSignedIn() && (incoming().ownerId == request.auth.uid || !('ownerId' in existing()));
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || !('ownerId' in existing()));
+      allow read, write: if isSignedIn();
+    }
+
+    match /user_roles/{roleId} {
+      allow read, list: if isSignedIn();
+      allow create, update, delete: if isSuperAdmin();
+    }
+
+    match /support_tickets/{ticketId} {
+      allow create: if isSignedIn();
+      allow read, list, update, delete: if isSignedIn() && (resource == null || resource.data.userId == request.auth.uid || isSuperAdmin());
+    }
+
+    match /system_config/{configId} {
+      allow read, list: if isSignedIn();
+      allow create, update, delete: if isSuperAdmin();
     }
   }
 }
+

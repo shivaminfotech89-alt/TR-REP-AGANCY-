@@ -7,6 +7,7 @@ import { Loader2, Printer, Search, FileSpreadsheet, Download } from 'lucide-reac
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
 import { ExternalData } from './ExternalInspection';
+import { LetterheadHeader } from './LetterheadHeader';
 
 export default function EstimateGenerate() {
   const { activeAgency, activeAtMaster } = useAgency();
@@ -324,13 +325,7 @@ export default function EstimateGenerate() {
           {/* PAGE 1: ESTIMATE REPORT */}
           <div className="bg-white p-8 rounded shadow-sm border border-slate-200 print:shadow-none print:border-none print:p-0">
             {/* Header */}
-            <div className="text-center mb-6 text-black border-b-2 border-black pb-4">
-              {activeAgency?.letterheadUrl ? (
-                <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-32 mx-auto mb-4 object-contain" />
-              ) : (
-                <h1 className="text-4xl font-black mb-2 text-green-800 tracking-tighter uppercase font-serif" style={{WebkitTextStroke: '1px black'}}>{activeAgency?.name || 'Ideal Engineering Co.'}</h1>
-              )}
-            </div>
+            <LetterheadHeader agency={activeAgency} documentTitle="ESTIMATE REPORT" />
 
             <div className="flex justify-between items-center text-[10px] font-bold uppercase text-black mb-2 border-b-2 border-black pb-2">
               <div>
@@ -528,7 +523,7 @@ export default function EstimateGenerate() {
                 </p>
               </div>
               <div className="text-center">
-                <p className="mb-12">For, {activeAgency?.name || 'Ideal Engineering Co.'}</p>
+                <p className="mb-12">For, {activeAgency?.name || ''}</p>
                 <p>Auth Sign.</p>
               </div>
             </div>
@@ -539,13 +534,7 @@ export default function EstimateGenerate() {
 
           {/* PAGE 2: FORWARDING LETTER */}
           <div className="bg-white p-12 mt-8 rounded shadow-sm border border-slate-200 print:shadow-none print:border-none print:p-0 print:mt-0 text-black">
-            <div className="text-center mb-10 border-b-2 border-black pb-4">
-              {activeAgency?.letterheadUrl ? (
-                <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-32 mx-auto mb-4 object-contain" />
-              ) : (
-                <h1 className="text-4xl font-black mb-2 text-green-800 tracking-tighter uppercase font-serif" style={{WebkitTextStroke: '1px black'}}>{activeAgency?.name || 'Ideal Engineering Co.'}</h1>
-              )}
-            </div>
+            <LetterheadHeader agency={activeAgency} />
 
             <div className="flex justify-between text-sm font-bold mb-8">
               <div className="whitespace-pre-wrap">
@@ -629,7 +618,7 @@ Circle Office : SABARMATI`}
             <div className="flex justify-between text-sm mb-8">
               <p>Encl. : Estimate & Inspection Reports</p>
               <div className="text-center">
-                <p className="mb-12">For, {activeAgency?.name || 'Ideal Engineering Co.'}</p>
+                <p className="mb-12">For, {activeAgency?.name || ''}</p>
                 <p>Auth Sign.</p>
               </div>
             </div>
