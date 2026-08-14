@@ -3,13 +3,14 @@ import React, { useState, useRef } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { useTheme } from '../lib/ThemeContext';
 import EditAgencyForm from "./EditAgencyForm";
-import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, Palette, Check, Sparkles } from 'lucide-react';
+import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, Palette, Check, Sparkles, Sun, Moon, Layers } from 'lucide-react';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 
 export default function AgencySettings() {
   const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading } = useAgency();
   const { currentTheme, themeId, setThemeId, availableThemes } = useTheme();
+  const [themeFilter, setThemeFilter] = useState<'all' | 'light' | 'dark'>('all');
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAgencyName, setNewAgencyName] = useState('');
   
@@ -211,9 +212,50 @@ export default function AgencySettings() {
           </span>
         </div>
 
+        {/* Theme mode filter tabs */}
+        <div className="flex items-center gap-1.5 mt-3 bg-slate-100 p-1 rounded-lg border border-slate-200 w-fit">
+          <button
+            type="button"
+            onClick={() => setThemeFilter('all')}
+            className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
+              themeFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-3 h-3" />
+            <span>All ({availableThemes.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setThemeFilter('light')}
+            className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
+              themeFilter === 'light' ? 'bg-amber-500 text-white shadow-xs font-black' : 'text-amber-800 hover:bg-amber-100/60'
+            }`}
+          >
+            <Sun className="w-3 h-3" />
+            <span>☀️ Light ({availableThemes.filter(t => t.themeMode === 'light').length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setThemeFilter('dark')}
+            className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
+              themeFilter === 'dark' ? 'bg-slate-900 text-white shadow-xs font-black' : 'text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Moon className="w-3 h-3" />
+            <span>🌙 Dark ({availableThemes.filter(t => t.themeMode === 'dark').length})</span>
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 mt-4">
-          {availableThemes.map(t => {
+          {availableThemes
+            .filter(t => {
+              if (themeFilter === 'light') return t.themeMode === 'light';
+              if (themeFilter === 'dark') return t.themeMode === 'dark';
+              return true;
+            })
+            .map(t => {
             const isSelected = t.id === themeId;
+            const isLight = t.themeMode === 'light';
             return (
               <div
                 key={t.id}
@@ -226,13 +268,18 @@ export default function AgencySettings() {
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <div className="flex items-center -space-x-1 shadow-2xs rounded overflow-hidden border border-slate-300 shrink-0 p-0.5 bg-white">
-                    <span className="w-4 h-5 rounded-l-xs" style={{ backgroundColor: t.previewColors.sidebar }} />
+                    <span className="w-4 h-5 rounded-l-xs border-r border-slate-200/50" style={{ backgroundColor: t.previewColors.sidebar }} />
                     <span className="w-3 h-5" style={{ backgroundColor: t.previewColors.accent }} />
                     <span className="w-3 h-5 rounded-r-xs border-l border-slate-200" style={{ backgroundColor: t.previewColors.canvas }} />
                   </div>
                   <div className="min-w-0">
                     <div className="flex items-center gap-1.5">
                       <span className="block text-xs font-bold text-slate-900 truncate">{t.name}</span>
+                      {isLight ? (
+                        <Sun className="w-2.5 h-2.5 text-amber-500 shrink-0" />
+                      ) : (
+                        <Moon className="w-2.5 h-2.5 text-slate-500 shrink-0" />
+                      )}
                       {t.tag && (
                         <span 
                           className="text-[8px] font-black px-1 py-0.2 rounded uppercase"

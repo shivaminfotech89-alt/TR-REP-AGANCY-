@@ -233,8 +233,8 @@ export default function AdminPanel() {
   // Compute metrics
   const totalAgenciesCount = allAgencies.length;
   const activeAgenciesCount = allAgencies.filter(a => (a as any).subscriptionStatus === 'active' || !(a as any).subscriptionStatus).length;
+  const expiredAgenciesCount = allAgencies.filter(a => (a as any).subscriptionStatus === 'expired' || (a as any).subscriptionStatus === 'suspended').length;
   const openTicketsCount = tickets.filter(t => t.status === 'Open' || t.status === 'In Progress').length;
-  const totalRevenueCollected = activeAgenciesCount * 3999;
 
   // Filtered ticket list
   const filteredTickets = tickets.filter(t => {
@@ -298,9 +298,9 @@ export default function AdminPanel() {
             <CreditCard className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Razorpay Subscription Revenue</span>
-            <span className="text-xl font-black text-slate-900">₹{totalRevenueCollected.toLocaleString()}</span>
-            <span className="text-[11px] text-slate-500 block">@ ₹3,999 / Agency / Yr</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Subscriptions</span>
+            <span className="text-xl font-black text-slate-900">{activeAgenciesCount} <span className="text-xs font-normal text-slate-500">/ {totalAgenciesCount}</span></span>
+            <span className="text-[11px] text-emerald-600 font-semibold block">{expiredAgenciesCount} Expired/Pending</span>
           </div>
         </div>
 
