@@ -224,6 +224,39 @@ export default function InternalInspection() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !selectedMrNo) return;
+
+    // Strict validation: Ensure no blank or incomplete inspection form is submitted
+    const incompleteJobs: string[] = [];
+    for (const job of mrJobs) {
+      if (job.status === 'Dispatched' || job.isClosed === true) continue;
+      const jobData = formsData[job.id];
+      if (!jobData) {
+        incompleteJobs.push(`Job #${job.jobNo}: Form is completely blank`);
+        continue;
+      }
+
+      const missing: string[] = [];
+      if (!jobData.windingType || jobData.windingType.trim() === '') missing.push('Winding Type');
+      if (!jobData.condition || jobData.condition.trim() === '') missing.push('Condition (Repairable / Scrap)');
+      if (!jobData.wasring || jobData.wasring.trim() === '') missing.push('WAS Ring');
+      if (!jobData.inPnt || jobData.inPnt.trim() === '') missing.push('Inside Paint');
+
+      if (jobData.condition === 'Repairable') {
+        const totalHvDam = (Number(jobData.damR) || 0) + (Number(jobData.damY) || 0) + (Number(jobData.damB) || 0);
+        if (totalHvDam > 0 && (!jobData.wtOfCoil || jobData.wtOfCoil.trim() === '')) {
+          missing.push('HV Coil Weight (Kg)');
+        }
+      }
+
+      if (missing.length > 0) {
+        incompleteJobs.push(`Job #${job.jobNo}: Missing (${missing.join(', ')})`);
+      }
+    }
+
+    if (incompleteJobs.length > 0) {
+      alert(`⚠️ Blank or incomplete internal inspection forms are NOT acceptable!\n\nPlease fill in all required inspection details before saving:\n\n${incompleteJobs.join('\n')}`);
+      return;
+    }
     
     setIsSubmitting(true);
     try {
@@ -500,6 +533,11 @@ export default function InternalInspection() {
               </button>
             </div>
 
+          </div>
+
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm print:hidden">
+            <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
+            <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, WAS Ring, and fill damaged coil weights before submitting.</span>
           </div>
 
           <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">

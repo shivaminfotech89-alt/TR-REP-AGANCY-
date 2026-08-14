@@ -179,7 +179,46 @@ export default function TestingReport() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (selectedJobIds.size === 0) return;
+    if (selectedJobIds.size === 0) {
+      alert('Please select at least one job to submit testing report.');
+      return;
+    }
+
+    // Strict validation: Blank or incomplete testing forms are NOT acceptable
+    const incompleteJobs: string[] = [];
+    Array.from<string>(selectedJobIds).forEach((id: string) => {
+      const targetJob = jobs.find(j => j.id === id);
+      if (targetJob?.status === 'Dispatched' || targetJob?.isClosed === true) return;
+      
+      const data = formsData[id];
+      if (!data) {
+        incompleteJobs.push(`Job #${targetJob?.jobNo || id}: Testing form is completely blank`);
+        return;
+      }
+
+      const missing: string[] = [];
+      if (!data.excitationCurrent || data.excitationCurrent.trim() === '') missing.push('Excitation Current');
+      if (!data.noLoadLoss || data.noLoadLoss.trim() === '') missing.push('No Load Loss');
+      if (!data.fullLoadCurrent || data.fullLoadCurrent.trim() === '') missing.push('Full Load Current');
+      if (!data.impedanceVoltage || data.impedanceVoltage.trim() === '') missing.push('Impedance Voltage');
+      if (!data.loadLoss || data.loadLoss.trim() === '') missing.push('Load Loss');
+      if (!data.neutralCurrent || data.neutralCurrent.trim() === '') missing.push('Neutral Current');
+      if (!data.oilBdv || data.oilBdv.trim() === '') missing.push('Oil BDV');
+      if (!data.ratioTest || data.ratioTest.trim() === '') missing.push('Ratio Test');
+      if (!data.highVoltageTest || data.highVoltageTest.trim() === '') missing.push('High Voltage Test');
+      if (!data.dvdfTest || data.dvdfTest.trim() === '') missing.push('DVDF Test');
+      if (!data.insulationResistance || data.insulationResistance.trim() === '') missing.push('Insulation Resistance');
+
+      if (missing.length > 0) {
+        incompleteJobs.push(`Job #${targetJob?.jobNo || id}: Missing (${missing.join(', ')})`);
+      }
+    });
+
+    if (incompleteJobs.length > 0) {
+      alert(`⚠️ Blank or incomplete testing reports are NOT acceptable!\n\nPlease fill in all required test parameters for the selected transformers before saving:\n\n${incompleteJobs.join('\n')}`);
+      return;
+    }
+
     setLoading(true);
     try {
       const batch = writeBatch(db);
@@ -562,6 +601,11 @@ export default function TestingReport() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
+            <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm">
+              <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
+              <span>Blank testing reports are <strong>NOT acceptable</strong>. You must fill Excitation Current, No Load Loss, Full Load Current, Load Loss, BDV, and all test parameters before saving.</span>
+            </div>
+
             <div className="bg-blue-50 border border-blue-200 text-blue-800 text-xs p-3 rounded flex items-center shadow-sm">
               <span className="font-bold mr-2">Tip:</span> Fill in the first job's details completely. You can double-click any field label in the first row to apply that value to all jobs below.
             </div>

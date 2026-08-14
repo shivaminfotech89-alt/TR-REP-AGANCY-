@@ -216,6 +216,34 @@ export default function ExternalInspection() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !selectedMrNo) return;
+
+    // Strict validation: Ensure no blank or incomplete inspection form is submitted
+    const incompleteJobs: string[] = [];
+    for (const job of mrJobs) {
+      if (job.status === 'Dispatched' || job.isClosed === true) continue;
+      const jobData = formsData[job.id];
+      if (!jobData) {
+        incompleteJobs.push(`Job #${job.jobNo}: Form is completely blank`);
+        continue;
+      }
+
+      const missing: string[] = [];
+      if (!jobData.oilCapLtrs || jobData.oilCapLtrs.trim() === '') missing.push('Oil Capacity (Ltrs)');
+      if (jobData.lessOilLtrs === undefined || jobData.lessOilLtrs.trim() === '') missing.push('Less Oil (Ltrs)');
+      if (!jobData.kv || jobData.kv.trim() === '') missing.push('KV Rating');
+      if (!jobData.sealType || jobData.sealType.trim() === '') missing.push('Seal Type');
+      if (!jobData.gasket || jobData.gasket.trim() === '') missing.push('Gasket');
+      if (!jobData.transType || jobData.transType.trim() === '') missing.push('Transformer Type');
+
+      if (missing.length > 0) {
+        incompleteJobs.push(`Job #${job.jobNo}: Missing (${missing.join(', ')})`);
+      }
+    }
+
+    if (incompleteJobs.length > 0) {
+      alert(`⚠️ Blank or incomplete inspection forms are NOT acceptable!\n\nPlease fill in all required inspection details before saving:\n\n${incompleteJobs.join('\n')}`);
+      return;
+    }
     
     setIsSubmitting(true);
     try {
@@ -496,6 +524,11 @@ export default function ExternalInspection() {
               </button>
             </div>
 
+          </div>
+
+          <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm print:hidden">
+            <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
+            <span>Blank inspection reports are <strong>NOT acceptable</strong>. You must fill in Oil Capacity (Ltrs), Less Oil (Ltrs), Seal Type, and all inspection fields for every transformer before submitting.</span>
           </div>
 
           <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
