@@ -185,6 +185,8 @@ export default function NewJob() {
   // Receipt Print Modal State
   const [showReceiptModal, setShowReceiptModal] = useState(false);
   const [savedJobsForReceipt, setSavedJobsForReceipt] = useState<any[] | null>(null);
+  const [modalAlertMessage, setModalAlertMessage] = useState<string | null>(null);
+  const [showSaveConfirmModal, setShowSaveConfirmModal] = useState<boolean>(false);
 
   const [commonData, setCommonData] = useState({
     mrNo: '',
@@ -363,6 +365,27 @@ export default function NewJob() {
     setTimeout(() => setAutoFillNotice(null), 4000);
   };
 
+  const clearTransformerRow = (index: number) => {
+    setTransformers(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        jobNo: '',
+        capacityKva: '',
+        make: '',
+        serialNo: '',
+        coreType: 'CRGO',
+        prevAtNo: '',
+        prevJobNo: '',
+        prevDeliveryDate: '',
+        gpReason: '',
+        autoFilledFrom: undefined
+      };
+      return updated;
+    });
+    setAutoFillNotice(`Cleared transformer row #${index + 1}.`);
+    setTimeout(() => setAutoFillNotice(null), 3000);
+  };
+
   const handleGpAutoLookup = async (index: number, lookupField: 'serialNo' | 'jobNo', queryVal: string) => {
     if (commonData.repairType !== 'GP' || !queryVal.trim() || !auth.currentUser) return;
     
@@ -394,6 +417,12 @@ export default function NewJob() {
         const jobsList = snapshot.docs.map(d => d.data() as any).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         const latestJob = jobsList[0];
         applyPastJobToRow(index, latestJob);
+      } else {
+        // If not found in database records:
+        if (lookupField === 'jobNo') {
+          setAutoFillNotice(`ℹ️ Job #${queryVal.trim()} not found in database. Please enter the Last Date of Repaired below to verify the ${gpValidationMonths}-month Guarantee Period.`);
+          setTimeout(() => setAutoFillNotice(null), 6000);
+        }
       }
     } catch (err) {
       console.error(`Error fetching GP job details by ${lookupField}:`, err);
@@ -580,13 +609,116 @@ export default function NewJob() {
     return allotments;
   }, [activeAtMaster, activeAgency, commonData.division]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!auth.currentUser || !activeAgency) return;
-    
+    if (!auth.currentUser) {
+      setModalAlertMessage("You must be logged in to save a job.");
+      return;
+    }
+    if (!activeAgency) {
+      setModalAlertMessage("Please select or create an active agency in Agency Settings before saving jobs.");
+      return;
+    }
+    if (commonData.repairType === 'OGP') {
+      for (const t of transformers) {
+        const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
+        if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
+          const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          return;
+        }
+      }
+    }
+
+    if (commonData.repairType === 'GP') {
+      for (let i = 0; i < transformers.length; i++) {
+        const t = transformers[i];
+        if (!t.jobNo || !t.jobNo.trim()) {
+          const err = `Please enter the Original Job Number for Transformer #${i + 1}.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          return;
+        }
+        if (!t.prevDeliveryDate || !t.prevDeliveryDate.trim()) {
+          const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${gpValidationMonths}-Month Guarantee Period before saving.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          return;
+        }
+        const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths);
+        if (!gpCalc || !gpCalc.isValidDate) {
+          const err = `Invalid Last Date of Repaired for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter a valid date.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          return;
+        }
+        if (!gpCalc.isWithinWarranty) {
+          const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${gpValidationMonths}-month Guarantee Period and cannot be booked as a GP repair.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          return;
+        }
+      }
+    }
+    setShowSaveConfirmModal(true);
+  };
+
+  const confirmSaveJob = async () => {
+    setShowSaveConfirmModal(false);
     setLoading(true);
     try {
       const now = Date.now();
+
+      // Check OGP prefix validation
+      if (commonData.repairType === 'OGP') {
+        for (const t of transformers) {
+          const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
+          if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
+            const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
+            setErrorMsg(err);
+            setModalAlertMessage(err);
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      // Check GP validation
+      if (commonData.repairType === 'GP') {
+        for (let i = 0; i < transformers.length; i++) {
+          const t = transformers[i];
+          if (!t.jobNo || !t.jobNo.trim()) {
+            const err = `Please enter the Original Job Number for Transformer #${i + 1}.`;
+            setErrorMsg(err);
+            setModalAlertMessage(err);
+            setLoading(false);
+            return;
+          }
+          if (!t.prevDeliveryDate || !t.prevDeliveryDate.trim()) {
+            const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${gpValidationMonths}-Month Guarantee Period before saving.`;
+            setErrorMsg(err);
+            setModalAlertMessage(err);
+            setLoading(false);
+            return;
+          }
+          const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths);
+          if (!gpCalc || !gpCalc.isValidDate) {
+            const err = `Invalid Last Date of Repaired for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter a valid date.`;
+            setErrorMsg(err);
+            setModalAlertMessage(err);
+            setLoading(false);
+            return;
+          }
+          if (!gpCalc.isWithinWarranty) {
+            const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${gpValidationMonths}-month Guarantee Period and cannot be booked as a GP repair.`;
+            setErrorMsg(err);
+            setModalAlertMessage(err);
+            setLoading(false);
+            return;
+          }
+        }
+      }
 
       // Check MR No duplication
       const mrQuery = query(
@@ -1371,6 +1503,14 @@ export default function NewJob() {
                         <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
                           <button
                             type="button"
+                            onClick={() => unlinkPastJobFromRow(index)}
+                            className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg text-[10px] font-bold shadow-2xs cursor-pointer transition-colors"
+                            title="Deselect or clear this job selection"
+                          >
+                            Deselect Job
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => {
                               setShowPastPickerRowIndex(index);
                               setPastSearchTerm('');
@@ -1393,30 +1533,27 @@ export default function NewJob() {
                     );
                   }
 
-                  // 2. UNSAVED JOB / MANUAL ENTRY: ASK FOR LAST REPAIRED DATE ONLY
+                  // 2. UNSAVED JOB / MANUAL ENTRY: LAST REPAIRED DATE ONLY TO VERIFY GUARANTEE PERIOD
                   return (
                     <div className="mt-3 pt-3 border-t border-amber-200/80 bg-amber-50/70 p-3 rounded-lg space-y-2.5">
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold text-amber-950 flex items-center gap-1.5">
                           <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>Manual Entry (Unsaved Past Job): Enter Last Repaired Date to Verify GP Period ({gpValidationMonths} Mos)</span>
+                          <span>Verify Guarantee Period ({gpValidationMonths} Mos) — Enter Last Repaired Date</span>
                         </span>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowPastPickerRowIndex(index);
-                            setPastSearchTerm('');
-                          }}
-                          className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-bold text-[10px] shadow-2xs flex items-center justify-center gap-1 transition-colors cursor-pointer w-fit"
-                          title="Pick from saved ATs in your account"
-                        >
-                          <History className="w-3 h-3" />
-                          <span>Pick from Saved AT / Past TR</span>
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => clearTransformerRow(index)}
+                            className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-lg text-[10px] font-bold cursor-pointer transition-colors"
+                            title="Clear job entry"
+                          >
+                            Clear Entry
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 text-xs">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
                         {/* LAST DATE OF REPAIRED */}
                         <div>
                           <label className="block text-[10px] font-bold uppercase text-amber-950 mb-0.5">
@@ -1430,68 +1567,39 @@ export default function NewJob() {
                             required={commonData.repairType === 'GP'}
                           />
                         </div>
-
-                        {/* PREVIOUS AT REF (OPTIONAL/MANUAL) */}
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-amber-950 mb-0.5">
-                            Previous AT / Tender Ref (Optional):
-                          </label>
-                          <input
-                            type="text"
-                            list="prev-at-suggestions"
-                            value={t.prevAtNo || ''}
-                            onChange={(e) => handleTransformerChange(index, 'prevAtNo', e.target.value)}
-                            placeholder="e.g. Past Tender / AT No"
-                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs font-mono bg-white text-amber-950 outline-none focus:ring-1 focus:ring-amber-500"
-                          />
-                          <datalist id="prev-at-suggestions">
-                            {atMasters.map(at => (
-                              <option key={at.id} value={at.atNumber || at.name}>
-                                {at.name} {at.id === activeAtMaster?.id ? '(Current AT)' : `(${at.status})`}
-                              </option>
-                            ))}
-                          </datalist>
-                        </div>
-
-                        {/* GP DEFECT / REASON */}
-                        <div>
-                          <label className="block text-[10px] font-bold uppercase text-amber-950 mb-0.5">
-                            GP Failure / Defect Reason:
-                          </label>
-                          <input
-                            type="text"
-                            value={t.gpReason || ''}
-                            onChange={(e) => handleTransformerChange(index, 'gpReason', e.target.value)}
-                            placeholder="e.g. Coil Burn, Leakage"
-                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs bg-white text-amber-950 outline-none focus:ring-1 focus:ring-amber-500"
-                          />
-                        </div>
                       </div>
 
                       {/* LIVE GP CALCULATION STATUS BADGE / BANNER */}
-                      {rowGpCalc && rowGpCalc.isValidDate && (
+                      {!t.prevDeliveryDate ? (
+                        <div className="px-3 py-2 bg-amber-100/90 border border-amber-300 rounded-lg text-xs text-amber-950 flex items-center gap-2">
+                          <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
+                          <span>
+                            <strong>Action Required:</strong> Enter the Last Date of Repaired above to verify whether this transformer is within the {gpValidationMonths}-month Guarantee Period.
+                          </span>
+                        </div>
+                      ) : rowGpCalc && rowGpCalc.isValidDate ? (
                         <div className={`px-3 py-2 rounded-lg border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 ${
                           rowGpCalc.isWithinWarranty
-                            ? 'bg-emerald-100/80 border-emerald-300 text-emerald-950'
-                            : 'bg-amber-100 border-amber-400 text-amber-950'
+                            ? 'bg-emerald-100/90 border-emerald-300 text-emerald-950 font-medium'
+                            : 'bg-red-50 border-red-300 text-red-950'
                         }`}>
                           <div className="flex items-center gap-1.5 font-bold">
                             {rowGpCalc.isWithinWarranty ? (
                               <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                             ) : (
-                              <AlertTriangle className="w-4 h-4 text-amber-800 shrink-0" />
+                              <X className="w-4 h-4 text-red-600 shrink-0" />
                             )}
                             <span>
                               {rowGpCalc.isWithinWarranty
-                                ? `🟢 Within ${gpValidationMonths}-Month GP Warranty (${rowGpCalc.remainingMonthsText})`
-                                : `🟠 ${gpValidationMonths}-Month GP Period Exceeded (${rowGpCalc.elapsedMonthsText} elapsed)`}
+                                ? `🟢 Within ${gpValidationMonths}-Month GP Warranty (${rowGpCalc.remainingMonthsText}) — Valid to Save`
+                                : `🔴 GP Period Exceeded (${rowGpCalc.elapsedMonthsText} elapsed) — Cannot Save as GP`}
                             </span>
                           </div>
-                          <div className="text-[11px] font-mono text-slate-700">
-                            Last Repaired: <span className="font-bold">{formatDDMMYYYY(rowGpCalc.repairedDateStr)}</span> → Expiry: <span className="font-bold">{formatDDMMYYYY(rowGpCalc.expiryDateStr)}</span>
+                          <div className="text-[11px] font-mono opacity-90">
+                            Last Repaired: <span className="font-bold">{formatDDMMYYYY(rowGpCalc.repairedDateStr)}</span> → Expired: <span className="font-bold">{formatDDMMYYYY(rowGpCalc.expiryDateStr)}</span>
                           </div>
                         </div>
-                      )}
+                      ) : null}
                     </div>
                   );
                 })()}
@@ -1847,6 +1955,55 @@ export default function NewJob() {
               </div>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* Save Confirmation Modal */}
+      {showSaveConfirmModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-4">
+              <FileText className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Confirm Job Save</h3>
+            <p className="text-sm text-slate-600 mb-6">Are you sure you want to save this new job entry?</p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowSaveConfirmModal(false)}
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmSaveJob}
+                className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+              >
+                Yes, Save Job
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Alert Message */}
+      {modalAlertMessage && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-amber-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
+              <X className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Notice</h3>
+            <p className="text-sm text-slate-600 mb-6">{modalAlertMessage}</p>
+            <button
+              type="button"
+              onClick={() => setModalAlertMessage(null)}
+              className="w-full px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+            >
+              OK
+            </button>
           </div>
         </div>
       )}

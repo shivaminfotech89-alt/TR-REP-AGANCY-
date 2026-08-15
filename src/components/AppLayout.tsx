@@ -52,15 +52,23 @@ export default function AppLayout({ user }: { user: User }) {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [showThemeModal, setShowThemeModal] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [logoutErrorMsg, setLogoutErrorMsg] = useState<string | null>(null);
 
   // Super Admin Check (case-insensitive for safety)
   const isSuperAdmin = user?.email?.toLowerCase().trim() === 'shivaminfotech89@gmail.com';
 
-  const handleLogout = async () => {
+  const handleLogoutClick = () => {
+    setShowLogoutConfirm(true);
+  };
+
+  const confirmLogout = async () => {
+    setShowLogoutConfirm(false);
     try {
       await signOut(auth);
     } catch (error) {
       console.error('Failed to log out', error);
+      setLogoutErrorMsg("Failed to log out: " + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -257,7 +265,7 @@ export default function AppLayout({ user }: { user: User }) {
             <p className="text-[10px] text-slate-500">Logged in</p>
           </div>
           <button
-            onClick={handleLogout}
+            onClick={handleLogoutClick}
             className={`p-2 rounded-lg transition-colors ${
               isLight ? 'text-slate-500 hover:text-red-600 hover:bg-red-50' : 'text-slate-400 hover:text-red-400 bg-white/10'
             }`}
@@ -333,7 +341,7 @@ export default function AppLayout({ user }: { user: User }) {
             )}
             <span className="text-xs font-medium text-slate-700 hidden lg:inline max-w-[180px] truncate">{user.email}</span>
             <button
-              onClick={handleLogout}
+              onClick={handleLogoutClick}
               className="p-2 text-slate-500 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded-lg transition-colors border border-slate-200"
               title="Sign Out"
             >
@@ -376,6 +384,55 @@ export default function AppLayout({ user }: { user: User }) {
           </Routes>
         </div>
       </main>
+
+      {/* Logout Confirmation Modal */}
+      {showLogoutConfirm && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+              <LogOut className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Confirm Sign Out</h3>
+            <p className="text-sm text-slate-600 mb-6">Are you sure you want to log out of your session?</p>
+            <div className="flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors text-sm"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmLogout}
+                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+              >
+                Log Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Logout Error Modal */}
+      {logoutErrorMsg && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-red-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+            <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-4">
+              <X className="w-6 h-6" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 mb-2">Logout Failed</h3>
+            <p className="text-sm text-slate-600 mb-6">{logoutErrorMsg}</p>
+            <button
+              type="button"
+              onClick={() => setLogoutErrorMsg(null)}
+              className="w-full px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+            >
+              OK
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
