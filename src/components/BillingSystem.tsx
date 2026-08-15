@@ -1,8 +1,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save, Edit3, Check } from 'lucide-react';
+import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
+import { 
+  Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, 
+  Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save, Edit3, Check, Send,
+  IndianRupee, Clock, CheckSquare, Eye, CreditCard, Banknote, Filter
+} from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData } from '../lib/estimateData';
 import { LetterheadHeader } from './LetterheadHeader';
@@ -42,11 +46,48 @@ export default function BillingSystem() {
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Tab State: 'generator' | 'sent'
+  const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'payments'>('generator');
+
   // Filters
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [billTypeFilter, setBillTypeFilter] = useState<'repairable' | 'scrap'>('repairable');
+
+  // Saving Bill State
+  const [savingBillDates, setSavingBillDates] = useState(false);
+  const [savedSuccessMsg, setSavedSuccessMsg] = useState('');
+
+  // Send Bill Modal State
+  const [showSendBillModal, setShowSendBillModal] = useState(false);
+  const [sendTargetMr, setSendTargetMr] = useState<string>('');
+  const [sendBillNo, setSendBillNo] = useState('');
+  const [sendBillRefNo, setSendBillRefNo] = useState('');
+  const [sendBillDate, setSendBillDate] = useState(new Date().toISOString().split('T')[0]);
+  const [sendBillRemarks, setSendBillRemarks] = useState('');
+  const [submittingSendBill, setSubmittingSendBill] = useState(false);
+
+  // Mark Bill Paid Modal State
+  const [showPaidModal, setShowPaidModal] = useState(false);
+  const [paidTargetMr, setPaidTargetMr] = useState<string>('');
+  const [paymentMode, setPaymentMode] = useState('NEFT / RTGS');
+  const [paymentRefNo, setPaymentRefNo] = useState('');
+  const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split('T')[0]);
+  const [paidAmount, setPaidAmount] = useState<number | string>('');
+  const [paymentDeductions, setPaymentDeductions] = useState<number | string>('0');
+  const [paymentBank, setPaymentBank] = useState('');
+  const [paymentRemarks, setPaymentRemarks] = useState('');
+  const [submittingPaid, setSubmittingPaid] = useState(false);
+
+  // Sent Bills Filter & Search
+  const [sentSearchQuery, setSentSearchQuery] = useState('');
+  const [sentFilterDivision, setSentFilterDivision] = useState<string>('All');
+
+  // Received Payments Filter & Search
+  const [paidSearchQuery, setPaidSearchQuery] = useState('');
+  const [paidFilterDivision, setPaidFilterDivision] = useState<string>('All');
+  const [paidFilterMode, setPaidFilterMode] = useState<string>('All');
 
   // Active Document Tab for preview
   const [activeDocTab, setActiveDocTab] = useState<'all' | 'forwarding' | 'certificate' | 'invoice' | 'oil'>('all');
@@ -92,8 +133,7 @@ export default function BillingSystem() {
           )),
           getDocs(query(
             collection(db, 'inspections'),
-            where('ownerId', '==', auth.currentUser.uid),
-            where('type', '==', 'External')
+            where('ownerId', '==', auth.currentUser.uid)
           )),
           getDocs(query(
             collection(db, 'oilTransactions'),
@@ -212,6 +252,7 @@ export default function BillingSystem() {
   // Set default bill metadata when an MR is picked
   const handleSelectMr = (mr: string) => {
     setSelectedMrNo(mr);
+    setCustomOilUptoDate('');
     const mrJobs = jobs.filter(j => j.mrNo === mr);
     const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
     const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052';
@@ -298,19 +339,33 @@ export default function BillingSystem() {
   // Oil Data Calculations for Oil Account Document (Page 4)
   const jobOilDetails = useMemo(() => {
     return selectedJobsData.map(job => {
-      const insp = inspections.find(i => i.jobId === job.id);
-      const kva = Number(job.capacityKva) || 25;
+      const insp = inspections.find(i => 
+        (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
+        (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
+      ) || inspections.find(i => i.jobId === job.id);
       
-      // Standard capacity calculation if missing
+      const rawOilCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
+      const rawLessOil = insp?.data?.lessOilLtrs ?? insp?.lessOilLtrs ?? job.externalDetails?.lessOilLtrs ?? job.lessOilLtrs;
+      const rawNetShortage = insp?.data?.netShortage ?? insp?.netShortage ?? job.externalDetails?.netShortage;
+
+      const kva = Number(job.capacityKva) || 25;
       const defaultCap = kva <= 16 ? 140 : kva <= 25 ? 184 : kva <= 63 ? 240 : 323;
-      const oilCap = Number(insp?.data?.oilCapLtrs) || defaultCap;
-      const lessOil = Number(insp?.data?.lessOilLtrs) || 0;
+
+      // Exact values as per external report
+      const oilCap = (rawOilCap !== undefined && rawOilCap !== null && String(rawOilCap).trim() !== '')
+        ? Number(rawOilCap)
+        : defaultCap;
+
+      const lessOil = (rawLessOil !== undefined && rawLessOil !== null && String(rawLessOil).trim() !== '')
+        ? Number(rawLessOil)
+        : 0;
+
       const oilRecd = Math.max(0, oilCap - lessOil);
-      const baseShortage = oilCap - oilRecd;
+      const baseShortage = lessOil;
       const filterLoss = oilRecd * 0.05; // 5% filtration loss on received oil
 
-      const netShortage = (insp && insp.data && typeof insp.data.netShortage === 'number')
-        ? insp.data.netShortage
+      const netShortage = (typeof rawNetShortage === 'number')
+        ? rawNetShortage
         : (baseShortage + filterLoss);
 
       return {
@@ -318,6 +373,7 @@ export default function BillingSystem() {
         oilCap,
         oilRecd,
         baseShortage,
+        lessOil,
         filterLoss,
         netShortage
       };
@@ -334,19 +390,26 @@ export default function BillingSystem() {
   const parseDateToTimestamp = (dateVal: any): number => {
     if (!dateVal) return 0;
     if (typeof dateVal === 'number') return dateVal;
-    if (dateVal.seconds) return dateVal.seconds * 1000;
+    if (dateVal instanceof Date) return dateVal.getTime();
+    if (dateVal.seconds || dateVal._seconds) return (dateVal.seconds || dateVal._seconds) * 1000;
     if (typeof dateVal === 'string') {
       const s = dateVal.trim();
-      if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-        const [y, m, d] = s.split('T')[0].split('-').map(Number);
-        return new Date(y, m - 1, d, 23, 59, 59, 999).getTime();
+      if (!s || s === '-') return 0;
+      // Format: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+      if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(s)) {
+        const parts = s.split('T')[0].split(/[-/.]/);
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        return new Date(y, m, d, 23, 59, 59, 999).getTime();
       }
-      if (/^\d{1,2}[-/]\d{1,2}[-/]\d{4}/.test(s)) {
-        const parts = s.split(/[-/]/);
-        const day = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        const year = parseInt(parts[2], 10);
-        return new Date(year, month, day, 23, 59, 59, 999).getTime();
+      // Format: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+      if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}/.test(s)) {
+        const parts = s.split(/[-/.]/);
+        const d = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const y = parseInt(parts[2], 10);
+        return new Date(y, m, d, 23, 59, 59, 999).getTime();
       }
       const parsed = new Date(s).getTime();
       return isNaN(parsed) ? 0 : parsed;
@@ -368,19 +431,149 @@ export default function BillingSystem() {
     return '';
   };
 
+  const getMrDate = (mrNo: string) => {
+    if (!mrNo) return "-";
+    const matchingJob = jobs.find((j) => j.mrNo === mrNo);
+    if (matchingJob?.dateOfIssue) return matchingJob.dateOfIssue;
+    if (matchingJob?.mrDate) return matchingJob.mrDate;
+    if (matchingJob?.createdAt) {
+      const d = formatDateStr(matchingJob.createdAt);
+      if (d) return d;
+    }
+    const tx = oilTransactions.find((t) => t.mrNo === mrNo && t.mrDate);
+    if (tx?.mrDate) return tx.mrDate;
+    return "-";
+  };
+
+  // Inspection Date for the selected MR
+  const selectedMrInspectionDate = useMemo(() => {
+    if (!selectedMrNo) return selectedMrDate;
+    for (const job of selectedJobsData) {
+      const insp = inspections.find(i => i.jobId === job.id);
+      if (insp?.data?.dateOfInspection) return String(insp.data.dateOfInspection);
+      if (job.externalDetails?.dateOfInspection) return String(job.externalDetails.dateOfInspection);
+    }
+    return selectedMrDate;
+  }, [selectedMrNo, selectedJobsData, inspections, selectedMrDate]);
+
+  // Master MR-wise Summary matching OilInward logic identically
+  const allMrSummary = useMemo(() => {
+    const summary: Record<
+      string,
+      {
+        mrNo: string;
+        mrDate: string;
+        division: string;
+        totalShortage: number;
+        totalReceived: number;
+      }
+    > = {};
+
+    // Group shortage from external inspections via jobs
+    jobs.forEach((job) => {
+      const mrNo = job.mrNo;
+      if (!mrNo) return;
+      const mrDate = job.dateOfIssue || job.mrDate || (job.createdAt ? formatDateStr(job.createdAt) : "-");
+      if (!summary[mrNo]) {
+        summary[mrNo] = {
+          mrNo,
+          mrDate,
+          division: job.division || "",
+          totalShortage: 0,
+          totalReceived: 0,
+        };
+      } else if (summary[mrNo].mrDate === "-" && mrDate !== "-") {
+        summary[mrNo].mrDate = mrDate;
+      }
+
+      const insp = inspections.find(i => 
+        (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
+        (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
+      ) || inspections.find(i => i.jobId === job.id);
+
+      const rawOilCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
+      const rawLessOil = insp?.data?.lessOilLtrs ?? insp?.lessOilLtrs ?? job.externalDetails?.lessOilLtrs ?? job.lessOilLtrs;
+      const rawNetShortage = insp?.data?.netShortage ?? insp?.netShortage ?? job.externalDetails?.netShortage;
+
+      const kva = Number(job.capacityKva) || 25;
+      const defaultCap = kva <= 16 ? 140 : kva <= 25 ? 184 : kva <= 63 ? 240 : 323;
+
+      const oilCap = (rawOilCap !== undefined && rawOilCap !== null && String(rawOilCap).trim() !== '')
+        ? Number(rawOilCap)
+        : defaultCap;
+
+      const lessOil = (rawLessOil !== undefined && rawLessOil !== null && String(rawLessOil).trim() !== '')
+        ? Number(rawLessOil)
+        : 0;
+
+      const oilRecd = Math.max(0, oilCap - lessOil);
+      const baseShortage = lessOil;
+      const filterLoss = oilRecd * 0.05;
+      const netShortage = (typeof rawNetShortage === "number")
+        ? rawNetShortage
+        : (baseShortage + filterLoss);
+
+      summary[mrNo].totalShortage += netShortage;
+    });
+
+    // Group received oil from transactions
+    oilTransactions.forEach((tx) => {
+      const mrNo = tx.mrNo;
+      if (!mrNo) return;
+      const txMrDate = tx.mrDate || getMrDate(tx.mrNo);
+      if (!summary[mrNo]) {
+        summary[mrNo] = {
+          mrNo,
+          mrDate: txMrDate,
+          division: tx.division || "",
+          totalShortage: 0,
+          totalReceived: 0,
+        };
+      } else if (summary[mrNo].mrDate === "-" && txMrDate !== "-") {
+        summary[mrNo].mrDate = txMrDate;
+      }
+      summary[mrNo].totalReceived += Number(tx.netLiters || 0);
+    });
+
+    return Object.values(summary);
+  }, [jobs, inspections, oilTransactions]);
+
+  const [customOilUptoDate, setCustomOilUptoDate] = useState<string>('');
+
+  const effectiveOilUptoDate = useMemo(() => {
+    if (customOilUptoDate) return customOilUptoDate;
+    if (selectedMrNo) {
+      const derived = getMrDate(selectedMrNo);
+      if (derived && derived !== '-') return derived;
+    }
+    return selectedMrDate || billDate;
+  }, [customOilUptoDate, selectedMrNo, selectedMrDate, billDate, jobs, oilTransactions]);
+
+  const formatToYyyyMmDd = (val: string): string => {
+    if (!val) return '';
+    const ts = parseDateToTimestamp(val);
+    if (!ts) return '';
+    const d = new Date(ts);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
   const mrOilTxList = useMemo(() => {
     if (!selectedMrNo) return [];
     const cleanSelectedMr = selectedMrNo.trim().toLowerCase();
     return oilTransactions.filter(t => {
-      // If transaction specifies division, ensure it matches currentDivision or allow if matching explicit MR No
-      if (t.division && currentDivision && t.division !== currentDivision) {
-        if (!t.mrNo || t.mrNo.trim().toLowerCase() !== cleanSelectedMr) return false;
+      if (t.division && currentDivision) {
+        const tDiv = t.division.trim().toUpperCase();
+        const cDiv = currentDivision.trim().toUpperCase();
+        if (tDiv !== cDiv && !tDiv.includes(cDiv) && !cDiv.includes(tDiv)) {
+          if (!t.mrNo || t.mrNo.trim().toLowerCase() !== cleanSelectedMr) return false;
+        }
       }
 
-      // Match explicit MR No
       if (t.mrNo && t.mrNo.trim().toLowerCase() === cleanSelectedMr) return true;
 
-      // Or if no MR specified, match by MR date or date matching selected MR Date
       if (!t.mrNo || t.mrNo.trim() === '') {
         const tDateStr = t.mrDate || formatDateStr(t.date);
         if (tDateStr && selectedMrDate && tDateStr === selectedMrDate) return true;
@@ -393,113 +586,60 @@ export default function BillingSystem() {
     return mrOilTxList.reduce((acc, tx) => acc + (Number(tx.netLiters) || 0), 0);
   }, [mrOilTxList]);
 
-  // Previous MR & Oil Shortage Balance
-  const previousMrLedger = useMemo(() => {
-    if (!selectedMrNo || !selectedMrDate) {
+  // Concern Division Cumulative Oil Shortage & Balance up to Inspection / MR Date
+  const divisionOilStatement = useMemo(() => {
+    if (!currentDivision) {
       return {
-        prevMrNo: '',
-        prevMrDate: '',
-        prevBillNo: '',
-        prevBillDate: '',
-        prevNetShortage: 0
+        divisionCumulativeShortage: totalNetShortage,
+        divisionCumulativeInward: mrInwardOilTotal,
+        divisionNetOilOnInspectionDate: totalNetShortage - mrInwardOilTotal,
+        priorShortage: 0,
+        priorInward: 0,
+        priorNetBalance: 0
       };
     }
 
-    const currentMrTime = parseDateToTimestamp(selectedMrDate);
+    const uptoTimestamp = parseDateToTimestamp(effectiveOilUptoDate);
 
-    // Map all distinct MRs in system for currentDivision except current
-    const mrMap: Record<string, { mrNo: string; mrDate: string }> = {};
-
-    jobs.forEach(j => {
-      if (!j.mrNo || j.mrNo === selectedMrNo) return;
-      if (j.division && currentDivision && j.division !== currentDivision) return; // Specific division only
-      if (!mrMap[j.mrNo]) {
-        const d = j.dateOfIssue || j.mrDate || (j.createdAt ? formatDateStr(j.createdAt) : '');
-        mrMap[j.mrNo] = { mrNo: j.mrNo, mrDate: d };
+    // Filter MR summary for concern division up to the effective MR date identically to OilInward
+    const divisionMrList = allMrSummary.filter((s) => {
+      if (currentDivision) {
+        const sDiv = (s.division || "").trim().toUpperCase();
+        const cDiv = currentDivision.trim().toUpperCase();
+        if (sDiv && cDiv && sDiv !== cDiv && !sDiv.includes(cDiv) && !cDiv.includes(sDiv)) {
+          return false;
+        }
       }
-    });
-
-    oilTransactions.forEach(t => {
-      if (!t.mrNo || t.mrNo === selectedMrNo) return;
-      if (t.division && currentDivision && t.division !== currentDivision) return; // Specific division only
-      if (!mrMap[t.mrNo]) {
-        mrMap[t.mrNo] = { mrNo: t.mrNo, mrDate: t.mrDate || '' };
-      } else if (!mrMap[t.mrNo].mrDate && t.mrDate) {
-        mrMap[t.mrNo].mrDate = t.mrDate;
+      if (uptoTimestamp > 0) {
+        const itemTimestamp = parseDateToTimestamp(s.mrDate);
+        if (itemTimestamp > 0 && itemTimestamp > uptoTimestamp) {
+          return false;
+        }
       }
-    });
-
-    const prevMrs = Object.values(mrMap).filter(m => {
-      if (!m.mrDate) return false;
-      const t = parseDateToTimestamp(m.mrDate);
-      return t < currentMrTime || (t === currentMrTime && m.mrNo < selectedMrNo);
-    }).sort((a, b) => {
-      const tA = parseDateToTimestamp(a.mrDate);
-      const tB = parseDateToTimestamp(b.mrDate);
-      if (tA !== tB) return tB - tA;
-      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
-    });
-
-    const mostRecentPrevMr = prevMrs[0] || null;
-
-    if (!mostRecentPrevMr) {
-      return {
-        prevMrNo: '',
-        prevMrDate: '',
-        prevBillNo: '',
-        prevBillDate: '',
-        prevNetShortage: 0
-      };
-    }
-
-    const prevMrSet = new Set(prevMrs.map(m => m.mrNo));
-
-    // Calculate cumulative net required oil for previous dispatched jobs in currentDivision
-    const prevDispatchedJobs = jobs.filter(j => {
-      if (!j.mrNo || !prevMrSet.has(j.mrNo)) return false;
-      if (j.division && currentDivision && j.division !== currentDivision) return false;
-      if (j.status !== 'Dispatched') return false;
       return true;
     });
 
-    const prevTotalNetRequired = prevDispatchedJobs.reduce((sum, j) => {
-      const insp = inspections.find(i => i.jobId === j.id);
-      const kva = Number(j.capacityKva) || 25;
-      const defaultCap = kva <= 16 ? 140 : kva <= 25 ? 184 : kva <= 63 ? 240 : 323;
-      const oilCap = Number(insp?.data?.oilCapLtrs) || defaultCap;
-      const lessOil = Number(insp?.data?.lessOilLtrs) || 0;
-      const oilRecd = Math.max(0, oilCap - lessOil);
-      const baseShortage = oilCap - oilRecd;
-      const filterLoss = oilRecd * 0.05;
-      const netShortage = (insp && insp.data && typeof insp.data.netShortage === 'number')
-        ? insp.data.netShortage
-        : (baseShortage + filterLoss);
-      return sum + netShortage;
-    }, 0);
+    const divisionCumulativeShortage = divisionMrList.reduce((sum, item) => sum + item.totalShortage, 0);
+    const divisionCumulativeInward = divisionMrList.reduce((sum, item) => sum + item.totalReceived, 0);
+    const divisionNetOilOnInspectionDate = divisionCumulativeShortage - divisionCumulativeInward;
 
-    // Calculate cumulative inward oil received on previous MRs
-    const prevInwardTx = oilTransactions.filter(t => {
-      if (!t.mrNo || !prevMrSet.has(t.mrNo)) return false;
-      if (t.division && currentDivision && t.division !== currentDivision) return false;
-      return true;
-    });
-
-    const prevTotalInward = prevInwardTx.reduce((sum, t) => sum + (Number(t.netLiters) || 0), 0);
-
-    const prevNetShortage = prevTotalNetRequired - prevTotalInward;
+    const priorShortage = Math.max(0, divisionCumulativeShortage - totalNetShortage);
+    const priorInward = Math.max(0, divisionCumulativeInward - mrInwardOilTotal);
+    const priorNetBalance = priorShortage - priorInward;
 
     return {
-      prevMrNo: mostRecentPrevMr.mrNo,
-      prevMrDate: mostRecentPrevMr.mrDate,
-      prevBillNo: `HE/T-${mostRecentPrevMr.mrNo}/26-27`,
-      prevBillDate: mostRecentPrevMr.mrDate,
-      prevNetShortage
+      divisionCumulativeShortage,
+      divisionCumulativeInward,
+      divisionNetOilOnInspectionDate,
+      priorShortage,
+      priorInward,
+      priorNetBalance
     };
-  }, [selectedMrNo, selectedMrDate, currentDivision, jobs, inspections, oilTransactions]);
+  }, [allMrSummary, currentDivision, effectiveOilUptoDate, selectedMrNo, totalNetShortage, mrInwardOilTotal]);
 
   const netOilDue = useMemo(() => {
-    return totalNetShortage + previousMrLedger.prevNetShortage - mrInwardOilTotal;
-  }, [totalNetShortage, previousMrLedger.prevNetShortage, mrInwardOilTotal]);
+    return divisionOilStatement.divisionNetOilOnInspectionDate;
+  }, [divisionOilStatement]);
 
   const handlePrint = () => {
     window.print();
@@ -563,6 +703,429 @@ export default function BillingSystem() {
     XLSX.writeFile(wb, `Tax_Invoice_MR_${selectedMrNo}_Bill_${billNo}.xlsx`);
   };
 
+  const handleSaveBillDates = async () => {
+    if (!selectedMrNo || selectedJobsData.length === 0 || !auth.currentUser) return;
+    setSavingBillDates(true);
+    setSavedSuccessMsg('');
+    try {
+      const batch = writeBatch(db);
+      const todayIso = billDate || new Date().toISOString().split('T')[0];
+
+      selectedJobsData.forEach(job => {
+        const baseAmt = calculateJobTotal(job);
+        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
+        const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
+        const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.update(jobRef, {
+          billSentDate: todayIso,
+          billNo: billNo || `BILL/${selectedMrNo}`,
+          billAmount: totalJobTaxedAmt,
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setJobs(prev => prev.map(j => {
+        if (selectedJobsData.some(sj => sj.id === j.id)) {
+          const baseAmt = calculateJobTotal(j);
+          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
+          const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
+          const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+          return {
+            ...j,
+            billSentDate: todayIso,
+            billNo: billNo || `BILL/${selectedMrNo}`,
+            billAmount: totalJobTaxedAmt
+          };
+        }
+        return j;
+      }));
+
+      setSavedSuccessMsg('Bill No & Bill Sent Date saved to all delivered jobs in this MR!');
+      setTimeout(() => setSavedSuccessMsg(''), 4000);
+    } catch (err: any) {
+      console.error(err);
+      alert('Error saving bill dates: ' + (err.message || err.toString()));
+    } finally {
+      setSavingBillDates(false);
+    }
+  };
+
+  // Helper to compute bill summary for any MR
+  const calculateMrBillSummary = (mr: string) => {
+    const groupJobs = mrGroups[mr] || [];
+    const deliveredJobs = groupJobs.filter(j => j.status === 'Dispatched' && j.status !== 'Scrap' && j.condition !== 'Scrap');
+    const targetJobs = deliveredJobs.length > 0 ? deliveredJobs : groupJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
+    
+    let mrSubTotal = 0;
+    targetJobs.forEach(job => {
+      mrSubTotal += calculateJobTotal(job);
+    });
+
+    const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
+    const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
+    const cgstAmount = mrSubTotal * (cgstRate / 100);
+    const sgstAmount = mrSubTotal * (sgstRate / 100);
+    const mrGrandTotal = Math.round(mrSubTotal + cgstAmount + sgstAmount);
+
+    return {
+      subTotal: mrSubTotal,
+      grandTotal: mrGrandTotal,
+      jobCount: targetJobs.length
+    };
+  };
+
+  // Open Send Bill Modal
+  const handleOpenSendBillModal = (mr: string) => {
+    setSendTargetMr(mr);
+    const groupJobs = mrGroups[mr] || [];
+    const sample = groupJobs[0] || {};
+    const defaultBillNum = sample.billNo || (activeAgency?.agencyCode ? `${activeAgency.agencyCode}/${new Date().getFullYear()}/${mr}` : `BILL/${mr}`);
+    const defaultRef = sample.billRefNo || `UGVCL/BILL-SUB/${mr}`;
+    
+    setSendBillNo(defaultBillNum);
+    setSendBillRefNo(defaultRef);
+    setSendBillDate(sample.billSentDate || new Date().toISOString().split('T')[0]);
+    setSendBillRemarks(sample.billRemarks || '');
+    setShowSendBillModal(true);
+  };
+
+  // Confirm Send Bill
+  const handleConfirmSendBill = async () => {
+    if (!sendTargetMr || !sendBillNo.trim() || !sendBillRefNo.trim() || !sendBillDate || !auth.currentUser) {
+      alert('Please fill Bill No, Dispatch Reference No and Sent Date');
+      return;
+    }
+    setSubmittingSendBill(true);
+    try {
+      const groupJobs = mrGroups[sendTargetMr] || [];
+      const batch = writeBatch(db);
+      const { grandTotal } = calculateMrBillSummary(sendTargetMr);
+
+      groupJobs.forEach(job => {
+        const baseAmt = calculateJobTotal(job);
+        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
+        const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
+        const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.update(jobRef, {
+          billNo: sendBillNo.trim(),
+          billRefNo: sendBillRefNo.trim(),
+          billSentDate: sendBillDate,
+          billAmount: totalJobTaxedAmt,
+          billTotalMrAmount: grandTotal,
+          billStatus: 'Sent',
+          paymentStatus: job.paymentStatus || 'Unpaid',
+          billRemarks: sendBillRemarks || '',
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setJobs(prev => prev.map(j => {
+        if (j.mrNo === sendTargetMr) {
+          const baseAmt = calculateJobTotal(j);
+          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
+          const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
+          const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+          return {
+            ...j,
+            billNo: sendBillNo.trim(),
+            billRefNo: sendBillRefNo.trim(),
+            billSentDate: sendBillDate,
+            billAmount: totalJobTaxedAmt,
+            billTotalMrAmount: grandTotal,
+            billStatus: 'Sent',
+            paymentStatus: j.paymentStatus || 'Unpaid',
+            billRemarks: sendBillRemarks || ''
+          };
+        }
+        return j;
+      }));
+
+      setShowSendBillModal(false);
+      setSavedSuccessMsg(`Bill ${sendBillNo} for MR ${sendTargetMr} successfully marked as Sent (Ref: ${sendBillRefNo})!`);
+      setTimeout(() => setSavedSuccessMsg(''), 5000);
+    } catch (err: any) {
+      console.error('Error sending bill:', err);
+      alert('Failed to save sent bill: ' + (err.message || err.toString()));
+    } finally {
+      setSubmittingSendBill(false);
+    }
+  };
+
+  // Open Mark as Paid Modal
+  const handleOpenPaidModal = (mr: string) => {
+    setPaidTargetMr(mr);
+    const groupJobs = mrGroups[mr] || [];
+    const sample = groupJobs[0] || {};
+    const { grandTotal } = calculateMrBillSummary(mr);
+
+    setPaymentMode(sample.paymentMode || 'NEFT / RTGS');
+    setPaymentRefNo(sample.paymentRefNo || `UTR/${new Date().getFullYear()}/${mr}`);
+    setPaymentDate(sample.paymentDate || new Date().toISOString().split('T')[0]);
+    setPaidAmount(sample.paidAmount || grandTotal);
+    setPaymentDeductions(sample.paymentDeductions || '0');
+    setPaymentBank(sample.paymentBank || '');
+    setPaymentRemarks(sample.paymentRemarks || '');
+    setShowPaidModal(true);
+  };
+
+  // Confirm Mark as Paid
+  const handleConfirmPaid = async () => {
+    if (!paidTargetMr || !paymentRefNo.trim() || !paymentDate || !auth.currentUser) {
+      alert('Please fill Payment Reference / UTR No and Payment Date');
+      return;
+    }
+    setSubmittingPaid(true);
+    try {
+      const groupJobs = mrGroups[paidTargetMr] || [];
+      const batch = writeBatch(db);
+
+      groupJobs.forEach(job => {
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.update(jobRef, {
+          paymentStatus: 'Paid',
+          paymentMode: paymentMode,
+          paymentRefNo: paymentRefNo.trim(),
+          paymentDate: paymentDate,
+          paidAmount: Number(paidAmount) || 0,
+          paymentDeductions: Number(paymentDeductions) || 0,
+          paymentBank: paymentBank.trim(),
+          paymentRemarks: paymentRemarks.trim(),
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setJobs(prev => prev.map(j => {
+        if (j.mrNo === paidTargetMr) {
+          return {
+            ...j,
+            paymentStatus: 'Paid',
+            paymentMode: paymentMode,
+            paymentRefNo: paymentRefNo.trim(),
+            paymentDate: paymentDate,
+            paidAmount: Number(paidAmount) || 0,
+            paymentDeductions: Number(paymentDeductions) || 0,
+            paymentBank: paymentBank.trim(),
+            paymentRemarks: paymentRemarks.trim()
+          };
+        }
+        return j;
+      }));
+
+      setShowPaidModal(false);
+      setSavedSuccessMsg(`Payment recorded successfully for MR ${paidTargetMr} (Ref: ${paymentRefNo})!`);
+      setTimeout(() => setSavedSuccessMsg(''), 5000);
+    } catch (err: any) {
+      console.error('Error saving payment:', err);
+      alert('Failed to record payment: ' + (err.message || err.toString()));
+    } finally {
+      setSubmittingPaid(false);
+    }
+  };
+
+  // Sent Bills List Memoized (All Sent Bills)
+  const sentBillsList = useMemo(() => {
+    const list: Array<{
+      mrNo: string;
+      mrDate: string;
+      division: string;
+      deliveredCount: number;
+      totalCount: number;
+      billNo: string;
+      billRefNo: string;
+      billSentDate: string;
+      billAmount: number;
+      isPaid: boolean;
+      paymentMode?: string;
+      paymentRefNo?: string;
+      paymentDate?: string;
+      paidAmount?: number;
+      paymentDeductions?: number;
+      paymentBank?: string;
+      paymentRemarks?: string;
+    }> = [];
+
+    Object.keys(mrGroups).forEach(mr => {
+      const groupJobs = mrGroups[mr] || [];
+      const isSent = groupJobs.some(j => j.billSentDate || j.billStatus === 'Sent' || (j.billNo && j.billNo !== ''));
+      if (isSent) {
+        const sample = groupJobs[0] || {};
+        const deliveredJobs = groupJobs.filter(j => j.status === 'Dispatched' && j.status !== 'Scrap' && j.condition !== 'Scrap');
+        const isPaid = groupJobs.some(j => j.paymentStatus === 'Paid' || !!j.paymentRefNo);
+        const { grandTotal } = calculateMrBillSummary(mr);
+
+        list.push({
+          mrNo: mr,
+          mrDate: sample.dateOfIssue || sample.mrDate || '-',
+          division: sample.division || 'SABARMATI',
+          deliveredCount: deliveredJobs.length,
+          totalCount: groupJobs.length,
+          billNo: sample.billNo || `BILL/${mr}`,
+          billRefNo: sample.billRefNo || `UGVCL/BILL/${mr}`,
+          billSentDate: sample.billSentDate || '-',
+          billAmount: grandTotal,
+          isPaid,
+          paymentMode: sample.paymentMode,
+          paymentRefNo: sample.paymentRefNo,
+          paymentDate: sample.paymentDate,
+          paidAmount: Number(sample.paidAmount) || grandTotal,
+          paymentDeductions: Number(sample.paymentDeductions) || 0,
+          paymentBank: sample.paymentBank,
+          paymentRemarks: sample.paymentRemarks
+        });
+      }
+    });
+
+    return list.sort((a, b) => {
+      if (a.billSentDate && b.billSentDate) {
+        return b.billSentDate.localeCompare(a.billSentDate);
+      }
+      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
+    });
+  }, [mrGroups, activeAtMaster, activeAgency]);
+
+  // Unpaid Sent Bills List (Awaiting Payment)
+  const unpaidSentBills = useMemo(() => {
+    return sentBillsList.filter(item => !item.isPaid);
+  }, [sentBillsList]);
+
+  // Paid Bills List (Payments Received)
+  const paidBillsList = useMemo(() => {
+    return sentBillsList.filter(item => item.isPaid).sort((a, b) => {
+      if (a.paymentDate && b.paymentDate) {
+        return b.paymentDate.localeCompare(a.paymentDate);
+      }
+      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
+    });
+  }, [sentBillsList]);
+
+  // Filtered Unpaid Sent Bills List
+  const filteredUnpaidSentBills = useMemo(() => {
+    return unpaidSentBills.filter(item => {
+      const matchesSearch = !sentSearchQuery || 
+        item.mrNo.toLowerCase().includes(sentSearchQuery.toLowerCase()) ||
+        item.billNo.toLowerCase().includes(sentSearchQuery.toLowerCase()) ||
+        item.billRefNo.toLowerCase().includes(sentSearchQuery.toLowerCase());
+      
+      const matchesDivision = sentFilterDivision === 'All' || item.division === sentFilterDivision;
+
+      return matchesSearch && matchesDivision;
+    });
+  }, [unpaidSentBills, sentSearchQuery, sentFilterDivision]);
+
+  // Filtered Paid Bills List
+  const filteredPaidBills = useMemo(() => {
+    return paidBillsList.filter(item => {
+      const matchesSearch = !paidSearchQuery || 
+        item.mrNo.toLowerCase().includes(paidSearchQuery.toLowerCase()) ||
+        item.billNo.toLowerCase().includes(paidSearchQuery.toLowerCase()) ||
+        item.billRefNo.toLowerCase().includes(paidSearchQuery.toLowerCase()) ||
+        (item.paymentRefNo && item.paymentRefNo.toLowerCase().includes(paidSearchQuery.toLowerCase())) ||
+        (item.paymentBank && item.paymentBank.toLowerCase().includes(paidSearchQuery.toLowerCase()));
+      
+      const matchesDivision = paidFilterDivision === 'All' || item.division === paidFilterDivision;
+      
+      const matchesMode = paidFilterMode === 'All' || item.paymentMode === paidFilterMode;
+
+      return matchesSearch && matchesDivision && matchesMode;
+    });
+  }, [paidBillsList, paidSearchQuery, paidFilterDivision, paidFilterMode]);
+
+  // Sent Bills Summary Stats
+  const sentBillStats = useMemo(() => {
+    const totalCount = sentBillsList.length;
+    const totalValue = sentBillsList.reduce((sum, item) => sum + item.billAmount, 0);
+    const paidCount = paidBillsList.length;
+    const paidValue = paidBillsList.reduce((sum, item) => sum + (item.paidAmount || item.billAmount), 0);
+    const totalDeductions = paidBillsList.reduce((sum, item) => sum + (item.paymentDeductions || 0), 0);
+    const unpaidCount = unpaidSentBills.length;
+    const unpaidValue = unpaidSentBills.reduce((sum, item) => sum + item.billAmount, 0);
+
+    return {
+      totalCount,
+      totalValue,
+      paidCount,
+      paidValue,
+      totalDeductions,
+      unpaidCount,
+      unpaidValue
+    };
+  }, [sentBillsList, paidBillsList, unpaidSentBills]);
+
+  // Excel Export for Sent Bills
+  const handleExportSentBillsExcel = () => {
+    if (filteredUnpaidSentBills.length === 0) {
+      alert('No sent bills to export matching current filters');
+      return;
+    }
+    const data = filteredUnpaidSentBills.map((item, idx) => ({
+      'Sr No': idx + 1,
+      'MR No': item.mrNo,
+      'MR Date': item.mrDate,
+      'Division': item.division,
+      'Delivered Jobs': item.deliveredCount,
+      'Total Transformers': item.totalCount,
+      'Bill No': item.billNo,
+      'Dispatch Ref No': item.billRefNo,
+      'Bill Sent Date': item.billSentDate,
+      'Invoiced Amount (INR)': item.billAmount,
+      'Status': 'Awaiting Payment',
+      'Remarks': item.paymentRemarks || ''
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Sent_Bills');
+    XLSX.writeFile(wb, `Sent_Bills_Register_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  // Excel Export for Received Payments
+  const handleExportPaidBillsExcel = () => {
+    if (filteredPaidBills.length === 0) {
+      alert('No payment records to export matching current filters');
+      return;
+    }
+    const data = filteredPaidBills.map((item, idx) => ({
+      'Sr No': idx + 1,
+      'MR No': item.mrNo,
+      'MR Date': item.mrDate,
+      'Division': item.division,
+      'Bill No': item.billNo,
+      'Dispatch Ref No': item.billRefNo,
+      'Bill Sent Date': item.billSentDate,
+      'Billed Amount (INR)': item.billAmount,
+      'Payment Mode': item.paymentMode || 'NEFT / RTGS',
+      'Payment Ref / UTR No': item.paymentRefNo || '',
+      'Payment Date': item.paymentDate || '',
+      'Realized Amount (INR)': item.paidAmount || item.billAmount,
+      'TDS / Deductions (INR)': item.paymentDeductions || 0,
+      'Bank': item.paymentBank || '',
+      'Remarks': item.paymentRemarks || '',
+      'Status': 'Paid & Settled'
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Received_Payments');
+    XLSX.writeFile(wb, `Received_Payments_Register_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   if (loading) {
     return (
       <div className="flex justify-center py-12">
@@ -576,207 +1139,670 @@ export default function BillingSystem() {
       
       {!selectedMrNo ? (
         <div className="space-y-6 print:hidden">
-          {/* Header Banner */}
-          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-xs border border-slate-200 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-              <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight">Billing System</h1>
-              <p className="text-xs sm:text-sm text-slate-500">Generate Official Tax Invoices & Covering Letters for Delivered Transformers (MR-Wise)</p>
-            </div>
-            
-            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
-              <button
-                onClick={() => setBillTypeFilter('repairable')}
-                className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
-                  billTypeFilter === 'repairable' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Repairable Delivered
-              </button>
-              <button
-                onClick={() => setBillTypeFilter('scrap')}
-                className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
-                  billTypeFilter === 'scrap' ? 'bg-white text-red-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                Scrap Committee
-              </button>
-            </div>
-          </div>
+          {/* Header Banner & Navigation Tabs */}
+          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-xs border border-slate-200 space-y-4">
+            <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+              <div>
+                <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
+                  <IndianRupee className="w-6 h-6 text-blue-600 shrink-0" />
+                  <span>Billing & Payment Management</span>
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-500">Generate Official Tax Invoices, Track Sent Bills & Record Received Payments (MR-Wise)</p>
+              </div>
 
-          {/* Explanation Banner for Pending Delivery */}
-          <div className="p-3.5 sm:p-4 bg-blue-50/90 border border-blue-200 rounded-xl text-blue-950 text-xs flex items-start gap-3 shadow-xs">
-            <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="font-bold text-xs sm:text-sm text-blue-900">💡 Why do jobs show as "Pending" in Billing System?</p>
-              <p className="text-blue-800 leading-relaxed text-[11px] sm:text-xs">
-                Tax Invoices & Bills are <strong>ONLY</strong> generated for transformers that have been <strong>delivered/dispatched</strong> back to the division via a <strong>Delivery Challan</strong> (Status: <span className="font-bold text-emerald-800 bg-emerald-100 px-1 rounded">Dispatched</span>).
-                If a job has finished Inspection & Testing, dispatch it in the <strong>Delivery Challan</strong> tab first before generating its bill.
-              </p>
-            </div>
-          </div>
-
-          {/* Search & Filter Toolbar */}
-          <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
-            <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-              <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                <span>Select Delivered MR to Generate Bill</span>
-              </h2>
-              <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
-                <div className="relative flex-1 md:w-56">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search MR No..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
-                  />
-                </div>
-                <div className="w-full sm:w-48">
-                  <select
-                    value={selectedDivision}
-                    onChange={(e) => setSelectedDivision(e.target.value)}
-                    className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
-                  >
-                    <option value="All">All Divisions</option>
-                    {divisions.map(div => (
-                      <option key={div} value={div}>{div} Division</option>
-                    ))}
-                  </select>
-                </div>
+              {/* Primary Top Tab Switcher */}
+              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto overflow-x-auto">
+                <button
+                  onClick={() => setActiveTab('generator')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap ${
+                    activeTab === 'generator' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>Bill Generator</span>
+                </button>
+                <button
+                  onClick={() => setActiveTab('sent')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap relative ${
+                    activeTab === 'sent' ? 'bg-white text-amber-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Sent Bills</span>
+                  {sentBillStats.unpaidCount > 0 && (
+                    <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">
+                      {sentBillStats.unpaidCount}
+                    </span>
+                  )}
+                </button>
+                <button
+                  onClick={() => setActiveTab('payments')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap relative ${
+                    activeTab === 'payments' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  <Banknote className="w-3.5 h-3.5" />
+                  <span>Received Payments</span>
+                  {sentBillStats.paidCount > 0 && (
+                    <span className="px-1.5 py-0.2 bg-emerald-600 text-white rounded-full text-[10px] font-bold">
+                      {sentBillStats.paidCount}
+                    </span>
+                  )}
+                </button>
               </div>
             </div>
 
-            {/* Delivered MR Table */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm min-w-[620px]">
-                <thead className="bg-slate-50 border-b border-slate-200">
-                  <tr>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR No</th>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Delivered Jobs</th>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Challan Info</th>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Status</th>
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredMrNos.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
-                        No delivered jobs found for this filter. Please dispatch jobs from <strong>Delivery Challans</strong> first.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredMrNos.map(mr => {
-                      const groupJobs = mrGroups[mr] || [];
-                      const scrapJobs = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
-                      const repairableJobs = groupJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
+            {/* Notification message */}
+            {savedSuccessMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-800 text-xs font-semibold flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{savedSuccessMsg}</span>
+              </div>
+            )}
+          </div>
 
-                      const matchingJobs = groupJobs.filter(j => {
-                        const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
-                        return billTypeFilter === 'scrap' ? isScrap : !isScrap;
-                      });
-                      const deliveredJobs = matchingJobs.filter(j => j.status === 'Dispatched');
-                      const pendingJobs = matchingJobs.filter(j => j.status !== 'Dispatched');
+          {activeTab === 'generator' ? (
+            /* TAB 1: BILL GENERATOR */
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+                  <button
+                    onClick={() => setBillTypeFilter('repairable')}
+                    className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                      billTypeFilter === 'repairable' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Repairable Delivered
+                  </button>
+                  <button
+                    onClick={() => setBillTypeFilter('scrap')}
+                    className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
+                      billTypeFilter === 'scrap' ? 'bg-white text-red-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    Scrap Committee
+                  </button>
+                </div>
+              </div>
 
-                      const deliveredScrap = scrapJobs.filter(j => j.status === 'Dispatched');
-                      const allGroupDelivered = groupJobs.every(j => j.status === 'Dispatched');
+              {/* Explanation Banner for Pending Delivery */}
+              <div className="p-3.5 sm:p-4 bg-blue-50/90 border border-blue-200 rounded-xl text-blue-950 text-xs flex items-start gap-3 shadow-xs">
+                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="font-bold text-xs sm:text-sm text-blue-900">💡 Why do jobs show as "Pending" in Billing System?</p>
+                  <p className="text-blue-800 leading-relaxed text-[11px] sm:text-xs">
+                    Tax Invoices & Bills are <strong>ONLY</strong> generated for transformers that have been <strong>delivered/dispatched</strong> back to the division via a <strong>Delivery Challan</strong> (Status: <span className="font-bold text-emerald-800 bg-emerald-100 px-1 rounded">Dispatched</span>).
+                    If a job has finished Inspection & Testing, dispatch it in the <strong>Delivery Challan</strong> tab first before generating its bill.
+                  </p>
+                </div>
+              </div>
 
-                      const divName = groupJobs[0]?.division || '-';
-                      const challans = Array.from(new Set(deliveredJobs.map(j => j.challanNo).filter(Boolean))).join(', ');
-                      const dates = Array.from(new Set(deliveredJobs.map(j => j.deliveryDate || j.challanDate).filter(Boolean))).join(', ');
+              {/* Search & Filter Toolbar */}
+              <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+                  <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                    <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                    <span>Select Delivered MR to Generate or Send Bill</span>
+                  </h2>
+                  <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
+                    <div className="relative flex-1 md:w-56">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search MR No..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                        className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
+                      />
+                    </div>
+                    <div className="w-full sm:w-48">
+                      <select
+                        value={selectedDivision}
+                        onChange={(e) => setSelectedDivision(e.target.value)}
+                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
+                      >
+                        <option value="All">All Divisions</option>
+                        {divisions.map(div => (
+                          <option key={div} value={div}>{div} Division</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </div>
 
-                      return (
-                        <tr key={mr} className="hover:bg-slate-50/80 border-b border-slate-100">
-                          <td className="px-4 py-3 font-mono font-bold text-blue-600 align-top text-xs sm:text-sm">{mr}</td>
-                          <td className="px-4 py-3 font-medium text-slate-700 align-top text-xs sm:text-sm">{divName}</td>
-                          <td className="px-4 py-3 font-semibold text-slate-700 align-top text-xs">
-                            <div>
-                              <span className="font-bold text-slate-900">{deliveredJobs.length}</span> of {matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Delivered
-                            </div>
-                            {scrapJobs.length > 0 && billTypeFilter === 'repairable' && (
-                              <div className="text-[11px] text-rose-700 font-semibold mt-0.5">
-                                ({deliveredScrap.length} of {scrapJobs.length} Scrap Returned - No Repair Bill)
-                              </div>
-                            )}
-                            {/* Detailed stage breakdown list for each job */}
-                            <div className="mt-2 space-y-1">
-                              {groupJobs.map(j => {
-                                let badgeText = 'Received';
-                                let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
-                                if (j.status === 'Dispatched') {
-                                  badgeText = 'Dispatched (Delivered)';
-                                  badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
-                                } else if (j.status === 'Tested - Ready for Dispatch') {
-                                  badgeText = 'Tested (Awaiting Delivery Challan)';
-                                  badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
-                                } else if (j.status === 'Scrap' || j.condition === 'Scrap') {
-                                  badgeText = 'Scrap (Awaiting Return)';
-                                  badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
-                                } else if (j.status === 'Internal Done') {
-                                  badgeText = 'Internal Done (Pending Testing)';
-                                  badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
-                                } else if (j.status === 'External Done') {
-                                  badgeText = 'External Done (Pending Internal)';
-                                  badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
-                                } else {
-                                  badgeText = 'Received (Pending External)';
-                                  badgeClass = 'bg-slate-100 text-slate-800 border-slate-300';
-                                }
-
-                                return (
-                                  <div key={j.id} className="flex items-center gap-1.5 text-[11px]">
-                                    <span className="font-mono font-bold text-slate-800">{j.jobNo}:</span>
-                                    <span className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${badgeClass}`}>
-                                      {badgeText}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-slate-500 align-top">
-                            <div><span className="font-bold text-slate-700">Challan:</span> {challans || (deliveredJobs.length > 0 ? 'Dispatched' : 'None')}</div>
-                            <div><span className="font-bold text-slate-700">Date:</span> {dates || '-'}</div>
-                          </td>
-                          <td className="px-4 py-3 align-top">
-                            {allGroupDelivered ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
-                                <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600 shrink-0" />
-                                {scrapJobs.length > 0 ? `All Delivered (${scrapJobs.length} Scrap)` : 'Ready for Bill'}
-                              </span>
-                            ) : pendingJobs.length > 0 ? (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
-                                <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
-                                {deliveredJobs.length > 0 ? `${pendingJobs.length} Pending` : 'Pending Dispatch'}
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                                <CheckCircle2 className="w-3 h-3 mr-1 shrink-0" />
-                                Ready
-                              </span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3 align-top text-right">
-                            <button
-                              onClick={() => handleGenerateClick(mr)}
-                              className={`px-3.5 py-2 text-[10px] font-bold uppercase tracking-wider text-white rounded-lg transition-colors shadow-xs ${
-                                pendingJobs.length > 0 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
-                              }`}
-                            >
-                              Generate Bill
-                            </button>
+                {/* Delivered MR Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[680px]">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR No</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Delivered Jobs</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Challan Info</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Bill & Payment Status</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredMrNos.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
+                            No delivered jobs found for this filter. Please dispatch jobs from <strong>Delivery Challans</strong> first.
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+                      ) : (
+                        filteredMrNos.map(mr => {
+                          const groupJobs = mrGroups[mr] || [];
+                          const scrapJobs = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+                          const repairableJobs = groupJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
+
+                          const matchingJobs = groupJobs.filter(j => {
+                            const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+                            return billTypeFilter === 'scrap' ? isScrap : !isScrap;
+                          });
+                          const deliveredJobs = matchingJobs.filter(j => j.status === 'Dispatched');
+                          const pendingJobs = matchingJobs.filter(j => j.status !== 'Dispatched');
+
+                          const deliveredScrap = scrapJobs.filter(j => j.status === 'Dispatched');
+                          const allGroupDelivered = groupJobs.every(j => j.status === 'Dispatched');
+
+                          const divName = groupJobs[0]?.division || '-';
+                          const challans = Array.from(new Set(deliveredJobs.map(j => j.challanNo).filter(Boolean))).join(', ');
+                          const dates = Array.from(new Set(deliveredJobs.map(j => j.deliveryDate || j.challanDate).filter(Boolean))).join(', ');
+
+                          const isBillSent = groupJobs.some(j => j.billSentDate || j.billStatus === 'Sent');
+                          const isPaid = groupJobs.some(j => j.paymentStatus === 'Paid');
+                          const sampleJob = groupJobs[0] || {};
+
+                          return (
+                            <tr key={mr} className="hover:bg-slate-50/80 border-b border-slate-100">
+                              <td className="px-4 py-3 font-mono font-bold text-blue-600 align-top text-xs sm:text-sm">{mr}</td>
+                              <td className="px-4 py-3 font-medium text-slate-700 align-top text-xs sm:text-sm">{divName}</td>
+                              <td className="px-4 py-3 font-semibold text-slate-700 align-top text-xs">
+                                <div>
+                                  <span className="font-bold text-slate-900">{deliveredJobs.length}</span> of {matchingJobs.length} {billTypeFilter === 'scrap' ? 'Scrap' : 'Repairable'} Delivered
+                                </div>
+                                {scrapJobs.length > 0 && billTypeFilter === 'repairable' && (
+                                  <div className="text-[11px] text-rose-700 font-semibold mt-0.5">
+                                    ({deliveredScrap.length} of {scrapJobs.length} Scrap Returned - No Repair Bill)
+                                  </div>
+                                )}
+                                {/* Detailed stage breakdown list for each job */}
+                                <div className="mt-2 space-y-1">
+                                  {groupJobs.map(j => {
+                                    let badgeText = 'Received';
+                                    let badgeClass = 'bg-slate-100 text-slate-700 border-slate-200';
+                                    if (j.status === 'Dispatched') {
+                                      badgeText = 'Dispatched (Delivered)';
+                                      badgeClass = 'bg-emerald-100 text-emerald-800 border-emerald-300';
+                                    } else if (j.status === 'Tested - Ready for Dispatch') {
+                                      badgeText = 'Tested (Awaiting Delivery Challan)';
+                                      badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
+                                    } else if (j.status === 'Scrap' || j.condition === 'Scrap') {
+                                      badgeText = 'Scrap (Awaiting Return)';
+                                      badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
+                                    } else if (j.status === 'Internal Done') {
+                                      badgeText = 'Internal Done (Pending Testing)';
+                                      badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+                                    } else if (j.status === 'External Done') {
+                                      badgeText = 'External Done (Pending Internal)';
+                                      badgeClass = 'bg-amber-100 text-amber-800 border-amber-300';
+                                    } else {
+                                      badgeText = 'Received (Pending External)';
+                                      badgeClass = 'bg-slate-100 text-slate-800 border-slate-300';
+                                    }
+
+                                    return (
+                                      <div key={j.id} className="flex items-center gap-1.5 text-[11px]">
+                                        <span className="font-mono font-bold text-slate-800">{j.jobNo}:</span>
+                                        <span className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border ${badgeClass}`}>
+                                          {badgeText}
+                                        </span>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 text-xs text-slate-500 align-top">
+                                <div><span className="font-bold text-slate-700">Challan:</span> {challans || (deliveredJobs.length > 0 ? 'Dispatched' : 'None')}</div>
+                                <div><span className="font-bold text-slate-700">Date:</span> {dates || '-'}</div>
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="space-y-1.5">
+                                  {isPaid ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                      <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600 shrink-0" />
+                                      Paid
+                                    </span>
+                                  ) : isBillSent ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-blue-100 text-blue-800 border border-blue-300">
+                                      <Send className="w-3 h-3 mr-1 text-blue-600 shrink-0" />
+                                      Bill Sent (Ref: {sampleJob.billRefNo || 'Saved'})
+                                    </span>
+                                  ) : allGroupDelivered ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                      <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600 shrink-0" />
+                                      Ready to Bill
+                                    </span>
+                                  ) : pendingJobs.length > 0 ? (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-800 border border-amber-300">
+                                      <AlertTriangle className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
+                                      {deliveredJobs.length > 0 ? `${pendingJobs.length} Pending Delivery` : 'Pending Dispatch'}
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                      <CheckCircle2 className="w-3 h-3 mr-1 shrink-0" />
+                                      Ready
+                                    </span>
+                                  )}
+
+                                  {sampleJob.billSentDate && (
+                                    <div className="text-[10px] text-slate-500">
+                                      Sent: <span className="font-semibold text-slate-700">{sampleJob.billSentDate}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              </td>
+                              <td className="px-4 py-3 align-top text-right">
+                                <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
+                                  <button
+                                    onClick={() => handleGenerateClick(mr)}
+                                    className={`px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white rounded-lg transition-colors shadow-xs ${
+                                      pendingJobs.length > 0 ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'
+                                    }`}
+                                  >
+                                    View / Bill
+                                  </button>
+                                  <button
+                                    onClick={() => handleOpenSendBillModal(mr)}
+                                    className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-slate-800 hover:bg-slate-900 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1"
+                                    title="Send Bill with Reference No & Date"
+                                  >
+                                    <Send className="w-3 h-3" />
+                                    <span>{isBillSent ? 'Update Sent' : 'Send Bill'}</span>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             </div>
-          </div>
+          ) : activeTab === 'sent' ? (
+            /* TAB 2: SENT BILLS (AWAITING PAYMENT) */
+            <div className="space-y-6">
+              {/* KPI Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-4">
+                <div className="bg-white p-4 rounded-xl border border-amber-200 bg-amber-50/30 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Sent Bills Awaiting Payment</p>
+                  <p className="text-xl sm:text-2xl font-bold text-amber-700 mt-1">{sentBillStats.unpaidCount}</p>
+                  <p className="text-[11px] text-amber-600 mt-0.5">Bills Pending Realization</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pending Invoiced Value</p>
+                  <p className="text-xl sm:text-2xl font-bold text-blue-600 mt-1">₹{sentBillStats.unpaidValue.toLocaleString('en-IN')}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Awaiting Disbursal</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Sent Invoices</p>
+                  <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">{sentBillStats.totalCount}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Lifetime Sent</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Realized Collections</p>
+                  <p className="text-xl sm:text-2xl font-bold text-emerald-700 mt-1">₹{sentBillStats.paidValue.toLocaleString('en-IN')}</p>
+                  <p className="text-[11px] text-emerald-600 mt-0.5">{sentBillStats.paidCount} Bills Realized</p>
+                </div>
+              </div>
+
+              {/* Sent Bills Register Table Card */}
+              <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+                  <div>
+                    <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                      <Send className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>Sent Invoices Register (Awaiting Payment)</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Invoices dispatched to division office awaiting payment credit</p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
+                    {/* Search input */}
+                    <div className="relative flex-1 md:w-56">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search MR, Bill, Ref..."
+                        value={sentSearchQuery}
+                        onChange={(e) => setSentSearchQuery(e.target.value)}
+                        className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
+                      />
+                    </div>
+
+                    {/* Division Filter */}
+                    <div className="w-full sm:w-44">
+                      <select
+                        value={sentFilterDivision}
+                        onChange={(e) => setSentFilterDivision(e.target.value)}
+                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
+                      >
+                        <option value="All">All Divisions</option>
+                        {divisions.map(div => (
+                          <option key={div} value={div}>{div} Division</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Export Excel Button */}
+                    <button
+                      onClick={handleExportSentBillsExcel}
+                      className="px-3 py-2 text-xs font-bold uppercase tracking-wider bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>Export Excel</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Sent Bills Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[760px]">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR & Division</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Bill No & Dispatch Ref</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Sent Date</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Invoiced Grand Total</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Status</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredUnpaidSentBills.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
+                            {unpaidSentBills.length === 0 ? (
+                              <div>
+                                <p className="font-semibold text-slate-700">All sent bills have been marked as paid!</p>
+                                <p className="text-xs text-slate-400 mt-1">To record newly dispatched bills, use "Send Bill" in the Bill Generator tab.</p>
+                              </div>
+                            ) : (
+                              <p>No sent bills found matching the selected search criteria.</p>
+                            )}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredUnpaidSentBills.map(item => (
+                          <tr key={item.mrNo} className="hover:bg-slate-50/80 border-b border-slate-100">
+                            <td className="px-4 py-3 align-top">
+                              <div className="font-mono font-bold text-blue-600 text-xs sm:text-sm">{item.mrNo}</div>
+                              <div className="text-xs font-semibold text-slate-700">{item.division}</div>
+                              <div className="text-[10px] text-slate-500">{item.deliveredCount} / {item.totalCount} Delivered</div>
+                            </td>
+                            <td className="px-4 py-3 align-top text-xs">
+                              <div className="font-bold text-slate-800">{item.billNo}</div>
+                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">Ref: {item.billRefNo}</div>
+                              {item.paymentRemarks && (
+                                <div className="text-[10px] text-slate-400 italic mt-0.5">{item.paymentRemarks}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 align-top text-xs font-medium text-slate-700">
+                              {item.billSentDate || '-'}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <span className="font-bold text-slate-900 text-sm">
+                                ₹{item.billAmount.toLocaleString('en-IN')}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                <Clock className="w-3.5 h-3.5 mr-1 text-amber-600 shrink-0" />
+                                Pending Payment
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 align-top text-right">
+                              <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleOpenPaidModal(item.mrNo)}
+                                  className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1"
+                                  title="Record received payment with UTR / Cheque No and Date"
+                                >
+                                  <CheckSquare className="w-3 h-3" />
+                                  <span>Mark as Paid</span>
+                                </button>
+                                <button
+                                  onClick={() => handleOpenSendBillModal(item.mrNo)}
+                                  className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1"
+                                  title="Edit sent reference number or date"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                  <span>Edit Ref</span>
+                                </button>
+                                <button
+                                  onClick={() => handleSelectMr(item.mrNo)}
+                                  className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1"
+                                  title="View and print invoice"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>View Bill</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* TAB 3: RECEIVED PAYMENTS */
+            <div className="space-y-6">
+              {/* KPI Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-4">
+                <div className="bg-white p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Total Realized Collections</p>
+                  <p className="text-xl sm:text-2xl font-bold text-emerald-700 mt-1">₹{sentBillStats.paidValue.toLocaleString('en-IN')}</p>
+                  <p className="text-[11px] text-emerald-600 mt-0.5">{sentBillStats.paidCount} Invoices Fully Settled</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Deductions / TDS</p>
+                  <p className="text-xl sm:text-2xl font-bold text-amber-700 mt-1">₹{sentBillStats.totalDeductions.toLocaleString('en-IN')}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">TDS / SD Withheld</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Settled Bills Count</p>
+                  <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">{sentBillStats.paidCount}</p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">Paid MRs</p>
+                </div>
+                <div className="bg-white p-4 rounded-xl border border-amber-200 bg-amber-50/30 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Pending Payments</p>
+                  <p className="text-xl sm:text-2xl font-bold text-amber-700 mt-1">₹{sentBillStats.unpaidValue.toLocaleString('en-IN')}</p>
+                  <p className="text-[11px] text-amber-600 mt-0.5">{sentBillStats.unpaidCount} Bills Pending</p>
+                </div>
+              </div>
+
+              {/* Received Payments Register Table Card */}
+              <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
+                  <div>
+                    <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                      <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Received Payments Register</span>
+                    </h2>
+                    <p className="text-[11px] text-slate-500 mt-0.5">Bank transaction records, UTR details and realized payment values</p>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
+                    {/* Search input */}
+                    <div className="relative flex-1 md:w-52">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Search MR, Bill, UTR, Bank..."
+                        value={paidSearchQuery}
+                        onChange={(e) => setPaidSearchQuery(e.target.value)}
+                        className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
+                      />
+                    </div>
+
+                    {/* Division Filter */}
+                    <div className="w-full sm:w-40">
+                      <select
+                        value={paidFilterDivision}
+                        onChange={(e) => setPaidFilterDivision(e.target.value)}
+                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
+                      >
+                        <option value="All">All Divisions</option>
+                        {divisions.map(div => (
+                          <option key={div} value={div}>{div} Division</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {/* Payment Mode Filter */}
+                    <div className="w-full sm:w-36">
+                      <select
+                        value={paidFilterMode}
+                        onChange={(e) => setPaidFilterMode(e.target.value)}
+                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
+                      >
+                        <option value="All">All Modes</option>
+                        <option value="NEFT / RTGS">NEFT / RTGS</option>
+                        <option value="Cheque / DD">Cheque / DD</option>
+                        <option value="Direct Credit">Direct Credit</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+
+                    {/* Export Excel Button */}
+                    <button
+                      onClick={handleExportPaidBillsExcel}
+                      className="px-3 py-2 text-xs font-bold uppercase tracking-wider bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      <span>Export Excel</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Received Payments Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm min-w-[820px]">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Payment Details & UTR</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR & Division</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Bill No & Sent Date</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Realized Amount</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Deductions / Bank</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Status</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredPaidBills.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
+                            {paidBillsList.length === 0 ? (
+                              <div>
+                                <p className="font-semibold text-slate-700">No payment receipts recorded yet.</p>
+                                <p className="text-xs text-slate-400 mt-1">Go to "Sent Bills" tab and click "Mark as Paid" on any sent invoice to record incoming payment.</p>
+                              </div>
+                            ) : (
+                              <p>No payment records found matching the selected search criteria.</p>
+                            )}
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredPaidBills.map(item => (
+                          <tr key={item.mrNo} className="hover:bg-slate-50/80 border-b border-slate-100">
+                            <td className="px-4 py-3 align-top text-xs">
+                              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                                <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-semibold text-[10px]">
+                                  {item.paymentMode || 'NEFT'}
+                                </span>
+                                <span className="font-mono text-emerald-700 font-bold">{item.paymentRefNo}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-500 mt-1">
+                                Payment Date: <span className="font-medium text-slate-700">{item.paymentDate || '-'}</span>
+                              </div>
+                              {item.paymentRemarks && (
+                                <div className="text-[10px] text-slate-400 italic mt-0.5">{item.paymentRemarks}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <div className="font-mono font-bold text-blue-600 text-xs sm:text-sm">{item.mrNo}</div>
+                              <div className="text-xs font-semibold text-slate-700">{item.division}</div>
+                              <div className="text-[10px] text-slate-500">{item.deliveredCount} Delivered Jobs</div>
+                            </td>
+                            <td className="px-4 py-3 align-top text-xs">
+                              <div className="font-bold text-slate-800">{item.billNo}</div>
+                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">Ref: {item.billRefNo}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">Sent: {item.billSentDate || '-'}</div>
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <div className="font-bold text-emerald-700 text-sm">
+                                ₹{(item.paidAmount || item.billAmount).toLocaleString('en-IN')}
+                              </div>
+                              {item.billAmount !== item.paidAmount && (
+                                <div className="text-[10px] text-slate-400">
+                                  Billed: ₹{item.billAmount.toLocaleString('en-IN')}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 align-top text-xs">
+                              {Number(item.paymentDeductions) > 0 ? (
+                                <div className="font-semibold text-amber-700">
+                                  TDS/Ded: ₹{Number(item.paymentDeductions).toLocaleString('en-IN')}
+                                </div>
+                              ) : (
+                                <div className="text-slate-400 text-[11px]">No Deductions</div>
+                              )}
+                              {item.paymentBank && (
+                                <div className="text-[11px] text-slate-600 font-medium mt-0.5">Bank: {item.paymentBank}</div>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 align-top">
+                              <span className="inline-flex items-center px-2.5 py-1 rounded text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                <CheckCircle2 className="w-3.5 h-3.5 mr-1 text-emerald-600 shrink-0" />
+                                Paid & Settled
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 align-top text-right">
+                              <div className="flex flex-col sm:flex-row items-end sm:items-center justify-end gap-1.5">
+                                <button
+                                  onClick={() => handleOpenPaidModal(item.mrNo)}
+                                  className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-slate-700 hover:bg-slate-800 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1"
+                                  title="Edit payment transaction details"
+                                >
+                                  <Edit3 className="w-3 h-3" />
+                                  <span>Edit Payment</span>
+                                </button>
+                                <button
+                                  onClick={() => handleSelectMr(item.mrNo)}
+                                  className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1"
+                                  title="View and print tax invoice"
+                                >
+                                  <Eye className="w-3 h-3" />
+                                  <span>View Bill</span>
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Pending Delivery Alert Modal */}
           {pendingAlertModal && pendingAlertModal.isOpen && (
@@ -845,6 +1871,15 @@ export default function BillingSystem() {
                 <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-300 rounded uppercase border border-blue-500/30">
                   {billTypeFilter === 'scrap' ? 'Scrap Committee Bill' : 'Repairable Bill'}
                 </span>
+                {selectedJobsData.some(j => j.paymentStatus === 'Paid') ? (
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/30 text-emerald-300 rounded uppercase border border-emerald-500/40 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> Paid
+                  </span>
+                ) : selectedJobsData.some(j => j.billSentDate || j.billStatus === 'Sent') ? (
+                  <span className="px-2 py-0.5 text-[10px] font-bold bg-amber-500/30 text-amber-300 rounded uppercase border border-amber-500/40 flex items-center gap-1">
+                    <Send className="w-3 h-3" /> Bill Sent
+                  </span>
+                ) : null}
               </div>
               <p className="text-lg sm:text-xl font-mono font-bold text-white mt-1">MR No: {selectedMrNo}</p>
               <p className="text-xs text-slate-300 mt-0.5">
@@ -853,6 +1888,38 @@ export default function BillingSystem() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+              <button
+                onClick={() => handleOpenSendBillModal(selectedMrNo)}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs"
+                title="Send Bill with Reference No & Date"
+              >
+                <Send className="w-4 h-4 mr-1.5 shrink-0" /> Send Bill
+              </button>
+
+              <button
+                onClick={() => handleOpenPaidModal(selectedMrNo)}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs"
+                title="Record payment details for this MR Bill"
+              >
+                <Banknote className="w-4 h-4 mr-1.5 shrink-0" /> {selectedJobsData.some(j => j.paymentStatus === 'Paid') ? 'Edit Payment' : 'Mark Paid'}
+              </button>
+
+              <button
+                onClick={handleSaveBillDates}
+                disabled={savingBillDates}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs disabled:opacity-50"
+                title="Save Bill No & Bill Date to all delivered jobs in this MR"
+              >
+                {savingBillDates ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin shrink-0" /> Saving...
+                  </>
+                ) : (
+                  <>
+                    <Calendar className="w-4 h-4 mr-1.5 shrink-0" /> Save Bill Date
+                  </>
+                )}
+              </button>
               <button
                 onClick={() => setShowEditLetterModal(true)}
                 className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg transition-colors shadow-xs"
@@ -870,13 +1937,13 @@ export default function BillingSystem() {
               </button>
               <button
                 onClick={handlePrint}
-                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs"
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-slate-800 hover:bg-slate-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs border border-slate-700"
               >
                 <Printer className="w-4 h-4 mr-1.5 shrink-0" /> Print (4 Pages)
               </button>
               <button
                 onClick={handleExportExcel}
-                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg transition-colors shadow-xs"
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-emerald-700 hover:bg-emerald-800 text-white px-3 py-2 rounded-lg transition-colors shadow-xs"
               >
                 <FileSpreadsheet className="w-4 h-4 mr-1.5 shrink-0" /> Excel
               </button>
@@ -888,6 +1955,18 @@ export default function BillingSystem() {
               </button>
             </div>
           </div>
+
+          {savedSuccessMsg && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-lg flex items-center justify-between text-xs font-semibold print:hidden shadow-sm">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{savedSuccessMsg}</span>
+              </div>
+              <button onClick={() => setSavedSuccessMsg('')} className="text-emerald-600 hover:text-emerald-800">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+          )}
 
           {/* Pending Delivery Warning Banner inside Editor */}
           {selectedMrPendingCount > 0 && (
@@ -1343,10 +2422,11 @@ export default function BillingSystem() {
                 <LetterheadHeader agency={activeAgency} documentTitle="OIL ACCOUNT SHEET" />
 
                 {/* Sub Metadata */}
-                <div className="grid grid-cols-3 gap-2 font-semibold text-[11px] border-b border-black pb-2">
-                  <div>Order no. <span className="font-mono font-bold">{apprNo}</span></div>
-                  <div className="text-center">MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | MR Date: <span className="font-mono font-bold">{selectedMrDate}</span></div>
-                  <div className="text-right">Bill No. <span className="font-mono font-bold">{billNo}</span> (Dated: {billDate})</div>
+                <div className="grid grid-cols-4 gap-2 font-semibold text-[10px] border-b border-black pb-2">
+                  <div>Order: <span className="font-mono font-bold">{apprNo}</span></div>
+                  <div>MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | Date: <span className="font-mono font-bold">{selectedMrDate}</span></div>
+                  <div>Insp. Date: <span className="font-mono font-bold text-blue-900">{selectedMrInspectionDate}</span></div>
+                  <div className="text-right">Division: <strong className="font-bold uppercase text-black">{currentDivision}</strong></div>
                 </div>
 
                 {/* Table 1: Delivered Transformers Oil Table */}
@@ -1383,7 +2463,7 @@ export default function BillingSystem() {
                       </tr>
                     ))}
                     <tr className="font-bold border-t-2 border-black bg-slate-50 print:bg-white">
-                      <td colSpan={6} className="border border-black p-1 text-right">Total:</td>
+                      <td colSpan={6} className="border border-black p-1 text-right">Total (MR {selectedMrNo}):</td>
                       <td className="border border-black p-1 font-mono">{totalOilCapacity.toFixed(2)}</td>
                       <td className="border border-black p-1 font-mono">{totalOilReceived.toFixed(2)}</td>
                       <td className="border border-black p-1 font-mono">{totalBaseShortage.toFixed(2)}</td>
@@ -1394,37 +2474,42 @@ export default function BillingSystem() {
                 </table>
 
                 {/* Table 2: Oil Inward Log for MR */}
-                <div className="pt-2">
-                  <h4 className="font-bold text-[11px] mb-1 uppercase">
-                    Inward Oil Received Log for MR: {selectedMrNo}
-                  </h4>
-                  <table className="w-full text-center border-collapse border border-black text-[10px]">
+                <div className="pt-1">
+                  <div className="flex justify-between items-center mb-1">
+                    <h4 className="font-bold text-[10px] uppercase">
+                      Inward Oil Received Log for MR: {selectedMrNo} (Division: {currentDivision})
+                    </h4>
+                    <span className="text-[9px] text-slate-500 font-mono">Bill No: {billNo}</span>
+                  </div>
+                  <table className="w-full text-center border-collapse border border-black text-[9px]">
                     <thead>
                       <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
                         <th className="border border-black p-1">MR NO</th>
-                        <th className="border border-black p-1">Date</th>
-                        <th className="border border-black p-1">Fresh/Used</th>
-                        <th className="border border-black p-1">Oil Received</th>
-                        <th className="border border-black p-1">Barrel Received</th>
-                        <th className="border border-black p-1">Oil after deducting FL (5.000)</th>
+                        <th className="border border-black p-1">Receive Date</th>
+                        <th className="border border-black p-1">MR Date</th>
+                        <th className="border border-black p-1">Fresh / Used</th>
+                        <th className="border border-black p-1">Gross Oil (LTR)</th>
+                        <th className="border border-black p-1">Barrels</th>
+                        <th className="border border-black p-1 font-bold">Net Oil (after 5% FL if used)</th>
                       </tr>
                     </thead>
                     <tbody>
                       {mrOilTxList.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="border border-black p-2 text-slate-500">
-                            No inward oil transaction logged for MR {selectedMrNo} in Oil Ledger.
+                          <td colSpan={7} className="border border-black p-2 text-slate-500 italic">
+                            No inward oil transaction logged specifically for MR {selectedMrNo} in Oil Ledger.
                           </td>
                         </tr>
                       ) : (
                         mrOilTxList.map((tx, idx) => (
                           <tr key={tx.id || idx} className="border-b border-black">
-                            <td className="border border-black p-1 font-mono">{tx.mrNo}</td>
+                            <td className="border border-black p-1 font-mono font-bold">{tx.mrNo}</td>
                             <td className="border border-black p-1">{tx.date ? new Date(tx.date).toLocaleDateString() : billDate}</td>
+                            <td className="border border-black p-1">{tx.mrDate || selectedMrDate}</td>
                             <td className="border border-black p-1">{tx.oilType || 'Fresh'}</td>
                             <td className="border border-black p-1 font-mono">{Number(tx.grossLiters || 0).toFixed(2)}</td>
                             <td className="border border-black p-1 font-mono">{tx.barrels || 0}</td>
-                            <td className="border border-black p-1 font-mono">{Number(tx.netLiters || 0).toFixed(2)}</td>
+                            <td className="border border-black p-1 font-mono font-bold">{Number(tx.netLiters || 0).toFixed(2)}</td>
                           </tr>
                         ))
                       )}
@@ -1432,20 +2517,20 @@ export default function BillingSystem() {
                   </table>
                 </div>
 
-                {/* Summary Box with Filtration Loss & Previous Shortage Balance */}
+                {/* Summary Box with Concern Division Subtotal & Net Oil on Inspection Date */}
                 <div className="grid grid-cols-2 gap-3 border border-black p-3 font-semibold text-[11px]">
                   {/* Left Box: Current MR Oil Requirement */}
                   <div className="space-y-1">
-                    <h4 className="font-bold border-b border-black pb-1 mb-1 uppercase text-[10px]">
-                      Current MR {selectedMrNo} Requirement
+                    <h4 className="font-bold border-b border-black pb-1 mb-1 uppercase text-[10px] text-slate-900">
+                      1. Current MR ({selectedMrNo}) Oil Requirement
                     </h4>
-                    <div className="flex justify-between"><span>Trans Oil Capacity:</span> <span className="font-mono">{totalOilCapacity.toFixed(2)} Ltr</span></div>
-                    <div className="flex justify-between"><span>Oil Received with Transformer:</span> <span className="font-mono">{totalOilReceived.toFixed(2)} Ltr</span></div>
+                    <div className="flex justify-between"><span>Transformers Oil Capacity:</span> <span className="font-mono">{totalOilCapacity.toFixed(2)} Ltr</span></div>
+                    <div className="flex justify-between"><span>Oil Received with Transformers:</span> <span className="font-mono">{totalOilReceived.toFixed(2)} Ltr</span></div>
                     <div className="flex justify-between text-slate-700"><span>Base Oil Shortage:</span> <span className="font-mono">{totalBaseShortage.toFixed(2)} Ltr</span></div>
                     <div className="flex justify-between text-slate-700"><span>Filtration Loss (5% on Received):</span> <span className="font-mono">+{totalFilterLoss.toFixed(2)} Ltr</span></div>
                     <div className="flex justify-between border-t border-black pt-1 font-bold text-amber-950">
-                      <span>Net Requirement of Oil (Current MR):</span>
-                      <span className="font-mono">{totalNetShortage.toFixed(2)} Ltr</span>
+                      <span>Net Oil Shortage (MR {selectedMrNo}):</span>
+                      <span className="font-mono font-bold">{totalNetShortage.toFixed(2)} Ltr</span>
                     </div>
                     <div className="flex justify-between pt-1 text-blue-900">
                       <span>Inward Oil Received for MR {selectedMrNo}:</span>
@@ -1453,56 +2538,52 @@ export default function BillingSystem() {
                     </div>
                   </div>
 
-                  {/* Right Box: Ledger & Previous Shortage Balance */}
+                  {/* Right Box: Concern Division Subtotal & Net Balance on Inspection / MR Date */}
                   <div className="space-y-1 border-l border-black pl-3">
-                    <h4 className="font-bold border-b border-black pb-1 mb-1 uppercase text-[10px]">
-                      Oil Account & Previous Balance
-                    </h4>
-
-                    <div className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-300 space-y-0.5 mb-1">
-                      <div className="flex justify-between">
-                        <span>Previous Billed MR:</span>
-                        <span className="font-mono font-bold">{previousMrLedger.prevMrNo ? `MR ${previousMrLedger.prevMrNo}` : 'N/A (First MR)'}</span>
+                    <div className="flex justify-between items-center border-b border-black pb-1 mb-1">
+                      <h4 className="font-bold uppercase text-[10px] text-blue-900">
+                        2. {currentDivision} Division Oil Account
+                      </h4>
+                      <div className="flex items-center gap-1 text-[9px] text-slate-700">
+                        <span>(Up to MR Date: <strong className="font-mono text-blue-950 font-bold">{effectiveOilUptoDate}</strong>)</span>
+                        <input
+                          type="date"
+                          value={formatToYyyyMmDd(effectiveOilUptoDate)}
+                          onChange={(e) => setCustomOilUptoDate(e.target.value)}
+                          className="print:hidden border border-slate-300 rounded px-1 py-0.5 text-[9px] bg-white cursor-pointer ml-1"
+                          title="Change 'Up to MR Date' filter for cross-checking"
+                        />
                       </div>
-                      {previousMrLedger.prevMrNo && (
-                        <div className="flex justify-between text-[9px] text-slate-600">
-                          <span>Previous Bill No. & Date:</span>
-                          <span className="font-mono">{previousMrLedger.prevBillNo} ({previousMrLedger.prevBillDate})</span>
-                        </div>
-                      )}
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>Net Oil Req. (Current MR):</span>
-                      <span className="font-mono font-bold">+{totalNetShortage.toFixed(2)} Ltr</span>
+                    <div className="flex justify-between pt-0.5">
+                      <span className="font-bold">Sub Total of Total Oil Shortage ({currentDivision} Division):</span>
+                      <span className="font-mono font-bold text-amber-900">+{divisionOilStatement.divisionCumulativeShortage.toFixed(2)} Ltr</span>
                     </div>
 
-                    <div className="flex justify-between">
-                      <span>Balance Previous Oil Shortage:</span>
-                      <span className={`font-mono font-bold ${previousMrLedger.prevNetShortage >= 0 ? 'text-amber-900' : 'text-emerald-900'}`}>
-                        {previousMrLedger.prevNetShortage >= 0 ? '+' : ''}{previousMrLedger.prevNetShortage.toFixed(2)} Ltr
+                    <div className="flex justify-between text-blue-900 font-bold">
+                      <span>Total Inward Oil Received ({currentDivision} Division):</span>
+                      <span className="font-mono font-bold">-{divisionOilStatement.divisionCumulativeInward.toFixed(2)} Ltr</span>
+                    </div>
+
+                    <div className="flex justify-between border-t-2 border-black pt-1 font-black text-xs">
+                      <span>Net Oil (Due / Credited at Agency):</span>
+                      <span className="font-mono text-sm">
+                        {divisionOilStatement.divisionNetOilOnInspectionDate >= 0 ? '+' : ''}
+                        {divisionOilStatement.divisionNetOilOnInspectionDate.toFixed(2)} Ltr
                       </span>
                     </div>
-                    <div className="text-[9px] text-slate-600 text-right -mt-1 italic">
-                      ({previousMrLedger.prevNetShortage >= 0 ? 'Pending to be received' : 'Credited / Surplus in hand'})
-                    </div>
 
-                    <div className="flex justify-between text-blue-900 font-bold border-t border-slate-200 pt-1">
-                      <span>Less Inward Oil Received (MR {selectedMrNo}):</span>
-                      <span className="font-mono">-{mrInwardOilTotal.toFixed(2)} Ltr</span>
-                    </div>
-
-                    <div className="flex justify-between border-t-2 border-black pt-1 font-bold text-sm">
-                      <span>Net Oil Due:</span>
-                      <span className="font-mono">{netOilDue >= 0 ? '+' : ''}{netOilDue.toFixed(2)} Ltr</span>
-                    </div>
-
-                    <div className="bg-slate-100 p-1.5 border border-black rounded mt-1 flex justify-between items-center text-xs">
-                      <span className="font-bold uppercase">Final Oil Status:</span>
-                      <span className={`font-black font-mono px-2 py-0.5 rounded text-white ${netOilDue > 0 ? 'bg-amber-800' : netOilDue < 0 ? 'bg-emerald-800' : 'bg-slate-800'}`}>
-                        {netOilDue < 0 ? `${Math.abs(netOilDue).toFixed(2)} Ltr Credited` : netOilDue > 0 ? `${netOilDue.toFixed(2)} Ltr Due` : '0.00 Ltr (Balanced)'}
+                    <div className="bg-slate-100 p-1.5 border border-black rounded mt-1 flex justify-between items-center text-[10px]">
+                      <span className="font-bold uppercase">Status on MR Date:</span>
+                      <span className={`font-bold font-mono px-2 py-0.5 rounded text-white ${divisionOilStatement.divisionNetOilOnInspectionDate > 0 ? 'bg-amber-800' : divisionOilStatement.divisionNetOilOnInspectionDate < 0 ? 'bg-emerald-800' : 'bg-slate-800'}`}>
+                        {divisionOilStatement.divisionNetOilOnInspectionDate > 0 ? `${divisionOilStatement.divisionNetOilOnInspectionDate.toFixed(2)} Ltr Due to Agency` : divisionOilStatement.divisionNetOilOnInspectionDate < 0 ? `${Math.abs(divisionOilStatement.divisionNetOilOnInspectionDate).toFixed(2)} Ltr Credited at Agency` : '0.00 Ltr (Balanced)'}
                       </span>
                     </div>
+
+                    <p className="text-[9px] text-slate-500 italic mt-1 leading-tight">
+                      * Cross-check in Oil Ledger: Select Division "{currentDivision}" and set "Up to MR Date" filter to {effectiveOilUptoDate}.
+                    </p>
                   </div>
                 </div>
 
@@ -1589,6 +2670,274 @@ export default function BillingSystem() {
               >
                 <Check className="w-4 h-4 mr-1.5" /> Confirm & Apply To Document
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SEND BILL MODAL */}
+      {showSendBillModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-blue-600 p-4 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Send className="w-5 h-5" />
+                <h3 className="font-bold text-base">Send Bill / Record Dispatch (MR {sendTargetMr})</h3>
+              </div>
+              <button onClick={() => setShowSendBillModal(false)} className="text-blue-100 hover:text-white p-1 rounded">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-xs text-blue-900 flex justify-between items-center">
+                <div>
+                  <p className="font-bold text-blue-950">MR No: {sendTargetMr}</p>
+                  <p className="text-blue-700">Division: {mrGroups[sendTargetMr]?.[0]?.division || 'SABARMATI'}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] uppercase font-bold text-blue-700">Net Bill Value</p>
+                  <p className="text-base font-bold text-blue-900 font-mono">
+                    ₹{calculateMrBillSummary(sendTargetMr).grandTotal.toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Bill / Invoice No <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={sendBillNo}
+                  onChange={e => setSendBillNo(e.target.value)}
+                  placeholder="e.g. BILL/SAB/2026/045"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Dispatch / Covering Letter Ref No <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={sendBillRefNo}
+                  onChange={e => setSendBillRefNo(e.target.value)}
+                  placeholder="e.g. UGVCL/BILL-SUB/MR-841/2026-27"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Bill Sent / Dispatch Date <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={sendBillDate}
+                  onChange={e => setSendBillDate(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Remarks / Dispatch Details (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={sendBillRemarks}
+                  onChange={e => setSendBillRemarks(e.target.value)}
+                  placeholder="e.g. Hand delivered to EE Sabarmati with test certs"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  onClick={() => setShowSendBillModal(false)}
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmSendBill}
+                  disabled={submittingSendBill}
+                  className="px-5 py-2 text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {submittingSendBill ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Mark as Sent & Save</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MARK AS PAID MODAL */}
+      {showPaidModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 overflow-y-auto">
+          <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="bg-emerald-600 p-4 text-white flex justify-between items-center">
+              <div className="flex items-center gap-2">
+                <Banknote className="w-5 h-5" />
+                <h3 className="font-bold text-base">Record Payment (MR {paidTargetMr})</h3>
+              </div>
+              <button onClick={() => setShowPaidModal(false)} className="text-emerald-100 hover:text-white p-1 rounded">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-950 flex justify-between items-center">
+                <div>
+                  <p className="font-bold text-emerald-950">MR No: {paidTargetMr}</p>
+                  <p className="text-emerald-700">Division: {mrGroups[paidTargetMr]?.[0]?.division || 'SABARMATI'}</p>
+                  <p className="text-emerald-800 font-mono text-[11px] mt-0.5">
+                    Bill No: {mrGroups[paidTargetMr]?.[0]?.billNo || `BILL/${paidTargetMr}`}
+                  </p>
+                </div>
+                <div className="text-right">
+                  <p className="text-[10px] uppercase font-bold text-emerald-700">Total Billed</p>
+                  <p className="text-base font-bold text-emerald-900 font-mono">
+                    ₹{calculateMrBillSummary(paidTargetMr).grandTotal.toLocaleString('en-IN')}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                    Payment Mode
+                  </label>
+                  <select
+                    value={paymentMode}
+                    onChange={e => setPaymentMode(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none bg-white font-medium"
+                  >
+                    <option value="NEFT / RTGS">NEFT / RTGS</option>
+                    <option value="Bank Transfer">Bank Transfer / IMPS</option>
+                    <option value="Cheque">Cheque</option>
+                    <option value="Demand Draft (DD)">Demand Draft (DD)</option>
+                    <option value="Cash / Other">Cash / Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                    Payment Date <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={paymentDate}
+                    onChange={e => setPaymentDate(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Transaction UTR / Cheque / Ref No <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={paymentRefNo}
+                  onChange={e => setPaymentRefNo(e.target.value)}
+                  placeholder="e.g. UTR002938192839 or CHQ-928371"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                    Net Paid Amount (₹) <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={paidAmount}
+                    onChange={e => setPaidAmount(e.target.value)}
+                    placeholder="e.g. 145000"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                    TDS / Deduction Amount (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={paymentDeductions}
+                    onChange={e => setPaymentDeductions(e.target.value)}
+                    placeholder="e.g. 2900"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Bank Name / Branch (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={paymentBank}
+                  onChange={e => setPaymentBank(e.target.value)}
+                  placeholder="e.g. State Bank of India, Ahmedabad"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-700 mb-1">
+                  Payment Remarks / Notes (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={paymentRemarks}
+                  onChange={e => setPaymentRemarks(e.target.value)}
+                  placeholder="e.g. Full settlement received against Bill No"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  onClick={() => setShowPaidModal(false)}
+                  className="px-4 py-2 text-xs font-bold uppercase tracking-wider text-slate-600 hover:text-slate-800 border border-slate-300 rounded-lg"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmPaid}
+                  disabled={submittingPaid}
+                  className="px-5 py-2 text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-xs flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {submittingPaid ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Saving...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Check className="w-4 h-4" />
+                      <span>Confirm & Record Payment</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         </div>

@@ -52,7 +52,9 @@ export default function OilInward() {
     "transactions",
   );
   const [filterDivision, setFilterDivision] = useState<string>("All");
-  const [filterMrDate, setFilterMrDate] = useState<string>("All");
+  const [filterDateMode, setFilterDateMode] = useState<"all" | "upto" | "exact">("all");
+  const [filterUptoDate, setFilterUptoDate] = useState<string>("");
+  const [filterExactDate, setFilterExactDate] = useState<string>("");
 
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -66,14 +68,58 @@ export default function OilInward() {
     grossLiters: 210,
   });
 
+  const parseDateToTimestamp = (dateVal: any): number => {
+    if (!dateVal) return 0;
+    if (typeof dateVal === "number") return dateVal;
+    if (dateVal instanceof Date) return dateVal.getTime();
+    if (dateVal.seconds || dateVal._seconds) return (dateVal.seconds || dateVal._seconds) * 1000;
+    if (typeof dateVal === "string") {
+      const s = dateVal.trim();
+      if (!s || s === "-") return 0;
+      // Format: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
+      if (/^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/.test(s)) {
+        const parts = s.split("T")[0].split(/[-/.]/);
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const d = parseInt(parts[2], 10);
+        return new Date(y, m, d, 23, 59, 59, 999).getTime();
+      }
+      // Format: DD-MM-YYYY or DD/MM/YYYY or DD.MM.YYYY
+      if (/^\d{1,2}[-/.]\d{1,2}[-/.]\d{4}/.test(s)) {
+        const parts = s.split(/[-/.]/);
+        const d = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10) - 1;
+        const y = parseInt(parts[2], 10);
+        return new Date(y, m, d, 23, 59, 59, 999).getTime();
+      }
+      const parsed = new Date(s).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  };
+
+  const formatDateStr = (dateVal: any): string => {
+    if (!dateVal) return "";
+    if (typeof dateVal === "string") return dateVal;
+    if (typeof dateVal === "number") {
+      const d = new Date(dateVal);
+      if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    }
+    if (dateVal?.seconds) {
+      const d = new Date(dateVal.seconds * 1000);
+      if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+    }
+    return "";
+  };
+
   const getMrDate = (mrNo: string) => {
     if (!mrNo) return "-";
     const matchingJob = jobs.find((j) => j.mrNo === mrNo);
     if (matchingJob?.dateOfIssue) return matchingJob.dateOfIssue;
     if (matchingJob?.mrDate) return matchingJob.mrDate;
     if (matchingJob?.createdAt) {
-      const d = new Date(matchingJob.createdAt);
-      if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+      const d = formatDateStr(matchingJob.createdAt);
+      if (d) return d;
     }
     const tx = transactions.find((t) => t.mrNo === mrNo && t.mrDate);
     if (tx?.mrDate) return tx.mrDate;
@@ -273,7 +319,7 @@ export default function OilInward() {
     jobs.forEach((job) => {
       const mrNo = job.mrNo;
       if (!mrNo) return;
-      const mrDate = job.dateOfIssue || job.mrDate || (job.createdAt ? new Date(job.createdAt).toISOString().split("T")[0] : "-");
+      const mrDate = job.dateOfIssue || job.mrDate || (job.createdAt ? formatDateStr(job.createdAt) : "-");
       if (!summary[mrNo]) {
         summary[mrNo] = {
           mrNo,
@@ -286,10 +332,34 @@ export default function OilInward() {
         summary[mrNo].mrDate = mrDate;
       }
 
-      const insp = inspections.find((i) => i.jobId === job.id);
-      if (insp && insp.data && typeof insp.data.netShortage === "number") {
-        summary[mrNo].totalShortage += insp.data.netShortage;
-      }
+      const insp = inspections.find(i => 
+        (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
+        (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
+      ) || inspections.find(i => i.jobId === job.id);
+
+      const rawOilCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
+      const rawLessOil = insp?.data?.lessOilLtrs ?? insp?.lessOilLtrs ?? job.externalDetails?.lessOilLtrs ?? job.lessOilLtrs;
+      const rawNetShortage = insp?.data?.netShortage ?? insp?.netShortage ?? job.externalDetails?.netShortage;
+
+      const kva = Number(job.capacityKva) || 25;
+      const defaultCap = kva <= 16 ? 140 : kva <= 25 ? 184 : kva <= 63 ? 240 : 323;
+
+      const oilCap = (rawOilCap !== undefined && rawOilCap !== null && String(rawOilCap).trim() !== '')
+        ? Number(rawOilCap)
+        : defaultCap;
+
+      const lessOil = (rawLessOil !== undefined && rawLessOil !== null && String(rawLessOil).trim() !== '')
+        ? Number(rawLessOil)
+        : 0;
+
+      const oilRecd = Math.max(0, oilCap - lessOil);
+      const baseShortage = lessOil;
+      const filterLoss = oilRecd * 0.05;
+      const netShortage = (typeof rawNetShortage === "number")
+        ? rawNetShortage
+        : (baseShortage + filterLoss);
+
+      summary[mrNo].totalShortage += netShortage;
     });
 
     // Group received oil from transactions
@@ -327,32 +397,60 @@ export default function OilInward() {
   const filteredSummary = useMemo(() => {
     return mrSummary.filter((s) => {
       if (filterDivision !== "All" && s.division !== filterDivision) return false;
-      if (filterMrDate !== "All" && filterMrDate.trim() !== "") {
-        const target = filterMrDate.trim();
+      
+      if (filterDateMode === "upto" && filterUptoDate.trim() !== "") {
+        const uptoTimestamp = parseDateToTimestamp(filterUptoDate);
+        const itemTimestamp = parseDateToTimestamp(s.mrDate);
+        if (itemTimestamp && uptoTimestamp && itemTimestamp > uptoTimestamp) return false;
+      } else if (filterDateMode === "exact" && filterExactDate.trim() !== "") {
+        const target = filterExactDate.trim();
         if (!s.mrDate || s.mrDate === "-") return false;
         if (s.mrDate !== target && !s.mrDate.includes(target)) return false;
       }
       return true;
     });
-  }, [mrSummary, filterDivision, filterMrDate]);
+  }, [mrSummary, filterDivision, filterDateMode, filterUptoDate, filterExactDate]);
 
   const filteredTransactions = useMemo(() => {
     return transactions.filter((t) => {
       if (filterDivision !== "All" && t.division !== filterDivision) return false;
-      if (filterMrDate !== "All" && filterMrDate.trim() !== "") {
-        const target = filterMrDate.trim();
-        const txMrDate = t.mrDate || getMrDate(t.mrNo);
+      
+      const txMrDate = t.mrDate || getMrDate(t.mrNo) || formatDateStr(t.date);
+      if (filterDateMode === "upto" && filterUptoDate.trim() !== "") {
+        const uptoTimestamp = parseDateToTimestamp(filterUptoDate);
+        const txTimestamp = parseDateToTimestamp(txMrDate);
+        if (txTimestamp && uptoTimestamp && txTimestamp > uptoTimestamp) return false;
+      } else if (filterDateMode === "exact" && filterExactDate.trim() !== "") {
+        const target = filterExactDate.trim();
         if (!txMrDate || txMrDate === "-") return false;
         if (txMrDate !== target && !txMrDate.includes(target)) return false;
       }
       return true;
     });
-  }, [transactions, filterDivision, filterMrDate, jobs]);
+  }, [transactions, filterDivision, filterDateMode, filterUptoDate, filterExactDate, jobs]);
+
+  // Aggregate stats for filtered criteria
+  const subTotalShortage = useMemo(() => {
+    return filteredSummary.reduce((sum, item) => sum + item.totalShortage, 0);
+  }, [filteredSummary]);
+
+  const subTotalReceived = useMemo(() => {
+    return filteredSummary.reduce((sum, item) => sum + item.totalReceived, 0);
+  }, [filteredSummary]);
+
+  const subTotalNetBalance = useMemo(() => {
+    return subTotalShortage - subTotalReceived;
+  }, [subTotalShortage, subTotalReceived]);
 
   const exportToExcel = () => {
     const wsData: any[][] = [];
 
+    const filterInfo = `Division: ${filterDivision} | Mode: ${filterDateMode === "upto" ? `Up to ${filterUptoDate}` : filterDateMode === "exact" ? `Date: ${filterExactDate}` : "All Dates"}`;
+
     if (viewMode === "transactions") {
+      wsData.push(["OIL INWARD TRANSACTIONS LEDGER"]);
+      wsData.push([`Agency: ${activeAgency?.name || ""}`, filterInfo]);
+      wsData.push([]);
       wsData.push(["Receive Date", "MR No.", "MR Date", "Division", "Oil Type", "Barrels", "Gross (LTR)", "Loss %", "Net (LTR)"]);
       filteredTransactions.forEach((tx) => {
         const date = new Date(tx.date).toLocaleDateString();
@@ -369,8 +467,15 @@ export default function OilInward() {
           Number(tx.netLiters.toFixed(2))
         ]);
       });
+      const totalGross = filteredTransactions.reduce((sum, item) => sum + item.grossLiters, 0);
+      const totalNet = filteredTransactions.reduce((sum, item) => sum + item.netLiters, 0);
+      wsData.push([]);
+      wsData.push(["Sub Total", "", "", "", "", "", Number(totalGross.toFixed(2)), "", Number(totalNet.toFixed(2))]);
     } else {
-      wsData.push(["MR No.", "MR Date", "Division", "Total Shortage (LTR)", "Oil Received (LTR)", "Net Pending (LTR)"]);
+      wsData.push(["OIL MR-WISE SHORTAGE & INWARD SUMMARY"]);
+      wsData.push([`Agency: ${activeAgency?.name || ""}`, filterInfo]);
+      wsData.push([]);
+      wsData.push(["MR No.", "MR Date", "Division", "Total Shortage (LTR)", "Oil Received (LTR)", "Net Pending / Shortage (LTR)"]);
       filteredSummary.forEach((summary) => {
         const pending = summary.totalShortage - summary.totalReceived;
         wsData.push([
@@ -382,16 +487,22 @@ export default function OilInward() {
           Number(pending.toFixed(2))
         ]);
       });
-      const totalShortage = filteredSummary.reduce((sum, item) => sum + item.totalShortage, 0);
-      const totalReceived = filteredSummary.reduce((sum, item) => sum + item.totalReceived, 0);
-      const totalPending = filteredSummary.reduce((sum, item) => sum + (item.totalShortage - item.totalReceived), 0);
-      wsData.push(["Overall Totals", "", "", Number(totalShortage.toFixed(2)), Number(totalReceived.toFixed(2)), Number(totalPending.toFixed(2))]);
+      wsData.push([]);
+      wsData.push([
+        `SUB TOTAL (${filterDivision !== 'All' ? filterDivision : 'All Divisions'}${filterDateMode === 'upto' ? ` - Up to ${filterUptoDate}` : ''})`,
+        "",
+        "",
+        Number(subTotalShortage.toFixed(2)),
+        Number(subTotalReceived.toFixed(2)),
+        Number(subTotalNetBalance.toFixed(2))
+      ]);
     }
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Oil Ledger");
-    XLSX.writeFile(wb, `Oil_Ledger_${viewMode}_${filterDivision}.xlsx`);
+    XLSX.utils.book_append_sheet(wb, ws, viewMode === "transactions" ? "Transactions" : "MR_Summary");
+    const filename = `Oil_Ledger_${filterDivision}_${filterDateMode === "upto" ? `Upto_${filterUptoDate}` : "Report"}.xlsx`;
+    XLSX.writeFile(wb, filename);
   };
 
   if (!activeAgency) {
@@ -402,29 +513,58 @@ export default function OilInward() {
     );
   }
 
-  const totalOilShortage = filteredSummary.reduce(
-    (sum, item) => sum + (item.totalShortage - item.totalReceived),
-    0,
-  );
-
   return (
     <div className="space-y-6">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded shadow-sm border border-slate-200 gap-4">
-        <div>
-          <h1 className="text-xl font-bold text-slate-900 flex items-center">
-            <Droplet className="w-6 h-6 mr-3 text-blue-600" />
-            Oil Ledger - {activeAgency.name}
-          </h1>
-          <p className="text-sm text-slate-500 mt-1">
-            Track inward oil (Fresh/Used), edit entries, and manage MR-wise or
-            Division-wise net shortage.
-          </p>
+      {/* Top Header & Stat Cards */}
+      <div className="bg-white p-6 rounded shadow-sm border border-slate-200 space-y-4">
+        <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-slate-900 flex items-center">
+              <Droplet className="w-6 h-6 mr-3 text-blue-600" />
+              Oil Ledger & Shortage Account - {activeAgency.name}
+            </h1>
+            <p className="text-sm text-slate-500 mt-1">
+              Manage inward oil, filter by concern division and up to MR date to cross-check billing shortage subtotals.
+            </p>
+          </div>
+
+          {/* Quick Stat Cards */}
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-right">
+              <div className="text-[10px] uppercase font-bold text-amber-700">
+                Sub Total Shortage
+              </div>
+              <div className="text-base font-mono font-bold text-amber-900">
+                {subTotalShortage.toFixed(2)} LTR
+              </div>
+            </div>
+
+            <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-right">
+              <div className="text-[10px] uppercase font-bold text-blue-700">
+                Inward Received
+              </div>
+              <div className="text-base font-mono font-bold text-blue-900">
+                {subTotalReceived.toFixed(2)} LTR
+              </div>
+            </div>
+
+            <div className={`border rounded px-3 py-2 text-right ${subTotalNetBalance > 0 ? 'bg-rose-50 border-rose-200 text-rose-900' : subTotalNetBalance < 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-slate-50 border-slate-200 text-slate-900'}`}>
+              <div className="text-[10px] uppercase font-bold opacity-80">
+                Net Balance
+              </div>
+              <div className="text-base font-mono font-black">
+                {subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR
+              </div>
+            </div>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-          <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded px-3 py-2">
+        {/* Filter Controls Bar */}
+        <div className="flex flex-wrap items-center gap-3 pt-3 border-t border-slate-100">
+          {/* Division Filter */}
+          <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded px-3 py-1.5">
             <span className="text-[10px] uppercase font-bold text-slate-500">
-              Division:
+              Concern Division:
             </span>
             <select
               value={filterDivision}
@@ -440,44 +580,138 @@ export default function OilInward() {
             </select>
           </div>
 
-          <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded px-3 py-2">
-            <Calendar className="w-4 h-4 text-blue-600" />
-            <span className="text-[10px] uppercase font-bold text-slate-500">
-              MR Date Filter:
-            </span>
-            <select
-              value={filterMrDate}
-              onChange={(e) => setFilterMrDate(e.target.value)}
-              className="text-sm border-none bg-transparent font-bold text-slate-700 focus:ring-0 cursor-pointer outline-none max-w-[150px]"
+          {/* Date Filter Mode */}
+          <div className="flex items-center space-x-1 bg-slate-100 p-1 rounded border border-slate-200 text-xs">
+            <button
+              type="button"
+              onClick={() => {
+                setFilterDateMode("all");
+                setFilterUptoDate("");
+                setFilterExactDate("");
+              }}
+              className={`px-2.5 py-1 rounded font-bold transition-all ${filterDateMode === "all" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
             >
-              <option value="All">All MR Dates</option>
-              {availableMrDates.map((d) => (
-                <option key={d} value={d}>
-                  {d}
-                </option>
-              ))}
-            </select>
-            {filterMrDate !== "All" && (
-              <button
-                type="button"
-                onClick={() => setFilterMrDate("All")}
-                className="p-0.5 hover:bg-slate-200 rounded text-slate-400 hover:text-slate-600"
-                title="Clear MR Date Filter"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            )}
+              All Dates
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFilterDateMode("upto");
+                if (!filterUptoDate && availableMrDates.length > 0) {
+                  setFilterUptoDate(availableMrDates[0]);
+                }
+              }}
+              className={`px-2.5 py-1 rounded font-bold transition-all flex items-center ${filterDateMode === "upto" ? "bg-blue-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+            >
+              <Calendar className="w-3.5 h-3.5 mr-1" />
+              Up to MR Date (Cumulative)
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setFilterDateMode("exact");
+                if (!filterExactDate && availableMrDates.length > 0) {
+                  setFilterExactDate(availableMrDates[0]);
+                }
+              }}
+              className={`px-2.5 py-1 rounded font-bold transition-all ${filterDateMode === "exact" ? "bg-white text-blue-700 shadow-sm" : "text-slate-600 hover:text-slate-900"}`}
+            >
+              Exact MR Date
+            </button>
           </div>
 
-          <div className="bg-blue-50 border border-blue-100 rounded px-4 py-2 text-right">
-            <div className="text-[10px] uppercase font-bold text-blue-500">
-              Total Oil Shortage
+          {/* Date Selector for Upto Mode */}
+          {filterDateMode === "upto" && (
+            <div className="flex items-center space-x-2 bg-blue-50 border border-blue-200 rounded px-3 py-1.5 animate-fadeIn">
+              <span className="text-[10px] uppercase font-bold text-blue-700">
+                Up to Date:
+              </span>
+              <input
+                type="date"
+                value={filterUptoDate}
+                onChange={(e) => setFilterUptoDate(e.target.value)}
+                className="text-xs font-mono font-bold bg-white border border-blue-300 rounded px-2 py-1 text-slate-800 focus:outline-none"
+              />
+              {availableMrDates.length > 0 && (
+                <select
+                  value={filterUptoDate}
+                  onChange={(e) => setFilterUptoDate(e.target.value)}
+                  className="text-xs font-mono font-semibold bg-white border border-blue-300 rounded px-2 py-1 text-slate-700 focus:outline-none max-w-[140px]"
+                >
+                  <option value="">-- Pick MR Date --</option>
+                  {availableMrDates.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              )}
             </div>
-            <div className="text-lg font-mono font-bold text-blue-900">
-              {totalOilShortage.toFixed(2)} LTR
+          )}
+
+          {/* Date Selector for Exact Mode */}
+          {filterDateMode === "exact" && (
+            <div className="flex items-center space-x-2 bg-slate-50 border border-slate-200 rounded px-3 py-1.5 animate-fadeIn">
+              <span className="text-[10px] uppercase font-bold text-slate-600">
+                Exact Date:
+              </span>
+              <input
+                type="date"
+                value={filterExactDate}
+                onChange={(e) => setFilterExactDate(e.target.value)}
+                className="text-xs font-mono font-bold bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 focus:outline-none"
+              />
+              {availableMrDates.length > 0 && (
+                <select
+                  value={filterExactDate}
+                  onChange={(e) => setFilterExactDate(e.target.value)}
+                  className="text-xs font-mono font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none max-w-[140px]"
+                >
+                  <option value="">-- Pick MR Date --</option>
+                  {availableMrDates.map((d) => (
+                    <option key={d} value={d}>
+                      {d}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+
+          {/* Clear Filters */}
+          {(filterDivision !== "All" || filterDateMode !== "all") && (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterDivision("All");
+                setFilterDateMode("all");
+                setFilterUptoDate("");
+                setFilterExactDate("");
+              }}
+              className="flex items-center px-2.5 py-1.5 text-xs text-rose-600 hover:bg-rose-50 border border-rose-200 rounded font-semibold transition-colors"
+            >
+              <X className="w-3.5 h-3.5 mr-1" />
+              Reset Filters
+            </button>
+          )}
+        </div>
+
+        {/* Cross-check Banner */}
+        {filterDivision !== "All" && filterDateMode === "upto" && filterUptoDate && (
+          <div className="bg-blue-50 border border-blue-200 text-blue-900 rounded p-3 text-xs flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="font-bold uppercase tracking-wider text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded">
+                Billing Reconciliation
+              </span>
+              <span>
+                Cumulative oil account for <strong>{filterDivision}</strong> up to <strong>{filterUptoDate}</strong>.
+                Sub Total Shortage: <strong className="font-mono">{subTotalShortage.toFixed(2)} LTR</strong> |
+                Total Inward: <strong className="font-mono">{subTotalReceived.toFixed(2)} LTR</strong> |
+                Net Due: <strong className="font-mono">{subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR</strong>.
+              </span>
             </div>
           </div>
-        </div>
+        )}
       </div>
 
       <div className="bg-white rounded shadow-sm border border-slate-200">
@@ -812,12 +1046,12 @@ export default function OilInward() {
                 )}
                 {/* Aggregate Totals for Transactions */}
                 {!loading && filteredTransactions.length > 0 && (
-                  <tr className="bg-slate-100 font-bold text-slate-900">
+                  <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
                     <td
                       colSpan={6}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
-                      Filtered Totals:
+                      SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${filterUptoDate}` : ''}):
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {filteredTransactions
@@ -849,7 +1083,7 @@ export default function OilInward() {
                     Oil Received (LTR)
                   </th>
                   <th className="px-4 py-3 text-right text-slate-900 font-bold">
-                    Net Pending (LTR)
+                    Net Pending / Shortage (LTR)
                   </th>
                 </tr>
               </thead>
@@ -900,7 +1134,7 @@ export default function OilInward() {
                               pending > 0 ? "text-red-600" : "text-green-600"
                             }
                           >
-                            {pending.toFixed(2)}
+                            {pending > 0 ? `+${pending.toFixed(2)}` : pending.toFixed(2)}
                           </span>
                         </td>
                       </tr>
@@ -909,31 +1143,23 @@ export default function OilInward() {
                 )}
                 {/* Aggregate Totals Row */}
                 {!loading && filteredSummary.length > 0 && (
-                  <tr className="bg-slate-100 font-bold text-slate-900">
+                  <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
                     <td
                       colSpan={3}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
-                      Filtered Totals:
+                      SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${filterUptoDate}` : ''}):
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-amber-700">
-                      {filteredSummary
-                        .reduce((sum, item) => sum + item.totalShortage, 0)
-                        .toFixed(2)}
+                    <td className="px-4 py-3 text-right font-mono text-amber-700 font-bold">
+                      {subTotalShortage.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-blue-700">
-                      {filteredSummary
-                        .reduce((sum, item) => sum + item.totalReceived, 0)
-                        .toFixed(2)}
+                    <td className="px-4 py-3 text-right font-mono text-blue-700 font-bold">
+                      {subTotalReceived.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-slate-900">
-                      {filteredSummary
-                        .reduce(
-                          (sum, item) =>
-                            sum + (item.totalShortage - item.totalReceived),
-                          0,
-                        )
-                        .toFixed(2)}
+                    <td className="px-4 py-3 text-right font-mono font-black">
+                      <span className={subTotalNetBalance > 0 ? 'text-red-700' : subTotalNetBalance < 0 ? 'text-emerald-700' : 'text-slate-900'}>
+                        {subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)}
+                      </span>
                     </td>
                   </tr>
                 )}

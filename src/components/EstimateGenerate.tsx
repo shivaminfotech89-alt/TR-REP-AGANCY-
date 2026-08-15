@@ -2,10 +2,11 @@
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileSpreadsheet, Download, Edit3, Check, Save, FileText, X,
-  Lock, Unlock, AlertTriangle, RotateCcw 
+  Lock, Unlock, AlertTriangle, RotateCcw, Calendar, Send, CheckCircle2, Clock, CheckSquare,
+  Eye, ArrowLeft, ArrowUpRight, Filter, IndianRupee
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
@@ -18,9 +19,39 @@ export default function EstimateGenerate() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // Tab state: 'generator' | 'sent' | 'approvals'
+  const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
+
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
+  const [savingEstimateDates, setSavingEstimateDates] = useState(false);
+  const [savedSuccessMsg, setSavedSuccessMsg] = useState('');
+
+  // Send Estimate Modal State
+  const [showSendModal, setShowSendModal] = useState(false);
+  const [sendTargetMr, setSendTargetMr] = useState<string>('');
+  const [sendRefNo, setSendRefNo] = useState('');
+  const [sendDate, setSendDate] = useState(new Date().toISOString().split('T')[0]);
+  const [sendRemarks, setSendRemarks] = useState('');
+  const [submittingSend, setSubmittingSend] = useState(false);
+
+  // Approval Received Modal State
+  const [showApprModal, setShowApprModal] = useState(false);
+  const [apprTargetMr, setApprTargetMr] = useState<string>('');
+  const [apprNo, setApprNo] = useState('');
+  const [apprDate, setApprDate] = useState(new Date().toISOString().split('T')[0]);
+  const [apprAmount, setApprAmount] = useState<number | string>('');
+  const [apprRemarks, setApprRemarks] = useState('');
+  const [submittingAppr, setSubmittingAppr] = useState(false);
+
+  // Sent Estimates List Filters
+  const [sentSearchQuery, setSentSearchQuery] = useState('');
+  const [sentFilterDivision, setSentFilterDivision] = useState<string>('All');
+
+  // Received Approvals List Filters
+  const [apprSearchQuery, setApprSearchQuery] = useState('');
+  const [apprFilterDivision, setApprFilterDivision] = useState<string>('All');
 
   // Customizable Forwarding Letter Fields
   const [forwardingTo, setForwardingTo] = useState('');
@@ -198,6 +229,56 @@ export default function EstimateGenerate() {
     XLSX.writeFile(wb, `Estimate_Report_MR_${selectedMrNo}.xlsx`);
   };
 
+  const handleSaveEstimateDates = async () => {
+    if (!selectedMrNo || selectedJobsData.length === 0 || !auth.currentUser) return;
+    setSavingEstimateDates(true);
+    setSavedSuccessMsg('');
+    try {
+      const batch = writeBatch(db);
+      const todayIso = new Date().toISOString().split('T')[0];
+
+      selectedJobsData.forEach(job => {
+        const baseTot = calculateJobTotal(job);
+        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const grandTot = Math.round(baseTot * (1 + atPct / 100));
+
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.update(jobRef, {
+          estimateSentDate: todayIso,
+          estimateRefNo: refNoText || `UGVCL/EST/${selectedMrNo}`,
+          estimateAmount: grandTot,
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setJobs(prev => prev.map(j => {
+        if (j.mrNo === selectedMrNo) {
+          const baseTot = calculateJobTotal(j);
+          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const grandTot = Math.round(baseTot * (1 + atPct / 100));
+          return {
+            ...j,
+            estimateSentDate: todayIso,
+            estimateRefNo: refNoText || `UGVCL/EST/${selectedMrNo}`,
+            estimateAmount: grandTot
+          };
+        }
+        return j;
+      }));
+
+      setSavedSuccessMsg('Estimate Sent Date & Ref No saved to all jobs in this MR!');
+      setTimeout(() => setSavedSuccessMsg(''), 4000);
+    } catch (err: any) {
+      console.error(err);
+      alert('Error saving estimate dates: ' + (err.message || err.toString()));
+    } finally {
+      setSavingEstimateDates(false);
+    }
+  };
+
   const today = new Date();
   const dateString = today.toLocaleDateString('en-GB'); // dd/mm/yyyy
 
@@ -232,6 +313,295 @@ export default function EstimateGenerate() {
     });
     return jobTotal;
   };
+
+  const calculateMrEstimateTotal = (mr: string) => {
+    const mrJobs = mrGroups[mr] || [];
+    let total = 0;
+    mrJobs.forEach(job => {
+      const baseTot = calculateJobTotal(job);
+      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      total += Math.round(baseTot * (1 + atPct / 100));
+    });
+    return total;
+  };
+
+  // Open Send Estimate Modal
+  const handleOpenSendModal = (mr: string) => {
+    setSendTargetMr(mr);
+    const mrJobs = mrGroups[mr] || [];
+    const div = mrJobs[0]?.division || currentSelectedDivision;
+    setSendRefNo(`UGVCL/EE-T-1/TRANS-REP/${mr}`);
+    setSendDate(new Date().toISOString().split('T')[0]);
+    setSendRemarks('');
+    setShowSendModal(true);
+  };
+
+  // Confirm Sending Estimate
+  const handleConfirmSendEstimate = async () => {
+    if (!sendTargetMr || !sendRefNo.trim() || !sendDate || !auth.currentUser) {
+      alert('Please enter both Reference No and Send Date');
+      return;
+    }
+    setSubmittingSend(true);
+    try {
+      const targetJobs = mrGroups[sendTargetMr] || [];
+      const batch = writeBatch(db);
+
+      targetJobs.forEach(job => {
+        const baseTot = calculateJobTotal(job);
+        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const grandTot = Math.round(baseTot * (1 + atPct / 100));
+
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.update(jobRef, {
+          estimateSentDate: sendDate,
+          estimateRefNo: sendRefNo.trim(),
+          estimateAmount: grandTot,
+          estimateStatus: 'Sent',
+          estimateApprovalStatus: job.approvalNo ? 'Approved' : (job.estimateApprovalStatus || 'Pending'),
+          estimateRemarks: sendRemarks || '',
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setJobs(prev => prev.map(j => {
+        if (j.mrNo === sendTargetMr) {
+          const baseTot = calculateJobTotal(j);
+          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const grandTot = Math.round(baseTot * (1 + atPct / 100));
+          return {
+            ...j,
+            estimateSentDate: sendDate,
+            estimateRefNo: sendRefNo.trim(),
+            estimateAmount: grandTot,
+            estimateStatus: 'Sent',
+            estimateApprovalStatus: j.approvalNo ? 'Approved' : (j.estimateApprovalStatus || 'Pending'),
+            estimateRemarks: sendRemarks || ''
+          };
+        }
+        return j;
+      }));
+
+      setShowSendModal(false);
+      setSavedSuccessMsg(`Estimate for MR ${sendTargetMr} successfully marked as Sent with Ref: ${sendRefNo}!`);
+      setTimeout(() => setSavedSuccessMsg(''), 5000);
+    } catch (err: any) {
+      console.error('Error sending estimate:', err);
+      alert('Failed to send estimate: ' + (err.message || err.toString()));
+    } finally {
+      setSubmittingSend(false);
+    }
+  };
+
+  // Open Approval Received Modal
+  const handleOpenApprModal = (mr: string) => {
+    setApprTargetMr(mr);
+    const mrJobs = mrGroups[mr] || [];
+    const sample = mrJobs[0] || {};
+    const totalEstAmt = calculateMrEstimateTotal(mr);
+    setApprNo(sample.approvalNo || `UGVCL/SE-TR/APPR/${new Date().getFullYear()}/${mr}`);
+    setApprDate(sample.approvalDate || new Date().toISOString().split('T')[0]);
+    setApprAmount(sample.approvedAmount || totalEstAmt);
+    setApprRemarks(sample.approvalRemarks || '');
+    setShowApprModal(true);
+  };
+
+  // Confirm Approval Received
+  const handleConfirmApproval = async () => {
+    if (!apprTargetMr || !apprNo.trim() || !apprDate || !auth.currentUser) {
+      alert('Please enter Approval Number and Approval Date');
+      return;
+    }
+    setSubmittingAppr(true);
+    try {
+      const targetJobs = mrGroups[apprTargetMr] || [];
+      const batch = writeBatch(db);
+
+      targetJobs.forEach(job => {
+        const jobRef = doc(db, 'jobs', job.id);
+        batch.update(jobRef, {
+          approvalNo: apprNo.trim(),
+          approvalDate: apprDate,
+          approvedAmount: Number(apprAmount) || 0,
+          estimateApprovalStatus: 'Approved',
+          approvalRemarks: apprRemarks || '',
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      await batch.commit();
+
+      // Update local state
+      setJobs(prev => prev.map(j => {
+        if (j.mrNo === apprTargetMr) {
+          return {
+            ...j,
+            approvalNo: apprNo.trim(),
+            approvalDate: apprDate,
+            approvedAmount: Number(apprAmount) || 0,
+            estimateApprovalStatus: 'Approved',
+            approvalRemarks: apprRemarks || ''
+          };
+        }
+        return j;
+      }));
+
+      setShowApprModal(false);
+      setSavedSuccessMsg(`Approval for MR ${apprTargetMr} marked successfully (Appr No: ${apprNo})!`);
+      setTimeout(() => setSavedSuccessMsg(''), 5000);
+    } catch (err: any) {
+      console.error('Error saving approval:', err);
+      alert('Failed to save approval: ' + (err.message || err.toString()));
+    } finally {
+      setSubmittingAppr(false);
+    }
+  };
+
+  // Sent Estimates List (Awaiting Approval)
+  const sentEstimatesList = useMemo(() => {
+    const list: Array<{
+      mrNo: string;
+      mrDate: string;
+      division: string;
+      jobCount: number;
+      estimateRefNo: string;
+      estimateSentDate: string;
+      estimateAmount: number;
+      isApproved: boolean;
+      approvalNo: string;
+      approvalDate: string;
+      approvedAmount: number;
+      approvalRemarks?: string;
+    }> = [];
+
+    Object.keys(mrGroups).forEach(mr => {
+      const groupJobs = mrGroups[mr] || [];
+      // Sent if estimateSentDate or estimateStatus === 'Sent' or estimateRefNo
+      const isSent = groupJobs.some(j => j.estimateSentDate || j.estimateStatus === 'Sent' || j.estimateRefNo);
+      const isApproved = groupJobs.some(j => !!j.approvalNo || j.estimateApprovalStatus === 'Approved');
+      
+      if (isSent && !isApproved) {
+        const sample = groupJobs[0] || {};
+        const estAmount = calculateMrEstimateTotal(mr);
+        list.push({
+          mrNo: mr,
+          mrDate: sample.dateOfIssue || sample.mrDate || '-',
+          division: sample.division || 'SABARMATI',
+          jobCount: groupJobs.length,
+          estimateRefNo: sample.estimateRefNo || `UGVCL/EST/${mr}`,
+          estimateSentDate: sample.estimateSentDate || '-',
+          estimateAmount: estAmount,
+          isApproved: false,
+          approvalNo: '',
+          approvalDate: '',
+          approvedAmount: 0,
+          approvalRemarks: sample.approvalRemarks || ''
+        });
+      }
+    });
+
+    return list.sort((a, b) => {
+      if (a.estimateSentDate && b.estimateSentDate) {
+        return b.estimateSentDate.localeCompare(a.estimateSentDate);
+      }
+      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
+    });
+  }, [mrGroups, activeAtMaster, activeAgency]);
+
+  // Received Approvals List
+  const approvedEstimatesList = useMemo(() => {
+    const list: Array<{
+      mrNo: string;
+      mrDate: string;
+      division: string;
+      jobCount: number;
+      estimateRefNo: string;
+      estimateSentDate: string;
+      estimateAmount: number;
+      approvalNo: string;
+      approvalDate: string;
+      approvedAmount: number;
+      approvalRemarks?: string;
+    }> = [];
+
+    Object.keys(mrGroups).forEach(mr => {
+      const groupJobs = mrGroups[mr] || [];
+      const isApproved = groupJobs.some(j => !!j.approvalNo || j.estimateApprovalStatus === 'Approved');
+      if (isApproved) {
+        const sample = groupJobs[0] || {};
+        const estAmount = calculateMrEstimateTotal(mr);
+        list.push({
+          mrNo: mr,
+          mrDate: sample.dateOfIssue || sample.mrDate || '-',
+          division: sample.division || 'SABARMATI',
+          jobCount: groupJobs.length,
+          estimateRefNo: sample.estimateRefNo || `UGVCL/EST/${mr}`,
+          estimateSentDate: sample.estimateSentDate || '-',
+          estimateAmount: estAmount,
+          approvalNo: sample.approvalNo || `UGVCL/APPR/${mr}`,
+          approvalDate: sample.approvalDate || sample.estimateSentDate || '-',
+          approvedAmount: Number(sample.approvedAmount) || estAmount,
+          approvalRemarks: sample.approvalRemarks || ''
+        });
+      }
+    });
+
+    return list.sort((a, b) => {
+      if (a.approvalDate && b.approvalDate) {
+        return b.approvalDate.localeCompare(a.approvalDate);
+      }
+      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
+    });
+  }, [mrGroups, activeAtMaster, activeAgency]);
+
+  // Filtered Sent Estimates List
+  const filteredSentEstimates = useMemo(() => {
+    return sentEstimatesList.filter(item => {
+      const matchesSearch = !sentSearchQuery || 
+        item.mrNo.toLowerCase().includes(sentSearchQuery.toLowerCase()) ||
+        item.estimateRefNo.toLowerCase().includes(sentSearchQuery.toLowerCase());
+      
+      const matchesDivision = sentFilterDivision === 'All' || item.division === sentFilterDivision;
+
+      return matchesSearch && matchesDivision;
+    });
+  }, [sentEstimatesList, sentSearchQuery, sentFilterDivision]);
+
+  // Filtered Approved Estimates List
+  const filteredApprovedEstimates = useMemo(() => {
+    return approvedEstimatesList.filter(item => {
+      const matchesSearch = !apprSearchQuery || 
+        item.mrNo.toLowerCase().includes(apprSearchQuery.toLowerCase()) ||
+        item.estimateRefNo.toLowerCase().includes(apprSearchQuery.toLowerCase()) ||
+        item.approvalNo.toLowerCase().includes(apprSearchQuery.toLowerCase());
+      
+      const matchesDivision = apprFilterDivision === 'All' || item.division === apprFilterDivision;
+
+      return matchesSearch && matchesDivision;
+    });
+  }, [approvedEstimatesList, apprSearchQuery, apprFilterDivision]);
+
+  // Summary Stats
+  const sentStats = useMemo(() => {
+    const pendingCount = sentEstimatesList.length;
+    const pendingValue = sentEstimatesList.reduce((sum, item) => sum + item.estimateAmount, 0);
+    const approvedCount = approvedEstimatesList.length;
+    const approvedValue = approvedEstimatesList.reduce((sum, item) => sum + (item.approvedAmount || item.estimateAmount), 0);
+    const totalCount = pendingCount + approvedCount;
+    const totalValue = pendingValue + approvedValue;
+
+    return {
+      totalCount,
+      totalValue,
+      approvedCount,
+      approvedValue,
+      pendingCount,
+      pendingValue
+    };
+  }, [sentEstimatesList, approvedEstimatesList]);
   
   if (loading) {
     return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
@@ -240,146 +610,259 @@ export default function EstimateGenerate() {
   return (
     <div className="max-w-6xl mx-auto print:max-w-none print:w-full print:m-0 print:p-0">
       
-      {!selectedMrNo ? (
-        <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden print:hidden">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-center gap-4">
-            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">Select MR to Generate Estimate</h2>
-            <div className="flex flex-wrap gap-3 items-center w-full md:w-auto">
-              <div className="relative flex-1 md:w-56">
-                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search MR No..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9 pr-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white"
-                />
-              </div>
-              <div className="w-full sm:w-auto">
-                <select
-                  value={selectedDivision}
-                  onChange={(e) => setSelectedDivision(e.target.value)}
-                  className="py-2 px-3 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium"
-                >
-                  <option value="All">All Divisions</option>
-                  {divisions.map(div => (
-                    <option key={div} value={div}>{div} Division</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-          
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 border-b border-slate-200">
-                <tr>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR No</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Total Jobs</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Remark</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {filteredMrNos.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
-                      No matching MR numbers found.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredMrNos.map(mr => {
-                    const groupJobs = mrGroups[mr] || [];
-                    const divName = groupJobs[0]?.division || '-';
-                    const scrapCount = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
-                    const repairableCount = groupJobs.length - scrapCount;
-                    
-                    let remarkText = '';
-                    if (repairableCount > 0 && scrapCount > 0) {
-                      remarkText = `${repairableCount} Repairable, ${scrapCount} Scrap`;
-                    } else if (scrapCount > 0) {
-                      remarkText = `${scrapCount} Scrap`;
-                    } else {
-                      remarkText = `${repairableCount} Repairable`;
-                    }
+      {/* Top Tab Navigation (Hidden during print) */}
+      <div className="flex flex-wrap items-center justify-between border-b border-slate-200 mb-5 pb-3 gap-3 print:hidden">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => { setActiveTab('generator'); }}
+            className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+              activeTab === 'generator'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Estimate Generator</span>
+          </button>
 
-                    return (
-                      <tr key={mr} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-mono font-bold text-slate-800">{mr}</td>
-                        <td className="px-4 py-3 font-medium text-slate-600">{divName}</td>
-                        <td className="px-4 py-3 text-slate-600">{groupJobs.length} Jobs</td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded text-xs font-semibold ${
-                            scrapCount > 0 && repairableCount > 0 
-                              ? 'bg-amber-50 text-amber-800 border border-amber-200'
-                              : scrapCount > 0 
-                                ? 'bg-red-50 text-red-700 border border-red-200' 
-                                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                          }`}>
-                            {remarkText}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <button 
-                            onClick={() => setSelectedMrNo(mr)}
-                            className="px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                          >
-                            Generate Reports
-                          </button>
+          <button
+            onClick={() => { setActiveTab('sent'); setSelectedMrNo(null); }}
+            className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+              activeTab === 'sent'
+                ? 'bg-amber-600 text-white shadow-sm'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <Send className="w-4 h-4" />
+            <span>Sent Estimates</span>
+            {sentStats.pendingCount > 0 && (
+              <span className={`ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                activeTab === 'sent' ? 'bg-amber-900 text-amber-100' : 'bg-amber-100 text-amber-800'
+              }`}>
+                {sentStats.pendingCount} Awaiting Appr.
+              </span>
+            )}
+          </button>
+
+          <button
+            onClick={() => { setActiveTab('approvals'); setSelectedMrNo(null); }}
+            className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+              activeTab === 'approvals'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+            }`}
+          >
+            <CheckCircle2 className="w-4 h-4" />
+            <span>Received Approvals</span>
+            {sentStats.approvedCount > 0 && (
+              <span className={`ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                activeTab === 'approvals' ? 'bg-emerald-900 text-emerald-100' : 'bg-emerald-100 text-emerald-800'
+              }`}>
+                {sentStats.approvedCount} Approved
+              </span>
+            )}
+          </button>
+        </div>
+
+        {activeTab === 'generator' && selectedMrNo && (
+          <button
+            onClick={() => setSelectedMrNo(null)}
+            className="flex items-center gap-1.5 text-xs font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 px-3 py-1.5 rounded-lg transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>All MR Estimates</span>
+          </button>
+        )}
+      </div>
+
+      {/* Global Success Notification */}
+      {savedSuccessMsg && (
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-lg flex items-center justify-between text-xs font-semibold print:hidden shadow-sm mb-4">
+          <div className="flex items-center gap-2">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{savedSuccessMsg}</span>
+          </div>
+          <button onClick={() => setSavedSuccessMsg('')} className="text-emerald-600 hover:text-emerald-800">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* TAB 1: ESTIMATE GENERATOR */}
+      {activeTab === 'generator' && (
+        <>
+          {!selectedMrNo ? (
+            <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden print:hidden">
+              <div className="p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-center gap-4">
+                <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest">Select MR to Generate Estimate</h2>
+                <div className="flex flex-wrap gap-3 items-center w-full md:w-auto">
+                  <div className="relative flex-1 md:w-56">
+                    <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search MR No..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="pl-9 pr-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white"
+                    />
+                  </div>
+                  <div className="w-full sm:w-auto">
+                    <select
+                      value={selectedDivision}
+                      onChange={(e) => setSelectedDivision(e.target.value)}
+                      className="py-2 px-3 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium"
+                    >
+                      <option value="All">All Divisions</option>
+                      {divisions.map(div => (
+                        <option key={div} value={div}>{div} Division</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR No</th>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Total Jobs</th>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Est. Amount</th>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Status</th>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredMrNos.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                          No matching MR numbers found.
                         </td>
                       </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        <div className="space-y-6 print:space-y-0">
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded flex flex-wrap gap-3 justify-between items-center text-white print:hidden shadow-sm">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Selected MR</p>
-              <p className="text-lg font-mono font-bold">{selectedMrNo}</p>
-              <p className="text-xs text-slate-300 mt-1">{selectedJobsData.length} Transformer(s) in this MR</p>
+                    ) : (
+                      filteredMrNos.map(mr => {
+                        const groupJobs = mrGroups[mr] || [];
+                        const divName = groupJobs[0]?.division || '-';
+                        const scrapCount = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+                        const repairableCount = groupJobs.length - scrapCount;
+                        const estTotal = calculateMrEstimateTotal(mr);
+                        const isSent = groupJobs.some(j => j.estimateSentDate || j.estimateStatus === 'Sent' || j.estimateRefNo);
+                        const isApproved = groupJobs.some(j => !!j.approvalNo || j.estimateApprovalStatus === 'Approved');
+                        
+                        return (
+                          <tr key={mr} className="hover:bg-slate-50">
+                            <td className="px-4 py-3 font-mono font-bold text-slate-800">{mr}</td>
+                            <td className="px-4 py-3 font-medium text-slate-600">{divName}</td>
+                            <td className="px-4 py-3 text-slate-600">
+                              <span className="font-semibold">{groupJobs.length} Jobs</span>
+                              <span className="text-xs text-slate-400 block">({repairableCount} Rep, {scrapCount} Scrap)</span>
+                            </td>
+                            <td className="px-4 py-3 font-mono font-bold text-slate-900">
+                              ₹{estTotal.toLocaleString('en-IN')}
+                            </td>
+                            <td className="px-4 py-3">
+                              {isApproved ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                  <CheckCircle2 className="w-3 h-3 mr-1" /> Approved
+                                </span>
+                              ) : isSent ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                  <Send className="w-3 h-3 mr-1" /> Sent (Pending Appr.)
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 border border-slate-200">
+                                  Draft / Ready
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-right space-x-2">
+                              <button
+                                onClick={() => handleOpenSendModal(mr)}
+                                className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 hover:bg-purple-100 border border-purple-200 rounded transition-colors inline-flex items-center"
+                                title="Mark this estimate as Sent to Department"
+                              >
+                                <Send className="w-3 h-3 mr-1" />
+                                {isSent ? 'Update Sent Ref' : 'Send Estimate'}
+                              </button>
+                              <button 
+                                onClick={() => setSelectedMrNo(mr)}
+                                className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200 rounded transition-colors"
+                              >
+                                Generate / View
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button 
-                onClick={() => setShowEditModal(true)}
-                className="flex items-center text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
-              >
-                <Edit3 className="w-3.5 h-3.5 mr-1.5" /> Edit Letter
-              </button>
-              <button 
-                onClick={() => {
-                  const container = document.getElementById('printable-estimate-container');
-                  if (container) downloadHtmlAsWord(container, `Estimate_Report_${selectedMrNo}.doc`, `Estimate Report & Forwarding Letter - ${selectedMrNo}`);
-                }}
-                className="flex items-center text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
-              >
-                <FileText className="w-3.5 h-3.5 mr-1.5" /> Download Word (.doc)
-              </button>
-              <button 
-                onClick={handlePrint}
-                className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
-              >
-                <Printer className="w-3.5 h-3.5 mr-1.5" /> Print / PDF
-              </button>
-              <button 
-                onClick={handleExportExcel}
-                className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 mr-1.5" /> Export Excel
-              </button>
-              <button 
-                onClick={() => setSelectedMrNo(null)}
-                className="text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3.5 py-2 rounded transition-colors"
-              >
-                Change MR
+          ) : (
+            <div className="space-y-6 print:space-y-0">
+              <div className="bg-slate-900 border border-slate-800 p-4 rounded flex flex-wrap gap-3 justify-between items-center text-white print:hidden shadow-sm">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Selected MR</p>
+                  <p className="text-lg font-mono font-bold">{selectedMrNo}</p>
+                  <p className="text-xs text-slate-300 mt-1">{selectedJobsData.length} Transformer(s) in this MR</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => handleOpenSendModal(selectedMrNo)}
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                    title="Send Estimate with Ref No and Date"
+                  >
+                    <Send className="w-3.5 h-3.5 mr-1.5" /> Send Estimate
+                  </button>
+                  <button 
+                    onClick={() => setShowEditModal(true)}
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                  >
+                    <Edit3 className="w-3.5 h-3.5 mr-1.5" /> Edit Letter
+                  </button>
+                  <button 
+                    onClick={() => {
+                      const container = document.getElementById('printable-estimate-container');
+                      if (container) downloadHtmlAsWord(container, `Estimate_Report_${selectedMrNo}.doc`, `Estimate Report & Forwarding Letter - ${selectedMrNo}`);
+                    }}
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                  >
+                    <FileText className="w-3.5 h-3.5 mr-1.5" /> Download Word (.doc)
+                  </button>
+                  <button 
+                    onClick={handlePrint}
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                  >
+                    <Printer className="w-3.5 h-3.5 mr-1.5" /> Print / PDF
+                  </button>
+                  <button 
+                    onClick={handleExportExcel}
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 mr-1.5" /> Export Excel
+                  </button>
+                  <button 
+                    onClick={() => setSelectedMrNo(null)}
+                    className="text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3.5 py-2 rounded transition-colors"
+                  >
+                    Change MR
+                  </button>
+                </div>
+              </div>
+
+          {savedSuccessMsg && (
+            <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-lg flex items-center justify-between text-xs font-semibold print:hidden shadow-sm">
+              <div className="flex items-center gap-2">
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{savedSuccessMsg}</span>
+              </div>
+              <button onClick={() => setSavedSuccessMsg('')} className="text-emerald-600 hover:text-emerald-800">
+                <X className="w-4 h-4" />
               </button>
             </div>
-          </div>
+          )}
 
           <div id="printable-estimate-container" className="space-y-6 print:space-y-0">
             {/* PAGE 1: ESTIMATE REPORT */}
@@ -690,6 +1173,659 @@ Circle Office : SABARMATI`}
           </div>
         </div>
       </div>
+      )}
+      </>
+      )}
+
+      {/* TAB 2: SENT ESTIMATES (AWAITING APPROVAL) */}
+      {activeTab === 'sent' && (
+        <div className="space-y-5 print:hidden">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-xs flex items-center justify-between bg-gradient-to-br from-white to-amber-50/40">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Sent Estimates Awaiting Approval</p>
+                <p className="text-2xl font-mono font-black text-amber-900 mt-1">{sentStats.pendingCount}</p>
+                <p className="text-xs text-amber-700 mt-0.5">₹{sentStats.pendingValue.toLocaleString('en-IN')} Total Value</p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
+                <Clock className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Cumulative Sent Estimates</p>
+                <p className="text-2xl font-mono font-black text-slate-900 mt-1">{sentStats.totalCount}</p>
+                <p className="text-xs text-slate-500 mt-0.5">₹{sentStats.totalValue.toLocaleString('en-IN')} Estimated</p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
+                <Send className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Already Approved Estimates</p>
+                <p className="text-2xl font-mono font-black text-emerald-800 mt-1">{sentStats.approvedCount}</p>
+                <p className="text-xs text-emerald-600 mt-0.5">
+                  <button 
+                    onClick={() => setActiveTab('approvals')}
+                    className="hover:underline font-bold text-emerald-700 inline-flex items-center gap-1"
+                  >
+                    <span>View Received Approvals</span> &rarr;
+                  </button>
+                </p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+            </div>
+          </div>
+
+          {/* Search, Filters & Export */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto flex-1">
+              <div className="relative flex-1 min-w-[240px]">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search MR No or Ref No..."
+                  value={sentSearchQuery}
+                  onChange={(e) => setSentSearchQuery(e.target.value)}
+                  className="pl-9 pr-4 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 w-full bg-white outline-none"
+                />
+              </div>
+
+              <select
+                value={sentFilterDivision}
+                onChange={(e) => setSentFilterDivision(e.target.value)}
+                className="py-2 px-3 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500 bg-white font-medium text-slate-700 outline-none"
+              >
+                <option value="All">All Divisions</option>
+                {divisions.map(d => (
+                  <option key={d} value={d}>{d} Division</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const wsData = filteredSentEstimates.map(item => ({
+                    'MR Number': item.mrNo,
+                    'MR Date': item.mrDate,
+                    'Division': item.division,
+                    'Total Transformers': item.jobCount,
+                    'Estimate Ref No': item.estimateRefNo,
+                    'Estimate Sent Date': item.estimateSentDate,
+                    'Estimate Amount (₹)': item.estimateAmount,
+                    'Status': 'Awaiting DISCOM Approval',
+                    'Remarks': item.approvalRemarks || '-'
+                  }));
+                  const ws = XLSX.utils.json_to_sheet(wsData);
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, 'Sent Estimates');
+                  XLSX.writeFile(wb, `Sent_Estimates_Awaiting_Approval_${new Date().toISOString().split('T')[0]}.xlsx`);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Export Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Sent Estimates Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Send className="w-4 h-4 text-amber-600" />
+                <h3 className="font-bold text-slate-800 text-xs sm:text-sm uppercase tracking-wider">
+                  Sent Estimates Awaiting DISCOM Approval ({filteredSentEstimates.length})
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold text-amber-700 bg-amber-100 px-2.5 py-0.5 rounded-full border border-amber-300">
+                Awaiting Approval
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="px-4 py-3">MR Details</th>
+                    <th className="px-4 py-3">Dispatch Details</th>
+                    <th className="px-4 py-3 text-right">Estimated Amount</th>
+                    <th className="px-4 py-3 text-center">Status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredSentEstimates.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-12 text-center text-slate-400">
+                        <Send className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                        <p className="font-bold text-slate-600">No sent estimates currently awaiting approval</p>
+                        <p className="text-xs text-slate-400 mt-0.5">Use the "Send Estimate" option in the Estimate Generator tab to dispatch an estimate to DISCOM.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredSentEstimates.map(item => (
+                      <tr key={item.mrNo} className="hover:bg-slate-50/80 transition-colors">
+                        {/* MR Details */}
+                        <td className="px-4 py-3.5">
+                          <span className="font-mono font-black text-slate-900 text-sm block">{item.mrNo}</span>
+                          <span className="text-slate-600 font-medium">{item.division} Division • {item.jobCount} T/F</span>
+                          {item.mrDate !== '-' && (
+                            <span className="text-[10px] text-slate-400 block font-mono mt-0.5">MR Date: {item.mrDate}</span>
+                          )}
+                        </td>
+
+                        {/* Dispatch Details */}
+                        <td className="px-4 py-3.5">
+                          <span className="font-mono font-bold text-slate-800 block text-xs">{item.estimateRefNo}</span>
+                          <span className="text-slate-500 flex items-center mt-0.5 text-[11px]">
+                            <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Dispatched: {item.estimateSentDate}
+                          </span>
+                        </td>
+
+                        {/* Amount */}
+                        <td className="px-4 py-3.5 text-right font-mono font-black text-slate-900 text-sm">
+                          ₹{item.estimateAmount.toLocaleString('en-IN')}
+                        </td>
+
+                        {/* Status Badge */}
+                        <td className="px-4 py-3.5 text-center">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                            <Clock className="w-3 h-3 mr-1 text-amber-600" /> Pending Approval
+                          </span>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                          <button
+                            onClick={() => handleOpenApprModal(item.mrNo)}
+                            className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-xs inline-flex items-center gap-1"
+                            title="Record DISCOM Approval No, Date & Amount"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Mark Approval Received</span>
+                          </button>
+
+                          <button
+                            onClick={() => handleOpenSendModal(item.mrNo)}
+                            className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors inline-flex items-center gap-1"
+                            title="Edit dispatch reference number or date"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit Dispatch</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setSelectedMrNo(item.mrNo);
+                              setActiveTab('generator');
+                            }}
+                            className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors inline-flex items-center gap-1"
+                            title="View Estimate & Forwarding Letter"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View / Print</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 3: RECEIVED APPROVALS */}
+      {activeTab === 'approvals' && (
+        <div className="space-y-5 print:hidden">
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-between bg-gradient-to-br from-white to-emerald-50/40">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Total Received Approvals</p>
+                <p className="text-2xl font-mono font-black text-emerald-900 mt-1">{sentStats.approvedCount}</p>
+                <p className="text-xs text-emerald-700 mt-0.5">₹{sentStats.approvedValue.toLocaleString('en-IN')} Approved Value</p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Approval Rate</p>
+                <p className="text-2xl font-mono font-black text-slate-900 mt-1">
+                  {sentStats.totalCount > 0 
+                    ? `${Math.round((sentStats.approvedCount / sentStats.totalCount) * 100)}%` 
+                    : '100%'}
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">{sentStats.approvedCount} of {sentStats.totalCount} sent estimates</p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center">
+                <CheckSquare className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-xs flex items-center justify-between">
+              <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Approvals</p>
+                <p className="text-2xl font-mono font-black text-amber-800 mt-1">{sentStats.pendingCount}</p>
+                <p className="text-xs text-amber-600 mt-0.5">
+                  <button 
+                    onClick={() => setActiveTab('sent')}
+                    className="hover:underline font-bold text-amber-700 inline-flex items-center gap-1"
+                  >
+                    <span>View Sent Estimates</span> &rarr;
+                  </button>
+                </p>
+              </div>
+              <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
+                <Clock className="w-6 h-6" />
+              </div>
+            </div>
+          </div>
+
+          {/* Search, Filters & Export */}
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-col md:flex-row justify-between items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3 w-full md:w-auto flex-1">
+              <div className="relative flex-1 min-w-[240px]">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search MR No, Approval No, or Ref No..."
+                  value={apprSearchQuery}
+                  onChange={(e) => setApprSearchQuery(e.target.value)}
+                  className="pl-9 pr-4 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 w-full bg-white outline-none"
+                />
+              </div>
+
+              <select
+                value={apprFilterDivision}
+                onChange={(e) => setApprFilterDivision(e.target.value)}
+                className="py-2 px-3 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white font-medium text-slate-700 outline-none"
+              >
+                <option value="All">All Divisions</option>
+                {divisions.map(d => (
+                  <option key={d} value={d}>{d} Division</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  const wsData = filteredApprovedEstimates.map(item => ({
+                    'MR Number': item.mrNo,
+                    'MR Date': item.mrDate,
+                    'Division': item.division,
+                    'Total Transformers': item.jobCount,
+                    'Estimate Ref No': item.estimateRefNo,
+                    'Estimate Sent Date': item.estimateSentDate,
+                    'Original Estimate Amount (₹)': item.estimateAmount,
+                    'Approval Order No': item.approvalNo,
+                    'Approval Date': item.approvalDate,
+                    'Approved Amount (₹)': item.approvedAmount,
+                    'Approval Status': 'Approved by DISCOM',
+                    'Remarks / Scope': item.approvalRemarks || '-'
+                  }));
+                  const ws = XLSX.utils.json_to_sheet(wsData);
+                  const wb = XLSX.utils.book_new();
+                  XLSX.utils.book_append_sheet(wb, ws, 'Received Approvals');
+                  XLSX.writeFile(wb, `Received_Estimate_Approvals_${new Date().toISOString().split('T')[0]}.xlsx`);
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors shadow-xs"
+              >
+                <FileSpreadsheet className="w-3.5 h-3.5" />
+                <span>Export Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Received Approvals Table */}
+          <div className="bg-white rounded-xl border border-slate-200 shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <h3 className="font-bold text-slate-800 text-xs sm:text-sm uppercase tracking-wider">
+                  Received Estimate Approvals Register ({filteredApprovedEstimates.length})
+                </h3>
+              </div>
+              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-100 px-2.5 py-0.5 rounded-full border border-emerald-300">
+                Officially Approved
+              </span>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                  <tr>
+                    <th className="px-4 py-3">Approval Details</th>
+                    <th className="px-4 py-3">MR & Division</th>
+                    <th className="px-4 py-3 text-right">Approved Amount</th>
+                    <th className="px-4 py-3">Remarks / Scope</th>
+                    <th className="px-4 py-3 text-center">Status</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredApprovedEstimates.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} className="px-4 py-12 text-center text-slate-400">
+                        <CheckCircle2 className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                        <p className="font-bold text-slate-600">No approved estimates recorded yet</p>
+                        <p className="text-xs text-slate-400 mt-0.5">When DISCOM issues approval for an estimate, click "Mark Approval Received" on the Sent Estimates tab.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredApprovedEstimates.map(item => (
+                      <tr key={item.mrNo} className="hover:bg-slate-50/80 transition-colors">
+                        {/* Approval Details */}
+                        <td className="px-4 py-3.5">
+                          <span className="font-mono font-bold text-emerald-900 text-xs block">{item.approvalNo}</span>
+                          <span className="text-slate-500 flex items-center mt-0.5 text-[11px]">
+                            <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Approval Date: {item.approvalDate}
+                          </span>
+                          <span className="text-[10px] text-slate-400 block font-mono">Ref: {item.estimateRefNo}</span>
+                        </td>
+
+                        {/* MR Details */}
+                        <td className="px-4 py-3.5">
+                          <span className="font-mono font-black text-slate-900 text-sm block">{item.mrNo}</span>
+                          <span className="text-slate-600 font-medium">{item.division} Division • {item.jobCount} T/F</span>
+                        </td>
+
+                        {/* Approved Amount */}
+                        <td className="px-4 py-3.5 text-right">
+                          <span className="font-mono font-black text-emerald-800 text-sm block">
+                            ₹{item.approvedAmount.toLocaleString('en-IN')}
+                          </span>
+                          {item.approvedAmount !== item.estimateAmount && (
+                            <span className="text-[10px] text-slate-400 block">
+                              Est: ₹{item.estimateAmount.toLocaleString('en-IN')}
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Remarks */}
+                        <td className="px-4 py-3.5 text-slate-600 max-w-[200px]">
+                          {item.approvalRemarks ? (
+                            <span className="italic text-xs text-slate-700 block">"{item.approvalRemarks}"</span>
+                          ) : (
+                            <span className="text-slate-400 text-[11px]">-</span>
+                          )}
+                        </td>
+
+                        {/* Status Badge */}
+                        <td className="px-4 py-3.5 text-center">
+                          <span className="inline-flex items-center px-2.5 py-1 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
+                            <CheckCircle2 className="w-3 h-3 mr-1 text-emerald-600" /> Approved
+                          </span>
+                        </td>
+
+                        {/* Actions */}
+                        <td className="px-4 py-3.5 text-right space-x-1.5 whitespace-nowrap">
+                          <button
+                            onClick={() => handleOpenApprModal(item.mrNo)}
+                            className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300 rounded-lg transition-colors inline-flex items-center gap-1"
+                            title="Edit Approval Details"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit Approval</span>
+                          </button>
+
+                          <button
+                            onClick={() => {
+                              setSelectedMrNo(item.mrNo);
+                              setActiveTab('generator');
+                            }}
+                            className="px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg transition-colors inline-flex items-center gap-1"
+                            title="View Full Estimate & Documents"
+                          >
+                            <Eye className="w-3 h-3" />
+                            <span>View Estimate</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 1: SEND ESTIMATE (Prompt for Ref No and Date) */}
+      {showSendModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-purple-100 text-purple-700 rounded-xl">
+                  <Send className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Send Estimate to DISCOM</h3>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">MR Number: <strong>{sendTargetMr}</strong></p>
+                </div>
+              </div>
+              <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs text-purple-900 flex justify-between items-center">
+              <div>
+                <span className="text-purple-700 block font-medium">Estimated Value:</span>
+                <span className="text-base font-mono font-black text-purple-950">
+                  ₹{calculateMrEstimateTotal(sendTargetMr).toLocaleString('en-IN')}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-purple-700 block font-medium">Transformers:</span>
+                <span className="font-bold text-purple-950">{(mrGroups[sendTargetMr] || []).length} Units</span>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Dispatch Reference Number <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={sendRefNo}
+                  onChange={(e) => setSendRefNo(e.target.value)}
+                  placeholder="e.g. UGVCL/EE-T-1/TRANS-REP/123"
+                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Estimate Sent Date <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={sendDate}
+                  onChange={(e) => setSendDate(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Remarks / Notes (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={sendRemarks}
+                  onChange={(e) => setSendRemarks(e.target.value)}
+                  placeholder="e.g. Submitted by hand to Circle Office"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2.5 pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowSendModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submittingSend || !sendRefNo.trim()}
+                onClick={handleConfirmSendEstimate}
+                className="px-5 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
+              >
+                {submittingSend ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>Confirm & Mark as Sent</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: MARK APPROVAL RECEIVED */}
+      {showApprModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="p-3 bg-emerald-100 text-emerald-700 rounded-xl">
+                  <CheckCircle2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">Record Estimate Approval</h3>
+                  <p className="text-xs text-slate-500 font-mono mt-0.5">MR Number: <strong>{apprTargetMr}</strong></p>
+                </div>
+              </div>
+              <button onClick={() => setShowApprModal(false)} className="text-slate-400 hover:text-slate-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-900 flex justify-between items-center">
+              <div>
+                <span className="text-emerald-700 block font-medium">Estimated Amount:</span>
+                <span className="text-base font-mono font-black text-emerald-950">
+                  ₹{calculateMrEstimateTotal(apprTargetMr).toLocaleString('en-IN')}
+                </span>
+              </div>
+              <div className="text-right">
+                <span className="text-emerald-700 block font-medium">Status:</span>
+                <span className="font-bold text-emerald-800">DISCOM Official Approval</span>
+              </div>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Approval Letter / Order No. <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={apprNo}
+                  onChange={(e) => setApprNo(e.target.value)}
+                  placeholder="e.g. UGVCL/SE-TR/APPR/2026/123"
+                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Approval Date <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={apprDate}
+                    onChange={(e) => setApprDate(e.target.value)}
+                    className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Approved Amount (₹)
+                  </label>
+                  <input
+                    type="number"
+                    value={apprAmount}
+                    onChange={(e) => setApprAmount(e.target.value)}
+                    placeholder="Approved Amt"
+                    className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                  Approval Remarks (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={apprRemarks}
+                  onChange={(e) => setApprRemarks(e.target.value)}
+                  placeholder="e.g. Approved with 100% repair scope"
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end space-x-2.5 pt-4 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowApprModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={submittingAppr || !apprNo.trim()}
+                onClick={handleConfirmApproval}
+                className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm disabled:opacity-50"
+              >
+                {submittingAppr ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Saving...</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Confirm Approval Received</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* EDIT / CUSTOMIZE FORWARDING LETTER MODAL */}
