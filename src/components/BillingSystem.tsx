@@ -178,10 +178,23 @@ export default function BillingSystem() {
     return groups;
   }, [jobs]);
 
-  // Filter MRs matching search & division
+  // Unsent bills count for stage tab
+  const unsentBillCount = useMemo(() => {
+    return Object.keys(mrGroups).filter(mr => {
+      const groupJobs = mrGroups[mr] || [];
+      const isSent = groupJobs.some(j => j.billSentDate || j.billStatus === 'Sent' || (j.billNo && j.billNo !== ''));
+      return !isSent;
+    }).length;
+  }, [mrGroups]);
+
+  // Filter MRs matching search & division (STAGE 1: Bill Generator - Unsent Only)
   const filteredMrNos = useMemo(() => {
     return Object.keys(mrGroups).filter(mr => {
       const groupJobs = mrGroups[mr] || [];
+      // Remove from Bill Generator if already sent (advances to Stage 2: Sent Bills)
+      const isSent = groupJobs.some(j => j.billSentDate || j.billStatus === 'Sent' || (j.billNo && j.billNo !== ''));
+      if (isSent) return false;
+
       const matchesSearch = !searchQuery || mr.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesDivision = selectedDivision === 'All' || groupJobs.some(j => j.division === selectedDivision);
 
@@ -1015,37 +1028,45 @@ export default function BillingSystem() {
     });
   }, [sentBillsList]);
 
-  // Filtered Unpaid Sent Bills List
+  // Filtered Unpaid Sent Bills List (Stage 2: Sent Bills Awaiting Payment)
   const filteredUnpaidSentBills = useMemo(() => {
     return unpaidSentBills.filter(item => {
-      const matchesSearch = !sentSearchQuery || 
-        item.mrNo.toLowerCase().includes(sentSearchQuery.toLowerCase()) ||
-        item.billNo.toLowerCase().includes(sentSearchQuery.toLowerCase()) ||
-        item.billRefNo.toLowerCase().includes(sentSearchQuery.toLowerCase());
+      const q = (sentSearchQuery || searchQuery).toLowerCase();
+      const div = sentFilterDivision !== 'All' ? sentFilterDivision : selectedDivision;
+
+      const matchesSearch = !q || 
+        item.mrNo.toLowerCase().includes(q) ||
+        item.billNo.toLowerCase().includes(q) ||
+        item.billRefNo.toLowerCase().includes(q) ||
+        item.division.toLowerCase().includes(q);
       
-      const matchesDivision = sentFilterDivision === 'All' || item.division === sentFilterDivision;
+      const matchesDivision = div === 'All' || item.division === div;
 
       return matchesSearch && matchesDivision;
     });
-  }, [unpaidSentBills, sentSearchQuery, sentFilterDivision]);
+  }, [unpaidSentBills, sentSearchQuery, searchQuery, sentFilterDivision, selectedDivision]);
 
-  // Filtered Paid Bills List
+  // Filtered Paid Bills List (Stage 3: Received Payments)
   const filteredPaidBills = useMemo(() => {
     return paidBillsList.filter(item => {
-      const matchesSearch = !paidSearchQuery || 
-        item.mrNo.toLowerCase().includes(paidSearchQuery.toLowerCase()) ||
-        item.billNo.toLowerCase().includes(paidSearchQuery.toLowerCase()) ||
-        item.billRefNo.toLowerCase().includes(paidSearchQuery.toLowerCase()) ||
-        (item.paymentRefNo && item.paymentRefNo.toLowerCase().includes(paidSearchQuery.toLowerCase())) ||
-        (item.paymentBank && item.paymentBank.toLowerCase().includes(paidSearchQuery.toLowerCase()));
+      const q = (paidSearchQuery || searchQuery).toLowerCase();
+      const div = paidFilterDivision !== 'All' ? paidFilterDivision : selectedDivision;
+
+      const matchesSearch = !q || 
+        item.mrNo.toLowerCase().includes(q) ||
+        item.billNo.toLowerCase().includes(q) ||
+        item.billRefNo.toLowerCase().includes(q) ||
+        (item.paymentRefNo && item.paymentRefNo.toLowerCase().includes(q)) ||
+        (item.paymentBank && item.paymentBank.toLowerCase().includes(q)) ||
+        item.division.toLowerCase().includes(q);
       
-      const matchesDivision = paidFilterDivision === 'All' || item.division === paidFilterDivision;
+      const matchesDivision = div === 'All' || item.division === div;
       
       const matchesMode = paidFilterMode === 'All' || item.paymentMode === paidFilterMode;
 
       return matchesSearch && matchesDivision && matchesMode;
     });
-  }, [paidBillsList, paidSearchQuery, paidFilterDivision, paidFilterMode]);
+  }, [paidBillsList, paidSearchQuery, searchQuery, paidFilterDivision, selectedDivision, paidFilterMode]);
 
   // Sent Bills Summary Stats
   const sentBillStats = useMemo(() => {
@@ -1139,57 +1160,103 @@ export default function BillingSystem() {
       
       {!selectedMrNo ? (
         <div className="space-y-6 print:hidden">
-          {/* Header Banner & Navigation Tabs */}
-          <div className="bg-white p-4 sm:p-6 rounded-xl shadow-xs border border-slate-200 space-y-4">
+          {/* Header Banner, Universal Filters & Stage Navigation Tabs */}
+          <div className="bg-white p-4 sm:p-5 rounded-xl shadow-xs border border-slate-200 space-y-4">
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
-                <h1 className="text-lg sm:text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2.5">
-                  <IndianRupee className="w-6 h-6 text-blue-600 shrink-0" />
-                  <span>Billing & Payment Management</span>
+                <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
+                  <IndianRupee className="w-5 h-5 text-blue-600 shrink-0" />
+                  <span>Billing & Payment Lifecycle</span>
                 </h1>
-                <p className="text-xs sm:text-sm text-slate-500">Generate Official Tax Invoices, Track Sent Bills & Record Received Payments (MR-Wise)</p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Stage 1: Generate & Send Bill &rarr; Stage 2: Sent Awaiting Payment &rarr; Stage 3: Paid & Settled
+                </p>
               </div>
 
-              {/* Primary Top Tab Switcher */}
-              <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto overflow-x-auto">
-                <button
-                  onClick={() => setActiveTab('generator')}
-                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap ${
-                    activeTab === 'generator' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <FileText className="w-3.5 h-3.5" />
-                  <span>Bill Generator</span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('sent')}
-                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap relative ${
-                    activeTab === 'sent' ? 'bg-white text-amber-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Sent Bills</span>
-                  {sentBillStats.unpaidCount > 0 && (
-                    <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">
-                      {sentBillStats.unpaidCount}
-                    </span>
-                  )}
-                </button>
-                <button
-                  onClick={() => setActiveTab('payments')}
-                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-xs font-bold uppercase transition-all whitespace-nowrap relative ${
-                    activeTab === 'payments' ? 'bg-white text-emerald-700 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  <Banknote className="w-3.5 h-3.5" />
-                  <span>Received Payments</span>
-                  {sentBillStats.paidCount > 0 && (
-                    <span className="px-1.5 py-0.2 bg-emerald-600 text-white rounded-full text-[10px] font-bold">
-                      {sentBillStats.paidCount}
-                    </span>
-                  )}
-                </button>
+              {/* Universal Filters (Applies across all 3 tabs) */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full md:w-auto">
+                <div className="relative flex-1 sm:w-60">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search MR, Bill, UTR, Ref..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
+                  />
+                </div>
+
+                <div className="w-full sm:w-44">
+                  <select
+                    value={selectedDivision}
+                    onChange={(e) => setSelectedDivision(e.target.value)}
+                    className="py-2 px-3 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
+                  >
+                    <option value="All">All Divisions</option>
+                    {divisions.map(div => (
+                      <option key={div} value={div}>{div} Division</option>
+                    ))}
+                  </select>
+                </div>
               </div>
+            </div>
+
+            {/* Stage Tabs (Positioned BELOW the Universal Filters) */}
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => setActiveTab('generator')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+                  activeTab === 'generator'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>1. Bill Generator</span>
+                <span className={`ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                  activeTab === 'generator' ? 'bg-blue-800 text-blue-100' : 'bg-slate-200 text-slate-700'
+                }`}>
+                  {unsentBillCount} Unsent
+                </span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('sent')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+                  activeTab === 'sent'
+                    ? 'bg-amber-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>2. Sent Bills</span>
+                {sentBillStats.unpaidCount > 0 && (
+                  <span className={`ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    activeTab === 'sent' ? 'bg-amber-800 text-amber-100' : 'bg-amber-100 text-amber-800'
+                  }`}>
+                    {sentBillStats.unpaidCount} Awaiting Payment
+                  </span>
+                )}
+              </button>
+
+              <button
+                onClick={() => setActiveTab('payments')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
+                  activeTab === 'payments'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
+                }`}
+              >
+                <Banknote className="w-3.5 h-3.5" />
+                <span>3. Received Payments</span>
+                {sentBillStats.paidCount > 0 && (
+                  <span className={`ml-1.5 px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    activeTab === 'payments' ? 'bg-emerald-800 text-emerald-100' : 'bg-emerald-100 text-emerald-800'
+                  }`}>
+                    {sentBillStats.paidCount} Paid
+                  </span>
+                )}
+              </button>
             </div>
 
             {/* Notification message */}
@@ -1237,35 +1304,18 @@ export default function BillingSystem() {
                 </div>
               </div>
 
-              {/* Search & Filter Toolbar */}
+              {/* Delivered MR Table */}
               <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
-                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-                  <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                    <span>Select Delivered MR to Generate or Send Bill</span>
-                  </h2>
-                  <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
-                    <div className="relative flex-1 md:w-56">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Search MR No..."
-                        value={searchQuery}
-                        onChange={(e) => setSearchQuery(e.target.value)}
-                        className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
-                      />
-                    </div>
-                    <div className="w-full sm:w-48">
-                      <select
-                        value={selectedDivision}
-                        onChange={(e) => setSelectedDivision(e.target.value)}
-                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
-                      >
-                        <option value="All">All Divisions</option>
-                        {divisions.map(div => (
-                          <option key={div} value={div}>{div} Division</option>
-                        ))}
-                      </select>
+                    <div>
+                      <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider">
+                        Stage 1: Delivered MRs for Bill Generation ({filteredMrNos.length})
+                      </h2>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Delivered jobs ready for official invoice creation. Once sent, items automatically advance to Stage 2.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -1461,46 +1511,23 @@ export default function BillingSystem() {
 
               {/* Sent Bills Register Table Card */}
               <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
-                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-                  <div>
-                    <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                      <Send className="w-4 h-4 text-amber-600 shrink-0" />
-                      <span>Sent Invoices Register (Awaiting Payment)</span>
-                    </h2>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Invoices dispatched to division office awaiting payment credit</p>
+                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Send className="w-4 h-4 text-amber-600 shrink-0" />
+                    <div>
+                      <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider">
+                        Stage 2: Sent Invoices Register (Awaiting Payment) ({filteredUnpaidSentBills.length})
+                      </h2>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Invoices dispatched to division. Click "Mark as Paid" when payment credit is received to advance to Stage 3.
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
-                    {/* Search input */}
-                    <div className="relative flex-1 md:w-56">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Search MR, Bill, Ref..."
-                        value={sentSearchQuery}
-                        onChange={(e) => setSentSearchQuery(e.target.value)}
-                        className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
-                      />
-                    </div>
-
-                    {/* Division Filter */}
-                    <div className="w-full sm:w-44">
-                      <select
-                        value={sentFilterDivision}
-                        onChange={(e) => setSentFilterDivision(e.target.value)}
-                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
-                      >
-                        <option value="All">All Divisions</option>
-                        {divisions.map(div => (
-                          <option key={div} value={div}>{div} Division</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    {/* Export Excel Button */}
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
                     <button
                       onClick={handleExportSentBillsExcel}
-                      className="px-3 py-2 text-xs font-bold uppercase tracking-wider bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
+                      className="px-3 py-1.5 text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
                       <span>Export Excel</span>
@@ -1629,48 +1656,26 @@ export default function BillingSystem() {
 
               {/* Received Payments Register Table Card */}
               <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
-                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row justify-between items-stretch md:items-center gap-3">
-                  <div>
-                    <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                      <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
-                      <span>Received Payments Register</span>
-                    </h2>
-                    <p className="text-[11px] text-slate-500 mt-0.5">Bank transaction records, UTR details and realized payment values</p>
+                <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <div>
+                      <h2 className="text-xs sm:text-sm font-bold text-slate-700 uppercase tracking-wider">
+                        Stage 3: Received Payments Register ({filteredPaidBills.length})
+                      </h2>
+                      <p className="text-[11px] text-slate-500 mt-0.5">
+                        Bank transaction records, UTR details and realized payment values.
+                      </p>
+                    </div>
                   </div>
 
-                  <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center w-full md:w-auto">
-                    {/* Search input */}
-                    <div className="relative flex-1 md:w-52">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Search MR, Bill, UTR, Bank..."
-                        value={paidSearchQuery}
-                        onChange={(e) => setPaidSearchQuery(e.target.value)}
-                        className="pl-9 pr-3 py-2 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white outline-none"
-                      />
-                    </div>
-
-                    {/* Division Filter */}
-                    <div className="w-full sm:w-40">
-                      <select
-                        value={paidFilterDivision}
-                        onChange={(e) => setPaidFilterDivision(e.target.value)}
-                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
-                      >
-                        <option value="All">All Divisions</option>
-                        {divisions.map(div => (
-                          <option key={div} value={div}>{div} Division</option>
-                        ))}
-                      </select>
-                    </div>
-
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
                     {/* Payment Mode Filter */}
-                    <div className="w-full sm:w-36">
+                    <div className="w-36">
                       <select
                         value={paidFilterMode}
                         onChange={(e) => setPaidFilterMode(e.target.value)}
-                        className="py-2 px-3 text-xs sm:text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
+                        className="py-1.5 px-2.5 text-xs border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 w-full bg-white text-slate-700 font-medium outline-none cursor-pointer"
                       >
                         <option value="All">All Modes</option>
                         <option value="NEFT / RTGS">NEFT / RTGS</option>
@@ -1683,7 +1688,7 @@ export default function BillingSystem() {
                     {/* Export Excel Button */}
                     <button
                       onClick={handleExportPaidBillsExcel}
-                      className="px-3 py-2 text-xs font-bold uppercase tracking-wider bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
+                      className="px-3 py-1.5 text-xs font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition-colors shadow-xs flex items-center justify-center gap-1.5 shrink-0"
                     >
                       <FileSpreadsheet className="w-3.5 h-3.5" />
                       <span>Export Excel</span>

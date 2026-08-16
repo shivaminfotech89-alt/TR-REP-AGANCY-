@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { useAgency } from '../lib/AgencyContext';
 import { useTheme } from '../lib/ThemeContext';
@@ -55,10 +55,28 @@ export default function AppLayout({ user }: { user: User }) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [logoutErrorMsg, setLogoutErrorMsg] = useState<string | null>(null);
 
+  // Auto-hide mobile sidebar when route/pathname changes
+  useEffect(() => {
+    setMobileMenuOpen(false);
+  }, [location.pathname]);
+
+  // Lock body scroll on mobile when menu is open
+  useEffect(() => {
+    if (mobileMenuOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [mobileMenuOpen]);
+
   // Super Admin Check (case-insensitive for safety)
   const isSuperAdmin = user?.email?.toLowerCase().trim() === 'shivaminfotech89@gmail.com';
 
   const handleLogoutClick = () => {
+    setMobileMenuOpen(false);
     setShowLogoutConfirm(true);
   };
 
@@ -89,6 +107,10 @@ export default function AppLayout({ user }: { user: User }) {
 
   const isLight = currentTheme.isLightSidebar;
 
+  const handleSidebarItemClick = () => {
+    setMobileMenuOpen(false);
+  };
+
   return (
     <div className={`h-screen ${currentTheme.mainBg} flex overflow-hidden print:h-auto print:overflow-visible font-sans text-slate-900 transition-colors duration-200`}>
       
@@ -98,40 +120,45 @@ export default function AppLayout({ user }: { user: User }) {
         onClose={() => setShowThemeModal(false)} 
       />
 
-      {/* Mobile Backdrop Overlay */}
+      {/* Mobile Backdrop Overlay with smooth transition */}
       {mobileMenuOpen && (
         <div 
           className="fixed inset-0 bg-slate-950/70 z-40 md:hidden backdrop-blur-xs transition-opacity animate-in fade-in"
           onClick={() => setMobileMenuOpen(false)}
+          aria-hidden="true"
         />
       )}
 
       {/* Sidebar (Responsive drawer on mobile, fixed width on md+) */}
       <aside className={`
-        fixed inset-y-0 left-0 z-50 w-72 md:w-64 ${currentTheme.sidebarBg} flex flex-col h-full ${currentTheme.sidebarBorder} border-r shrink-0 print:hidden transition-transform duration-200 ease-in-out md:static md:translate-x-0
+        fixed inset-y-0 left-0 z-50 w-72 md:w-64 ${currentTheme.sidebarBg} flex flex-col h-full ${currentTheme.sidebarBorder} border-r shrink-0 print:hidden transition-transform duration-250 ease-in-out md:static md:translate-x-0
         ${mobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:translate-x-0'}
       `}>
         {/* Brand Header */}
         <div className={`p-4 sm:p-5 ${currentTheme.sidebarBorder} border-b flex items-center justify-between`}>
-          <div className="flex items-center gap-3">
+          <Link 
+            to="/" 
+            onClick={handleSidebarItemClick} 
+            className="flex items-center gap-3 min-w-0"
+          >
             <img 
               src={appLogo} 
               alt="Transformer Logo" 
-              className="w-10 h-10 rounded-lg object-cover border border-slate-300/40 shadow-xs" 
+              className="w-10 h-10 rounded-lg object-cover border border-slate-300/40 shadow-xs shrink-0" 
               referrerPolicy="no-referrer"
             />
-            <div>
-              <h1 className={`${currentTheme.sidebarTitleText} text-base tracking-wide leading-none`}>TR REP AGENCY</h1>
-              <p className={`${currentTheme.sidebarSubText} text-[10px] uppercase tracking-wider mt-1`}>Transformer Repair Portal</p>
+            <div className="min-w-0">
+              <h1 className={`${currentTheme.sidebarTitleText} text-base tracking-wide leading-none truncate`}>TR REP AGENCY</h1>
+              <p className={`${currentTheme.sidebarSubText} text-[10px] uppercase tracking-wider mt-1 truncate`}>Transformer Repair Portal</p>
             </div>
-          </div>
+          </Link>
           
           {/* Mobile Close Button */}
           <button 
             type="button"
             onClick={() => setMobileMenuOpen(false)}
-            className={`md:hidden p-1.5 rounded-lg transition-colors ${
-              isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100' : 'text-slate-400 hover:text-white hover:bg-white/10'
+            className={`md:hidden p-2 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center ${
+              isLight ? 'text-slate-500 hover:text-slate-900 hover:bg-slate-100 active:bg-slate-200' : 'text-slate-400 hover:text-white hover:bg-white/10 active:bg-white/20'
             }`}
             aria-label="Close menu"
           >
@@ -141,21 +168,25 @@ export default function AppLayout({ user }: { user: User }) {
 
         {/* Agency Info Badge in Sidebar */}
         <div className={`px-4 py-3 border-b ${currentTheme.sidebarBorder} ${isLight ? 'bg-slate-100/60' : 'bg-black/20'}`}>
-          <div className={`flex flex-col space-y-1.5 ${currentTheme.sidebarCardBg} p-2.5 rounded-lg border ${currentTheme.sidebarCardBorder}`}>
+          <Link 
+            to="/agency-settings" 
+            onClick={handleSidebarItemClick}
+            className={`block ${currentTheme.sidebarCardBg} p-2.5 rounded-lg border ${currentTheme.sidebarCardBorder} hover:opacity-95 transition-opacity`}
+          >
             <span className={`text-[9px] uppercase font-bold tracking-wider ${isLight ? 'text-slate-500' : 'text-slate-400'}`}>Current Workspace</span>
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center space-x-2 mt-0.5">
               <Building2 className={`w-4 h-4 shrink-0 ${isLight ? 'text-blue-600' : 'text-blue-400'}`} />
               <span className={`text-xs font-bold truncate ${currentTheme.sidebarCardTitle}`} title={activeAgency?.name || 'No Agency Selected'}>
                 {activeAgency?.name || 'No Agency Selected'}
               </span>
             </div>
             {activeAgency && (
-              <div className="flex items-center space-x-1.5 mt-0.5">
+              <div className="flex items-center space-x-1.5 mt-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
                 <span className={`text-[10px] font-medium ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>Active Workspace</span>
               </div>
             )}
-          </div>
+          </Link>
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
@@ -170,7 +201,8 @@ export default function AppLayout({ user }: { user: User }) {
               <Link 
                 key={link.to}
                 to={link.to} 
-                className={`px-3 py-2.5 rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                onClick={handleSidebarItemClick}
+                className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
                   isActive 
                     ? `${currentTheme.sidebarActiveBg} ${currentTheme.sidebarActiveText} shadow-xs font-bold` 
                     : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
@@ -189,7 +221,8 @@ export default function AppLayout({ user }: { user: User }) {
 
             <Link 
               to="/agency-settings" 
-              className={`px-3 py-2 rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
+              onClick={handleSidebarItemClick}
+              className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
                 location.pathname === '/agency-settings' 
                   ? (isLight ? 'text-blue-700 bg-blue-50 font-bold border border-blue-200' : 'text-white bg-white/10 font-bold') 
                   : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
@@ -201,7 +234,8 @@ export default function AppLayout({ user }: { user: User }) {
 
             <Link 
               to="/support" 
-              className={`px-3 py-2 rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
+              onClick={handleSidebarItemClick}
+              className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
                 location.pathname === '/support' 
                   ? `${currentTheme.sidebarActiveBg} ${currentTheme.sidebarActiveText} font-bold` 
                   : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
@@ -211,11 +245,14 @@ export default function AppLayout({ user }: { user: User }) {
               <span>Support Desk</span>
             </Link>
 
-            {/* Change Theme Option BELOW Support Desk */}
+            {/* Change Theme Option */}
             <button
               type="button"
-              onClick={() => setShowThemeModal(true)}
-              className={`w-full px-3 py-2 rounded-lg flex items-center justify-between text-xs font-semibold transition-all ${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`}
+              onClick={() => {
+                setShowThemeModal(true);
+                setMobileMenuOpen(false);
+              }}
+              className={`w-full px-3 py-2.5 min-h-[42px] rounded-lg flex items-center justify-between text-xs font-semibold transition-all ${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`}
             >
               <div className="flex items-center gap-2.5">
                 <Palette className="w-4 h-4 text-pink-500 shrink-0" />
@@ -239,7 +276,8 @@ export default function AppLayout({ user }: { user: User }) {
             {isSuperAdmin && (
               <Link 
                 to="/admin" 
-                className={`px-3 py-2 rounded-lg flex items-center justify-between text-xs font-bold transition-all ${
+                onClick={handleSidebarItemClick}
+                className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center justify-between text-xs font-bold transition-all ${
                   location.pathname === '/admin' 
                     ? 'bg-amber-500 text-slate-950 shadow-xs' 
                     : (isLight ? 'text-amber-800 bg-amber-50 hover:bg-amber-100' : 'text-amber-400 hover:bg-slate-800 hover:text-amber-300')
@@ -266,7 +304,7 @@ export default function AppLayout({ user }: { user: User }) {
           </div>
           <button
             onClick={handleLogoutClick}
-            className={`p-2 rounded-lg transition-colors ${
+            className={`p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-lg transition-colors ${
               isLight ? 'text-slate-500 hover:text-red-600 hover:bg-red-50' : 'text-slate-400 hover:text-red-400 bg-white/10'
             }`}
             title="Sign Out"
@@ -284,18 +322,18 @@ export default function AppLayout({ user }: { user: User }) {
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className="md:hidden p-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors"
+              className="md:hidden p-2 text-slate-700 hover:text-slate-900 hover:bg-slate-100 active:bg-slate-200 rounded-lg transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="Open menu"
             >
               <Menu className="w-5 h-5" />
             </button>
 
             {activeAgency ? (
-              <div className="flex items-center space-x-2.5 min-w-0">
+              <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0">
                 <img 
                   src={appLogo} 
                   alt="Logo" 
-                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" 
+                  className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" 
                   referrerPolicy="no-referrer"
                 />
                 <div className="min-w-0">
@@ -313,12 +351,12 @@ export default function AppLayout({ user }: { user: User }) {
             )}
           </div>
           
-          <div className="flex items-center space-x-2 sm:space-x-3 shrink-0">
+          <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
             {/* Theme Switcher Quick Button */}
             <button
               type="button"
               onClick={() => setShowThemeModal(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100/90 hover:bg-slate-200/90 rounded-lg border border-slate-200 transition-colors shadow-2xs"
+              className="flex items-center gap-1.5 px-2 sm:px-2.5 py-1.5 min-h-[38px] text-xs font-bold text-slate-700 hover:text-slate-900 bg-slate-100/90 hover:bg-slate-200/90 rounded-lg border border-slate-200 transition-colors shadow-2xs"
               title={`Active Theme: ${currentTheme.name}. Click to change theme`}
             >
               {currentTheme.themeMode === 'light' ? (
@@ -342,7 +380,7 @@ export default function AppLayout({ user }: { user: User }) {
             <span className="text-xs font-medium text-slate-700 hidden lg:inline max-w-[180px] truncate">{user.email}</span>
             <button
               onClick={handleLogoutClick}
-              className="p-2 text-slate-500 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded-lg transition-colors border border-slate-200"
+              className="p-2 min-h-[38px] min-w-[38px] flex items-center justify-center text-slate-500 hover:text-red-600 bg-slate-50 hover:bg-red-50 rounded-lg transition-colors border border-slate-200"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
@@ -350,7 +388,7 @@ export default function AppLayout({ user }: { user: User }) {
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto overflow-x-hidden print:overflow-visible p-3 sm:p-6 print:p-0 relative custom-scrollbar">
+        <div className="flex-1 overflow-y-auto overflow-x-hidden print:overflow-visible p-2.5 sm:p-4 md:p-6 print:p-0 relative custom-scrollbar">
           {!activeAgency && location.pathname !== '/agency-settings' && location.pathname !== '/admin' && location.pathname !== '/support' && (
              <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-10 flex items-center justify-center p-4 sm:p-6">
                 <div className="bg-white p-6 rounded-xl shadow-xl border border-amber-200 max-w-md w-full text-center">
@@ -398,14 +436,14 @@ export default function AppLayout({ user }: { user: User }) {
               <button
                 type="button"
                 onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors text-sm"
+                className="flex-1 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors text-sm"
               >
                 Cancel
               </button>
               <button
                 type="button"
                 onClick={confirmLogout}
-                className="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+                className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
               >
                 Log Out
               </button>
@@ -426,7 +464,7 @@ export default function AppLayout({ user }: { user: User }) {
             <button
               type="button"
               onClick={() => setLogoutErrorMsg(null)}
-              className="w-full px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
+              className="w-full px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-semibold rounded-xl transition-colors text-sm shadow-sm"
             >
               OK
             </button>
@@ -436,3 +474,4 @@ export default function AppLayout({ user }: { user: User }) {
     </div>
   );
 }
+
