@@ -6,7 +6,8 @@ import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/fir
 import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
-import { LetterheadHeader } from './LetterheadHeader';
+import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
+import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 
 export interface ExternalData {
   kv: string;
@@ -58,6 +59,8 @@ export default function ExternalInspection() {
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [formsData, setFormsData] = useState<Record<string, ExternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrintOpen, setIsPrintOpen] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
   
@@ -239,7 +242,7 @@ export default function ExternalInspection() {
   };
 
   const handlePrint = () => {
-    window.print();
+    setIsPrintOpen(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -422,6 +425,186 @@ export default function ExternalInspection() {
     );
   }
 
+  if (isPrintOpen && selectedMrNo) {
+    const sampleJob = mrJobs[0];
+    const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
+    const CHUNK_SIZE = 9;
+    const jobChunks: typeof mrJobs[] = [];
+    for (let i = 0; i < mrJobs.length; i += CHUNK_SIZE) {
+      jobChunks.push(mrJobs.slice(i, i + CHUNK_SIZE));
+    }
+    if (jobChunks.length === 0) jobChunks.push([]);
+
+    return (
+      <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
+        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-4 rounded-xl shadow-md border border-slate-200">
+          <div>
+            <p className="text-sm font-bold text-slate-800">External Inspection Report - Print Preview</p>
+            <p className="text-xs text-slate-500">
+              MR No: <strong className="font-mono">{selectedMrNo}</strong> ({mrDateStr}) • {mrJobs.length} Transformers • {jobChunks.length} Landscape A4 Page{jobChunks.length > 1 ? 's' : ''}
+            </p>
+          </div>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => triggerUniversalPrint('printable-external-inspection-sheet', `External_Inspection_MR_${selectedMrNo}`, `External_Inspection_MR_${selectedMrNo}.pdf`, 'landscape')} 
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer transition-colors"
+              title="Print document on Landscape A4 / Letterhead"
+            >
+              <Printer className="w-4 h-4 mr-2" /> Print (Landscape)
+            </button>
+            <button 
+              disabled={isExportingPdf}
+              onClick={async () => {
+                setIsExportingPdf(true);
+                try {
+                  await downloadElementAsPdf('printable-external-inspection-sheet', `External_Inspection_MR_${selectedMrNo}.pdf`, 'landscape');
+                } finally {
+                  setIsExportingPdf(false);
+                }
+              }}
+              className="px-5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer disabled:opacity-50 transition-colors"
+              title="Download crisp PDF file"
+            >
+              {isExportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              {isExportingPdf ? 'Generating PDF...' : 'Download PDF'}
+            </button>
+            <button 
+              onClick={handleExportExcel}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xs cursor-pointer transition-colors flex items-center"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Excel
+            </button>
+            <button 
+              onClick={() => setIsPrintOpen(false)} 
+              className="px-4 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs cursor-pointer transition-colors"
+            >
+              Close Preview
+            </button>
+          </div>
+        </div>
+
+        <div id="printable-external-inspection-sheet" className="p-0 bg-transparent flex flex-col items-center">
+          {jobChunks.map((chunk, pageIdx) => {
+            const isLastPage = pageIdx === jobChunks.length - 1;
+            return (
+              <PrintableA4Page
+                key={pageIdx}
+                agency={activeAgency}
+                orientation="landscape"
+                documentTitle="EXTERNAL INSPECTION & PRELIMINARY ASSESSMENT REPORT"
+                subtitle={jobChunks.length > 1 ? `Sheet ${pageIdx + 1} of ${jobChunks.length}` : undefined}
+                className={pageIdx > 0 ? 'print-page-break-before mb-6' : 'mb-6'}
+              >
+                <div className="flex flex-col justify-between h-full">
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
+                      <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
+                      <span>MR DATE: <strong className="font-mono">({mrDateStr})</strong></span>
+                      <span>DIVISION: <strong className="uppercase">{sampleJob?.division || '-'}</strong></span>
+                      <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
+                    </div>
+
+                    <table className="w-full border-collapse border border-black text-[7.5px] text-center">
+                      <thead>
+                        <tr className="bg-slate-100 print:bg-transparent font-bold">
+                          <th className="border border-black p-0.5 w-6">Sr</th>
+                          <th className="border border-black p-0.5 min-w-[70px]">Job No</th>
+                          <th className="border border-black p-0.5 min-w-[50px]">Make</th>
+                          <th className="border border-black p-0.5 w-8">KVA</th>
+                          <th className="border border-black p-0.5 w-6">KV</th>
+                          <th className="border border-black p-0.5 w-10">Oil Cap (L)</th>
+                          <th className="border border-black p-0.5 w-10">Less Oil (L)</th>
+                          <th className="border border-black p-0.5 w-8">SL/BL</th>
+                          <th className="border border-black p-0.5 w-8">Gasket</th>
+                          <th className="border border-black p-0.5 w-8">HV/LV Rod</th>
+                          <th className="border border-black p-0.5 w-8">Nut/Bolt</th>
+                          <th className="border border-black p-0.5 w-8">Dry Act</th>
+                          <th className="border border-black p-0.5 w-8">Cln Tank</th>
+                          <th className="border border-black p-0.5 w-8">Breather</th>
+                          <th className="border border-black p-0.5 w-8">Oil Lev</th>
+                          <th className="border border-black p-0.5 w-8">Out Paint</th>
+                          <th className="border border-black p-0.5 w-8">Name Plt</th>
+                          <th className="border border-black p-0.5 w-10">Dam CT</th>
+                          <th className="border border-black p-0.5 w-10">Dam Rad</th>
+                          <th className="border border-black p-0.5" colSpan={3}>HV Side (B/M/CC)</th>
+                          <th className="border border-black p-0.5" colSpan={3}>LV Side (B/M/CC)</th>
+                          <th className="border border-black p-0.5 w-8">Type</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {chunk.map((job, cIdx) => {
+                          const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
+                          const data = formsData[job.id] || {} as any;
+
+                          return (
+                            <tr key={job.id} className="border border-black h-6">
+                              <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
+                              <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
+                                {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
+                              </td>
+                              <td className="border border-black p-0.5 truncate max-w-[50px]">{job.make || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
+                              <td className="border border-black p-0.5">{data.kv || '11'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.oilCapLtrs || '0'}</td>
+                              <td className="border border-black p-0.5">{data.lessOilLtrs || '0'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.sealType || 'BL'}</td>
+                              <td className="border border-black p-0.5">{data.gasket || '1'}</td>
+                              <td className="border border-black p-0.5">{data.hvLvRod || '7'}</td>
+                              <td className="border border-black p-0.5">{data.nuteBolt || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.dryActPart || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.clnDrtyTank || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.breather || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.oilLevGls || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.outsidePaint || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.namePlate || '-'}</td>
+                              <td className="border border-black p-0.5">{data.damCtTank || '0'}</td>
+                              <td className="border border-black p-0.5">{data.damRadNo || '0'}</td>
+                              <td className="border border-black p-0.5">{data.hvSideHvb || '3'}</td>
+                              <td className="border border-black p-0.5">{data.hvSideHvm || '3'}</td>
+                              <td className="border border-black p-0.5">{data.hvSideHvCc || '3'}</td>
+                              <td className="border border-black p-0.5">{data.lvSideLvb || '4'}</td>
+                              <td className="border border-black p-0.5">{data.lvSideLvm || '4'}</td>
+                              <td className="border border-black p-0.5">{data.lvSideLvCc || '4'}</td>
+                              <td className="border border-black p-0.5">{data.transType || 'C'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {isLastPage && (
+                    <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
+                      <div className="text-center">
+                        <div className="h-8"></div>
+                        <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY (TESTING ENG.)</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer / Inspector</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="h-8"></div>
+                        <div className="border-t border-dotted border-black pt-0.5">WITNESSED & RECEIVED BY</div>
+                        <div className="text-[8px] text-slate-700 font-normal">AEE / Sub-Division Officer</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="h-8 flex items-center justify-center">
+                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[7.5px] text-slate-500 font-normal">
+                            OFFICIAL STAMP
+                          </div>
+                        </div>
+                        <div className="border-t border-dotted border-black pt-0.5">FOR {activeAgency?.name}</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Authorized Signatory</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </PrintableA4Page>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 print:space-y-0">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded shadow-sm border border-slate-200">
@@ -508,12 +691,26 @@ export default function ExternalInspection() {
                         {mrGroups[mr].map(j => j.jobNo).join(', ')}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <button 
-                          onClick={() => handleSelectMr(mr)}
-                          className="flex items-center px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                        >
-                          {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
-                        </button>
+                        <div className="flex items-center space-x-2">
+                          <button 
+                            onClick={() => handleSelectMr(mr)}
+                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                          >
+                            {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
+                          </button>
+                          {statusFilter === 'Completed' && (
+                            <button 
+                              onClick={() => {
+                                handleSelectMr(mr);
+                                setIsPrintOpen(true);
+                              }}
+                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors"
+                              title="Print External Inspection Report"
+                            >
+                              <Printer className="w-3 h-3 mr-1 text-slate-600" /> Print
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     );

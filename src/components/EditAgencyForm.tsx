@@ -5,6 +5,8 @@ import {
   CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
   Lock, Unlock, AlertTriangle, RotateCcw
 } from 'lucide-react';
+import { validateDivisionPrefixes } from '../lib/prefixValidation';
+import { LetterheadCalibrator } from './LetterheadCalibrator';
 
 export default function EditAgencyForm({ agency }: { agency: any }) {
   const { updateAgency } = useAgency();
@@ -23,6 +25,16 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [email, setEmail] = useState(agency.email || '');
   const [msmeNo, setMsmeNo] = useState(agency.msmeNo || '');
   const [gpValidationMonths, setGpValidationMonths] = useState(agency.gpValidationMonths ?? 18);
+
+  // Letterhead Layout & Calibrator States
+  const [letterheadBase64, setLetterheadBase64] = useState(agency.letterheadUrl || '');
+  const [letterheadMode, setLetterheadMode] = useState<'full_a4' | 'header_only' | 'standard'>(
+    agency.letterheadMode || (agency.letterheadUrl ? 'full_a4' : 'standard')
+  );
+  const [headerHeightMm, setHeaderHeightMm] = useState<number>(agency.letterheadHeaderHeightMm ?? 38);
+  const [footerHeightMm, setFooterHeightMm] = useState<number>(agency.letterheadFooterHeightMm ?? 24);
+  const [marginLeftMm, setMarginLeftMm] = useState<number>(agency.letterheadMarginLeftMm ?? 12);
+  const [marginRightMm, setMarginRightMm] = useState<number>(agency.letterheadMarginRightMm ?? 12);
 
   // DISCOM / Client (Buyer) & Tax Details
   const [discomName, setDiscomName] = useState(agency.discomName || 'Uttar Gujarat Vij Company Ltd.');
@@ -55,12 +67,8 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
   // Divisions & Prefixes
   const [divisions, setDivisions] = useState<any[]>([]);
+  const divisionValidation = validateDivisionPrefixes(divisions);
 
-  // Letterhead PDF
-  const [letterheadBase64, setLetterheadBase64] = useState(agency.letterheadUrl || '');
-  const [fileName, setFileName] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatePopupData, setUpdatePopupData] = useState<{
     agencyName: string;
@@ -101,6 +109,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setAccountNumber(agency.accountNumber || '');
     setIfscCode(agency.ifscCode || '');
     setLetterheadBase64(agency.letterheadUrl || '');
+    setLetterheadMode(agency.letterheadMode || (agency.letterheadUrl ? 'full_a4' : 'standard'));
+    setHeaderHeightMm(agency.letterheadHeaderHeightMm ?? 38);
+    setFooterHeightMm(agency.letterheadFooterHeightMm ?? 24);
+    setMarginLeftMm(agency.letterheadMarginLeftMm ?? 12);
+    setMarginRightMm(agency.letterheadMarginRightMm ?? 12);
 
     // Parse divisions
     const divs: any[] = [];
@@ -148,18 +161,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setDivisions(divs);
   }, [agency]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFileName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLetterheadBase64(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
-
   const handleAddDivision = () => {
     setDivisions([
       ...divisions,
@@ -192,6 +193,14 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
   const handleUpdateAgency = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = validateDivisionPrefixes(divisions);
+    if (!validation.isValid) {
+      alert(`Cannot update agency due to prefix/division validation error:\n\n${validation.errors.join('\n')}`);
+      setActiveTab('divisions');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const prefixes: Record<string, Record<string, string>> = {};
@@ -203,10 +212,10 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           const divName = d.name.trim();
           prefixes[divName] = {
             'CRGO': d.prefixCRGO.trim(),
-            'Amorphous': d.prefixAmorphous.trim() || d.prefixCRGO.trim(),
-            'Wound Core': d.prefixWoundCore.trim() || d.prefixCRGO.trim(),
-            'LSTC': d.prefixLSTC.trim() || d.prefixCRGO.trim(),
-            'OH': d.prefixOH.trim() || d.prefixCRGO.trim(),
+            'Amorphous': (d.prefixAmorphous || '').trim(),
+            'Wound Core': (d.prefixWoundCore || '').trim(),
+            'LSTC': (d.prefixLSTC || '').trim(),
+            'OH': (d.prefixOH || '').trim(),
           };
           allotments[divName] = {
             'CRGO': Number(d.allotmentCRGO) || 0,
@@ -286,6 +295,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       await updateAgency(agency.id, {
         name: agencyName,
         letterheadUrl: letterheadBase64,
+        letterheadMode,
+        letterheadHeaderHeightMm: headerHeightMm,
+        letterheadFooterHeightMm: footerHeightMm,
+        letterheadMarginLeftMm: marginLeftMm,
+        letterheadMarginRightMm: marginRightMm,
         gpValidationMonths,
         
         // Agency details
@@ -547,32 +561,22 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 />
               </div>
 
-              <div className="md:col-span-2 pt-2 border-t border-slate-200">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
-                  Letterhead Document (PDF)
-                </label>
-                <input
-                  type="file"
-                  accept="application/pdf"
-                  ref={fileInputRef}
-                  onChange={handleFileChange}
-                  className="hidden"
+              <div className="md:col-span-2 pt-4 border-t border-slate-200">
+                <LetterheadCalibrator
+                  letterheadUrl={letterheadBase64}
+                  letterheadMode={letterheadMode}
+                  headerHeightMm={headerHeightMm}
+                  footerHeightMm={footerHeightMm}
+                  marginLeftMm={marginLeftMm}
+                  marginRightMm={marginRightMm}
+                  agencyName={agencyName}
+                  onLetterheadChange={setLetterheadBase64}
+                  onModeChange={setLetterheadMode}
+                  onHeaderHeightChange={setHeaderHeightMm}
+                  onFooterHeightChange={setFooterHeightMm}
+                  onMarginLeftChange={setMarginLeftMm}
+                  onMarginRightChange={setMarginRightMm}
                 />
-                <div className="flex items-center space-x-3">
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="px-4 py-2 text-xs font-bold uppercase tracking-widest bg-slate-200 text-slate-800 rounded border border-slate-300 hover:bg-slate-300 transition-colors flex items-center"
-                  >
-                    <FileUp className="w-4 h-4 mr-2" /> {letterheadBase64 ? 'Change PDF' : 'Upload PDF'}
-                  </button>
-                  {fileName && <span className="text-xs text-slate-700 font-medium truncate">{fileName}</span>}
-                  {!fileName && letterheadBase64 && (
-                    <span className="text-xs text-emerald-700 font-semibold flex items-center">
-                      <Check className="w-3.5 h-3.5 mr-1" /> Existing Letterhead PDF is Active
-                    </span>
-                  )}
-                </div>
               </div>
             </div>
           </div>
@@ -898,7 +902,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   <GitBranch className="w-4 h-4 mr-1.5 text-blue-600" /> Divisions, Core Prefixes & Allotment Quotas
                 </h4>
                 <p className="text-[11px] text-slate-500 mt-0.5">
-                  Configure Job Number Prefixes and Capacity Quotas for each Division
+                  Configure Job Number Prefixes and Capacity Quotas for each Division. Each core type within a division must have a distinct, unique prefix.
                 </p>
               </div>
               <button
@@ -910,129 +914,159 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
               </button>
             </div>
 
-            <div className="space-y-4">
-              {divisions.map((div, index) => (
-                <div key={index} className="p-4 bg-white border border-slate-300 rounded-lg shadow-sm space-y-3">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                    <div className="flex-1 max-w-sm">
-                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Division Name *</label>
-                      <input
-                        required
-                        type="text"
-                        value={div.name}
-                        onChange={e => handleDivisionChange(index, 'name', e.target.value)}
-                        className="w-full px-3 py-1.5 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50"
-                        placeholder="e.g. SABARMATI"
-                      />
-                    </div>
-                    {divisions.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveDivision(index)}
-                        className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
-                        title="Remove Division"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
+            {!divisionValidation.isValid && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-xs text-red-800">
+                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                <div>
+                  <strong className="font-bold">Division Prefix Warnings:</strong>
+                  <ul className="list-disc list-inside mt-0.5 text-[11px] text-red-700">
+                    {divisionValidation.errors.map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            )}
 
-                  {/* Core Prefixes Grid */}
-                  <div>
-                    <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-600 mb-1">Job Number Prefixes:</span>
-                    <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">CRGO Prefix *</label>
+            <div className="space-y-4">
+              {divisions.map((div, index) => {
+                const divErr = divisionValidation.divisionErrors[index];
+                const dupes = divErr?.duplicatePrefixes;
+
+                return (
+                  <div key={index} className={`p-4 bg-white border rounded-lg shadow-sm space-y-3 ${
+                    divErr ? 'border-red-300' : 'border-slate-300'
+                  }`}>
+                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                      <div className="flex-1 max-w-sm">
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Division Name *</label>
                         <input
                           required
                           type="text"
-                          value={div.prefixCRGO}
-                          onChange={e => handleDivisionChange(index, 'prefixCRGO', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="21 IS"
+                          value={div.name}
+                          onChange={e => handleDivisionChange(index, 'name', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50"
+                          placeholder="e.g. SABARMATI"
                         />
                       </div>
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">Amorphous Prefix</label>
-                        <input
-                          type="text"
-                          value={div.prefixAmorphous}
-                          onChange={e => handleDivisionChange(index, 'prefixAmorphous', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="AM21 IS"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">Wound Core Prefix</label>
-                        <input
-                          type="text"
-                          value={div.prefixWoundCore}
-                          onChange={e => handleDivisionChange(index, 'prefixWoundCore', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="WC21 IS"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">LSTC Prefix</label>
-                        <input
-                          type="text"
-                          value={div.prefixLSTC}
-                          onChange={e => handleDivisionChange(index, 'prefixLSTC', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="LS21 IS"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">Overhauling (OH)</label>
-                        <input
-                          type="text"
-                          value={div.prefixOH}
-                          onChange={e => handleDivisionChange(index, 'prefixOH', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="OH21 IS"
-                        />
-                      </div>
+                      {divisions.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveDivision(index)}
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          title="Remove Division"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
-                  </div>
 
-                  {/* Allotment Quotas Grid */}
-                  <div className="pt-2 border-t border-slate-100">
-                    <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-600 mb-1">Division Allotment Quotas:</span>
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">CRGO Quota</label>
-                        <input
-                          type="number"
-                          value={div.allotmentCRGO}
-                          onChange={e => handleDivisionChange(index, 'allotmentCRGO', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="20"
-                        />
+                    {dupes && dupes.length > 0 && (
+                      <div className="p-2 bg-amber-50 border border-amber-300 rounded text-xs text-amber-900 flex items-center gap-1.5">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                        <span>
+                          Duplicate prefix not allowed in same division: <strong className="font-mono">{dupes.map(d => `"${d.prefix}" (${d.fields.join(' & ')})`).join(', ')}</strong>
+                        </span>
                       </div>
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">Amorphous Quota</label>
-                        <input
-                          type="number"
-                          value={div.allotmentAmorphous}
-                          onChange={e => handleDivisionChange(index, 'allotmentAmorphous', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="15"
-                        />
+                    )}
+
+                    {/* Core Prefixes Grid */}
+                    <div>
+                      <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-600 mb-1">Job Number Prefixes:</span>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">CRGO Prefix *</label>
+                          <input
+                            required
+                            type="text"
+                            value={div.prefixCRGO}
+                            onChange={e => handleDivisionChange(index, 'prefixCRGO', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="21 IS"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">Amorphous Prefix</label>
+                          <input
+                            type="text"
+                            value={div.prefixAmorphous}
+                            onChange={e => handleDivisionChange(index, 'prefixAmorphous', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="AM21 IS"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">Wound Core Prefix</label>
+                          <input
+                            type="text"
+                            value={div.prefixWoundCore}
+                            onChange={e => handleDivisionChange(index, 'prefixWoundCore', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="WC21 IS"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">LSTC Prefix</label>
+                          <input
+                            type="text"
+                            value={div.prefixLSTC}
+                            onChange={e => handleDivisionChange(index, 'prefixLSTC', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="LS21 IS"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">Overhauling (OH)</label>
+                          <input
+                            type="text"
+                            value={div.prefixOH}
+                            onChange={e => handleDivisionChange(index, 'prefixOH', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="OH21 IS"
+                          />
+                        </div>
                       </div>
-                      <div>
-                        <label className="block text-[9px] uppercase font-semibold text-slate-500">Wound Core Quota</label>
-                        <input
-                          type="number"
-                          value={div.allotmentWoundCore}
-                          onChange={e => handleDivisionChange(index, 'allotmentWoundCore', e.target.value)}
-                          className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder="10"
-                        />
+                    </div>
+
+                    {/* Allotment Quotas Grid */}
+                    <div className="pt-2 border-t border-slate-100">
+                      <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-600 mb-1">Division Allotment Quotas:</span>
+                      <div className="grid grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">CRGO Quota</label>
+                          <input
+                            type="number"
+                            value={div.allotmentCRGO}
+                            onChange={e => handleDivisionChange(index, 'allotmentCRGO', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="20"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">Amorphous Quota</label>
+                          <input
+                            type="number"
+                            value={div.allotmentAmorphous}
+                            onChange={e => handleDivisionChange(index, 'allotmentAmorphous', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="15"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] uppercase font-semibold text-slate-500">Wound Core Quota</label>
+                          <input
+                            type="number"
+                            value={div.allotmentWoundCore}
+                            onChange={e => handleDivisionChange(index, 'allotmentWoundCore', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                            placeholder="10"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData } from '../lib/estimateData';
-import { LetterheadHeader } from './LetterheadHeader';
+import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { downloadHtmlAsWord } from '../lib/wordExport';
+import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 
 // Helper to convert number to Indian Rupees in words
 export function numberToIndianWords(num: number): string {
@@ -45,6 +46,7 @@ export default function BillingSystem() {
   const [inspections, setInspections] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   // Tab State: 'generator' | 'sent'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'payments'>('generator');
@@ -655,7 +657,11 @@ export default function BillingSystem() {
   }, [divisionOilStatement]);
 
   const handlePrint = () => {
-    window.print();
+    if (selectedMrNo) {
+      triggerUniversalPrint('printable-billing-container', `Tax Invoice & Letter Documents - MR ${selectedMrNo}`, `Bill_Package_MR_${selectedMrNo}.pdf`);
+    } else {
+      triggerUniversalPrint('printable-billing-container', 'Tax Invoice & Bill Documents', 'Bill_Package.pdf');
+    }
   };
 
   const handleExportExcel = () => {
@@ -1942,9 +1948,26 @@ export default function BillingSystem() {
               </button>
               <button
                 onClick={handlePrint}
-                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-slate-800 hover:bg-slate-700 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs border border-slate-700"
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs cursor-pointer"
+                title="Print documents or open print dialog"
               >
-                <Printer className="w-4 h-4 mr-1.5 shrink-0" /> Print (4 Pages)
+                <Printer className="w-4 h-4 mr-1.5 shrink-0" /> Print
+              </button>
+              <button
+                disabled={isExportingPdf}
+                onClick={async () => {
+                  setIsExportingPdf(true);
+                  try {
+                    await downloadElementAsPdf('printable-billing-container', `Bill_Package_MR_${selectedMrNo || 'Package'}.pdf`);
+                  } finally {
+                    setIsExportingPdf(false);
+                  }
+                }}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                title="Download crisp A4 PDF file"
+              >
+                {isExportingPdf ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin shrink-0" /> : <Download className="w-4 h-4 mr-1.5 shrink-0" />}
+                {isExportingPdf ? 'Saving...' : 'PDF'}
               </button>
               <button
                 onClick={handleExportExcel}
@@ -2131,476 +2154,437 @@ export default function BillingSystem() {
           <div id="printable-billing-container" className="space-y-8 print:space-y-0">
 
             {/* ==================== PAGE 1: FORWARDING LETTER ==================== */}
-            <div className={`bg-white p-10 md:p-12 border border-slate-300 shadow-sm rounded print:border-none print:shadow-none print:p-0 print:m-0 print:page-break-after-always ${
-              activeDocTab === 'all' || activeDocTab === 'forwarding' ? 'block' : 'hidden print:block'
-            }`}>
-              {/* Agency Header */}
-              <LetterheadHeader agency={activeAgency} />
-
-              {/* Recipient */}
-              <div className="mb-6 text-sm text-black whitespace-pre-wrap font-medium">
-                {forwardingTo || `To\n${activeAgency?.divisionAuthority || 'The Executive Engineer ,'}\n${activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}\nDivision Office : ${currentDivision}`}
-                {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
-              </div>
-
-              {/* Subject */}
-              <div className="text-center my-6">
-                <p className="text-base font-bold text-black border-b border-black inline-block pb-0.5">
-                  Sub : {forwardingSub || 'Submission of Bill for Payment'}
-                </p>
-              </div>
-
-              {/* Salutation & Body */}
-              <div className="text-sm text-black space-y-4 leading-relaxed mb-8">
-                <p>Dear Sir,</p>
-                <div className="pl-6 space-y-1">
-                  <p>
-                    Please find enclosed herewith our bill No. - <strong className="font-bold">{billNo}</strong> dated <strong className="font-bold">{billDate}</strong>
-                  </p>
-                  <p>
-                    <strong className="font-bold">Rs. {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-</strong> in words <strong className="font-bold">{numberToIndianWords(grandTotal)}</strong>
-                  </p>
-                </div>
-                <p className="pl-6">
-                  Along with our Delivery Challan , Oil Account and relevant Test Certificate.
-                </p>
-                <p className="pl-6">
-                  You are requested to pass the above bill at your earliest and arrange to release the payment possibly earlier.
-                </p>
-                <p className="pl-6">Thanking you and assuring you of best services.</p>
-              </div>
-
-              {/* Enclosures & Signatures */}
-              <div className="flex justify-between items-end text-sm text-black pt-8">
-                <div className="space-y-1">
-                  <p className="font-bold">Encl :-</p>
-                  <ol className="list-decimal list-inside space-y-0.5 text-xs">
-                    <li>Bill Copy - 2 with Advance Stamp receipt.</li>
-                    <li>Bill Oil Account - 2.</li>
-                    <li>Delivery Challan - 1.</li>
-                    <li>Test Certificate - 1.</li>
-                    <li>Estimate Copy - 1.</li>
-                    <li>Approval Copy - 1.</li>
-                  </ol>
-                </div>
-
-                <div className="text-center">
-                  <p className="font-bold mb-12">Yours Faithfully,</p>
-                  <p className="font-bold">For, {activeAgency?.name || ''}</p>
-                  <p className="text-xs text-slate-500 mt-2">(Auth Sign.)</p>
-                </div>
-              </div>
-
-              {forwardingCc && (
-                <div className="mt-8 text-xs font-bold text-slate-800 border-t pt-3">
-                  <p>C . C. to :</p>
-                  <p className="whitespace-pre-wrap font-normal mt-1">{forwardingCc}</p>
-                </div>
-              )}
-            </div>
-
-            {/* ==================== PAGE 2: CERTIFICATE ==================== */}
-            <div className={`bg-white p-10 md:p-12 border border-slate-300 shadow-sm rounded print:border-none print:shadow-none print:p-0 print:m-0 print:page-break-after-always ${
-              activeDocTab === 'all' || activeDocTab === 'certificate' ? 'block' : 'hidden print:block'
-            }`}>
-              {/* Agency Header */}
-              <LetterheadHeader agency={activeAgency} />
-
-              {/* Certificate Container Box */}
-              <div className="border-2 border-black p-8 my-12 min-h-[300px] flex flex-col justify-between">
-                <div className="text-center mb-8">
-                  <h2 className="text-xl font-black uppercase border-b-2 border-black inline-block tracking-wider pb-1">
-                    CERTIFICATE
-                  </h2>
-                </div>
-
-                <p className="text-sm text-black leading-loose text-justify font-medium">
-                  We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{billDate}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certMonthsText || 'Twelve/Eighteen'} months from the date to delivery.
-                </p>
-
-                <div className="text-right mt-16 pt-8">
-                  <p className="font-bold text-sm">For, {activeAgency?.name || ''}</p>
-                  <p className="text-xs text-slate-500 mt-8">(Auth Sign.)</p>
-                </div>
-              </div>
-            </div>
-
-            {/* ==================== PAGE 3: TAX INVOICE ==================== */}
-            <div className={`bg-white p-6 md:p-8 border border-slate-300 shadow-sm rounded print:border-none print:shadow-none print:p-0 print:m-0 print:page-break-after-always ${
-              activeDocTab === 'all' || activeDocTab === 'invoice' ? 'block' : 'hidden print:block'
-            }`}>
-              <div className="border-2 border-black text-black text-xs">
-                
-                {/* Header Row: Supplier & Invoice Identification */}
-                <div className="grid grid-cols-2 border-b-2 border-black">
-                  <div className="p-3 border-r-2 border-black flex flex-col justify-between">
-                    <div>
-                      {activeAgency?.letterheadUrl ? (
-                        <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-20 object-contain mb-2" />
-                      ) : (
-                        <h1 className="text-lg font-black uppercase font-serif tracking-wide">{activeAgency?.name || 'AGENCY NAME'}</h1>
-                      )}
-                      <p className="font-bold text-[11px] text-slate-800">Repairing of Distribution Transformers</p>
-                      <p className="mt-1 text-[10px] leading-tight">{activeAgency?.address || ''}</p>
-                    </div>
-                    <div className="mt-2 pt-1 border-t border-slate-200 text-[10px] space-y-0.5">
-                      <div className="flex justify-between">
-                        <span><strong>State:</strong> {activeAgency?.agencyState || 'Gujarat'}</span>
-                        <span><strong>State Code:</strong> {activeAgency?.agencyStateCode || '24'}</span>
-                      </div>
-                      {(activeAgency?.phone || activeAgency?.email) && (
-                        <div>
-                          {activeAgency?.phone && <span><strong>Ph:</strong> {activeAgency.phone} </span>}
-                          {activeAgency?.email && <span><strong>Email:</strong> {activeAgency.email}</span>}
-                        </div>
-                      )}
-                      {activeAgency?.msmeNo && (
-                        <div><strong>MSME Reg No:</strong> {activeAgency.msmeNo}</div>
-                      )}
-                    </div>
+            <PrintableA4Page
+              agency={activeAgency}
+              documentTitle=""
+              className={activeDocTab === 'all' || activeDocTab === 'forwarding' ? 'block' : 'hidden print:block'}
+            >
+              <div className="flex flex-col justify-between h-full">
+                <div>
+                  {/* Recipient */}
+                  <div className="mb-4 text-xs text-black whitespace-pre-wrap font-medium">
+                    {forwardingTo || `To\n${activeAgency?.divisionAuthority || 'The Executive Engineer ,'}\n${activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}\nDivision Office : ${currentDivision}`}
+                    {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
                   </div>
 
-                  <div className="p-3 relative flex flex-col justify-between">
-                    <div>
-                      <div className="text-right font-bold text-[10px] uppercase tracking-widest border-b border-black pb-1 mb-2">
-                        TAX INVOICE (Original / Duplicate / Triplicate)
-                      </div>
-                      <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
-                        <div><span className="font-bold">Bill No:</span> <strong className="font-bold font-mono">{billNo}</strong></div>
-                        <div><span className="font-bold">Bill Date:</span> <span className="font-mono">{billDate}</span></div>
-                        <div><span className="font-bold">Order / Appr No:</span> <span className="font-mono">{apprNo}</span></div>
-                        <div><span className="font-bold">Order Date:</span> <span className="font-mono">{apprDate}</span></div>
-                      </div>
-                    </div>
-                    <div className="mt-2 pt-2 border-t border-black bg-slate-50 print:bg-transparent p-1.5 rounded text-[11px] grid grid-cols-2 gap-x-2 gap-y-0.5">
-                      <div><span className="font-bold">Supplier GSTIN:</span> <strong className="font-mono">{activeAgency?.gstin || '-'}</strong></div>
-                      <div><span className="font-bold">Supplier PAN:</span> <strong className="font-mono">{activeAgency?.pan || '-'}</strong></div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Customer (Buyer / Consignee) Details */}
-                <div className="p-3 border-b-2 border-black bg-slate-50/50 print:bg-transparent">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                    <div>
-                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-500 block mb-0.5">Billed To (Client / Consignee):</span>
-                      <p className="font-bold uppercase text-[11px]">{activeAgency?.divisionAuthority || 'EXECUTIVE ENGINEER (O&M)'}</p>
-                      <p className="font-bold text-black">{activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}</p>
-                      <p className="text-[11px]">Division Office: <strong className="font-bold">{currentDivision}</strong></p>
-                      {activeAgency?.discomAddress && (
-                        <p className="text-[10px] text-slate-700 mt-0.5 leading-tight">{activeAgency.discomAddress}</p>
-                      )}
-                    </div>
-                    <div className="border-t md:border-t-0 md:border-l border-slate-300 md:pl-3 flex flex-col justify-between text-[11px] space-y-1">
-                      <div>
-                        <div><span className="font-bold">DISCOM GSTIN:</span> <strong className="font-mono">{divisionGstin || activeAgency?.discomGstin || '24AAACU6551F1ZI'}</strong></div>
-                        <div><span className="font-bold">DISCOM PAN:</span> <strong className="font-mono">{divisionPan || activeAgency?.discomPan || 'AAACU6551F'}</strong></div>
-                        <div className="flex justify-between text-[10px] text-slate-700 mt-0.5">
-                          <span><strong>State:</strong> {activeAgency?.discomState || 'Gujarat'}</span>
-                          <span><strong>State Code:</strong> {activeAgency?.discomStateCode || '24'}</span>
-                        </div>
-                      </div>
-                      <div className="pt-1 border-t border-slate-200 text-[10px]">
-                        <span className="font-bold">Service Category:</span> Maintenance and repair of Distribution Transformers
-                        <span className="ml-2 font-mono font-bold">(SAC Code: {serviceSacCode || activeAgency?.serviceSacCode || '998719'})</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Sub-header instruction */}
-                <div className="p-2 border-b border-black font-semibold text-center bg-slate-50 print:bg-white text-[11px]">
-                  The following Transformer duly repaired with all the standard parts and tested o. k. with oil upto the level mark.
-                </div>
-
-                {/* Transformers Itemized Table */}
-                <table className="w-full text-center border-collapse text-[10px]">
-                  <thead>
-                    <tr className="font-bold border-b-2 border-black bg-slate-100 print:bg-white">
-                      <th className="p-1.5 border-r border-black w-8">Sr. No</th>
-                      <th className="p-1.5 border-r border-black">Job No.</th>
-                      <th className="p-1.5 border-r border-black">Challan No.</th>
-                      <th className="p-1.5 border-r border-black">Challan Date</th>
-                      <th className="p-1.5 border-r border-black">Make</th>
-                      <th className="p-1.5 border-r border-black w-10">KVA</th>
-                      <th className="p-1.5 border-r border-black w-8">KV</th>
-                      <th className="p-1.5 border-r border-black">Serial No.</th>
-                      <th className="p-1.5 border-r border-black text-right">Estimated Amount</th>
-                      <th className="p-1.5 text-right">Amount (Rs)</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedJobsData.map((job, idx) => {
-                      const jobTotal = calculateJobTotal(job);
-                      return (
-                        <tr key={job.id} className="border-b border-black">
-                          <td className="p-1.5 border-r border-black">{idx + 1}</td>
-                          <td className="p-1.5 border-r border-black font-bold font-mono">{job.jobNo}</td>
-                          <td className="p-1.5 border-r border-black font-mono">{job.challanNo || ''}</td>
-                          <td className="p-1.5 border-r border-black">{job.deliveryDate || job.challanDate || billDate}</td>
-                          <td className="p-1.5 border-r border-black">{job.make || ''}</td>
-                          <td className="p-1.5 border-r border-black font-bold">{job.capacityKva}</td>
-                          <td className="p-1.5 border-r border-black">11</td>
-                          <td className="p-1.5 border-r border-black font-mono">{job.serialNo || '-'}</td>
-                          <td className="p-1.5 border-r border-black text-right font-mono">{jobTotal.toFixed(2)}</td>
-                          <td className="p-1.5 text-right font-mono font-bold">{jobTotal.toFixed(2)}</td>
-                        </tr>
-                      );
-                    })}
-
-                    {/* Financial Calculations */}
-                    <tr className="font-bold border-t-2 border-black">
-                      <td colSpan={9} className="p-1.5 border-r border-black text-right">Total (Taxable Value):</td>
-                      <td className="p-1.5 text-right font-mono">{subTotal.toFixed(2)}</td>
-                    </tr>
-                    <tr className="font-bold border-t border-black">
-                      <td colSpan={9} className="p-1.5 border-r border-black text-right">CGST (9.00%):</td>
-                      <td className="p-1.5 text-right font-mono">{cgst.toFixed(2)}</td>
-                    </tr>
-                    <tr className="font-bold border-t border-black">
-                      <td colSpan={9} className="p-1.5 border-r border-black text-right">SGST (9.00%):</td>
-                      <td className="p-1.5 text-right font-mono">{sgst.toFixed(2)}</td>
-                    </tr>
-                    <tr className="font-black border-t-2 border-black bg-slate-100 print:bg-white text-[11px]">
-                      <td colSpan={9} className="p-1.5 border-r border-black text-right">Net Total Invoice Value:</td>
-                      <td className="p-1.5 text-right font-mono">{grandTotal.toFixed(2)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Bottom Footer Section */}
-                <div className="grid grid-cols-2 border-t-2 border-black">
-                  
-                  {/* Left Side: Receipt & Settlement & Bank info */}
-                  <div className="p-3 border-r-2 border-black flex flex-col justify-between space-y-3">
-                    <div>
-                      <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold text-sm">{grandTotal.toFixed(2)}</span></p>
-                      <p className="mt-1 font-semibold italic text-[11px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
-                      <p className="mt-2 text-[10px]">In full settlement of our Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{billDate}</strong></p>
-                      
-                      {(activeAgency?.bankName || activeAgency?.accountNumber) && (
-                        <div className="mt-2.5 pt-2 border-t border-dashed border-slate-300 text-[10px] text-slate-800">
-                          <span className="font-bold uppercase tracking-wider block text-[9px] text-slate-500 mb-0.5">Bank Settlement Details:</span>
-                          <div><strong>Bank:</strong> {activeAgency?.bankName || '-'} {activeAgency?.bankBranch ? `(${activeAgency.bankBranch})` : ''}</div>
-                          <div><strong>A/C No:</strong> <span className="font-mono font-bold">{activeAgency?.accountNumber || '-'}</span> | <strong>IFSC:</strong> <span className="font-mono font-bold">{activeAgency?.ifscCode || '-'}</span></div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="pt-6 text-center">
-                      <p className="font-bold">For, {activeAgency?.name || ''}</p>
-                      <div className="h-8"></div>
-                      <p className="text-[10px] text-slate-500">(Authorized Signatory / Stamp)</p>
-                    </div>
+                  {/* Subject */}
+                  <div className="text-center my-4">
+                    <p className="text-sm font-bold text-black border-b border-black inline-block pb-0.5">
+                      Sub : {forwardingSub || 'Submission of Bill for Payment'}
+                    </p>
                   </div>
 
-                  {/* Right Side: Guarantee Card */}
-                  <div className="p-3 flex flex-col justify-between">
-                    <div>
-                      <h4 className="font-black text-center uppercase tracking-wider mb-2 border-b border-black pb-0.5">
-                        Guarantee Card
-                      </h4>
-                      <p className="text-[10px] leading-tight text-justify">
-                        We guarantee the satisfactory performance of the above repaired transformers for {activeAgency?.gpValidationMonths || 18} months for 11 KV and 12 months for 22 KV for the date of delivery for the repaired and replaced parts only. We certify the material and spares mentioned in the estimate/bill have actually been fitted/used in the above transformer.
+                  {/* Salutation & Body */}
+                  <div className="text-xs text-black space-y-3 leading-relaxed mb-4">
+                    <p>Dear Sir,</p>
+                    <div className="pl-4 space-y-1">
+                      <p>
+                        Please find enclosed herewith our bill No. - <strong className="font-bold">{billNo}</strong> dated <strong className="font-bold">{billDate}</strong>
+                      </p>
+                      <p>
+                        <strong className="font-bold">Rs. {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-</strong> in words <strong className="font-bold">{numberToIndianWords(grandTotal)}</strong>
                       </p>
                     </div>
+                    <p className="pl-4">
+                      Along with our Delivery Challan , Oil Account and relevant Test Certificate.
+                    </p>
+                    <p className="pl-4">
+                      You are requested to pass the above bill at your earliest and arrange to release the payment possibly earlier.
+                    </p>
+                    <p className="pl-4">Thanking you and assuring you of best services.</p>
+                  </div>
+                </div>
 
-                    <div className="pt-6 text-center">
+                <div>
+                  {/* Enclosures & Signatures */}
+                  <div className="flex justify-between items-end text-xs text-black pt-4">
+                    <div className="space-y-1">
+                      <p className="font-bold">Encl :-</p>
+                      <ol className="list-decimal list-inside space-y-0.5 text-[11px]">
+                        <li>Bill Copy - 2 with Advance Stamp receipt.</li>
+                        <li>Bill Oil Account - 2.</li>
+                        <li>Delivery Challan - 1.</li>
+                        <li>Test Certificate - 1.</li>
+                        <li>Estimate Copy - 1.</li>
+                        <li>Approval Copy - 1.</li>
+                      </ol>
+                    </div>
+
+                    <div className="text-center">
+                      <p className="font-bold mb-8">Yours Faithfully,</p>
                       <p className="font-bold">For, {activeAgency?.name || ''}</p>
-                      <div className="h-8"></div>
-                      <p className="text-[10px] text-slate-500">(Authorized Signatory)</p>
+                      <p className="text-[10px] text-slate-500 mt-1">(Auth Sign.)</p>
                     </div>
                   </div>
 
+                  {forwardingCc && (
+                    <div className="mt-4 text-[10px] font-bold text-slate-800 border-t pt-2">
+                      <p>C . C. to :</p>
+                      <p className="whitespace-pre-wrap font-normal mt-0.5">{forwardingCc}</p>
+                    </div>
+                  )}
                 </div>
-
               </div>
-            </div>
+            </PrintableA4Page>
 
-            {/* ==================== PAGE 4: OIL ACCOUNT ==================== */}
-            <div className={`bg-white p-6 md:p-8 border border-slate-300 shadow-sm rounded print:border-none print:shadow-none print:p-0 print:m-0 ${
-              activeDocTab === 'all' || activeDocTab === 'oil' ? 'block' : 'hidden print:block'
-            }`}>
-              <div className="border-2 border-black p-4 text-black text-xs space-y-4">
-                
-                {/* Agency Header */}
-                <LetterheadHeader agency={activeAgency} documentTitle="OIL ACCOUNT SHEET" />
-
-                {/* Sub Metadata */}
-                <div className="grid grid-cols-4 gap-2 font-semibold text-[10px] border-b border-black pb-2">
-                  <div>Order: <span className="font-mono font-bold">{apprNo}</span></div>
-                  <div>MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | Date: <span className="font-mono font-bold">{selectedMrDate}</span></div>
-                  <div>Insp. Date: <span className="font-mono font-bold text-blue-900">{selectedMrInspectionDate}</span></div>
-                  <div className="text-right">Division: <strong className="font-bold uppercase text-black">{currentDivision}</strong></div>
-                </div>
-
-                {/* Table 1: Delivered Transformers Oil Table */}
-                <table className="w-full text-center border-collapse border border-black text-[9px]">
-                  <thead>
-                    <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                      <th className="border border-black p-1 w-6">Sr.</th>
-                      <th className="border border-black p-1">Job No.</th>
-                      <th className="border border-black p-1">Make</th>
-                      <th className="border border-black p-1">Serial No.</th>
-                      <th className="border border-black p-1 w-8">KVA</th>
-                      <th className="border border-black p-1 w-6">KV</th>
-                      <th className="border border-black p-1">Oil Capacity</th>
-                      <th className="border border-black p-1">Oil Received</th>
-                      <th className="border border-black p-1">Base Shortage</th>
-                      <th className="border border-black p-1">Filter Loss (5%)</th>
-                      <th className="border border-black p-1 font-bold">Net Oil Required</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {jobOilDetails.map((detail, idx) => (
-                      <tr key={detail.job.id} className="border-b border-black">
-                        <td className="border border-black p-1">{idx + 1}</td>
-                        <td className="border border-black p-1 font-bold font-mono">{detail.job.jobNo}</td>
-                        <td className="border border-black p-1">{detail.job.make || 'VIJAI'}</td>
-                        <td className="border border-black p-1 font-mono">{detail.job.serialNo || '-'}</td>
-                        <td className="border border-black p-1 font-bold">{detail.job.capacityKva}</td>
-                        <td className="border border-black p-1">11</td>
-                        <td className="border border-black p-1 font-mono">{detail.oilCap.toFixed(2)}</td>
-                        <td className="border border-black p-1 font-mono">{detail.oilRecd.toFixed(2)}</td>
-                        <td className="border border-black p-1 font-mono">{detail.baseShortage.toFixed(2)}</td>
-                        <td className="border border-black p-1 font-mono">{detail.filterLoss.toFixed(2)}</td>
-                        <td className="border border-black p-1 font-mono font-bold">{detail.netShortage.toFixed(2)}</td>
-                      </tr>
-                    ))}
-                    <tr className="font-bold border-t-2 border-black bg-slate-50 print:bg-white">
-                      <td colSpan={6} className="border border-black p-1 text-right">Total (MR {selectedMrNo}):</td>
-                      <td className="border border-black p-1 font-mono">{totalOilCapacity.toFixed(2)}</td>
-                      <td className="border border-black p-1 font-mono">{totalOilReceived.toFixed(2)}</td>
-                      <td className="border border-black p-1 font-mono">{totalBaseShortage.toFixed(2)}</td>
-                      <td className="border border-black p-1 font-mono">{totalFilterLoss.toFixed(2)}</td>
-                      <td className="border border-black p-1 font-mono font-bold">{totalNetShortage.toFixed(2)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-
-                {/* Table 2: Oil Inward Log for MR */}
-                <div className="pt-1">
-                  <div className="flex justify-between items-center mb-1">
-                    <h4 className="font-bold text-[10px] uppercase">
-                      Inward Oil Received Log for MR: {selectedMrNo} (Division: {currentDivision})
-                    </h4>
-                    <span className="text-[9px] text-slate-500 font-mono">Bill No: {billNo}</span>
+            {/* ==================== PAGE 2: CERTIFICATE ==================== */}
+            <PrintableA4Page
+              agency={activeAgency}
+              documentTitle=""
+              className={activeDocTab === 'all' || activeDocTab === 'certificate' ? 'block' : 'hidden print:block'}
+            >
+              <div className="flex flex-col justify-center h-full my-auto">
+                <div className="border-2 border-black p-8 my-auto flex flex-col justify-between">
+                  <div className="text-center mb-6">
+                    <h2 className="text-lg font-black uppercase border-b-2 border-black inline-block tracking-wider pb-1">
+                      CERTIFICATE
+                    </h2>
                   </div>
-                  <table className="w-full text-center border-collapse border border-black text-[9px]">
+
+                  <p className="text-xs text-black leading-loose text-justify font-medium">
+                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{billDate}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certMonthsText || 'Twelve/Eighteen'} months from the date to delivery.
+                  </p>
+
+                  <div className="text-right mt-12 pt-6">
+                    <p className="font-bold text-xs">For, {activeAgency?.name || ''}</p>
+                    <p className="text-[10px] text-slate-500 mt-6">(Auth Sign.)</p>
+                  </div>
+                </div>
+              </div>
+            </PrintableA4Page>
+
+            {/* ==================== PAGE 3: TAX INVOICE ==================== */}
+            <PrintableA4Page
+              agency={activeAgency}
+              showAgencyHeaderIfNoLetterhead={false}
+              className={activeDocTab === 'all' || activeDocTab === 'invoice' ? 'block' : 'hidden print:block'}
+            >
+              <div className="border-2 border-black text-black text-[10px] h-full flex flex-col justify-between">
+                <div>
+                  {/* Header Row: Supplier & Invoice Identification */}
+                  <div className="grid grid-cols-2 border-b-2 border-black">
+                    <div className="p-2 border-r-2 border-black flex flex-col justify-between">
+                      <div>
+                        {activeAgency?.letterheadUrl && activeAgency?.letterheadMode === 'header_only' ? (
+                          <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-12 object-contain mb-1" />
+                        ) : (
+                          <h1 className="text-xs font-black uppercase font-serif tracking-wide">{activeAgency?.name || 'AGENCY NAME'}</h1>
+                        )}
+                        <p className="font-bold text-[9px] text-slate-800">Repairing of Distribution Transformers</p>
+                        <p className="mt-0.5 text-[9px] leading-tight">{activeAgency?.address || ''}</p>
+                      </div>
+                      <div className="mt-1 pt-1 border-t border-slate-200 text-[9px] space-y-0.5">
+                        <div className="flex justify-between">
+                          <span><strong>State:</strong> {activeAgency?.agencyState || 'Gujarat'}</span>
+                          <span><strong>State Code:</strong> {activeAgency?.agencyStateCode || '24'}</span>
+                        </div>
+                        {(activeAgency?.phone || activeAgency?.email) && (
+                          <div>
+                            {activeAgency?.phone && <span><strong>Ph:</strong> {activeAgency.phone} </span>}
+                            {activeAgency?.email && <span><strong>Email:</strong> {activeAgency.email}</span>}
+                          </div>
+                        )}
+                        {activeAgency?.msmeNo && (
+                          <div><strong>MSME Reg No:</strong> {activeAgency.msmeNo}</div>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="p-2 flex flex-col justify-between">
+                      <div>
+                        <div className="text-right font-bold text-[9px] uppercase tracking-widest border-b border-black pb-0.5 mb-1">
+                          TAX INVOICE
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px]">
+                          <div><span className="font-bold">Bill No:</span> <strong className="font-bold font-mono">{billNo}</strong></div>
+                          <div><span className="font-bold">Bill Date:</span> <span className="font-mono">{billDate}</span></div>
+                          <div><span className="font-bold">Order No:</span> <span className="font-mono">{apprNo}</span></div>
+                          <div><span className="font-bold">Order Date:</span> <span className="font-mono">{apprDate}</span></div>
+                        </div>
+                      </div>
+                      <div className="mt-1 pt-1 border-t border-black p-1 text-[9px] grid grid-cols-2 gap-x-2">
+                        <div><span className="font-bold">GSTIN:</span> <strong className="font-mono">{activeAgency?.gstin || '-'}</strong></div>
+                        <div><span className="font-bold">PAN:</span> <strong className="font-mono">{activeAgency?.pan || '-'}</strong></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Customer (Buyer / Consignee) Details */}
+                  <div className="p-2 border-b-2 border-black">
+                    <div className="grid grid-cols-2 gap-2 text-[9px]">
+                      <div>
+                        <span className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-0.5">Billed To (Client / Consignee):</span>
+                        <p className="font-bold uppercase text-[9px]">{activeAgency?.divisionAuthority || 'EXECUTIVE ENGINEER (O&M)'}</p>
+                        <p className="font-bold text-black">{activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}</p>
+                        <p className="text-[9px]">Division Office: <strong className="font-bold">{currentDivision}</strong></p>
+                        {activeAgency?.discomAddress && (
+                          <p className="text-[8px] text-slate-700 mt-0.5 leading-tight">{activeAgency.discomAddress}</p>
+                        )}
+                      </div>
+                      <div className="border-l border-slate-300 pl-2 flex flex-col justify-between space-y-0.5">
+                        <div>
+                          <div><span className="font-bold">DISCOM GSTIN:</span> <strong className="font-mono">{divisionGstin || activeAgency?.discomGstin || '24AAACU6551F1ZI'}</strong></div>
+                          <div><span className="font-bold">DISCOM PAN:</span> <strong className="font-mono">{divisionPan || activeAgency?.discomPan || 'AAACU6551F'}</strong></div>
+                          <div className="flex justify-between text-[8px] text-slate-700 mt-0.5">
+                            <span><strong>State:</strong> {activeAgency?.discomState || 'Gujarat'}</span>
+                            <span><strong>State Code:</strong> {activeAgency?.discomStateCode || '24'}</span>
+                          </div>
+                        </div>
+                        <div className="text-[8px]">
+                          <span className="font-bold">SAC:</span> Maintenance of Transformers <strong className="font-mono">(998719)</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Sub-header instruction */}
+                  <div className="p-1 border-b border-black font-semibold text-center text-[9px]">
+                    The following Transformer duly repaired with standard parts and tested o. k. with oil upto level mark.
+                  </div>
+
+                  {/* Itemized Table */}
+                  <table className="w-full text-center border-collapse text-[9px]">
                     <thead>
                       <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                        <th className="border border-black p-1">MR NO</th>
-                        <th className="border border-black p-1">Receive Date</th>
-                        <th className="border border-black p-1">MR Date</th>
-                        <th className="border border-black p-1">Fresh / Used</th>
-                        <th className="border border-black p-1">Gross Oil (LTR)</th>
-                        <th className="border border-black p-1">Barrels</th>
-                        <th className="border border-black p-1 font-bold">Net Oil (after 5% FL if used)</th>
+                        <th className="p-1 border-r border-black w-6">Sr.</th>
+                        <th className="p-1 border-r border-black">Job No.</th>
+                        <th className="p-1 border-r border-black">Challan No.</th>
+                        <th className="p-1 border-r border-black">Date</th>
+                        <th className="p-1 border-r border-black">Make</th>
+                        <th className="p-1 border-r border-black w-8">KVA</th>
+                        <th className="p-1 border-r border-black w-6">KV</th>
+                        <th className="p-1 border-r border-black">Serial No.</th>
+                        <th className="p-1 border-r border-black text-right">Est. Amount</th>
+                        <th className="p-1 text-right">Amount (Rs)</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {mrOilTxList.length === 0 ? (
-                        <tr>
-                          <td colSpan={7} className="border border-black p-2 text-slate-500 italic">
-                            No inward oil transaction logged specifically for MR {selectedMrNo} in Oil Ledger.
-                          </td>
-                        </tr>
-                      ) : (
-                        mrOilTxList.map((tx, idx) => (
-                          <tr key={tx.id || idx} className="border-b border-black">
-                            <td className="border border-black p-1 font-mono font-bold">{tx.mrNo}</td>
-                            <td className="border border-black p-1">{tx.date ? new Date(tx.date).toLocaleDateString() : billDate}</td>
-                            <td className="border border-black p-1">{tx.mrDate || selectedMrDate}</td>
-                            <td className="border border-black p-1">{tx.oilType || 'Fresh'}</td>
-                            <td className="border border-black p-1 font-mono">{Number(tx.grossLiters || 0).toFixed(2)}</td>
-                            <td className="border border-black p-1 font-mono">{tx.barrels || 0}</td>
-                            <td className="border border-black p-1 font-mono font-bold">{Number(tx.netLiters || 0).toFixed(2)}</td>
+                      {selectedJobsData.map((job, idx) => {
+                        const jobTotal = calculateJobTotal(job);
+                        return (
+                          <tr key={job.id} className="border-b border-black">
+                            <td className="p-1 border-r border-black">{idx + 1}</td>
+                            <td className="p-1 border-r border-black font-bold font-mono">{job.jobNo}</td>
+                            <td className="p-1 border-r border-black font-mono">{job.challanNo || ''}</td>
+                            <td className="p-1 border-r border-black">{job.deliveryDate || job.challanDate || billDate}</td>
+                            <td className="p-1 border-r border-black">{job.make || ''}</td>
+                            <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
+                            <td className="p-1 border-r border-black">11</td>
+                            <td className="p-1 border-r border-black font-mono">{job.serialNo || '-'}</td>
+                            <td className="p-1 border-r border-black text-right font-mono">{jobTotal.toFixed(2)}</td>
+                            <td className="p-1 text-right font-mono font-bold">{jobTotal.toFixed(2)}</td>
                           </tr>
-                        ))
-                      )}
+                        );
+                      })}
+                      {/* Financial Calculations */}
+                      <tr className="font-bold border-t border-black">
+                        <td colSpan={9} className="p-1 border-r border-black text-right">Total (Taxable Value):</td>
+                        <td className="p-1 text-right font-mono">{subTotal.toFixed(2)}</td>
+                      </tr>
+                      <tr className="font-bold border-t border-black">
+                        <td colSpan={9} className="p-1 border-r border-black text-right">CGST (9.00%):</td>
+                        <td className="p-1 text-right font-mono">{cgst.toFixed(2)}</td>
+                      </tr>
+                      <tr className="font-bold border-t border-black">
+                        <td colSpan={9} className="p-1 border-r border-black text-right">SGST (9.00%):</td>
+                        <td className="p-1 text-right font-mono">{sgst.toFixed(2)}</td>
+                      </tr>
+                      <tr className="font-black border-t border-black text-[10px]">
+                        <td colSpan={9} className="p-1 border-r border-black text-right">Net Total Invoice Value:</td>
+                        <td className="p-1 text-right font-mono font-bold">{grandTotal.toFixed(2)}</td>
+                      </tr>
                     </tbody>
                   </table>
                 </div>
 
-                {/* Summary Box with Concern Division Subtotal & Net Oil on Inspection Date */}
-                <div className="grid grid-cols-2 gap-3 border border-black p-3 font-semibold text-[11px]">
-                  {/* Left Box: Current MR Oil Requirement */}
-                  <div className="space-y-1">
-                    <h4 className="font-bold border-b border-black pb-1 mb-1 uppercase text-[10px] text-slate-900">
-                      1. Current MR ({selectedMrNo}) Oil Requirement
-                    </h4>
-                    <div className="flex justify-between"><span>Transformers Oil Capacity:</span> <span className="font-mono">{totalOilCapacity.toFixed(2)} Ltr</span></div>
-                    <div className="flex justify-between"><span>Oil Received with Transformers:</span> <span className="font-mono">{totalOilReceived.toFixed(2)} Ltr</span></div>
-                    <div className="flex justify-between text-slate-700"><span>Base Oil Shortage:</span> <span className="font-mono">{totalBaseShortage.toFixed(2)} Ltr</span></div>
-                    <div className="flex justify-between text-slate-700"><span>Filtration Loss (5% on Received):</span> <span className="font-mono">+{totalFilterLoss.toFixed(2)} Ltr</span></div>
-                    <div className="flex justify-between border-t border-black pt-1 font-bold text-amber-950">
-                      <span>Net Oil Shortage (MR {selectedMrNo}):</span>
-                      <span className="font-mono font-bold">{totalNetShortage.toFixed(2)} Ltr</span>
+                {/* Bottom Footer Section */}
+                <div className="grid grid-cols-2 border-t-2 border-black">
+                  <div className="p-2 border-r-2 border-black flex flex-col justify-between text-[9px]">
+                    <div>
+                      <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold">{grandTotal.toFixed(2)}</span></p>
+                      <p className="font-semibold italic text-[8px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
+                      <p className="mt-1 text-[8px]">In full settlement of Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{billDate}</strong></p>
+                      {(activeAgency?.bankName || activeAgency?.accountNumber) && (
+                        <div className="mt-1 pt-1 border-t border-dashed border-slate-300 text-[8px]">
+                          <div><strong>Bank:</strong> {activeAgency?.bankName || '-'} | <strong>A/C:</strong> <span className="font-mono font-bold">{activeAgency?.accountNumber || '-'}</span> | <strong>IFSC:</strong> <span className="font-mono font-bold">{activeAgency?.ifscCode || '-'}</span></div>
+                        </div>
+                      )}
                     </div>
-                    <div className="flex justify-between pt-1 text-blue-900">
-                      <span>Inward Oil Received for MR {selectedMrNo}:</span>
-                      <span className="font-mono font-bold">{mrInwardOilTotal.toFixed(2)} Ltr</span>
+                    <div className="pt-3 text-center">
+                      <p className="font-bold">For, {activeAgency?.name || ''}</p>
+                      <div className="h-4"></div>
+                      <p className="text-[8px] text-slate-500">(Authorized Signatory / Stamp)</p>
                     </div>
                   </div>
 
-                  {/* Right Box: Concern Division Subtotal & Net Balance on Inspection / MR Date */}
-                  <div className="space-y-1 border-l border-black pl-3">
-                    <div className="flex justify-between items-center border-b border-black pb-1 mb-1">
-                      <h4 className="font-bold uppercase text-[10px] text-blue-900">
-                        2. {currentDivision} Division Oil Account
+                  <div className="p-2 flex flex-col justify-between text-[9px]">
+                    <div>
+                      <h4 className="font-black text-center uppercase tracking-wider mb-1 border-b border-black pb-0.5 text-[9px]">
+                        Guarantee Card
                       </h4>
-                      <div className="flex items-center gap-1 text-[9px] text-slate-700">
-                        <span>(Up to MR Date: <strong className="font-mono text-blue-950 font-bold">{effectiveOilUptoDate}</strong>)</span>
-                        <input
-                          type="date"
-                          value={formatToYyyyMmDd(effectiveOilUptoDate)}
-                          onChange={(e) => setCustomOilUptoDate(e.target.value)}
-                          className="print:hidden border border-slate-300 rounded px-1 py-0.5 text-[9px] bg-white cursor-pointer ml-1"
-                          title="Change 'Up to MR Date' filter for cross-checking"
-                        />
+                      <p className="text-[8px] leading-tight text-justify">
+                        We guarantee the satisfactory performance of the above repaired transformers for {activeAgency?.gpValidationMonths || 18} months for 11 KV and 12 months for 22 KV from date of delivery.
+                      </p>
+                    </div>
+                    <div className="pt-3 text-center">
+                      <p className="font-bold">For, {activeAgency?.name || ''}</p>
+                      <div className="h-4"></div>
+                      <p className="text-[8px] text-slate-500">(Authorized Signatory)</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </PrintableA4Page>
+
+            {/* ==================== PAGE 4: OIL ACCOUNT ==================== */}
+            <PrintableA4Page
+              agency={activeAgency}
+              documentTitle="OIL ACCOUNT SHEET"
+              showAgencyHeaderIfNoLetterhead={false}
+              className={activeDocTab === 'all' || activeDocTab === 'oil' ? 'block' : 'hidden print:block'}
+            >
+              <div className="border-2 border-black p-3 text-black text-[9px] space-y-2 h-full flex flex-col justify-between">
+                <div>
+                  <div className="grid grid-cols-4 gap-1 font-semibold text-[9px] border-b border-black pb-1 mb-2">
+                    <div>Order: <span className="font-mono font-bold">{apprNo}</span></div>
+                    <div>MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | Date: <span className="font-mono font-bold">{selectedMrDate}</span></div>
+                    <div>Insp. Date: <span className="font-mono font-bold text-blue-900">{selectedMrInspectionDate}</span></div>
+                    <div className="text-right">Division: <strong className="font-bold uppercase text-black">{currentDivision}</strong></div>
+                  </div>
+
+                  {/* Table 1: Delivered Transformers Oil Table */}
+                  <table className="w-full text-center border-collapse border border-black text-[8px] mb-2">
+                    <thead>
+                      <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                        <th className="border border-black p-0.5 w-5">Sr.</th>
+                        <th className="border border-black p-0.5">Job No.</th>
+                        <th className="border border-black p-0.5">Make</th>
+                        <th className="border border-black p-0.5">Serial No.</th>
+                        <th className="border border-black p-0.5 w-6">KVA</th>
+                        <th className="border border-black p-0.5 w-5">KV</th>
+                        <th className="border border-black p-0.5">Oil Cap.</th>
+                        <th className="border border-black p-0.5">Oil Recd.</th>
+                        <th className="border border-black p-0.5">Shortage</th>
+                        <th className="border border-black p-0.5">FL (5%)</th>
+                        <th className="border border-black p-0.5 font-bold">Net Oil Req.</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobOilDetails.map((detail, idx) => (
+                        <tr key={detail.job.id} className="border-b border-black">
+                          <td className="border border-black p-0.5">{idx + 1}</td>
+                          <td className="border border-black p-0.5 font-bold font-mono">{detail.job.jobNo}</td>
+                          <td className="border border-black p-0.5">{detail.job.make || 'VIJAI'}</td>
+                          <td className="border border-black p-0.5 font-mono">{detail.job.serialNo || '-'}</td>
+                          <td className="border border-black p-0.5 font-bold">{detail.job.capacityKva}</td>
+                          <td className="border border-black p-0.5">11</td>
+                          <td className="border border-black p-0.5 font-mono">{detail.oilCap.toFixed(1)}</td>
+                          <td className="border border-black p-0.5 font-mono">{detail.oilRecd.toFixed(1)}</td>
+                          <td className="border border-black p-0.5 font-mono">{detail.baseShortage.toFixed(1)}</td>
+                          <td className="border border-black p-0.5 font-mono">{detail.filterLoss.toFixed(1)}</td>
+                          <td className="border border-black p-0.5 font-mono font-bold">{detail.netShortage.toFixed(1)}</td>
+                        </tr>
+                      ))}
+                      <tr className="font-bold border-t border-black bg-slate-50 print:bg-white">
+                        <td colSpan={6} className="border border-black p-0.5 text-right">Total (MR {selectedMrNo}):</td>
+                        <td className="border border-black p-0.5 font-mono">{totalOilCapacity.toFixed(1)}</td>
+                        <td className="border border-black p-0.5 font-mono">{totalOilReceived.toFixed(1)}</td>
+                        <td className="border border-black p-0.5 font-mono">{totalBaseShortage.toFixed(1)}</td>
+                        <td className="border border-black p-0.5 font-mono">{totalFilterLoss.toFixed(1)}</td>
+                        <td className="border border-black p-0.5 font-mono font-bold">{totalNetShortage.toFixed(1)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  {/* Table 2: Oil Inward Log for MR */}
+                  <div className="mb-2">
+                    <div className="flex justify-between items-center mb-0.5">
+                      <h4 className="font-bold text-[8px] uppercase">
+                        Inward Oil Received Log for MR: {selectedMrNo} (Division: {currentDivision})
+                      </h4>
+                      <span className="text-[8px] text-slate-500 font-mono">Bill No: {billNo}</span>
+                    </div>
+                    <table className="w-full text-center border-collapse border border-black text-[8px]">
+                      <thead>
+                        <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                          <th className="border border-black p-0.5">MR NO</th>
+                          <th className="border border-black p-0.5">Date</th>
+                          <th className="border border-black p-0.5">Type</th>
+                          <th className="border border-black p-0.5">Gross (Ltr)</th>
+                          <th className="border border-black p-0.5">Barrels</th>
+                          <th className="border border-black p-0.5 font-bold">Net Oil (Ltr)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {mrOilTxList.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="border border-black p-1 text-slate-500 italic text-[8px]">
+                              No inward oil transaction logged for MR {selectedMrNo}.
+                            </td>
+                          </tr>
+                        ) : (
+                          mrOilTxList.map((tx, idx) => (
+                            <tr key={tx.id || idx} className="border-b border-black">
+                              <td className="border border-black p-0.5 font-mono font-bold">{tx.mrNo}</td>
+                              <td className="border border-black p-0.5">{tx.date ? new Date(tx.date).toLocaleDateString() : billDate}</td>
+                              <td className="border border-black p-0.5">{tx.oilType || 'Fresh'}</td>
+                              <td className="border border-black p-0.5 font-mono">{Number(tx.grossLiters || 0).toFixed(1)}</td>
+                              <td className="border border-black p-0.5 font-mono">{tx.barrels || 0}</td>
+                              <td className="border border-black p-0.5 font-mono font-bold">{Number(tx.netLiters || 0).toFixed(1)}</td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Summary Box */}
+                  <div className="grid grid-cols-2 gap-2 border border-black p-2 font-semibold text-[8px]">
+                    <div className="space-y-0.5">
+                      <h4 className="font-bold border-b border-black pb-0.5 mb-0.5 uppercase text-[8px]">
+                        1. Current MR ({selectedMrNo}) Oil Requirement
+                      </h4>
+                      <div className="flex justify-between"><span>Total Capacity:</span> <span className="font-mono">{totalOilCapacity.toFixed(1)} Ltr</span></div>
+                      <div className="flex justify-between"><span>Oil Received:</span> <span className="font-mono">{totalOilReceived.toFixed(1)} Ltr</span></div>
+                      <div className="flex justify-between"><span>Base Shortage:</span> <span className="font-mono">{totalBaseShortage.toFixed(1)} Ltr</span></div>
+                      <div className="flex justify-between"><span>Filtration Loss (5%):</span> <span className="font-mono">+{totalFilterLoss.toFixed(1)} Ltr</span></div>
+                      <div className="flex justify-between border-t border-black pt-0.5 font-bold">
+                        <span>Net Shortage:</span>
+                        <span className="font-mono font-bold">{totalNetShortage.toFixed(1)} Ltr</span>
                       </div>
                     </div>
 
-                    <div className="flex justify-between pt-0.5">
-                      <span className="font-bold">Sub Total of Total Oil Shortage ({currentDivision} Division):</span>
-                      <span className="font-mono font-bold text-amber-900">+{divisionOilStatement.divisionCumulativeShortage.toFixed(2)} Ltr</span>
+                    <div className="space-y-0.5 border-l border-black pl-2">
+                      <h4 className="font-bold border-b border-black pb-0.5 mb-0.5 uppercase text-[8px]">
+                        2. {currentDivision} Division Balance (Up to: {effectiveOilUptoDate})
+                      </h4>
+                      <div className="flex justify-between">
+                        <span>Cumulative Shortage:</span>
+                        <span className="font-mono font-bold">+{divisionOilStatement.divisionCumulativeShortage.toFixed(1)} Ltr</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Cumulative Inward:</span>
+                        <span className="font-mono font-bold">-{divisionOilStatement.divisionCumulativeInward.toFixed(1)} Ltr</span>
+                      </div>
+                      <div className="flex justify-between border-t border-black pt-0.5 font-black">
+                        <span>Net Oil Status:</span>
+                        <span className="font-mono">
+                          {divisionOilStatement.divisionNetOilOnInspectionDate >= 0 ? '+' : ''}
+                          {divisionOilStatement.divisionNetOilOnInspectionDate.toFixed(1)} Ltr
+                        </span>
+                      </div>
                     </div>
-
-                    <div className="flex justify-between text-blue-900 font-bold">
-                      <span>Total Inward Oil Received ({currentDivision} Division):</span>
-                      <span className="font-mono font-bold">-{divisionOilStatement.divisionCumulativeInward.toFixed(2)} Ltr</span>
-                    </div>
-
-                    <div className="flex justify-between border-t-2 border-black pt-1 font-black text-xs">
-                      <span>Net Oil (Due / Credited at Agency):</span>
-                      <span className="font-mono text-sm">
-                        {divisionOilStatement.divisionNetOilOnInspectionDate >= 0 ? '+' : ''}
-                        {divisionOilStatement.divisionNetOilOnInspectionDate.toFixed(2)} Ltr
-                      </span>
-                    </div>
-
-                    <div className="bg-slate-100 p-1.5 border border-black rounded mt-1 flex justify-between items-center text-[10px]">
-                      <span className="font-bold uppercase">Status on MR Date:</span>
-                      <span className={`font-bold font-mono px-2 py-0.5 rounded text-white ${divisionOilStatement.divisionNetOilOnInspectionDate > 0 ? 'bg-amber-800' : divisionOilStatement.divisionNetOilOnInspectionDate < 0 ? 'bg-emerald-800' : 'bg-slate-800'}`}>
-                        {divisionOilStatement.divisionNetOilOnInspectionDate > 0 ? `${divisionOilStatement.divisionNetOilOnInspectionDate.toFixed(2)} Ltr Due to Agency` : divisionOilStatement.divisionNetOilOnInspectionDate < 0 ? `${Math.abs(divisionOilStatement.divisionNetOilOnInspectionDate).toFixed(2)} Ltr Credited at Agency` : '0.00 Ltr (Balanced)'}
-                      </span>
-                    </div>
-
-                    <p className="text-[9px] text-slate-500 italic mt-1 leading-tight">
-                      * Cross-check in Oil Ledger: Select Division "{currentDivision}" and set "Up to MR Date" filter to {effectiveOilUptoDate}.
-                    </p>
                   </div>
                 </div>
 
                 {/* Footer Signature */}
-                <div className="text-right pt-8">
-                  <p className="font-bold">For, {activeAgency?.name || 'POWER TRANSMISSION COMPANY'}</p>
-                  <div className="h-8"></div>
-                  <p className="text-[10px] text-slate-500">(Auth Sign.)</p>
+                <div className="text-right pt-2">
+                  <p className="font-bold text-[9px]">For, {activeAgency?.name || 'POWER TRANSMISSION COMPANY'}</p>
+                  <div className="h-4"></div>
+                  <p className="text-[8px] text-slate-500">(Auth Sign.)</p>
                 </div>
-
               </div>
-            </div>
+            </PrintableA4Page>
 
           </div>
 

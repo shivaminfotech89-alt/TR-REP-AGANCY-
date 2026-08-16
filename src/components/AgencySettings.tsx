@@ -1,5 +1,4 @@
 import { AtSettings } from './AtSettings';
-import { AtDivisions } from './AtDivisions';
 import React, { useState, useRef } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { useTheme } from '../lib/ThemeContext';
@@ -7,6 +6,8 @@ import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, Palette, Check, Sparkles, Sun, Moon, Layers, ChevronDown, ChevronUp } from 'lucide-react';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
+import { validateDivisionPrefixes } from '../lib/prefixValidation';
+import { LetterheadCalibrator } from './LetterheadCalibrator';
 
 export default function AgencySettings() {
   const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading } = useAgency();
@@ -24,6 +25,14 @@ export default function AgencySettings() {
   const [ifscCode, setIfscCode] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
+
+  // Letterhead Layout & Calibrator States
+  const [letterheadBase64, setLetterheadBase64] = useState('');
+  const [letterheadMode, setLetterheadMode] = useState<'full_a4' | 'header_only' | 'standard'>('full_a4');
+  const [headerHeightMm, setHeaderHeightMm] = useState<number>(38);
+  const [footerHeightMm, setFooterHeightMm] = useState<number>(24);
+  const [marginLeftMm, setMarginLeftMm] = useState<number>(12);
+  const [marginRightMm, setMarginRightMm] = useState<number>(12);
 
   const [migrating, setMigrating] = useState(false);
   const handleMigrateData = async () => {
@@ -74,24 +83,7 @@ export default function AgencySettings() {
     allotmentWoundCore: '10'
   }]);
   
-  // Base64 file string for letterhead
-  const [letterheadBase64, setLetterheadBase64] = useState('');
-  const [fileName, setFileName] = useState('');
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  
   const [isSubmitting, setIsSubmitting] = useState(false);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFileName(file.name);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setLetterheadBase64(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
-  };
 
   const handleAddDivision = () => {
     setDivisions([...divisions, { name: '', prefixCRGO: '', prefixAmorphous: '', prefixWoundCore: '', prefixLSTC: '', prefixOH: '', allotmentCRGO: '', allotmentAmorphous: '', allotmentWoundCore: '' }]);
@@ -112,6 +104,13 @@ export default function AgencySettings() {
 
   const handleAddAgency = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const validation = validateDivisionPrefixes(divisions);
+    if (!validation.isValid) {
+      alert(`Cannot create agency due to division prefix validation error:\n\n${validation.errors.join('\n')}`);
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const prefixes: Record<string, Record<string, string>> = {};
@@ -120,12 +119,13 @@ export default function AgencySettings() {
       
       divisions.forEach(d => {
         if (d.name.trim() && d.prefixCRGO.trim()) {
-          prefixes[d.name.trim()] = {
+          const divName = d.name.trim();
+          prefixes[divName] = {
             'CRGO': d.prefixCRGO.trim(),
-            'Amorphous': d.prefixAmorphous.trim() || d.prefixCRGO.trim(),
-            'Wound Core': d.prefixWoundCore.trim() || d.prefixCRGO.trim(),
-            'LSTC': d.prefixLSTC.trim() || d.prefixCRGO.trim(),
-            'OH': d.prefixOH.trim() || d.prefixCRGO.trim(),
+            'Amorphous': (d.prefixAmorphous || '').trim(),
+            'Wound Core': (d.prefixWoundCore || '').trim(),
+            'LSTC': (d.prefixLSTC || '').trim(),
+            'OH': (d.prefixOH || '').trim(),
           };
           allotments[d.name.trim()] = {
             'CRGO': Number(d.allotmentCRGO) || 0,
@@ -140,6 +140,11 @@ export default function AgencySettings() {
       await addAgency({
         name: newAgencyName,
         letterheadUrl: letterheadBase64,
+        letterheadMode,
+        letterheadHeaderHeightMm: headerHeightMm,
+        letterheadFooterHeightMm: footerHeightMm,
+        letterheadMarginLeftMm: marginLeftMm,
+        letterheadMarginRightMm: marginRightMm,
         agencyState: 'Gujarat',
         agencyStateCode: '24',
         discomName: 'Uttar Gujarat Vij Company Ltd.',
@@ -179,7 +184,6 @@ export default function AgencySettings() {
       setEmail('');
       setPhone('');
       setLetterheadBase64('');
-      setFileName('');
       setDivisions([{ name: 'SABARMATI', prefix: '21 IS' }]);
     } catch (err) {
       console.error(err);
@@ -404,10 +408,7 @@ export default function AgencySettings() {
       </div>
       
       {activeAgency && (
-        <>
-          <AtSettings />
-          <AtDivisions />
-        </>
+        <AtSettings />
       )}
 
       <div className="bg-white p-6 rounded shadow-sm border border-slate-200">
@@ -466,25 +467,22 @@ export default function AgencySettings() {
               </div>
             </div>
             
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Letterhead (PDF)</label>
-              <input 
-                type="file" 
-                accept="application/pdf"
-                ref={fileInputRef}
-                onChange={handleFileChange} 
-                className="hidden" 
+            <div className="pt-2">
+              <LetterheadCalibrator
+                letterheadUrl={letterheadBase64}
+                letterheadMode={letterheadMode}
+                headerHeightMm={headerHeightMm}
+                footerHeightMm={footerHeightMm}
+                marginLeftMm={marginLeftMm}
+                marginRightMm={marginRightMm}
+                agencyName={newAgencyName}
+                onLetterheadChange={setLetterheadBase64}
+                onModeChange={setLetterheadMode}
+                onHeaderHeightChange={setHeaderHeightMm}
+                onFooterHeightChange={setFooterHeightMm}
+                onMarginLeftChange={setMarginLeftMm}
+                onMarginRightChange={setMarginRightMm}
               />
-              <div className="flex items-center space-x-3">
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="px-4 py-2 text-xs font-bold uppercase tracking-widest bg-slate-100 text-slate-700 rounded border border-slate-300 hover:bg-slate-200 transition-colors flex items-center"
-                >
-                  <FileUp className="w-4 h-4 mr-2" /> Upload PDF
-                </button>
-                {fileName && <span className="text-sm text-slate-600 truncate">{fileName}</span>}
-              </div>
             </div>
             
             <div>

@@ -11,13 +11,15 @@ import {
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
 import { ExternalData } from './ExternalInspection';
-import { LetterheadHeader } from './LetterheadHeader';
+import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { downloadHtmlAsWord } from '../lib/wordExport';
+import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 
 export default function EstimateGenerate() {
   const { activeAgency, activeAtMaster, updateAgency } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
@@ -161,7 +163,11 @@ export default function EstimateGenerate() {
   }, [mrGroups, searchQuery, selectedDivision]);
 
   const handlePrint = () => {
-    window.print();
+    if (selectedMrNo) {
+      triggerUniversalPrint('printable-estimate-container', `Estimate Report & Forwarding Letter - MR ${selectedMrNo}`, `Estimate_MR_${selectedMrNo}.pdf`);
+    } else {
+      triggerUniversalPrint('printable-estimate-container', 'Estimate Report', 'Estimate_Report.pdf');
+    }
   };
 
   const handleExportExcel = () => {
@@ -888,9 +894,26 @@ export default function EstimateGenerate() {
                   </button>
                   <button 
                     onClick={handlePrint}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3.5 py-2 rounded transition-colors shadow-sm cursor-pointer"
+                    title="Print document or open print dialog"
                   >
-                    <Printer className="w-3.5 h-3.5 mr-1.5" /> Print / PDF
+                    <Printer className="w-3.5 h-3.5 mr-1.5" /> Print
+                  </button>
+                  <button 
+                    disabled={isExportingPdf}
+                    onClick={async () => {
+                      setIsExportingPdf(true);
+                      try {
+                        await downloadElementAsPdf('printable-estimate-container', `Estimate_MR_${selectedMrNo || 'Report'}.pdf`);
+                      } finally {
+                        setIsExportingPdf(false);
+                      }
+                    }}
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white px-3.5 py-2 rounded transition-colors shadow-sm cursor-pointer disabled:opacity-50"
+                    title="Download crisp A4 PDF file"
+                  >
+                    {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
+                    {isExportingPdf ? 'Saving...' : 'PDF'}
                   </button>
                   <button 
                     onClick={handleExportExcel}
@@ -921,312 +944,314 @@ export default function EstimateGenerate() {
 
           <div id="printable-estimate-container" className="space-y-6 print:space-y-0">
             {/* PAGE 1: ESTIMATE REPORT */}
-            <div className="bg-white p-8 rounded shadow-sm border border-slate-200 print:shadow-none print:border-none print:p-0">
-              {/* Header */}
-              <LetterheadHeader agency={activeAgency} documentTitle="ESTIMATE REPORT" />
-
-              <div className="flex justify-between items-center text-[10px] font-bold uppercase text-black mb-2 border-b-2 border-black pb-2">
+            <PrintableA4Page agency={activeAgency} documentTitle="ESTIMATE REPORT">
+              <div className="flex flex-col justify-between h-full">
                 <div>
-                  <p>DIVISION : {selectedJobsData[0]?.division || 'SABARMATI'}</p>
-                  <p className="mt-1">ORDER NO : {activeAgency?.prefixes?.[selectedJobsData[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
-                </div>
-                <div className="text-center text-sm underline decoration-2 underline-offset-4">
-                  ESTIMATE REPORT
-                </div>
-                <div className="text-right">
-                  <p>NO : {Math.floor(Math.random() * 100) + 1}</p>
-                  <p className="mt-1">DATE : {letterDateText || dateString}</p>
-                </div>
-              </div>
+                  <div className="flex justify-between items-center text-[9px] font-bold uppercase text-black mb-1.5 border-b border-black pb-1">
+                    <div>
+                      <p>DIVISION : {selectedJobsData[0]?.division || 'SABARMATI'}</p>
+                      <p className="mt-0.5">ORDER NO : {activeAgency?.prefixes?.[selectedJobsData[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
+                    </div>
+                    <div className="text-center text-xs font-bold underline decoration-1 underline-offset-2">
+                      ESTIMATE REPORT
+                    </div>
+                    <div className="text-right">
+                      <p>NO : {Math.floor(Math.random() * 100) + 1}</p>
+                      <p className="mt-0.5">DATE : {letterDateText || dateString}</p>
+                    </div>
+                  </div>
 
-            <table className="w-full text-black text-[9px] border-collapse border-2 border-black">
-              <tbody>
-                <tr className="border-b-2 border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">TRANS TYPE</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">{job.coreType || 'CRGO'}</td>
-                  ))}
-                </tr>
-                <tr className="border-b border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">JOB NO</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">{job.jobNo}</td>
-                  ))}
-                </tr>
-                <tr className="border-b border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">MAKE</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">{job.make}</td>
-                  ))}
-                </tr>
-                <tr className="border-b border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">KVA / KV</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">{job.capacityKva} / 11</td>
-                  ))}
-                </tr>
-                <tr className="border-b border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">TSR NO.</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">{job.serialNo}</td>
-                  ))}
-                </tr>
-                <tr className="border-b border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">MR NO. & DATE</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">{job.mrNo}</td>
-                  ))}
-                </tr>
-                <tr className="border-b-2 border-black font-bold">
-                  <td className="p-1 border-r-2 border-black">Oil Cap / Less Oil / Filter Oil</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-1 border-r border-black text-center">- / - / -</td>
-                  ))}
-                </tr>
+                  <table className="w-full text-black text-[8px] border-collapse border border-black">
+                    <tbody>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">TRANS TYPE</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.coreType || 'CRGO'}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">JOB NO</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.jobNo}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">MAKE</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.make}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">KVA / KV</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.capacityKva} / 11</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">TSR NO.</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.serialNo}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">MR NO. & DATE</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.mrNo}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-black font-bold">
+                        <td className="p-0.5 border-r border-black">Oil Cap / Less Oil / Filter Oil</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0.5 border-r border-black text-center">- / - / -</td>
+                        ))}
+                      </tr>
 
-                {/* Sub headers */}
-                <tr className="border-b-2 border-black font-bold bg-slate-100 print:bg-transparent">
-                  <td className="p-1 border-r-2 border-black flex justify-between">
-                    <span>As Per AT Sr</span>
-                    <span className="text-center flex-1">ITEM</span>
-                  </td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-0 border-r border-black">
-                      <table className="w-full text-center">
-                        <tbody>
-                          <tr>
-                            <td className="w-1/3 py-1 border-r border-black">QTY</td>
-                            <td className="w-1/3 py-1 border-r border-black">RATE</td>
-                            <td className="w-1/3 py-1">AMT.</td>
-                          </tr>
-                        </tbody>
-                      </table>
-                    </td>
-                  ))}
-                </tr>
-
-                {/* Items */}
-                {(selectedJobsData.length > 0 
-                  ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
-                  : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
-                ).map((item, idx) => (
-                  <tr key={idx} className="border-b border-slate-400">
-                    <td className="p-1 border-r-2 border-black flex gap-2">
-                      <span className="w-8">{item.itemCode}</span>
-                      <span>{item.itemName}</span>
-                    </td>
-                    {selectedJobsData.map(job => {
-                      const kva = String(job.capacityKva);
-                      const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
-                      const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-                      const rawRate = itemForJob.rates[kva as keyof typeof itemForJob.rates] || 0;
-                      const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
-                      
-                      let qty = 0;
-                      let qtyDisplay = '0';
-                      
-                      const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
-                      const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                      
-                      if (isScrapItem === isScrapJob && rate > 0) {
-                        if (item.unit === 'Y') {
-                           qtyDisplay = 'Y';
-                           qty = 1;
-                        } else if (item.unit === 'QTY') {
-                           qty = 1;
-                           if (item.itemCode === '1c') qty = 7;
-                           if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-                           if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-                           if (item.itemCode === '15') qty = 6;
-                           qtyDisplay = qty.toString();
-                        } else if (item.unit === 'KG') {
-                           qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-                           qtyDisplay = qty.toFixed(2);
-                        }
-                      }
-                      
-                      if (item.unit === 'N') {
-                          qtyDisplay = 'N';
-                          qty = 0;
-                      }
-
-                      const amt = qty * rate;
-
-                      return (
-                        <td key={job.id} className="p-0 border-r border-black">
-                          <table className="w-full text-center">
-                            <tbody>
-                              <tr>
-                                <td className="w-1/3 py-1 border-r border-slate-400">{qtyDisplay}</td>
-                                <td className="w-1/3 py-1 border-r border-slate-400">{rate > 0 ? rate.toFixed(2) : '0.00'}</td>
-                                <td className="w-1/3 py-1">{amt > 0 ? amt.toFixed(2) : '0.00'}</td>
-                              </tr>
-                            </tbody>
-                          </table>
+                      {/* Sub headers */}
+                      <tr className="border-b border-black font-bold bg-slate-100 print:bg-transparent">
+                        <td className="p-0.5 border-r border-black flex justify-between">
+                          <span>As Per AT Sr</span>
+                          <span className="text-center flex-1">ITEM</span>
                         </td>
-                      );
-                    })}
-                  </tr>
-                ))}
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-0 border-r border-black">
+                            <table className="w-full text-center text-[8px]">
+                              <tbody>
+                                <tr>
+                                  <td className="w-1/3 py-0.5 border-r border-black">QTY</td>
+                                  <td className="w-1/3 py-0.5 border-r border-black">RATE</td>
+                                  <td className="w-1/3 py-0.5">AMT.</td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </td>
+                        ))}
+                      </tr>
+
+                      {/* Items */}
+                      {(selectedJobsData.length > 0 
+                        ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
+                        : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
+                      ).map((item, idx) => (
+                        <tr key={idx} className="border-b border-slate-300">
+                          <td className="p-0.5 border-r border-black flex gap-1">
+                            <span className="w-6 shrink-0">{item.itemCode}</span>
+                            <span className="truncate">{item.itemName}</span>
+                          </td>
+                          {selectedJobsData.map(job => {
+                            const kva = String(job.capacityKva);
+                            const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+                            const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
+                            const rawRate = itemForJob.rates[kva as keyof typeof itemForJob.rates] || 0;
+                            const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
+                            
+                            let qty = 0;
+                            let qtyDisplay = '0';
+                            
+                            const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
+                            const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                            
+                            if (isScrapItem === isScrapJob && rate > 0) {
+                              if (item.unit === 'Y') {
+                                 qtyDisplay = 'Y';
+                                 qty = 1;
+                              } else if (item.unit === 'QTY') {
+                                 qty = 1;
+                                 if (item.itemCode === '1c') qty = 7;
+                                 if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
+                                 if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
+                                 if (item.itemCode === '15') qty = 6;
+                                 qtyDisplay = qty.toString();
+                              } else if (item.unit === 'KG') {
+                                 qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
+                                 qtyDisplay = qty.toFixed(2);
+                              }
+                            }
+                            
+                            if (item.unit === 'N') {
+                                qtyDisplay = 'N';
+                                qty = 0;
+                            }
+
+                            const amt = qty * rate;
+
+                            return (
+                              <td key={job.id} className="p-0 border-r border-black">
+                                <table className="w-full text-center text-[8px]">
+                                  <tbody>
+                                    <tr>
+                                      <td className="w-1/3 py-0.5 border-r border-slate-300">{qtyDisplay}</td>
+                                      <td className="w-1/3 py-0.5 border-r border-slate-300">{rate > 0 ? rate.toFixed(1) : '0.0'}</td>
+                                      <td className="w-1/3 py-0.5">{amt > 0 ? amt.toFixed(1) : '0.0'}</td>
+                                    </tr>
+                                  </tbody>
+                                </table>
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      ))}
+                      
+                      {/* Totals */}
+                      <tr className="border-t border-black font-bold">
+                        <td className="p-1 border-r border-black text-right">Total</td>
+                        {selectedJobsData.map(job => (
+                          <td key={job.id} className="p-1 border-r border-black text-right font-mono">{calculateJobTotal(job).toFixed(2)}</td>
+                        ))}
+                      </tr>
+                      <tr className="border-t border-black font-bold">
+                        <td className="p-1 border-r border-black text-right">
+                          {(() => {
+                            if (selectedJobsData.length === 0) return 'Rise / Fall Total';
+                            const pcts = selectedJobsData.map(j => getAtPercentageForCore(activeAtMaster, j.coreType));
+                            const allSame = pcts.every(p => p === pcts[0]);
+                            if (allSame) {
+                              const p = pcts[0];
+                              return p >= 0 ? `${p.toFixed(2)} % Rise Total` : `${Math.abs(p).toFixed(2)} % Fall Total`;
+                            }
+                            return 'AT % Rise / Fall Total';
+                          })()}
+                        </td>
+                        {selectedJobsData.map(job => {
+                          const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                          const baseTot = calculateJobTotal(job);
+                          const riseAmt = baseTot * (atPct / 100);
+                          return (
+                            <td key={job.id} className="p-1 border-r border-black text-right font-mono">
+                              {riseAmt.toFixed(2)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                      <tr className="border-t border-black font-bold text-[9px]">
+                        <td className="p-1 border-r border-black text-right">Grand Total</td>
+                        {selectedJobsData.map(job => {
+                          const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                          const baseTot = calculateJobTotal(job);
+                          const grandTot = baseTot * (1 + atPct / 100);
+                          return (
+                            <td key={job.id} className="p-1 border-r border-black text-right font-mono">{grandTot.toFixed(2)}</td>
+                          );
+                        })}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
                 
-                {/* Totals */}
-                <tr className="border-t-2 border-black font-bold">
-                  <td className="p-2 border-r-2 border-black text-right">Total</td>
-                  {selectedJobsData.map(job => (
-                    <td key={job.id} className="p-2 border-r border-black text-right">{calculateJobTotal(job).toFixed(2)}</td>
-                  ))}
-                </tr>
-                <tr className="border-t border-black font-bold">
-                  <td className="p-2 border-r-2 border-black text-right">
-                    {(() => {
-                      if (selectedJobsData.length === 0) return 'Rise / Fall Total';
-                      const pcts = selectedJobsData.map(j => getAtPercentageForCore(activeAtMaster, j.coreType));
-                      const allSame = pcts.every(p => p === pcts[0]);
-                      if (allSame) {
-                        const p = pcts[0];
-                        return p >= 0 ? `${p.toFixed(2)} % Rise Total` : `${Math.abs(p).toFixed(2)} % Fall Total`;
-                      }
-                      return 'AT % Rise / Fall Total';
-                    })()}
-                  </td>
-                  {selectedJobsData.map(job => {
-                    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                    const baseTot = calculateJobTotal(job);
-                    const riseAmt = baseTot * (atPct / 100);
-                    return (
-                      <td key={job.id} className="p-2 border-r border-black text-right">
-                        {riseAmt.toFixed(2)}
-                      </td>
-                    );
-                  })}
-                </tr>
-                <tr className="border-t-2 border-black font-bold text-[10px]">
-                  <td className="p-2 border-r-2 border-black text-right">Grand Total</td>
-                  {selectedJobsData.map(job => {
-                    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                    const baseTot = calculateJobTotal(job);
-                    const grandTot = baseTot * (1 + atPct / 100);
-                    return (
-                      <td key={job.id} className="p-2 border-r border-black text-right">{grandTot.toFixed(2)}</td>
-                    );
-                  })}
-                </tr>
-              </tbody>
-            </table>
-            
-            <div className="flex justify-between items-end mt-8 text-black text-sm font-bold pb-16">
-              <div>
-                <p className="underline underline-offset-4">
-                  Note - {selectedJobsData.some(j => j.status === 'Scrap' || j.condition === 'Scrap') ? 'Scrap Included' : ''}
-                </p>
+                <div className="flex justify-between items-end mt-4 text-black text-xs font-bold pt-2">
+                  <div>
+                    <p className="underline underline-offset-2 text-[10px]">
+                      Note - {selectedJobsData.some(j => j.status === 'Scrap' || j.condition === 'Scrap') ? 'Scrap Included' : ''}
+                    </p>
+                  </div>
+                  <div className="text-center">
+                    <p className="mb-6">For, {activeAgency?.name || ''}</p>
+                    <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                  </div>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="mb-12">For, {activeAgency?.name || ''}</p>
-                <p>Auth Sign.</p>
-              </div>
-            </div>
-          </div>
+            </PrintableA4Page>
 
-          {/* PAGE BREAK HERE for FORWARDING LETTER */}
-          <div className="break-before-page"></div>
-
-          {/* PAGE 2: FORWARDING LETTER */}
-          <div className="bg-white p-12 mt-8 rounded shadow-sm border border-slate-200 print:shadow-none print:border-none print:p-0 print:mt-0 text-black">
-            <LetterheadHeader agency={activeAgency} />
-
-            <div className="flex justify-between text-sm font-bold mb-8">
-              <div className="whitespace-pre-wrap">
-                {forwardingTo || `Superintending Engineer (O & M),
+            {/* PAGE 2: FORWARDING LETTER */}
+            <PrintableA4Page agency={activeAgency}>
+              <div className="flex flex-col justify-between h-full text-black">
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-4">
+                    <div className="whitespace-pre-wrap">
+                      {forwardingTo || `Superintending Engineer (O & M),
 Uttar Gujarat Vij Company Ltd.,
 Circle Office : SABARMATI`}
+                    </div>
+                    <div className="text-right whitespace-pre-wrap">
+                      <p>REF. NO. : {refNoText}</p>
+                      <p className="mt-1">DATE : {letterDateText}</p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
+                    Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
+                  </div>
+
+                  <p className="text-xs mb-2">Dear Sir,</p>
+                  <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
+                    {refBodyText}
+                  </p>
+
+                  <table className="w-full text-center text-xs border-collapse border border-black mb-4">
+                    <thead>
+                      <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                        <th className="p-1 border-r border-black">NO.</th>
+                        <th className="p-1 border-r border-black">JOB. NO.</th>
+                        <th className="p-1 border-r border-black">T.R. MAKE</th>
+                        <th className="p-1 border-r border-black">TR. SR. NO.</th>
+                        <th className="p-1 border-r border-black">KVA</th>
+                        <th className="p-1 border-r border-black">KV</th>
+                        <th className="p-1 border-r border-black">TYPE</th>
+                        <th className="p-1 border-r border-black">OGP/GP</th>
+                        <th className="p-1 border-r border-black">EST. AMT.</th>
+                        <th className="p-1">REMARK</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedJobsData.map((job, idx) => {
+                         const jobBaseTotal = calculateJobTotal(job);
+                         const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                         const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
+                         const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                         
+                        return (
+                          <tr key={job.id} className="border-b border-black">
+                            <td className="p-1 border-r border-black">{idx + 1}</td>
+                            <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
+                            <td className="p-1 border-r border-black">{job.make}</td>
+                            <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
+                            <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
+                            <td className="p-1 border-r border-black">11</td>
+                            <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
+                            <td className="p-1 border-r border-black">OGP</td>
+                            <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
+                            <td className="p-1 text-center text-[10px] font-bold whitespace-nowrap">{isScrapJob ? 'SCRAP' : 'REPAIRABLE'}</td>
+                          </tr>
+                        )
+                      })}
+                      <tr className="font-bold border-black">
+                        <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
+                        <td className="p-1 border-r border-black text-right font-mono font-bold">
+                          {selectedJobsData.reduce((acc, job) => {
+                            const baseAmt = calculateJobTotal(job);
+                            const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                            return acc + (baseAmt * (1 + atPct / 100));
+                          }, 0).toFixed(2)}
+                        </td>
+                        <td></td>
+                      </tr>
+                    </tbody>
+                  </table>
+
+                  <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
+                </div>
+
+                <div>
+                  <div className="flex justify-between text-xs mb-6">
+                    <p>Thanking you</p>
+                    <p>Yours faithfully</p>
+                  </div>
+
+                  <div className="flex justify-between text-xs mb-4">
+                    <p>Encl. : Estimate & Inspection Reports</p>
+                    <div className="text-center">
+                      <p className="mb-6 font-bold">{signedByText}</p>
+                      <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs font-bold">
+                    <p className="mb-1">C . C. to :</p>
+                    <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
+                  </div>
+                </div>
               </div>
-              <div className="text-right whitespace-pre-wrap">
-                <p>REF. NO. : {refNoText}</p>
-                <p className="mt-2">DATE : {letterDateText}</p>
-              </div>
-            </div>
-
-            <div className="text-sm font-bold text-center underline underline-offset-4 mb-8">
-              Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
-            </div>
-
-            <p className="text-sm mb-6">Dear Sir,</p>
-            <p className="text-sm mb-8 leading-relaxed ml-8 whitespace-pre-wrap">
-              {refBodyText}
-            </p>
-
-            <table className="w-full text-center text-sm border-collapse border border-black mb-8">
-              <thead>
-                <tr className="font-bold border-b border-black">
-                  <th className="p-2 border-r border-black">NO.</th>
-                  <th className="p-2 border-r border-black">JOB. NO.</th>
-                  <th className="p-2 border-r border-black">T.R. MAKE</th>
-                  <th className="p-2 border-r border-black">TR. SR. NO.</th>
-                  <th className="p-2 border-r border-black">KVA</th>
-                  <th className="p-2 border-r border-black">KV</th>
-                  <th className="p-2 border-r border-black">TRANS. TYPE</th>
-                  <th className="p-2 border-r border-black">OGP/ GP</th>
-                  <th className="p-2 border-r border-black">EST. AMT.</th>
-                  <th className="p-2">REMARK</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedJobsData.map((job, idx) => {
-                   const jobBaseTotal = calculateJobTotal(job);
-                   const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                   const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
-                   const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                   
-                  return (
-                    <tr key={job.id} className="border-b border-black">
-                      <td className="p-2 border-r border-black">{idx + 1}</td>
-                      <td className="p-2 border-r border-black">{job.jobNo}</td>
-                      <td className="p-2 border-r border-black">{job.make}</td>
-                      <td className="p-2 border-r border-black">{job.serialNo}</td>
-                      <td className="p-2 border-r border-black">{job.capacityKva}</td>
-                      <td className="p-2 border-r border-black">11</td>
-                      <td className="p-2 border-r border-black">{job.coreType || 'CRGO'}</td>
-                      <td className="p-2 border-r border-black">OGP</td>
-                      <td className="p-2 border-r border-black text-right">{finalAmt}</td>
-                      <td className="p-2 text-center text-xs font-bold whitespace-nowrap">{isScrapJob ? 'SCRAP INCLUDED' : 'REPAIRABLE'}</td>
-                    </tr>
-                  )
-                })}
-                <tr className="font-bold border-black">
-                  <td colSpan={8} className="p-2 border-r border-black text-right">TOTAL</td>
-                  <td className="p-2 border-r border-black text-right">
-                    {selectedJobsData.reduce((acc, job) => {
-                      const baseAmt = calculateJobTotal(job);
-                      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                      return acc + (baseAmt * (1 + atPct / 100));
-                    }, 0).toFixed(2)}
-                  </td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-
-            <p className="text-sm mb-12 whitespace-pre-wrap">{closingText}</p>
-
-            <div className="flex justify-between text-sm mb-12">
-              <p>Thanking you</p>
-              <p>Yours faithfully</p>
-            </div>
-
-            <div className="flex justify-between text-sm mb-8">
-              <p>Encl. : Estimate & Inspection Reports</p>
-              <div className="text-center">
-                <p className="mb-12 font-bold">{signedByText}</p>
-                <p>Auth Sign.</p>
-              </div>
-            </div>
-
-            <div className="text-sm font-bold">
-              <p className="mb-4">C . C. to :</p>
-              <p className="whitespace-pre-wrap">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
-            </div>
+            </PrintableA4Page>
           </div>
-        </div>
       </div>
       )}
       </>

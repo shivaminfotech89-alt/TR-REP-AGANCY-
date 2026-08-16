@@ -4,9 +4,11 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
-import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
+import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet, Download } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
+import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { PrintableA4Page } from './LetterheadHeader';
 
 interface Job {
   id: string;
@@ -63,6 +65,7 @@ export default function TestingReport() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   const [tab, setTab] = useState<'Pending' | 'Completed'>('Pending');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
@@ -314,120 +317,164 @@ export default function TestingReport() {
     const selectedJobs = Array.from<string>(selectedJobIds).map(id => jobs.find(j => j.id === id)!).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
     const printDate = selectedJobs[0]?.testingDate ? formatDate(selectedJobs[0].testingDate) : formatDate(new Date().toISOString());
 
+    // Chunk jobs for clean landscape A4 pagination (8 jobs per page)
+    const CHUNK_SIZE = 8;
+    const jobChunks: typeof selectedJobs[] = [];
+    for (let i = 0; i < selectedJobs.length; i += CHUNK_SIZE) {
+      jobChunks.push(selectedJobs.slice(i, i + CHUNK_SIZE));
+    }
+    if (jobChunks.length === 0) jobChunks.push([]);
+
     return (
-      <div className="bg-white min-h-screen print:bg-white text-black p-4 print:p-0">
-        <style>
-          {`
-            @media print {
-              @page { size: landscape; margin: 10mm; }
-              body { font-family: sans-serif; -webkit-print-color-adjust: exact; }
-              table { page-break-inside: auto; }
-              tr { page-break-inside: avoid; page-break-after: auto; }
-            }
-          `}
-        </style>
-        
-        <div className="print:hidden mb-4 flex justify-between items-center bg-slate-100 p-4 rounded border border-slate-300">
-          <p className="text-sm font-bold">Print Preview Mode</p>
-          <div className="flex space-x-2">
-            <button onClick={() => window.print()} className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center shadow-sm">
-              <Printer className="w-4 h-4 mr-2" /> Print
+      <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
+        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-4 rounded-xl shadow-md border border-slate-200">
+          <div>
+            <p className="text-sm font-bold text-slate-800">Testing Report Print Preview</p>
+            <p className="text-xs text-slate-500">
+              {selectedJobs.length} Transformers • {jobChunks.length} Landscape A4 Page{jobChunks.length > 1 ? 's' : ''}
+            </p>
+          </div>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => triggerUniversalPrint('printable-testing-sheet', `Testing Report - ${printDate}`, `Testing_Report_${printDate}.pdf`, 'landscape')} 
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer transition-colors"
+              title="Print document on Landscape A4 / Letterhead"
+            >
+              <Printer className="w-4 h-4 mr-2" /> Print (Landscape)
             </button>
-            <button onClick={closePrint} className="px-4 py-2 border border-slate-400 bg-white text-slate-700 rounded hover:bg-slate-50">
-              Close
+            <button 
+              disabled={isExportingPdf}
+              onClick={async () => {
+                setIsExportingPdf(true);
+                try {
+                  await downloadElementAsPdf('printable-testing-sheet', `Testing_Report_${printDate}.pdf`, 'landscape');
+                } finally {
+                  setIsExportingPdf(false);
+                }
+              }}
+              className="px-5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer disabled:opacity-50 transition-colors"
+              title="Download crisp PDF file"
+            >
+              {isExportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              {isExportingPdf ? 'Generating PDF...' : 'Download PDF'}
+            </button>
+            <button 
+              onClick={closePrint} 
+              className="px-4 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs cursor-pointer transition-colors"
+            >
+              Close Preview
             </button>
           </div>
         </div>
 
-        <div className="w-full">
-          <table className="w-full border-collapse border border-black text-[9px] text-center">
-            <thead>
-              <tr>
-                <th colSpan={14} className="border border-black p-2 text-left text-sm">
-                  <div className="flex justify-between items-center">
-                    <span>Testing of Repairer Distribution Transformer : {activeAgency?.name || 'IDEAL ENGINEERING CO.'}</span>
-                    <span className="flex items-center space-x-2"><span>Date:</span> <span className="border-b border-black w-24 text-center inline-block">{printDate}</span></span>
-                  </div>
-                </th>
-              </tr>
-              <tr className="bg-slate-100 print:bg-transparent">
-                <th rowSpan={2} className="border border-black p-1 w-8">Sr.No.</th>
-                <th rowSpan={2} className="border border-black p-1">Name of<br/>Division</th>
-                <th rowSpan={2} className="border border-black p-1 w-20">Job No.</th>
-                <th rowSpan={2} className="border border-black p-1">Capacity<br/>(KVA)</th>
-                <th rowSpan={2} className="border border-black p-1">OGP or<br/>RGP</th>
-                <th colSpan={3} className="border border-black p-1">No Load Losses at rated Voltage</th>
-                <th colSpan={4} className="border border-black p-1">Full Load Losses at rated Current at 100%<br/>Loading</th>
-                <th rowSpan={2} className="border border-black p-1">Separate Source<br/>Voltage withstand Test<br/>(High Voltage) HV: 21<br/>KV/ LV : 3KV :<br/>Withstood for 60<br/>Second</th>
-                <th rowSpan={2} className="border border-black p-1">DVDF</th>
-                <th rowSpan={2} className="border border-black p-1">ISULATION<br/>RESISTANACE</th>
-                <th rowSpan={2} className="border border-black p-1">OIL TEST<br/>BDV</th>
-                <th rowSpan={2} className="border border-black p-1">RATIO TEST</th>
-                <th rowSpan={2} className="border border-black p-1">%Impedanc<br/>e Voltage</th>
-                <th rowSpan={2} className="border border-black p-1">Remark</th>
-              </tr>
-              <tr className="bg-slate-100 print:bg-transparent text-[8px]">
-                <th className="border border-black p-1 font-normal">Apply Full Load<br/>Voltage to LV<br/>Side (Open HV)</th>
-                <th className="border border-black p-1 font-normal">Excitation<br/>Current<br/>(Amp)</th>
-                <th className="border border-black p-1 font-normal">No Load<br/>Losses( Watt)</th>
-                <th className="border border-black p-1 font-normal">Apply Full<br/>Load Current<br/>to HV Side<br/>(Short LV)</th>
-                <th className="border border-black p-1 font-normal">Impedenc<br/>e Voltage</th>
-                <th className="border border-black p-1 font-normal">Load<br/>Losses at<br/>100%<br/>Loading</th>
-                <th className="border border-black p-1 font-normal">Neutral<br/>Current</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedJobs.map((job, idx) => {
-                const data = job.testingDetails || defaultTestingData;
-                return (
-                  <tr key={job.id} className="border border-black h-8">
-                    <td className="border border-black p-1 font-bold">{idx + 1}</td>
-                    <td className="border border-black p-1 font-bold uppercase">{job.division || '-'}</td>
-                    <td className="border border-black p-1 font-bold uppercase">
-                      <div>{job.jobNo}</div>
-                      <div className="text-[7px] font-mono font-normal text-slate-700">MR: {job.mrNo || '-'} ({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</div>
-                    </td>
-                    <td className="border border-black p-1 font-bold">{job.capacityKva}</td>
-                    <td className="border border-black p-1 font-bold uppercase">{job.repairType || 'GP'}</td>
-                    
-                    <td className="border border-black p-1">{data.noLoadVoltage || '433 Volts'}</td>
-                    <td className="border border-black p-1 font-bold">{data.excitationCurrent}</td>
-                    <td className="border border-black p-1 font-bold">{data.noLoadLoss}</td>
-                    
-                    <td className="border border-black p-1">{data.fullLoadCurrent}</td>
-                    <td className="border border-black p-1">{data.impedanceVoltage}</td>
-                    <td className="border border-black p-1 font-bold">{data.loadLoss}</td>
-                    <td className="border border-black p-1">{data.neutralCurrent}</td>
-                    
-                    <td className="border border-black p-1">{data.highVoltageTest}</td>
-                    <td className="border border-black p-1">{data.dvdfTest}</td>
-                    <td className="border border-black p-1">{data.insulationResistance}</td>
-                    <td className="border border-black p-1 font-bold">{data.oilBdv}</td>
-                    <td className="border border-black p-1">{data.ratioTest}</td>
-                    <td className="border border-black p-1">{data.percentageImpedance}</td>
-                    <td className="border border-black p-1">{data.remarks}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div id="printable-testing-sheet" className="p-0 bg-transparent flex flex-col items-center">
+          {jobChunks.map((chunk, pageIdx) => {
+            const isLastPage = pageIdx === jobChunks.length - 1;
+            return (
+              <PrintableA4Page
+                key={pageIdx}
+                agency={activeAgency}
+                orientation="landscape"
+                documentTitle="DISTRIBUTION TRANSFORMER ROUTINE TESTING REPORT"
+                subtitle={jobChunks.length > 1 ? `Sheet ${pageIdx + 1} of ${jobChunks.length}` : undefined}
+                className={pageIdx > 0 ? 'print-page-break-before mb-6' : 'mb-6'}
+              >
+                <div className="flex flex-col justify-between h-full">
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
+                      <span>REPAIRER: <strong className="font-serif uppercase">{activeAgency?.name || 'IDEAL ENGINEERING CO.'}</strong></span>
+                      <span>TESTING DATE: <strong className="font-mono">{printDate}</strong></span>
+                      <span>TOTAL TRANSFORMERS: <strong>{selectedJobs.length}</strong></span>
+                    </div>
 
-          <div className="mt-16 flex justify-between px-12 text-sm font-bold uppercase">
-            <div>
-              TESTING SUPERVISED WITNESS
-            </div>
-            <div className="text-center">
-              <div>TESTED BY</div>
-              <div className="mt-8 relative">
-                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 -z-10 opacity-20">
-                     <div className="w-24 h-24 rounded-full border-4 border-blue-900 flex items-center justify-center rotate-[-15deg]">
-                        <div className="text-[10px] text-blue-900 font-serif leading-tight">SEAL / STAMP</div>
-                     </div>
-                 </div>
-                 Shri {auth.currentUser?.displayName || '_____________'} - {activeAgency?.name}
-              </div>
-            </div>
-          </div>
+                    <table className="w-full border-collapse border border-black text-[8px] text-center">
+                      <thead>
+                        <tr className="bg-slate-100 print:bg-transparent">
+                          <th rowSpan={2} className="border border-black p-0.5 w-6">Sr.</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-16">Division</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[70px]">Job No & MR</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-10">KVA</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-10">Type</th>
+                          <th colSpan={3} className="border border-black p-0.5">No Load Losses (Rated Volt)</th>
+                          <th colSpan={4} className="border border-black p-0.5">Full Load Losses (100% Load)</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[65px]">HV/LV Withstand (HV:21KV/LV:3KV)</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-10">DVDF</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-12">IR Value</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-10">Oil BDV</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-10">Ratio</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-10">%Imp</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[50px]">Remarks</th>
+                        </tr>
+                        <tr className="bg-slate-100 print:bg-transparent text-[7.5px]">
+                          <th className="border border-black p-0.5 font-normal">LV Volts</th>
+                          <th className="border border-black p-0.5 font-normal">Ex. Amp</th>
+                          <th className="border border-black p-0.5 font-normal">Loss (W)</th>
+                          <th className="border border-black p-0.5 font-normal">Full Amp</th>
+                          <th className="border border-black p-0.5 font-normal">Imp. Volt</th>
+                          <th className="border border-black p-0.5 font-normal">Loss (W)</th>
+                          <th className="border border-black p-0.5 font-normal">Neut. A</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {chunk.map((job, cIdx) => {
+                          const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
+                          const data = job.testingDetails || defaultTestingData;
+                          return (
+                            <tr key={job.id} className="border border-black h-6.5">
+                              <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase truncate max-w-[65px]">{job.division || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase text-left pl-1">
+                                <div className="leading-tight">{job.jobNo}</div>
+                                <div className="text-[6.5px] font-mono font-normal text-slate-700 leading-tight">MR:{job.mrNo || '-'}</div>
+                              </td>
+                              <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase">{job.repairType || 'GP'}</td>
+                              
+                              <td className="border border-black p-0.5">{data.noLoadVoltage || '433V'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.excitationCurrent}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.noLoadLoss}</td>
+                              
+                              <td className="border border-black p-0.5">{data.fullLoadCurrent}</td>
+                              <td className="border border-black p-0.5">{data.impedanceVoltage}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.loadLoss}</td>
+                              <td className="border border-black p-0.5">{data.neutralCurrent}</td>
+                              
+                              <td className="border border-black p-0.5 text-[7px]">{data.highVoltageTest || 'Passed (60s)'}</td>
+                              <td className="border border-black p-0.5 text-[7.5px]">{data.dvdfTest || 'Passed'}</td>
+                              <td className="border border-black p-0.5 text-[7.5px]">{data.insulationResistance}</td>
+                              <td className="border border-black p-0.5 font-bold text-[7.5px]">{data.oilBdv}</td>
+                              <td className="border border-black p-0.5 text-[7.5px]">{data.ratioTest}</td>
+                              <td className="border border-black p-0.5 text-[7.5px]">{data.percentageImpedance}</td>
+                              <td className="border border-black p-0.5 text-[7px] font-medium">{data.remarks || 'OK'}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {isLastPage && (
+                    <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
+                      <div className="text-center">
+                        <div className="h-8"></div>
+                        <div className="border-t border-dotted border-black pt-0.5">TESTING SUPERVISED / WITNESSED</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer / AEE</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="h-8 flex items-center justify-center">
+                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[7.5px] text-slate-500 font-normal">
+                            OFFICIAL STAMP
+                          </div>
+                        </div>
+                        <div className="border-t border-dotted border-black pt-0.5">TESTED BY & AUTHORIZED SIGNATORY</div>
+                        <div className="text-[8px] text-slate-700 font-normal">{auth.currentUser?.displayName || 'Testing Engineer'} - {activeAgency?.name}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </PrintableA4Page>
+            );
+          })}
         </div>
       </div>
     );
@@ -540,6 +587,7 @@ export default function TestingReport() {
                   {tab === 'Completed' && (
                     <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Tested On</th>
                   )}
+                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -571,11 +619,36 @@ export default function TestingReport() {
                         {job.testingDate ? formatDate(job.testingDate) : '-'}
                       </td>
                     )}
+                    <td className="px-4 py-3 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end space-x-2">
+                        <button
+                          onClick={() => {
+                            setSelectedJobIds(new Set([job.id]));
+                            setIsFormOpen(true);
+                          }}
+                          className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                        >
+                          {tab === 'Pending' ? 'Test' : 'Edit'}
+                        </button>
+                        {tab === 'Completed' && (
+                          <button
+                            onClick={() => {
+                              setSelectedJobIds(new Set([job.id]));
+                              setIsPrintOpen(true);
+                            }}
+                            className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors"
+                            title="Print Testing Report"
+                          >
+                            <Printer className="w-3 h-3 text-slate-600" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {filteredJobs.length === 0 && (
                   <tr>
-                    <td colSpan={tab === 'Completed' ? 6 : 5} className="px-4 py-12 text-center text-slate-500 bg-slate-50/50">
+                    <td colSpan={tab === 'Completed' ? 7 : 6} className="px-4 py-12 text-center text-slate-500 bg-slate-50/50">
                       <Activity className="w-8 h-8 text-slate-300 mx-auto mb-3" />
                       <p>No jobs found for the selected filters.</p>
                     </td>

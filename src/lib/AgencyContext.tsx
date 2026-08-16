@@ -7,6 +7,11 @@ export interface Agency {
   id: string;
   name: string;
   letterheadUrl: string;
+  letterheadMode?: 'full_a4' | 'header_only' | 'standard';
+  letterheadHeaderHeightMm?: number;
+  letterheadFooterHeightMm?: number;
+  letterheadMarginLeftMm?: number;
+  letterheadMarginRightMm?: number;
   prefixes: Record<string, string | Record<string, string>>;
   lastJobNumbers: Record<string, number>;
   allotments?: Record<string, Record<string, number>>;

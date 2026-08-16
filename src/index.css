@@ -1,22 +1,150 @@
 @import "tailwindcss";
 
+/* Screen styles for A4 preview containers */
+.a4-print-page {
+  width: 210mm;
+  min-height: 297mm;
+  height: 297mm;
+  max-height: 297mm;
+  position: relative;
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #ffffff;
+  margin: 0 auto;
+}
+
+.a4-print-page.landscape {
+  width: 297mm;
+  min-height: 210mm;
+  height: 210mm;
+  max-height: 210mm;
+}
+
+@media screen {
+  .a4-print-page {
+    box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    border: 1px solid #e2e8f0;
+    margin-bottom: 2rem;
+  }
+}
+
 @media print {
   @page {
-    size: auto;
-    margin: 10mm;
+    size: A4 portrait;
+    margin: 0;
+  }
+  
+  @page landscape {
+    size: A4 landscape;
+    margin: 0;
   }
   
   html, body {
+    width: 210mm !important;
     height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
     overflow: visible !important;
     background: white !important;
     color: black !important;
-    font-size: 12pt;
+    font-size: 10pt;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 
-  /* Prevent awkward page breaks inside tables and signatures */
-  table, tr, td, th {
-    page-break-inside: avoid;
+  /* Strict A4 Print Page Boundary */
+  .a4-print-page {
+    width: 210mm !important;
+    min-height: 297mm !important;
+    height: 297mm !important;
+    max-height: 297mm !important;
+    position: relative !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    page-break-before: always !important;
+    page-break-after: always !important;
+    break-before: page !important;
+    break-after: page !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+  }
+
+  .a4-print-page.landscape {
+    width: 297mm !important;
+    min-height: 210mm !important;
+    height: 210mm !important;
+    max-height: 210mm !important;
+  }
+
+  .a4-print-page:first-of-type {
+    page-break-before: auto !important;
+    break-before: auto !important;
+  }
+
+  /* When modal print is open, unlock fixed container for natural print rendering */
+  .fixed.inset-0 {
+    position: static !important;
+    overflow: visible !important;
+    background: transparent !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+  }
+
+  /* Fixed full-page letterhead background */
+  .print-a4-letterhead-bg {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 210mm !important;
+    height: 297mm !important;
+    z-index: 0 !important;
+    pointer-events: none !important;
+    display: block !important;
+    object-fit: fill !important;
+  }
+
+  /* Prevent awkward page breaks inside tables, rows, cards, and signatures */
+  table {
+    border-collapse: collapse !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
+  }
+
+  tr, td, th {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  .print-avoid-break, .break-inside-avoid {
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+  }
+
+  .print-page-break-before, .break-before-page {
+    page-break-before: always !important;
+    break-before: page !important;
+  }
+
+  .print-page-break-after, .break-after-page {
+    page-break-after: always !important;
+    break-after: page !important;
   }
 
   .print\:m-0 {
@@ -42,4 +170,9 @@
   .print\:block {
     display: block !important;
   }
+
+  .print\:static {
+    position: static !important;
+  }
 }
+

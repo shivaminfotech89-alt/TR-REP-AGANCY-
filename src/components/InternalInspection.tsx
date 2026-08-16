@@ -6,7 +6,8 @@ import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/fir
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
-import { LetterheadHeader } from './LetterheadHeader';
+import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
+import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 
 export interface InternalData {
   windingType: string;
@@ -40,6 +41,8 @@ export default function InternalInspection() {
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [formsData, setFormsData] = useState<Record<string, InternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPrintOpen, setIsPrintOpen] = useState(false);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
   
@@ -221,7 +224,7 @@ export default function InternalInspection() {
   };
 
   const handlePrint = () => {
-    window.print();
+    setIsPrintOpen(true);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -405,6 +408,201 @@ export default function InternalInspection() {
     ? `NOTE : JOB NO ${scrapJobs.join(' & ')} FOUND HEAVILY DAMAGED WITH CORE & LT, HENCE PROPOSED FOR SCRAP ONLY`
     : null;
 
+  if (isPrintOpen && selectedMrNo) {
+    const sampleJob = mrJobs[0];
+    const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
+    const CHUNK_SIZE = 9;
+    const jobChunks: typeof mrJobs[] = [];
+    for (let i = 0; i < mrJobs.length; i += CHUNK_SIZE) {
+      jobChunks.push(mrJobs.slice(i, i + CHUNK_SIZE));
+    }
+    if (jobChunks.length === 0) jobChunks.push([]);
+
+    return (
+      <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
+        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-4 rounded-xl shadow-md border border-slate-200">
+          <div>
+            <p className="text-sm font-bold text-slate-800">Internal Inspection Report - Print Preview</p>
+            <p className="text-xs text-slate-500">
+              MR No: <strong className="font-mono">{selectedMrNo}</strong> ({mrDateStr}) • {mrJobs.length} Transformers • {jobChunks.length} Landscape A4 Page{jobChunks.length > 1 ? 's' : ''}
+            </p>
+          </div>
+          <div className="flex items-center space-x-3">
+            <button 
+              onClick={() => triggerUniversalPrint('printable-internal-inspection-sheet', `Internal_Inspection_MR_${selectedMrNo}`, `Internal_Inspection_MR_${selectedMrNo}.pdf`, 'landscape')} 
+              className="px-5 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer transition-colors"
+              title="Print document on Landscape A4 / Letterhead"
+            >
+              <Printer className="w-4 h-4 mr-2" /> Print (Landscape)
+            </button>
+            <button 
+              disabled={isExportingPdf}
+              onClick={async () => {
+                setIsExportingPdf(true);
+                try {
+                  await downloadElementAsPdf('printable-internal-inspection-sheet', `Internal_Inspection_MR_${selectedMrNo}.pdf`, 'landscape');
+                } finally {
+                  setIsExportingPdf(false);
+                }
+              }}
+              className="px-5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer disabled:opacity-50 transition-colors"
+              title="Download crisp PDF file"
+            >
+              {isExportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
+              {isExportingPdf ? 'Generating PDF...' : 'Download PDF'}
+            </button>
+            <button 
+              onClick={handleExportExcel}
+              className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xs cursor-pointer transition-colors flex items-center"
+            >
+              <Download className="w-3.5 h-3.5 mr-1.5" /> Excel
+            </button>
+            <button 
+              onClick={() => setIsPrintOpen(false)} 
+              className="px-4 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs cursor-pointer transition-colors"
+            >
+              Close Preview
+            </button>
+          </div>
+        </div>
+
+        <div id="printable-internal-inspection-sheet" className="p-0 bg-transparent flex flex-col items-center">
+          {jobChunks.map((chunk, pageIdx) => {
+            const isLastPage = pageIdx === jobChunks.length - 1;
+            return (
+              <PrintableA4Page
+                key={pageIdx}
+                agency={activeAgency}
+                orientation="landscape"
+                documentTitle="INTERNAL INSPECTION & COIL DAMAGE REPORT"
+                subtitle={jobChunks.length > 1 ? `Sheet ${pageIdx + 1} of ${jobChunks.length}` : undefined}
+                className={pageIdx > 0 ? 'print-page-break-before mb-6' : 'mb-6'}
+              >
+                <div className="flex flex-col justify-between h-full">
+                  <div>
+                    <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
+                      <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
+                      <span>MR DATE: <strong className="font-mono">({mrDateStr})</strong></span>
+                      <span>DIVISION: <strong className="uppercase">{sampleJob?.division || '-'}</strong></span>
+                      <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
+                    </div>
+
+                    <table className="w-full border-collapse border border-black text-[7.5px] text-center">
+                      <thead>
+                        <tr className="bg-slate-100 print:bg-transparent font-bold">
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Sr</th>
+                          <th className="border border-black p-0.5 min-w-[70px]" rowSpan={2}>Job No</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2}>KVA</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2}>Wind</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2}>HV Limb</th>
+                          <th className="border border-black p-0.5" colSpan={3}>Damaged HV Coil</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2}>Tot Coil (HT)</th>
+                          <th className="border border-black p-0.5 w-10" rowSpan={2}>Wt/Coil (Kg)</th>
+                          <th className="border border-black p-0.5 w-10" rowSpan={2}>Tot Wt (HT)</th>
+                          <th className="border border-black p-0.5" colSpan={3}>LV Coil (Dmg/RI/OK)</th>
+                          <th className="border border-black p-0.5 w-10" rowSpan={2}>Wt/Coil (LT)</th>
+                          <th className="border border-black p-0.5 w-10" rowSpan={2}>Tot Wt (LT)</th>
+                          <th className="border border-black p-0.5 w-7" rowSpan={2}>Was Ring</th>
+                          <th className="border border-black p-0.5 w-7" rowSpan={2}>In Pnt</th>
+                          <th className="border border-black p-0.5 w-7" rowSpan={2}>Tst Trn</th>
+                          <th className="border border-black p-0.5 w-7" rowSpan={2}>DC</th>
+                          <th className="border border-black p-0.5 w-7" rowSpan={2}>Insula</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2}>Type</th>
+                          <th className="border border-black p-0.5 w-12" rowSpan={2}>Condition</th>
+                        </tr>
+                        <tr className="bg-slate-100 print:bg-transparent font-bold">
+                          <th className="border border-black p-0.5 w-6">R</th>
+                          <th className="border border-black p-0.5 w-6">Y</th>
+                          <th className="border border-black p-0.5 w-6">B</th>
+                          <th className="border border-black p-0.5 w-6">R</th>
+                          <th className="border border-black p-0.5 w-6">Y</th>
+                          <th className="border border-black p-0.5 w-6">B</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {chunk.map((job, cIdx) => {
+                          const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
+                          const data = formsData[job.id] || {} as any;
+
+                          return (
+                            <tr key={job.id} className="border border-black h-6">
+                              <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
+                              <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
+                                {job.jobNo}
+                              </td>
+                              <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
+                              <td className="border border-black p-0.5">{data.windingType || 'AL'}</td>
+                              <td className="border border-black p-0.5">{data.hvCoilLimb || '-'}</td>
+                              
+                              <td className="border border-black p-0.5 font-mono">{data.damR || '-'}</td>
+                              <td className="border border-black p-0.5 font-mono">{data.damY || '-'}</td>
+                              <td className="border border-black p-0.5 font-mono">{data.damB || '-'}</td>
+                              
+                              <td className="border border-black p-0.5 font-bold">{data.totCoil || '-'}</td>
+                              <td className="border border-black p-0.5">{data.wtOfCoil || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.totWt || '-'}</td>
+                              
+                              <td className="border border-black p-0.5">{data.lvCoilR || 'OK'}</td>
+                              <td className="border border-black p-0.5">{data.lvCoilY || 'OK'}</td>
+                              <td className="border border-black p-0.5">{data.lvCoilB || 'OK'}</td>
+                              
+                              <td className="border border-black p-0.5">{data.wtOfCoilLv || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.totWtLv || '-'}</td>
+                              
+                              <td className="border border-black p-0.5">{data.wasring || '1'}</td>
+                              <td className="border border-black p-0.5">{data.inPnt || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.tstTrn || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.dc || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.insula || 'Y'}</td>
+                              <td className="border border-black p-0.5">{job.coreType || '-'}</td>
+                              <td className={`border border-black p-0.5 font-bold ${data.condition === 'Scrap' ? 'text-red-600' : 'text-slate-800'}`}>
+                                {data.condition || 'Repairable'}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {scrapNote && isLastPage && (
+                      <div className="mt-2 p-1.5 bg-amber-50 print:bg-transparent border border-amber-300 print:border-black text-[8px] font-bold text-amber-900 print:text-black uppercase">
+                        {scrapNote}
+                      </div>
+                    )}
+                  </div>
+
+                  {isLastPage && (
+                    <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
+                      <div className="text-center">
+                        <div className="h-8"></div>
+                        <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY (TESTING ENG.)</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer / Inspector</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="h-8"></div>
+                        <div className="border-t border-dotted border-black pt-0.5">WITNESSED & VERIFIED BY</div>
+                        <div className="text-[8px] text-slate-700 font-normal">AEE / Sub-Division Officer</div>
+                      </div>
+                      <div className="text-center">
+                        <div className="h-8 flex items-center justify-center">
+                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[7.5px] text-slate-500 font-normal">
+                            OFFICIAL STAMP
+                          </div>
+                        </div>
+                        <div className="border-t border-dotted border-black pt-0.5">FOR {activeAgency?.name}</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Authorized Signatory</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </PrintableA4Page>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 print:space-y-0">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded shadow-sm border border-slate-200">
@@ -491,12 +689,26 @@ export default function InternalInspection() {
                         {mrGroups[mr].map(j => j.jobNo).join(', ')}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <button 
-                          onClick={() => handleSelectMr(mr)}
-                          className="flex items-center px-4 py-2 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
-                        >
-                          {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
-                        </button>
+                        <div className="flex items-center space-x-2">
+                          <button 
+                            onClick={() => handleSelectMr(mr)}
+                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                          >
+                            {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
+                          </button>
+                          {statusFilter === 'Completed' && (
+                            <button 
+                              onClick={() => {
+                                handleSelectMr(mr);
+                                setIsPrintOpen(true);
+                              }}
+                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors"
+                              title="Print Internal Inspection Report"
+                            >
+                              <Printer className="w-3 h-3 mr-1 text-slate-600" /> Print
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                     );

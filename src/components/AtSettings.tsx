@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
 import { useAgency, AtMaster } from '../lib/AgencyContext';
-import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText } from 'lucide-react';
+import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
+import { AtDivisions } from './AtDivisions';
 
 export function AtSettings() {
   const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
+  const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
   
   const [editingAtId, setEditingAtId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<{
@@ -318,10 +320,46 @@ export function AtSettings() {
                       )}
                     </div>
                     
-                    {/* Allotments for this active AT */}
+                    {/* Combined Details (Divisions & Prefixes + Allotment Quotas) for this active AT */}
                     {activeAtMaster?.id === at.id && !isEditing && (
-                      <div className="border border-t-0 border-indigo-300 bg-white p-4 rounded-b-xl space-y-4">
-                        <AtAllotments at={at} />
+                      <div className="border border-t-0 border-indigo-300 bg-white p-4 rounded-b-xl space-y-4 shadow-xs">
+                        {/* Sub-tabs to seamlessly switch between Divisions & Prefixes and Allotment Quotas */}
+                        <div className="flex border-b border-slate-200">
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setActiveAtTab('divisions'); }}
+                            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                              activeAtTab === 'divisions'
+                                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Layers className="w-3.5 h-3.5" />
+                            <span>Divisions & Core Prefixes</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setActiveAtTab('allotments'); }}
+                            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 transition-all ${
+                              activeAtTab === 'allotments'
+                                ? 'border-indigo-600 text-indigo-700 bg-indigo-50/50'
+                                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                            }`}
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                            <span>Allotment Quotas & Letters</span>
+                          </button>
+                        </div>
+
+                        {/* Active Tab Content */}
+                        <div onClick={e => e.stopPropagation()} className="pt-1">
+                          {activeAtTab === 'divisions' ? (
+                            <AtDivisions at={at} />
+                          ) : (
+                            <AtAllotments at={at} />
+                          )}
+                        </div>
                       </div>
                     )}
                   </div>

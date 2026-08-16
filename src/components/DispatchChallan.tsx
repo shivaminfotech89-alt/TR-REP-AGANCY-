@@ -28,15 +28,17 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { LetterheadHeader } from './LetterheadHeader';
+import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { downloadHtmlAsWord } from '../lib/wordExport';
+import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function DispatchChallan() {
   const { activeAgency, activeAtMaster } = useAgency();
   const [allJobs, setAllJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   
@@ -674,9 +676,6 @@ export default function DispatchChallan() {
                         uniqueDivisions,
                         uniqueMrNos
                       });
-                      setTimeout(() => {
-                        window.print();
-                      }, 200);
                     } else {
                       alert("Please select one or more ready transformers below to preview challan.");
                     }
@@ -1481,17 +1480,6 @@ export default function DispatchChallan() {
       {/* ========================================================================= */}
       {printData && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs z-50 overflow-y-auto p-2 sm:p-4 md:p-6 flex justify-center items-start print:p-0 print:static print:bg-transparent print:backdrop-blur-none">
-          <style>
-            {`
-              @media print {
-                @page { size: portrait; margin: 8mm; }
-                body { font-family: sans-serif; -webkit-print-color-adjust: exact; }
-                .print\\:hidden { display: none !important; }
-                #printable-challan-section { box-shadow: none !important; border: none !important; padding: 0 !important; margin: 0 !important; width: 100% !important; max-width: 100% !important; }
-              }
-            `}
-          </style>
-          
           <div id="printable-challan-section" className="bg-white shadow-2xl border border-slate-300 rounded-xl p-3 sm:p-6 md:p-8 text-black w-full max-w-4xl print:m-0 print:p-0 print:border-none print:shadow-none print:max-w-none my-2 sm:my-4">
             
             {/* ACTION BAR (SCREEN ONLY) */}
@@ -1503,29 +1491,47 @@ export default function DispatchChallan() {
               <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => window.print()}
-                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs"
+                  onClick={() => triggerUniversalPrint('printable-challan-sheet', `Delivery Challan - ${printData.challanNo || 'Draft'}`, `Challan_${printData.challanNo || 'Draft'}.pdf`)}
+                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer"
+                  title="Print document or open print dialog"
                 >
-                  <Printer className="w-3.5 h-3.5" /> <span>Print / PDF</span>
+                  <Printer className="w-3.5 h-3.5" /> <span>Print</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isExportingPdf}
+                  onClick={async () => {
+                    setIsExportingPdf(true);
+                    try {
+                      await downloadElementAsPdf('printable-challan-sheet', `Delivery_Challan_${printData.challanNo || 'Draft'}.pdf`);
+                    } finally {
+                      setIsExportingPdf(false);
+                    }
+                  }}
+                  className="flex items-center gap-1 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                  title="Download crisp A4 PDF file"
+                >
+                  {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+                  <span>{isExportingPdf ? 'Saving...' : 'PDF'}</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleDownloadWord(printData.challanNo, printData)}
-                  className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg transition-colors shadow-xs"
+                  className="flex items-center gap-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer"
                 >
                   <FileText className="w-3.5 h-3.5" /> <span>Word</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => handleExportExcel(printData.challanNo, printData)}
-                  className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg transition-colors shadow-xs"
+                  className="flex items-center gap-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-2.5 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer"
                 >
                   <FileSpreadsheet className="w-3.5 h-3.5" /> <span>Excel</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setPrintData(null)}
-                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors"
+                  className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
                   title="Close Preview"
                 >
                   <X className="w-5 h-5" />
@@ -1534,83 +1540,85 @@ export default function DispatchChallan() {
             </div>
 
             {/* PRINTABLE DOCUMENT SHEET (WITH HORIZONTAL SCROLL PROTECTION ON MOBILE) */}
-            <div id="printable-challan-sheet" className="p-3 sm:p-6 border border-slate-200 rounded-lg print:border-none print:p-0 bg-white overflow-x-auto">
-              {/* Header with Letterhead support */}
-              <LetterheadHeader agency={activeAgency} documentTitle="DELIVERY CHALLAN" />
+            <div id="printable-challan-sheet" className="p-0 bg-white">
+              <PrintableA4Page agency={activeAgency} documentTitle="DELIVERY CHALLAN">
+                <div className="flex flex-col justify-between h-full">
+                  <div>
+                    <div className="flex flex-col sm:flex-row justify-between items-start mb-3 text-xs gap-2">
+                      <div className="space-y-1">
+                        <div className="flex"><span className="w-20 font-bold shrink-0">To:</span> <span className="font-bold uppercase max-w-xs">{printData.uniqueDivisions || 'DIVISION OFFICE'}</span></div>
+                        <div className="flex"><span className="w-20 font-bold shrink-0">Vehicle No:</span> <span className="font-mono uppercase font-bold">{printData.vehicleNo || '________________'}</span></div>
+                        <div className="flex"><span className="w-20 font-bold shrink-0">MR No(s):</span> <span className="font-mono uppercase max-w-xs">{printData.uniqueMrNos || '-'}</span></div>
+                      </div>
+                      <div className="space-y-1 text-left sm:text-right">
+                        <div className="flex sm:justify-end"><span className="w-24 font-bold text-left shrink-0">Challan No:</span> <span className="font-mono uppercase font-bold">{printData.challanNo || '________________'}</span></div>
+                        <div className="flex sm:justify-end"><span className="w-24 font-bold text-left shrink-0">Challan Date:</span> <span className="font-mono">{formatDDMMYYYY(printData.challanDate)}</span></div>
+                        <div className="flex sm:justify-end"><span className="w-24 font-bold text-left shrink-0">Delivery Date:</span> <span className="font-mono">{formatDDMMYYYY(printData.deliveryDate)}</span></div>
+                      </div>
+                    </div>
 
-              <div className="flex flex-col sm:flex-row justify-between items-start mb-4 text-xs md:text-sm gap-2">
-                <div className="space-y-1">
-                  <div className="flex"><span className="w-24 font-bold shrink-0">To:</span> <span className="font-bold uppercase max-w-xs">{printData.uniqueDivisions || 'DIVISION OFFICE'}</span></div>
-                  <div className="flex"><span className="w-24 font-bold shrink-0">Vehicle No:</span> <span className="font-mono uppercase font-bold">{printData.vehicleNo || '________________'}</span></div>
-                  <div className="flex"><span className="w-24 font-bold shrink-0">MR No(s):</span> <span className="font-mono uppercase max-w-xs">{printData.uniqueMrNos || '-'}</span></div>
-                </div>
-                <div className="space-y-1 text-left sm:text-right">
-                  <div className="flex sm:justify-end"><span className="w-28 font-bold text-left shrink-0">Challan No:</span> <span className="font-mono uppercase font-bold">{printData.challanNo || '________________'}</span></div>
-                  <div className="flex sm:justify-end"><span className="w-28 font-bold text-left shrink-0">Challan Date:</span> <span className="font-mono">{formatDDMMYYYY(printData.challanDate)}</span></div>
-                  <div className="flex sm:justify-end"><span className="w-28 font-bold text-left shrink-0">Delivery Date:</span> <span className="font-mono">{formatDDMMYYYY(printData.deliveryDate)}</span></div>
-                </div>
-              </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs border-collapse border border-slate-800">
+                        <thead>
+                          <tr className="bg-slate-100 print:bg-slate-100 font-bold">
+                            <th className="border border-slate-800 p-1 text-center w-8">Sr.</th>
+                            <th className="border border-slate-800 p-1 text-left">Job No.</th>
+                            <th className="border border-slate-800 p-1 text-left">MR No & Date</th>
+                            <th className="border border-slate-800 p-1 text-left">Make</th>
+                            <th className="border border-slate-800 p-1 text-center">Capacity (KVA)</th>
+                            <th className="border border-slate-800 p-1 text-left">Serial No.</th>
+                            <th className="border border-slate-800 p-1 text-center">Remarks</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {printData.jobs?.map((job: any, idx: number) => {
+                            const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                            const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
+                            return (
+                              <tr key={job.id || idx}>
+                                <td className="border border-slate-800 p-1 text-center font-bold">{idx + 1}</td>
+                                <td className="border border-slate-800 p-1 font-mono font-bold">{job.jobNo}</td>
+                                <td className="border border-slate-800 p-1 font-mono text-[11px]">
+                                  {job.mrNo || '-'} <span className="text-slate-600">({mrDateStr})</span>
+                                </td>
+                                <td className="border border-slate-800 p-1">{job.make || '-'}</td>
+                                <td className="border border-slate-800 p-1 text-center font-bold font-mono">{job.capacityKva}</td>
+                                <td className="border border-slate-800 p-1 font-mono">{job.serialNo || '-'}</td>
+                                <td className="border border-slate-800 p-1 text-center text-[11px] font-semibold">
+                                  {isScrap ? 'Scrap - Returned' : 'Tested OK'}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {(!printData.jobs || printData.jobs.length === 0) && (
+                            <tr>
+                              <td colSpan={7} className="border border-slate-800 p-4 text-center text-slate-400">
+                                No jobs selected
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                      
+                      <div className="mt-2 text-xs font-bold flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1">
+                        <span>Total Transformers Dispatched: {printData.jobs?.length || 0} Units</span>
+                        <span>Total Capacity: {printData.jobs?.reduce((acc: number, j: any) => acc + (Number(j.capacityKva) || 0), 0) || 0} KVA</span>
+                      </div>
+                    </div>
+                  </div>
 
-              <div className="min-h-[250px] overflow-x-auto">
-                <table className="w-full text-xs md:text-sm border-collapse border border-slate-800 min-w-[560px]">
-                  <thead>
-                    <tr className="bg-slate-100 print:bg-slate-100 font-bold">
-                      <th className="border border-slate-800 p-1.5 text-center w-10">Sr.</th>
-                      <th className="border border-slate-800 p-1.5 text-left">Job No.</th>
-                      <th className="border border-slate-800 p-1.5 text-left">MR No & Date</th>
-                      <th className="border border-slate-800 p-1.5 text-left">Make</th>
-                      <th className="border border-slate-800 p-1.5 text-center">Capacity (KVA)</th>
-                      <th className="border border-slate-800 p-1.5 text-left">Serial No.</th>
-                      <th className="border border-slate-800 p-1.5 text-center">Remarks</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {printData.jobs?.map((job: any, idx: number) => {
-                      const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
-                      const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
-                      return (
-                        <tr key={job.id || idx}>
-                          <td className="border border-slate-800 p-1.5 text-center font-bold">{idx + 1}</td>
-                          <td className="border border-slate-800 p-1.5 font-mono font-bold">{job.jobNo}</td>
-                          <td className="border border-slate-800 p-1.5 font-mono text-xs">
-                            {job.mrNo || '-'} <span className="text-slate-600">({mrDateStr})</span>
-                          </td>
-                          <td className="border border-slate-800 p-1.5">{job.make || '-'}</td>
-                          <td className="border border-slate-800 p-1.5 text-center font-bold font-mono">{job.capacityKva}</td>
-                          <td className="border border-slate-800 p-1.5 font-mono">{job.serialNo || '-'}</td>
-                          <td className="border border-slate-800 p-1.5 text-center text-xs font-semibold">
-                            {isScrap ? 'Scrap - Returned to Division' : 'Tested OK'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                    {(!printData.jobs || printData.jobs.length === 0) && (
-                      <tr>
-                        <td colSpan={7} className="border border-slate-800 p-6 text-center text-slate-400">
-                          No jobs selected
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-                
-                <div className="mt-3 text-xs sm:text-sm font-bold flex flex-col sm:flex-row justify-between items-start sm:items-center gap-1">
-                  <span>Total Transformers Dispatched: {printData.jobs?.length || 0} Units</span>
-                  <span>Total Capacity: {printData.jobs?.reduce((acc: number, j: any) => acc + (Number(j.capacityKva) || 0), 0) || 0} KVA</span>
+                  <div className="mt-8 flex justify-between items-end text-xs font-bold pt-4">
+                    <div className="text-center">
+                      <div className="w-36 sm:w-44 border-b border-slate-800 mb-1"></div>
+                      Receiver's Signature
+                    </div>
+                    <div className="text-center">
+                      <div className="w-36 sm:w-44 border-b border-slate-800 mb-1"></div>
+                      For {activeAgency?.name || 'Authorized Signatory'}
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <div className="mt-14 flex justify-between items-end text-xs sm:text-sm font-bold">
-                <div className="text-center">
-                  <div className="w-36 sm:w-48 border-b border-slate-800 mb-1.5"></div>
-                  Receiver's Signature
-                </div>
-                <div className="text-center">
-                  <div className="w-36 sm:w-48 border-b border-slate-800 mb-1.5"></div>
-                  For {activeAgency?.name || 'Authorized Signatory'}
-                </div>
-              </div>
-
+              </PrintableA4Page>
             </div>
           </div>
         </div>
