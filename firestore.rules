@@ -64,19 +64,54 @@ service cloud.firestore {
     function isValidAgency(data) {
       return data.name is string && data.name.size() >= 1 && data.name.size() <= 150 &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
-             (!('address' in data) || (data.address is string && data.address.size() <= 500)) &&
+             (!('address' in data) || (data.address is string && data.address.size() <= 1000)) &&
              (!('contact' in data) || (data.contact is string && data.contact.size() <= 100)) &&
              (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
-             (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 100)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 50)) &&
              (!('gstin' in data) || (data.gstin is string && data.gstin.size() <= 50)) &&
+             (!('pan' in data) || (data.pan is string && data.pan.size() <= 50)) &&
+             (!('msmeNo' in data) || (data.msmeNo is string && data.msmeNo.size() <= 100)) &&
+             (!('agencyState' in data) || (data.agencyState is string && data.agencyState.size() <= 100)) &&
+             (!('agencyStateCode' in data) || (data.agencyStateCode is string && data.agencyStateCode.size() <= 50)) &&
+             (!('bankName' in data) || (data.bankName is string && data.bankName.size() <= 200)) &&
+             (!('bankBranch' in data) || (data.bankBranch is string && data.bankBranch.size() <= 200)) &&
+             (!('accountNumber' in data) || (data.accountNumber is string && data.accountNumber.size() <= 100)) &&
+             (!('ifscCode' in data) || (data.ifscCode is string && data.ifscCode.size() <= 50)) &&
+             (!('discomName' in data) || (data.discomName is string && data.discomName.size() <= 200)) &&
+             (!('discomGstin' in data) || (data.discomGstin is string && data.discomGstin.size() <= 50)) &&
+             (!('discomPan' in data) || (data.discomPan is string && data.discomPan.size() <= 50)) &&
+             (!('discomAddress' in data) || (data.discomAddress is string && data.discomAddress.size() <= 1000)) &&
+             (!('discomState' in data) || (data.discomState is string && data.discomState.size() <= 100)) &&
+             (!('discomStateCode' in data) || (data.discomStateCode is string && data.discomStateCode.size() <= 50)) &&
+             (!('serviceSacCode' in data) || (data.serviceSacCode is string && data.serviceSacCode.size() <= 50)) &&
+             (!('circleOfficeName' in data) || (data.circleOfficeName is string && data.circleOfficeName.size() <= 200)) &&
+             (!('circleAuthority' in data) || (data.circleAuthority is string && data.circleAuthority.size() <= 200)) &&
+             (!('divisionAuthority' in data) || (data.divisionAuthority is string && data.divisionAuthority.size() <= 200)) &&
+             (!('estimateCcTemplate' in data) || (data.estimateCcTemplate is string && data.estimateCcTemplate.size() <= 500)) &&
+             (!('billCcTemplate' in data) || (data.billCcTemplate is string && data.billCcTemplate.size() <= 500)) &&
+             (!('forwardingToText' in data) || (data.forwardingToText is string && data.forwardingToText.size() <= 1000)) &&
+             (!('forwardingSubject' in data) || (data.forwardingSubject is string && data.forwardingSubject.size() <= 500)) &&
+             (!('forwardingCcText' in data) || (data.forwardingCcText is string && data.forwardingCcText.size() <= 1000)) &&
+             (!('letterheadUrl' in data) || (data.letterheadUrl is string && data.letterheadUrl.size() <= 2000)) &&
+             (!('letterheadMode' in data) || (data.letterheadMode is string && data.letterheadMode.size() <= 50)) &&
+             (!('letterheadHeaderHeightMm' in data) || (data.letterheadHeaderHeightMm is number)) &&
+             (!('letterheadFooterHeightMm' in data) || (data.letterheadFooterHeightMm is number)) &&
+             (!('letterheadMarginLeftMm' in data) || (data.letterheadMarginLeftMm is number)) &&
+             (!('letterheadMarginRightMm' in data) || (data.letterheadMarginRightMm is number)) &&
+             (!('gpValidationMonths' in data) || (data.gpValidationMonths is number)) &&
+             (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 100)) &&
              (!('bankDetails' in data) || (data.bankDetails is string && data.bankDetails.size() <= 500)) &&
              (!('prefixes' in data) || (data.prefixes is map)) &&
              (!('lastJobNumbers' in data) || (data.lastJobNumbers is map)) &&
+             (!('allotments' in data) || (data.allotments is map)) &&
              (!('divisions' in data) || (data.divisions is list)) &&
              (!('estimateMaster' in data) || (data.estimateMaster is list)) &&
              (!('estimateMasterCRGO' in data) || (data.estimateMasterCRGO is list)) &&
              (!('estimateMasterAmorphous' in data) || (data.estimateMasterAmorphous is list)) &&
-             (!('estimateMasterWoundCore' in data) || (data.estimateMasterWoundCore is list));
+             (!('estimateMasterWoundCore' in data) || (data.estimateMasterWoundCore is list)) &&
+             (!('estimateMasterOverhauling' in data) || (data.estimateMasterOverhauling is list)) &&
+             (!('estimateMasterCircleLimits' in data) || (data.estimateMasterCircleLimits is list)) &&
+             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string));
     }
 
     function isValidAtMaster(data) {
@@ -123,6 +158,17 @@ service cloud.firestore {
              (!('agencyId' in data) || (data.agencyId is string && data.agencyId.size() <= 128)) &&
              (!('agencyName' in data) || (data.agencyName is string && data.agencyName.size() <= 150)) &&
              (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 150));
+    }
+
+    function isValidSystemConfig(data) {
+      return (!('estimateMaster' in data) || (data.estimateMaster is list)) &&
+             (!('estimateMasterCRGO' in data) || (data.estimateMasterCRGO is list)) &&
+             (!('estimateMasterAmorphous' in data) || (data.estimateMasterAmorphous is list)) &&
+             (!('estimateMasterWoundCore' in data) || (data.estimateMasterWoundCore is list)) &&
+             (!('estimateMasterOverhauling' in data) || (data.estimateMasterOverhauling is list)) &&
+             (!('estimateMasterCircleLimits' in data) || (data.estimateMasterCircleLimits is list)) &&
+             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string)) &&
              (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 150));
     }
 
@@ -178,7 +224,8 @@ service cloud.firestore {
 
     match /system_config/{configId} {
       allow get, list: if isSignedIn();
-      allow create, update, delete: if isSuperAdmin();
+      allow create, update: if isSignedIn() && isValidSystemConfig(incoming());
+      allow delete: if isSuperAdmin();
     }
   }
 }

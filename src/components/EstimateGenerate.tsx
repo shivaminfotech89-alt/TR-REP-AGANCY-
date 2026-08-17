@@ -1,28 +1,230 @@
 
-import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileSpreadsheet, Download, Edit3, Check, Save, FileText, X,
   Lock, Unlock, AlertTriangle, RotateCcw, Calendar, Send, CheckCircle2, Clock, CheckSquare,
-  Eye, ArrowLeft, ArrowUpRight, Filter, IndianRupee
+  Eye, ArrowLeft, ArrowUpRight, Filter, IndianRupee, Scale, ShieldAlert, FileStack, Layers,
+  FileCheck2, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
+import { defaultEstimateData, EstimateItem, getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
+import SingleJobEstimateReport, { buildSingleJobEstimateData } from './SingleJobEstimateReport';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+
+// Helper function to calculate item rate, quantity, and amount for any core type
+export function calculateJobItemDetails(item: EstimateItem, job: any): { qty: number; qtyDisplay: string; rate: number; amt: number } {
+  if (!item || !job) return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+  
+  const kva = String(job.capacityKva || '25').trim();
+  const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
+  const isOverhauling = coreType === 'OH' || coreType.includes('OVERHAUL');
+  const isAmorphousOrWound = coreType.includes('AMORPHOUS') || coreType.includes('AM') || coreType.includes('WOUND') || coreType.includes('WC');
+  const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+
+  if (isOverhauling) {
+    const itemCode = (item.itemCode || '').trim().toLowerCase();
+    const itemName = (item.itemName || '').toLowerCase();
+
+    // Determine rate
+    let rate = 0;
+    if (item.rates && item.rates[kva as keyof typeof item.rates] !== null && item.rates[kva as keyof typeof item.rates] !== undefined) {
+      rate = Number(item.rates[kva as keyof typeof item.rates]) || 0;
+    } else if (item.fixedRate !== undefined && item.fixedRate !== null && !isNaN(Number(item.fixedRate)) && Number(item.fixedRate) > 0) {
+      rate = Number(item.fixedRate);
+    } else if (item.rates) {
+      const nonNull = Object.values(item.rates).find(v => v !== null && !isNaN(Number(v)) && Number(v) > 0);
+      if (nonNull) rate = Number(nonNull);
+    }
+
+    if (itemCode === '7' || itemName.includes('overhauling of complete transformer') || itemName.includes('overhauling')) {
+      if (!isScrapJob) {
+        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+      }
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    if (rate > 0 && !isScrapJob) {
+      if (item.unit === 'Y') return { qty: 1, qtyDisplay: 'Y', rate, amt: rate };
+      if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Each Transformer') return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+      if (item.unit === 'KG') {
+        const kgQty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
+        return { qty: kgQty, qtyDisplay: kgQty.toFixed(2), rate, amt: rate * kgQty };
+      }
+    }
+
+    return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+  }
+
+  if (isAmorphousOrWound) {
+    const itemCode = (item.itemCode || '').trim().toLowerCase();
+    const itemName = (item.itemName || '').toLowerCase();
+
+    // Check capacity match
+    const is10Kva = (itemCode === '1a' || itemName.startsWith('10 kva') || itemName.includes('10kva') || itemName.includes('10 kva')) && kva === '10';
+    const is16Kva = (itemCode === '1b' || itemName.startsWith('16 kva') || itemName.includes('16kva') || itemName.includes('16 kva')) && kva === '16';
+    const is25Kva = (itemCode === '1c' || itemName.startsWith('25 kva') || itemName.includes('25kva') || itemName.includes('25 kva')) && kva === '25';
+
+    const isVijayMake = (job.make || '').toLowerCase().includes('vijay');
+    const is63KvaVijay = (itemCode === '1d-2' || (itemName.includes('63') && itemName.includes('vijay'))) && kva === '63' && isVijayMake;
+    const is63KvaStd = (itemCode === '1d-1' || (itemName.includes('63') && !itemName.includes('vijay'))) && kva === '63' && !isVijayMake;
+    const is63KvaGeneric = (itemCode === '1d' || (itemName.includes('63') && !itemName.includes('vijay') && !is63KvaStd)) && kva === '63';
+
+    const is100Kva = (itemCode === '1e' || itemName.startsWith('100 kva') || itemName.includes('100kva') || itemName.includes('100 kva')) && kva === '100';
+    const is200Kva = (itemCode === '1f' || itemName.startsWith('200 kva') || itemName.includes('200kva') || itemName.includes('200 kva')) && kva === '200';
+
+    const isLabourCharge = itemCode === '2' || itemName.includes('labour charge') || itemName.includes('labor charge');
+    const isSealingScrap = itemCode === '6' || itemName.includes('sealing of uneconomical') || itemName.includes('welding at six places');
+    const isScrapDismantling = itemCode === '0' || itemCode === '1s' || itemCode === '1a-scrap' || itemName.includes('inspection & dismantling') || (itemName.includes('scrap') && (itemName.includes('dismantl') || itemName.includes('inspection') || itemName.includes('charges')));
+
+    // Determine rate: Prefer rates[kva] first (for user manually entered KVA rates), fallback to item.fixedRate
+    let rate = 0;
+    if (item.rates && item.rates[kva as keyof typeof item.rates] !== null && item.rates[kva as keyof typeof item.rates] !== undefined && Number(item.rates[kva as keyof typeof item.rates]) > 0) {
+      rate = Number(item.rates[kva as keyof typeof item.rates]);
+    } else if (item.fixedRate !== undefined && item.fixedRate !== null && !isNaN(Number(item.fixedRate)) && Number(item.fixedRate) > 0) {
+      rate = Number(item.fixedRate);
+    } else if (item.rates) {
+      const nonNull = Object.values(item.rates).find(v => v !== null && !isNaN(Number(v)) && Number(v) > 0);
+      if (nonNull) rate = Number(nonNull);
+    }
+
+    // Default fallback rates from official UGVCL schedule if not set
+    if (rate === 0) {
+      if (isScrapDismantling) rate = 500;
+      else if (is10Kva) rate = 4927;
+      else if (is16Kva) rate = 5202;
+      else if (is25Kva) rate = 8395;
+      else if (is63KvaStd || is63KvaGeneric) rate = 13746;
+      else if (is63KvaVijay) rate = 16746;
+      else if (is100Kva) rate = 17970;
+      else if (is200Kva) rate = 10148;
+      else if (isLabourCharge) rate = 2345;
+      else if (isSealingScrap) rate = 189;
+      else if (itemCode === '3' || itemCode === '4') rate = 54;
+      else if (itemCode === '5') rate = kva === '25' ? 1057 : kva === '63' ? 1256 : kva === '100' ? 1452 : 1057;
+    }
+
+    // Scrap Dismantling Charges (Rs. 500)
+    if (isScrapDismantling) {
+      if (isScrapJob) {
+        return { qty: 1, qtyDisplay: '1', rate: rate || 500, amt: rate || 500 };
+      }
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    // Sealing of uneconomical unit (Sr. 6)
+    if (isSealingScrap) {
+      if (isScrapJob) {
+        return { qty: 1, qtyDisplay: '1', rate: rate || 189, amt: rate || 189 };
+      }
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    if (isLabourCharge) {
+      if (!isScrapJob) {
+        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+      }
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    if (is10Kva || is16Kva || is25Kva || is63KvaVijay || is63KvaStd || is63KvaGeneric || is100Kva) {
+      if (!isScrapJob) {
+        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+      }
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    if (is200Kva) {
+      if (!isScrapJob) {
+        const qty = 3; // 3 coils / limbs for 200 KVA
+        return { qty, qtyDisplay: '3', rate, amt: rate * qty };
+      }
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    // If it's a capacity-specific winding item (e.g. 10 KVA coil evaluated for 25 KVA job), skip it
+    const isAnyWindingItem = itemCode.startsWith('1') || itemName.includes('winding') || itemName.includes('coil weight');
+    if (isAnyWindingItem) {
+      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+    }
+
+    // Additional items (like Tank replacement per KG, Radiator Set, or custom QTY items)
+    if (rate > 0 && !isScrapJob) {
+      if (item.unit === 'Y') return { qty: 1, qtyDisplay: 'Y', rate, amt: rate };
+      if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Job' || item.unit === 'Set' || item.unit?.toLowerCase().includes('each') || item.unit?.toLowerCase().includes('per')) {
+        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+      }
+      if (item.unit === 'KG') {
+        const kgQty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
+        return { qty: kgQty, qtyDisplay: kgQty.toFixed(2), rate, amt: rate * kgQty };
+      }
+    }
+
+    return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+  } else {
+    // Standard CRGO Stacked Core
+    const rawRate = item.rates ? item.rates[kva as keyof typeof item.rates] || 0 : 0;
+    const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
+
+    let qty = 0;
+    let qtyDisplay = '0';
+    const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemCode === '19';
+    const isDismantling = item.itemCode === '1a' || item.itemName.toLowerCase().includes('dismentaling') || item.itemName.toLowerCase().includes('dismantl');
+
+    if (isScrapJob) {
+      // In scrap jobs, only Dismantling (1a) and Scrap items are charged
+      if (isDismantling || isScrapItem || item.itemCode === '0') {
+        qty = 1;
+        qtyDisplay = '1';
+      }
+    } else {
+      // In regular repairable jobs, all non-scrap items with valid rate are evaluated
+      if (!isScrapItem && rate > 0) {
+        if (item.unit === 'Y') {
+          qtyDisplay = 'Y';
+          qty = 1;
+        } else if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Job' || item.unit === 'Set') {
+          qty = 1;
+          if (item.itemCode === '1c') qty = 7;
+          if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
+          if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
+          if (item.itemCode === '15') qty = 6;
+          qtyDisplay = qty.toString();
+        } else if (item.unit === 'KG') {
+          qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
+          qtyDisplay = qty.toFixed(2);
+        }
+      }
+    }
+
+    if (item.unit === 'N') {
+      qtyDisplay = 'N';
+      qty = 0;
+    }
+
+    const amt = qty * rate;
+    return { qty, qtyDisplay, rate, amt };
+  }
+}
 
 export default function EstimateGenerate() {
   const { activeAgency, activeAtMaster, updateAgency } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
+  const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
+
+  // Estimate view modes: 'matrix' (Default official multi-job matrix + forwarding letter) | 'batch_all' | 'single_job'
+  const [estimateViewMode, setEstimateViewMode] = useState<'matrix' | 'batch_all' | 'single_job'>('matrix');
+  const [activeSingleJobId, setActiveSingleJobId] = useState<string | null>(null);
 
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -96,25 +298,55 @@ export default function EstimateGenerate() {
   }, [selectedMrNo, currentSelectedDivision]);
 
   useEffect(() => {
-    async function fetchJobs() {
+    async function fetchData() {
       if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
       try {
-        const q = query(
+        const jobsQ = query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid), 
           where('agencyId', '==', activeAgency.id)
         );
-        const snapshot = await getDocs(q);
-        const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const inspQ = query(
+          collection(db, 'inspections'),
+          where('ownerId', '==', auth.currentUser.uid),
+          where('agencyId', '==', activeAgency.id)
+        );
+
+        const [jobsSnapshot, inspSnapshot] = await Promise.all([
+          getDocs(jobsQ),
+          getDocs(inspQ)
+        ]);
+
+        const fetchedJobs = jobsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const fetchedInspections = inspSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+
         setJobs(fetchedJobs);
+        setInspections(fetchedInspections);
       } catch (err) {
         handleFirestoreError(err, OperationType.LIST, 'jobs');
       } finally {
         setLoading(false);
       }
     }
-    fetchJobs();
+    fetchData();
   }, [activeAgency]);
+
+  // Inspection lookup maps
+  const externalInspMap = useMemo(() => {
+    const map: Record<string, any> = {};
+    inspections.filter(i => (i.type || '').toLowerCase() === 'external').forEach(i => {
+      if (i.jobId) map[i.jobId] = i.data || i;
+    });
+    return map;
+  }, [inspections]);
+
+  const internalInspMap = useMemo(() => {
+    const map: Record<string, any> = {};
+    inspections.filter(i => (i.type || '').toLowerCase() === 'internal').forEach(i => {
+      if (i.jobId) map[i.jobId] = i.data || i;
+    });
+    return map;
+  }, [inspections]);
 
   const mrGroups = useMemo(() => {
     const groups: Record<string, any[]> = {};
@@ -190,31 +422,9 @@ export default function EstimateGenerate() {
     itemsList.forEach((item) => {
       const row = [item.itemCode, item.itemName];
       selectedJobsData.forEach((job) => {
-        const kva = String(job.capacityKva);
         const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
         const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-        const rawRate = itemForJob.rates[kva as keyof typeof itemForJob.rates] || 0;
-        const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
-        
-        let qty = 0;
-        const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-        const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
-        
-        if (isScrapItem === isScrapJob && rate > 0) {
-          if (item.unit === 'Y') qty = 1;
-          else if (item.unit === 'QTY') {
-            qty = 1;
-            if (item.itemCode === '1c') qty = 7;
-            if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-            if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-            if (item.itemCode === '15') qty = 6;
-          } else if (item.unit === 'KG') {
-            qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-          }
-        }
-        if (item.unit === 'N') qty = 0;
-
-        const amt = qty * rate;
+        const { amt } = calculateJobItemDetails(itemForJob, job);
         row.push(amt.toFixed(2));
       });
       wsData.push(row);
@@ -306,35 +516,64 @@ export default function EstimateGenerate() {
 
   const calculateJobTotal = (job: any) => {
     let jobTotal = 0;
-    const kva = String(job.capacityKva);
-    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
 
     jobMasterData.forEach(item => {
-      const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
-      const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
-      let qty = 0;
-      const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
-      
-      if (isScrapItem === isScrapJob && rate > 0) {
-        if (item.unit === 'Y') qty = 1;
-        else if (item.unit === 'QTY') {
-          qty = 1;
-          if (item.itemCode === '1c') qty = 7;
-          if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-          if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-          if (item.itemCode === '15') qty = 6;
-        } else if (item.unit === 'KG') {
-          qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-        }
-      }
-      if (item.unit === 'N') {
-        qty = 0;
-      }
-      jobTotal += (qty * rate);
+      const { amt } = calculateJobItemDetails(item, job);
+      jobTotal += amt;
     });
     return jobTotal;
   };
+
+  // Helper to evaluate a job against Clause 4.0 Circle Estimate Power Limit
+  const checkJobCircleLimit = (job: any) => {
+    const baseTot = calculateJobTotal(job);
+    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+    const finalAmt = baseTot * (1 + atPct / 100);
+    const circleMaster = getCircleLimitsEstimateMaster(activeAgency);
+    const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
+    const limitInfo = getCircleLimitForJob(job.capacityKva, ratingKey, circleMaster);
+    const exceeds = limitInfo.hasLimit && finalAmt > limitInfo.limit;
+    const diff = finalAmt - limitInfo.limit;
+    const diffPct = limitInfo.limit > 0 ? ((diff / limitInfo.limit) * 100) : 0;
+    return {
+      finalAmt,
+      limit: limitInfo.limit,
+      ratingLabel: limitInfo.ratingLabel,
+      ratingCode: limitInfo.ratingCode,
+      hasLimit: limitInfo.hasLimit,
+      exceeds,
+      diff,
+      diffPct
+    };
+  };
+
+  const mrHasExceededCircleLimit = (mr: string) => {
+    const mrJobs = mrGroups[mr] || [];
+    return mrJobs.some(j => checkJobCircleLimit(j).exceeds);
+  };
+
+  const handleUpdateJobRating = async (jobId: string, newRating: string) => {
+    setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, starRating: newRating, ratingLevel: newRating } : j)));
+    try {
+      const jobRef = doc(db, 'jobs', jobId);
+      const batch = writeBatch(db);
+      batch.update(jobRef, {
+        starRating: newRating,
+        ratingLevel: newRating,
+        updatedAt: new Date().toISOString()
+      });
+      await batch.commit();
+    } catch (e) {
+      console.error('Failed to update job rating in Firestore:', e);
+    }
+  };
+
+  const exceedingJobsInSelectedMr = useMemo(() => {
+    return selectedJobsData
+      .map(job => ({ job, check: checkJobCircleLimit(job) }))
+      .filter(item => item.check.exceeds);
+  }, [selectedJobsData, activeAgency, activeAtMaster]);
 
   const calculateMrEstimateTotal = (mr: string) => {
     const mrJobs = mrGroups[mr] || [];
@@ -811,16 +1050,36 @@ export default function EstimateGenerate() {
                         const isSent = groupJobs.some(j => j.estimateSentDate || j.estimateStatus === 'Sent' || j.estimateRefNo);
                         const isApproved = groupJobs.some(j => !!j.approvalNo || j.estimateApprovalStatus === 'Approved');
                         
+                        const hasCircleLimitExceeded = mrHasExceededCircleLimit(mr);
+
                         return (
                           <tr key={mr} className="hover:bg-slate-50">
-                            <td className="px-4 py-3 font-mono font-bold text-slate-800">{mr}</td>
+                            <td className="px-4 py-3 font-mono font-bold text-slate-800">
+                              <div className="flex items-center gap-2">
+                                <span>{mr}</span>
+                                {hasCircleLimitExceeded && (
+                                  <span 
+                                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs"
+                                    title="One or more transformers in this MR exceed SE Circle Approval Power Limit (Clause 4.0)"
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5 mr-1 text-rose-600 shrink-0" />
+                                    <span>&gt; Circle Limit</span>
+                                  </span>
+                                )}
+                              </div>
+                            </td>
                             <td className="px-4 py-3 font-medium text-slate-600">{divName}</td>
                             <td className="px-4 py-3 text-slate-600">
                               <span className="font-semibold">{groupJobs.length} Jobs</span>
                               <span className="text-xs text-slate-400 block">({repairableCount} Rep, {scrapCount} Scrap)</span>
                             </td>
                             <td className="px-4 py-3 font-mono font-bold text-slate-900">
-                              ₹{estTotal.toLocaleString('en-IN')}
+                              <div>₹{estTotal.toLocaleString('en-IN')}</div>
+                              {hasCircleLimitExceeded && (
+                                <span className="text-[10px] text-rose-600 font-sans font-bold flex items-center gap-0.5">
+                                  <AlertTriangle className="w-2.5 h-2.5" /> Exceeds Circle Limit
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3">
                               {isApproved ? (
@@ -930,6 +1189,77 @@ export default function EstimateGenerate() {
                 </div>
               </div>
 
+          {/* VIEW MODE TABS */}
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-2.5 rounded-lg border border-slate-200 shadow-xs print:hidden">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mr-1">Report Format:</span>
+              <button
+                onClick={() => setEstimateViewMode('batch_all')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  estimateViewMode === 'batch_all'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                title="Prints each transformer on its own 3-section A4 sheet, followed by the common forwarding letter"
+              >
+                <FileStack className="w-3.5 h-3.5" />
+                <span>Complete Submission Package (All Individual Reports + Common Letter)</span>
+              </button>
+              <button
+                onClick={() => setEstimateViewMode('single_job')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  estimateViewMode === 'single_job'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                title="View or print a single transformer's 3-section estimate sheet"
+              >
+                <FileCheck2 className="w-3.5 h-3.5" />
+                <span>Single Job Estimate Sheet</span>
+              </button>
+              <button
+                onClick={() => setEstimateViewMode('matrix')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  estimateViewMode === 'matrix'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                title="Traditional multi-column side-by-side comparison matrix"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Multi-Job Summary Matrix</span>
+              </button>
+            </div>
+            <div className="text-[11px] text-slate-500 font-medium italic">
+              {estimateViewMode === 'batch_all' && '📌 Standard format: Individual A4 sheets per transformer + 1 Common Forwarding Letter'}
+              {estimateViewMode === 'single_job' && '📌 Inspecting individual 3-section breakdown (Physical, Internal, Labour)'}
+              {estimateViewMode === 'matrix' && '📌 Side-by-side comparison format'}
+            </div>
+          </div>
+
+          {/* SINGLE JOB SELECTOR (when in single_job mode) */}
+          {estimateViewMode === 'single_job' && (
+            <div className="flex flex-wrap items-center gap-2 bg-slate-50 p-3 rounded-lg border border-slate-200 print:hidden">
+              <span className="text-xs font-bold text-slate-700 mr-2">Select Transformer:</span>
+              {selectedJobsData.map((job) => {
+                const isActive = (activeSingleJobId || selectedJobsData[0]?.id) === job.id;
+                return (
+                  <button
+                    key={job.id}
+                    onClick={() => setActiveSingleJobId(job.id)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold transition-colors border ${
+                      isActive
+                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                    }`}
+                  >
+                    Job #{job.jobNo} &bull; {job.capacityKva} KVA ({job.coreType || 'CRGO'})
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {savedSuccessMsg && (
             <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-lg flex items-center justify-between text-xs font-semibold print:hidden shadow-sm">
               <div className="flex items-center gap-2">
@@ -942,315 +1272,561 @@ export default function EstimateGenerate() {
             </div>
           )}
 
-          <div id="printable-estimate-container" className="space-y-6 print:space-y-0">
-            {/* PAGE 1: ESTIMATE REPORT */}
-            <PrintableA4Page agency={activeAgency} documentTitle="ESTIMATE REPORT">
-              <div className="flex flex-col justify-between h-full">
-                <div>
-                  <div className="flex justify-between items-center text-[9px] font-bold uppercase text-black mb-1.5 border-b border-black pb-1">
+          {/* EXCEEDS CIRCLE LIMIT WARNING CARD */}
+          {exceedingJobsInSelectedMr.length > 0 && (
+            <div className="bg-rose-50 border-2 border-rose-400 rounded-xl p-4 text-rose-900 shadow-md print:hidden space-y-3">
+              <div className="flex items-start gap-3">
+                <div className="p-2.5 bg-rose-100 rounded-xl text-rose-700 shrink-0 border border-rose-300">
+                  <AlertTriangle className="w-6 h-6 animate-pulse text-rose-700" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-sm font-black uppercase tracking-wide text-rose-950">
+                      ⚠️ ESTIMATE AMOUNT IS MORE THAN CIRCLE LIMIT (Clause 4.0 - 25% Approval Power)
+                    </h3>
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] bg-rose-200 text-rose-900 font-bold font-mono border border-rose-300">
+                      {exceedingJobsInSelectedMr.length} Transformer(s) Over Limit
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-800 mt-1 leading-relaxed">
+                    The estimated repair cost for the transformer(s) listed below exceeds the 25% financial sanction power of the Superintending Engineer (Circle Office). These estimates will require special sanction from higher corporate authority (Chief Engineer / Corporate Office).
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5 pt-1">
+                {exceedingJobsInSelectedMr.map(({ job, check }) => (
+                  <div key={job.id} className="bg-white border border-rose-300 rounded-lg p-3 flex justify-between items-center shadow-xs">
                     <div>
-                      <p>DIVISION : {selectedJobsData[0]?.division || 'SABARMATI'}</p>
-                      <p className="mt-0.5">ORDER NO : {activeAgency?.prefixes?.[selectedJobsData[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
-                    </div>
-                    <div className="text-center text-xs font-bold underline decoration-1 underline-offset-2">
-                      ESTIMATE REPORT
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono font-bold text-slate-900 text-xs">Job #{job.jobNo}</span>
+                        <span className="text-[11px] font-semibold text-slate-600">({job.capacityKva} KVA &bull; {check.ratingLabel})</span>
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        Make: {job.make || '-'} &bull; S/N: {job.serialNo || '-'}
+                      </div>
                     </div>
                     <div className="text-right">
-                      <p>NO : {Math.floor(Math.random() * 100) + 1}</p>
-                      <p className="mt-0.5">DATE : {letterDateText || dateString}</p>
+                      <div className="font-mono font-bold text-rose-700 text-xs">
+                        ₹{check.finalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[9px] text-slate-500 font-medium">
+                        Circle Limit: ₹{check.limit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </div>
+                      <div className="text-[9px] font-bold text-rose-600">
+                        +₹{check.diff.toFixed(0)} (+{check.diffPct.toFixed(1)}%)
+                      </div>
                     </div>
                   </div>
+                ))}
+              </div>
+            </div>
+          )}
 
-                  <table className="w-full text-black text-[8px] border-collapse border border-black">
-                    <tbody>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">TRANS TYPE</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.coreType || 'CRGO'}</td>
-                        ))}
-                      </tr>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">JOB NO</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.jobNo}</td>
-                        ))}
-                      </tr>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">MAKE</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.make}</td>
-                        ))}
-                      </tr>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">KVA / KV</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.capacityKva} / 11</td>
-                        ))}
-                      </tr>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">TSR NO.</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.serialNo}</td>
-                        ))}
-                      </tr>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">MR NO. & DATE</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">{job.mrNo}</td>
-                        ))}
-                      </tr>
-                      <tr className="border-b border-black font-bold">
-                        <td className="p-0.5 border-r border-black">Oil Cap / Less Oil / Filter Oil</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0.5 border-r border-black text-center">- / - / -</td>
-                        ))}
-                      </tr>
+          <div id="printable-estimate-container" className="space-y-6 print:space-y-0">
+            {/* VIEW MODE 1: BATCH ALL (INDIVIDUAL 3-SECTION REPORTS + COMMON FORWARDING LETTER) */}
+            {estimateViewMode === 'batch_all' && (
+              <>
+                {selectedJobsData.map((job) => (
+                  <SingleJobEstimateReport
+                    key={job.id}
+                    job={job}
+                    agency={activeAgency}
+                    atMaster={activeAtMaster}
+                    externalData={externalInspMap[job.id]}
+                    internalData={internalInspMap[job.id]}
+                    letterDateText={letterDateText || dateString}
+                  />
+                ))}
 
-                      {/* Sub headers */}
-                      <tr className="border-b border-black font-bold bg-slate-100 print:bg-transparent">
-                        <td className="p-0.5 border-r border-black flex justify-between">
-                          <span>As Per AT Sr</span>
-                          <span className="text-center flex-1">ITEM</span>
-                        </td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-0 border-r border-black">
-                            <table className="w-full text-center text-[8px]">
-                              <tbody>
-                                <tr>
-                                  <td className="w-1/3 py-0.5 border-r border-black">QTY</td>
-                                  <td className="w-1/3 py-0.5 border-r border-black">RATE</td>
-                                  <td className="w-1/3 py-0.5">AMT.</td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </td>
-                        ))}
-                      </tr>
+                {/* COMMON FORWARDING LETTER FOR ALL JOBS IN THIS MR */}
+                <PrintableA4Page agency={activeAgency} documentTitle="FORWARDING LETTER">
+                  <div className="flex flex-col justify-between h-full text-black">
+                    <div>
+                      <div className="flex justify-between text-xs font-bold mb-4">
+                        <div className="whitespace-pre-wrap">
+                          {forwardingTo || `Superintending Engineer (O & M),
+Uttar Gujarat Vij Company Ltd.,
+Circle Office : SABARMATI`}
+                        </div>
+                        <div className="text-right whitespace-pre-wrap">
+                          <p>REF. NO. : {refNoText}</p>
+                          <p className="mt-1">DATE : {letterDateText}</p>
+                        </div>
+                      </div>
 
-                      {/* Items */}
-                      {(selectedJobsData.length > 0 
-                        ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
-                        : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
-                      ).map((item, idx) => (
-                        <tr key={idx} className="border-b border-slate-300">
-                          <td className="p-0.5 border-r border-black flex gap-1">
-                            <span className="w-6 shrink-0">{item.itemCode}</span>
-                            <span className="truncate">{item.itemName}</span>
-                          </td>
-                          {selectedJobsData.map(job => {
-                            const kva = String(job.capacityKva);
-                            const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
-                            const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-                            const rawRate = itemForJob.rates[kva as keyof typeof itemForJob.rates] || 0;
-                            const rate = typeof rawRate === "string" ? parseFloat(rawRate) : Number(rawRate);
-                            
-                            let qty = 0;
-                            let qtyDisplay = '0';
-                            
-                            const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
-                            const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                            
-                            if (isScrapItem === isScrapJob && rate > 0) {
-                              if (item.unit === 'Y') {
-                                 qtyDisplay = 'Y';
-                                 qty = 1;
-                              } else if (item.unit === 'QTY') {
-                                 qty = 1;
-                                 if (item.itemCode === '1c') qty = 7;
-                                 if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-                                 if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-                                 if (item.itemCode === '15') qty = 6;
-                                 qtyDisplay = qty.toString();
-                              } else if (item.unit === 'KG') {
-                                 qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-                                 qtyDisplay = qty.toFixed(2);
-                              }
-                            }
-                            
-                            if (item.unit === 'N') {
-                                qtyDisplay = 'N';
-                                qty = 0;
-                            }
+                      <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
+                        Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
+                      </div>
 
-                            const amt = qty * rate;
+                      <p className="text-xs mb-2">Dear Sir,</p>
+                      <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
+                        {refBodyText}
+                      </p>
 
+                      <table className="w-full text-center text-xs border-collapse border border-black mb-4">
+                        <thead>
+                          <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                            <th className="p-1 border-r border-black">NO.</th>
+                            <th className="p-1 border-r border-black">JOB. NO.</th>
+                            <th className="p-1 border-r border-black">T.R. MAKE</th>
+                            <th className="p-1 border-r border-black">TR. SR. NO.</th>
+                            <th className="p-1 border-r border-black">KVA</th>
+                            <th className="p-1 border-r border-black">KV</th>
+                            <th className="p-1 border-r border-black">TYPE</th>
+                            <th className="p-1 border-r border-black">OGP/GP</th>
+                            <th className="p-1 border-r border-black">EST. AMT.</th>
+                            <th className="p-1">REMARK</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedJobsData.map((job, idx) => {
+                             const jobBaseTotal = calculateJobTotal(job);
+                             const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                             const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
+                             const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                             const check = checkJobCircleLimit(job);
+                             
                             return (
+                              <tr key={job.id} className="border-b border-black">
+                                <td className="p-1 border-r border-black">{idx + 1}</td>
+                                <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
+                                <td className="p-1 border-r border-black">{job.make}</td>
+                                <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
+                                <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
+                                <td className="p-1 border-r border-black">11</td>
+                                <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
+                                <td className="p-1 border-r border-black">OGP</td>
+                                <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
+                                <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
+                                  {isScrapJob ? (
+                                    'SCRAP'
+                                  ) : check.exceeds ? (
+                                    <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
+                                      REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
+                                    </span>
+                                  ) : (
+                                    'REPAIRABLE'
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="font-bold border-black">
+                            <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
+                            <td className="p-1 border-r border-black text-right font-mono font-bold">
+                              {selectedJobsData.reduce((acc, job) => {
+                                const baseAmt = calculateJobTotal(job);
+                                const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                                return acc + (baseAmt * (1 + atPct / 100));
+                              }, 0).toFixed(2)}
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
+
+                      <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
+                    </div>
+
+                    <div>
+                      <div className="flex justify-between text-xs mb-6">
+                        <p>Thanking you</p>
+                        <p>Yours faithfully</p>
+                      </div>
+
+                      <div className="flex justify-between text-xs mb-4">
+                        <p>Encl. : Estimate & Inspection Reports</p>
+                        <div className="text-center">
+                          <p className="mb-6 font-bold">{signedByText}</p>
+                          <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                        </div>
+                      </div>
+
+                      <div className="text-xs font-bold">
+                        <p className="mb-1">C . C. to :</p>
+                        <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </PrintableA4Page>
+              </>
+            )}
+
+            {/* VIEW MODE 2: SINGLE JOB ESTIMATE SHEET */}
+            {estimateViewMode === 'single_job' && (
+              (() => {
+                const targetJob = selectedJobsData.find(j => j.id === (activeSingleJobId || selectedJobsData[0]?.id)) || selectedJobsData[0];
+                if (!targetJob) return <div className="text-center p-8 bg-white text-slate-500">No transformer selected.</div>;
+                return (
+                  <SingleJobEstimateReport
+                    job={targetJob}
+                    agency={activeAgency}
+                    atMaster={activeAtMaster}
+                    externalData={externalInspMap[targetJob.id]}
+                    internalData={internalInspMap[targetJob.id]}
+                    letterDateText={letterDateText || dateString}
+                  />
+                );
+              })()
+            )}
+
+            {/* VIEW MODE 3: MULTI-JOB SUMMARY MATRIX */}
+            {estimateViewMode === 'matrix' && (
+              <>
+                <PrintableA4Page agency={activeAgency} documentTitle="ESTIMATE REPORT">
+                  <div className="flex flex-col justify-between h-full">
+                    <div>
+                      <div className="flex justify-between items-center text-[9px] font-bold uppercase text-black mb-1.5 border-b border-black pb-1">
+                        <div>
+                          <p>DIVISION : {selectedJobsData[0]?.division || 'SABARMATI'}</p>
+                          <p className="mt-0.5">ORDER NO : {activeAgency?.prefixes?.[selectedJobsData[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
+                        </div>
+                        <div className="text-center text-xs font-bold underline decoration-1 underline-offset-2">
+                          ESTIMATE REPORT
+                        </div>
+                        <div className="text-right">
+                          <p>NO : {Math.floor(Math.random() * 100) + 1}</p>
+                          <p className="mt-0.5">DATE : {letterDateText || dateString}</p>
+                        </div>
+                      </div>
+
+                      <table className="w-full text-black text-[8px] border-collapse border border-black">
+                        <tbody>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">TRANS TYPE</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.coreType || 'CRGO'}</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">JOB NO</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.jobNo}</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">MAKE</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.make}</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">KVA / KV</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.capacityKva} / 11</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">TSR NO.</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.serialNo}</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">MR NO. & DATE</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.mrNo}</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">Oil Cap / Less Oil / Filter Oil</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">- / - / -</td>
+                            ))}
+                          </tr>
+                          <tr className="border-b border-black font-bold">
+                            <td className="p-0.5 border-r border-black">RATING / LEVEL (Clause 4.0)</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-0.5 border-r border-black text-center">
+                                <select
+                                  value={job.starRating || job.ratingLevel || '3 Star & other'}
+                                  onChange={(e) => handleUpdateJobRating(job.id, e.target.value)}
+                                  className="text-[8px] font-bold bg-white border border-slate-300 rounded px-1 py-0.5 max-w-full print:border-none print:bg-transparent print:appearance-none text-center cursor-pointer"
+                                  title="Change Transformer Rating / Level for Circle Limit Approval Check"
+                                >
+                                  {RATING_LEVEL_OPTIONS.map(opt => (
+                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                                  ))}
+                                </select>
+                              </td>
+                            ))}
+                          </tr>
+
+                          {/* Sub headers */}
+                          <tr className="border-b border-black font-bold bg-slate-100 print:bg-transparent">
+                            <td className="p-0.5 border-r border-black flex justify-between">
+                              <span>As Per AT Sr</span>
+                              <span className="text-center flex-1">ITEM</span>
+                            </td>
+                            {selectedJobsData.map(job => (
                               <td key={job.id} className="p-0 border-r border-black">
                                 <table className="w-full text-center text-[8px]">
                                   <tbody>
                                     <tr>
-                                      <td className="w-1/3 py-0.5 border-r border-slate-300">{qtyDisplay}</td>
-                                      <td className="w-1/3 py-0.5 border-r border-slate-300">{rate > 0 ? rate.toFixed(1) : '0.0'}</td>
-                                      <td className="w-1/3 py-0.5">{amt > 0 ? amt.toFixed(1) : '0.0'}</td>
+                                      <td className="w-1/3 py-0.5 border-r border-black">QTY</td>
+                                      <td className="w-1/3 py-0.5 border-r border-black">RATE</td>
+                                      <td className="w-1/3 py-0.5">AMT.</td>
                                     </tr>
                                   </tbody>
                                 </table>
                               </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                      
-                      {/* Totals */}
-                      <tr className="border-t border-black font-bold">
-                        <td className="p-1 border-r border-black text-right">Total</td>
-                        {selectedJobsData.map(job => (
-                          <td key={job.id} className="p-1 border-r border-black text-right font-mono">{calculateJobTotal(job).toFixed(2)}</td>
-                        ))}
-                      </tr>
-                      <tr className="border-t border-black font-bold">
-                        <td className="p-1 border-r border-black text-right">
-                          {(() => {
-                            if (selectedJobsData.length === 0) return 'Rise / Fall Total';
-                            const pcts = selectedJobsData.map(j => getAtPercentageForCore(activeAtMaster, j.coreType));
-                            const allSame = pcts.every(p => p === pcts[0]);
-                            if (allSame) {
-                              const p = pcts[0];
-                              return p >= 0 ? `${p.toFixed(2)} % Rise Total` : `${Math.abs(p).toFixed(2)} % Fall Total`;
-                            }
-                            return 'AT % Rise / Fall Total';
-                          })()}
-                        </td>
-                        {selectedJobsData.map(job => {
-                          const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                          const baseTot = calculateJobTotal(job);
-                          const riseAmt = baseTot * (atPct / 100);
-                          return (
-                            <td key={job.id} className="p-1 border-r border-black text-right font-mono">
-                              {riseAmt.toFixed(2)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                      <tr className="border-t border-black font-bold text-[9px]">
-                        <td className="p-1 border-r border-black text-right">Grand Total</td>
-                        {selectedJobsData.map(job => {
-                          const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                          const baseTot = calculateJobTotal(job);
-                          const grandTot = baseTot * (1 + atPct / 100);
-                          return (
-                            <td key={job.id} className="p-1 border-r border-black text-right font-mono">{grandTot.toFixed(2)}</td>
-                          );
-                        })}
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-                
-                <div className="flex justify-between items-end mt-4 text-black text-xs font-bold pt-2">
-                  <div>
-                    <p className="underline underline-offset-2 text-[10px]">
-                      Note - {selectedJobsData.some(j => j.status === 'Scrap' || j.condition === 'Scrap') ? 'Scrap Included' : ''}
-                    </p>
-                  </div>
-                  <div className="text-center">
-                    <p className="mb-6">For, {activeAgency?.name || ''}</p>
-                    <p className="text-[10px] text-slate-500">Auth Sign.</p>
-                  </div>
-                </div>
-              </div>
-            </PrintableA4Page>
+                            ))}
+                          </tr>
 
-            {/* PAGE 2: FORWARDING LETTER */}
-            <PrintableA4Page agency={activeAgency}>
-              <div className="flex flex-col justify-between h-full text-black">
-                <div>
-                  <div className="flex justify-between text-xs font-bold mb-4">
-                    <div className="whitespace-pre-wrap">
-                      {forwardingTo || `Superintending Engineer (O & M),
+                          {/* Items */}
+                          {(selectedJobsData.length > 0 
+                            ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
+                            : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
+                          ).map((item, idx) => (
+                            <tr key={idx} className="border-b border-slate-300">
+                              <td className="p-0.5 border-r border-black flex gap-1">
+                                <span className="w-6 shrink-0">{item.itemCode}</span>
+                                <span className="truncate">{item.itemName}</span>
+                              </td>
+                              {selectedJobsData.map(job => {
+                                const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+                                const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
+                                const { qtyDisplay, rate, amt } = calculateJobItemDetails(itemForJob, job);
+
+                                return (
+                                  <td key={job.id} className="p-0 border-r border-black">
+                                    <table className="w-full text-center text-[8px]">
+                                      <tbody>
+                                        <tr>
+                                          <td className="w-1/3 py-0.5 border-r border-slate-300">{qtyDisplay}</td>
+                                          <td className="w-1/3 py-0.5 border-r border-slate-300">{rate > 0 ? rate.toFixed(1) : '0.0'}</td>
+                                          <td className="w-1/3 py-0.5">{amt > 0 ? amt.toFixed(1) : '0.0'}</td>
+                                        </tr>
+                                      </tbody>
+                                    </table>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                          
+                          {/* Totals */}
+                          <tr className="border-t border-black font-bold">
+                            <td className="p-1 border-r border-black text-right">Total</td>
+                            {selectedJobsData.map(job => (
+                              <td key={job.id} className="p-1 border-r border-black text-right font-mono">{calculateJobTotal(job).toFixed(2)}</td>
+                            ))}
+                          </tr>
+                          <tr className="border-t border-black font-bold">
+                            <td className="p-1 border-r border-black text-right">
+                              {(() => {
+                                if (selectedJobsData.length === 0) return 'Rise / Fall Total';
+                                const pcts = selectedJobsData.map(j => getAtPercentageForCore(activeAtMaster, j.coreType));
+                                const allSame = pcts.every(p => p === pcts[0]);
+                                if (allSame) {
+                                  const p = pcts[0];
+                                  return p >= 0 ? `${p.toFixed(2)} % Rise Total` : `${Math.abs(p).toFixed(2)} % Fall Total`;
+                                }
+                                return 'AT % Rise / Fall Total';
+                              })()}
+                            </td>
+                            {selectedJobsData.map(job => {
+                              const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                              const baseTot = calculateJobTotal(job);
+                              const riseAmt = baseTot * (atPct / 100);
+                              return (
+                                <td key={job.id} className="p-1 border-r border-black text-right font-mono">
+                                  {riseAmt.toFixed(2)}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                          <tr className="border-t border-black font-bold text-[9px]">
+                            <td className="p-1 border-r border-black text-right">Grand Total</td>
+                            {selectedJobsData.map(job => {
+                              const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                              const baseTot = calculateJobTotal(job);
+                              const grandTot = baseTot * (1 + atPct / 100);
+                              return (
+                                <td key={job.id} className="p-1 border-r border-black text-right font-mono">{grandTot.toFixed(2)}</td>
+                              );
+                            })}
+                          </tr>
+
+                          {/* Circle Limit Clause 4.0 Rows */}
+                          <tr className="border-t border-black text-[8px] bg-slate-50 print:bg-transparent">
+                            <td className="p-1 border-r border-black text-right font-bold text-slate-700">
+                              SE (Circle) Limit (Clause 4.0)
+                            </td>
+                            {selectedJobsData.map(job => {
+                              const check = checkJobCircleLimit(job);
+                              return (
+                                <td key={job.id} className="p-1 border-r border-black text-right font-mono font-bold text-slate-800">
+                                  {check.hasLimit ? `₹ ${check.limit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A'}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                          <tr className="border-t border-black text-[8px] font-bold">
+                            <td className="p-1 border-r border-black text-right font-bold">
+                              Approval Authority Power Check
+                            </td>
+                            {selectedJobsData.map(job => {
+                              const check = checkJobCircleLimit(job);
+                              if (!check.hasLimit) {
+                                return (
+                                  <td key={job.id} className="p-1 border-r border-black text-center text-slate-500 font-normal">
+                                    Standard Limit
+                                  </td>
+                                );
+                              }
+                              if (check.exceeds) {
+                                return (
+                                  <td key={job.id} className="p-1 border-r border-black text-center bg-rose-100 text-rose-900 font-bold">
+                                    <div className="flex flex-col items-center justify-center">
+                                      <span className="text-[7.5px] uppercase text-rose-800 font-black">
+                                        ⚠️ EXCEEDS CIRCLE LIMIT
+                                      </span>
+                                      <span className="text-[7px] text-rose-700 font-mono">
+                                        +₹{check.diff.toFixed(0)} (+{check.diffPct.toFixed(1)}%) &bull; Needs CE/CO Appr.
+                                      </span>
+                                    </div>
+                                  </td>
+                                );
+                              }
+                              return (
+                                <td key={job.id} className="p-1 border-r border-black text-center bg-emerald-50 text-emerald-800 font-medium">
+                                  <span className="text-[7.5px]">✓ Within Circle Limit</span>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    
+                    <div className="flex justify-between items-end mt-4 text-black text-xs font-bold pt-2">
+                      <div>
+                        <p className="underline underline-offset-2 text-[10px]">
+                          Note - {selectedJobsData.some(j => j.status === 'Scrap' || j.condition === 'Scrap') ? 'Scrap Included' : ''}
+                        </p>
+                      </div>
+                      <div className="text-center">
+                        <p className="mb-6">For, {activeAgency?.name || ''}</p>
+                        <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                      </div>
+                    </div>
+                  </div>
+                </PrintableA4Page>
+
+                {/* COMMON FORWARDING LETTER */}
+                <PrintableA4Page agency={activeAgency}>
+                  <div className="flex flex-col justify-between h-full text-black">
+                    <div>
+                      <div className="flex justify-between text-xs font-bold mb-4">
+                        <div className="whitespace-pre-wrap">
+                          {forwardingTo || `Superintending Engineer (O & M),
 Uttar Gujarat Vij Company Ltd.,
 Circle Office : SABARMATI`}
-                    </div>
-                    <div className="text-right whitespace-pre-wrap">
-                      <p>REF. NO. : {refNoText}</p>
-                      <p className="mt-1">DATE : {letterDateText}</p>
-                    </div>
-                  </div>
+                        </div>
+                        <div className="text-right whitespace-pre-wrap">
+                          <p>REF. NO. : {refNoText}</p>
+                          <p className="mt-1">DATE : {letterDateText}</p>
+                        </div>
+                      </div>
 
-                  <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
-                    Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
-                  </div>
+                      <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
+                        Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
+                      </div>
 
-                  <p className="text-xs mb-2">Dear Sir,</p>
-                  <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
-                    {refBodyText}
-                  </p>
+                      <p className="text-xs mb-2">Dear Sir,</p>
+                      <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
+                        {refBodyText}
+                      </p>
 
-                  <table className="w-full text-center text-xs border-collapse border border-black mb-4">
-                    <thead>
-                      <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                        <th className="p-1 border-r border-black">NO.</th>
-                        <th className="p-1 border-r border-black">JOB. NO.</th>
-                        <th className="p-1 border-r border-black">T.R. MAKE</th>
-                        <th className="p-1 border-r border-black">TR. SR. NO.</th>
-                        <th className="p-1 border-r border-black">KVA</th>
-                        <th className="p-1 border-r border-black">KV</th>
-                        <th className="p-1 border-r border-black">TYPE</th>
-                        <th className="p-1 border-r border-black">OGP/GP</th>
-                        <th className="p-1 border-r border-black">EST. AMT.</th>
-                        <th className="p-1">REMARK</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {selectedJobsData.map((job, idx) => {
-                         const jobBaseTotal = calculateJobTotal(job);
-                         const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                         const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
-                         const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                         
-                        return (
-                          <tr key={job.id} className="border-b border-black">
-                            <td className="p-1 border-r border-black">{idx + 1}</td>
-                            <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
-                            <td className="p-1 border-r border-black">{job.make}</td>
-                            <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
-                            <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
-                            <td className="p-1 border-r border-black">11</td>
-                            <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
-                            <td className="p-1 border-r border-black">OGP</td>
-                            <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
-                            <td className="p-1 text-center text-[10px] font-bold whitespace-nowrap">{isScrapJob ? 'SCRAP' : 'REPAIRABLE'}</td>
+                      <table className="w-full text-center text-xs border-collapse border border-black mb-4">
+                        <thead>
+                          <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                            <th className="p-1 border-r border-black">NO.</th>
+                            <th className="p-1 border-r border-black">JOB. NO.</th>
+                            <th className="p-1 border-r border-black">T.R. MAKE</th>
+                            <th className="p-1 border-r border-black">TR. SR. NO.</th>
+                            <th className="p-1 border-r border-black">KVA</th>
+                            <th className="p-1 border-r border-black">KV</th>
+                            <th className="p-1 border-r border-black">TYPE</th>
+                            <th className="p-1 border-r border-black">OGP/GP</th>
+                            <th className="p-1 border-r border-black">EST. AMT.</th>
+                            <th className="p-1">REMARK</th>
                           </tr>
-                        )
-                      })}
-                      <tr className="font-bold border-black">
-                        <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
-                        <td className="p-1 border-r border-black text-right font-mono font-bold">
-                          {selectedJobsData.reduce((acc, job) => {
-                            const baseAmt = calculateJobTotal(job);
-                            const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                            return acc + (baseAmt * (1 + atPct / 100));
-                          }, 0).toFixed(2)}
-                        </td>
-                        <td></td>
-                      </tr>
-                    </tbody>
-                  </table>
+                        </thead>
+                        <tbody>
+                          {selectedJobsData.map((job, idx) => {
+                             const jobBaseTotal = calculateJobTotal(job);
+                             const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                             const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
+                             const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                             const check = checkJobCircleLimit(job);
+                             
+                            return (
+                              <tr key={job.id} className="border-b border-black">
+                                <td className="p-1 border-r border-black">{idx + 1}</td>
+                                <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
+                                <td className="p-1 border-r border-black">{job.make}</td>
+                                <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
+                                <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
+                                <td className="p-1 border-r border-black">11</td>
+                                <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
+                                <td className="p-1 border-r border-black">OGP</td>
+                                <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
+                                <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
+                                  {isScrapJob ? (
+                                    'SCRAP'
+                                  ) : check.exceeds ? (
+                                    <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
+                                      REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
+                                    </span>
+                                  ) : (
+                                    'REPAIRABLE'
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          <tr className="font-bold border-black">
+                            <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
+                            <td className="p-1 border-r border-black text-right font-mono font-bold">
+                              {selectedJobsData.reduce((acc, job) => {
+                                const baseAmt = calculateJobTotal(job);
+                                const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                                return acc + (baseAmt * (1 + atPct / 100));
+                              }, 0).toFixed(2)}
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tbody>
+                      </table>
 
-                  <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
-                </div>
+                      <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
+                    </div>
 
-                <div>
-                  <div className="flex justify-between text-xs mb-6">
-                    <p>Thanking you</p>
-                    <p>Yours faithfully</p>
-                  </div>
+                    <div>
+                      <div className="flex justify-between text-xs mb-6">
+                        <p>Thanking you</p>
+                        <p>Yours faithfully</p>
+                      </div>
 
-                  <div className="flex justify-between text-xs mb-4">
-                    <p>Encl. : Estimate & Inspection Reports</p>
-                    <div className="text-center">
-                      <p className="mb-6 font-bold">{signedByText}</p>
-                      <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                      <div className="flex justify-between text-xs mb-4">
+                        <p>Encl. : Estimate & Inspection Reports</p>
+                        <div className="text-center">
+                          <p className="mb-6 font-bold">{signedByText}</p>
+                          <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                        </div>
+                      </div>
+
+                      <div className="text-xs font-bold">
+                        <p className="mb-1">C . C. to :</p>
+                        <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
+                      </div>
                     </div>
                   </div>
-
-                  <div className="text-xs font-bold">
-                    <p className="mb-1">C . C. to :</p>
-                    <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
-                  </div>
-                </div>
-              </div>
-            </PrintableA4Page>
+                </PrintableA4Page>
+              </>
+            )}
           </div>
       </div>
       )}
@@ -1365,12 +1941,26 @@ Circle Office : SABARMATI`}
                       </td>
                     </tr>
                   ) : (
-                    filteredSentEstimates.map(item => (
+                    filteredSentEstimates.map(item => {
+                      const hasCircleLimitExceeded = mrHasExceededCircleLimit(item.mrNo);
+
+                      return (
                       <tr key={item.mrNo} className="hover:bg-slate-50/80 transition-colors">
                         {/* MR Details */}
                         <td className="px-4 py-3.5">
-                          <span className="font-mono font-black text-slate-900 text-sm block">{item.mrNo}</span>
-                          <span className="text-slate-600 font-medium">{item.division} Division • {item.jobCount} T/F</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-black text-slate-900 text-sm">{item.mrNo}</span>
+                            {hasCircleLimitExceeded && (
+                              <span 
+                                className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs"
+                                title="One or more transformers in this MR exceed SE Circle Approval Power Limit (Clause 4.0)"
+                              >
+                                <AlertTriangle className="w-2.5 h-2.5 mr-1 text-rose-600 shrink-0" />
+                                <span>&gt; Circle Limit</span>
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-slate-600 font-medium block">{item.division} Division • {item.jobCount} T/F</span>
                           {item.mrDate !== '-' && (
                             <span className="text-[10px] text-slate-400 block font-mono mt-0.5">MR Date: {item.mrDate}</span>
                           )}
@@ -1386,7 +1976,12 @@ Circle Office : SABARMATI`}
 
                         {/* Amount */}
                         <td className="px-4 py-3.5 text-right font-mono font-black text-slate-900 text-sm">
-                          ₹{item.estimateAmount.toLocaleString('en-IN')}
+                          <div>₹{item.estimateAmount.toLocaleString('en-IN')}</div>
+                          {hasCircleLimitExceeded && (
+                            <span className="text-[10px] text-rose-600 font-sans font-bold flex items-center justify-end gap-0.5">
+                              <AlertTriangle className="w-2.5 h-2.5" /> Exceeds Circle Limit
+                            </span>
+                          )}
                         </td>
 
                         {/* Status Badge */}
@@ -1429,10 +2024,11 @@ Circle Office : SABARMATI`}
                           </button>
                         </td>
                       </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
             </div>
           </div>
         </div>

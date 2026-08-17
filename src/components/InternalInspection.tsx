@@ -1,12 +1,11 @@
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer } from 'lucide-react';
+import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
-import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
+import { PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 
 export interface InternalData {
@@ -90,7 +89,7 @@ export default function InternalInspection() {
         initialForms[j.id] = {
           windingType: existingInsp.data.windingType || 'AL',
           condition: existingInsp.data.condition || 'Repairable',
-          hvCoilLimb: existingInsp.data.hvCoilLimb || '',
+          hvCoilLimb: existingInsp.data.hvCoilLimb || '4',
           damR: existingInsp.data.damR || '',
           damY: existingInsp.data.damY || '',
           damB: existingInsp.data.damB || '',
@@ -177,15 +176,37 @@ export default function InternalInspection() {
     return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
   }, [jobs, selectedMrNo]);
 
-  
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
     const mrDateStr = formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt);
     const wsData = [
-      ['MR Number', selectedMrNo, 'MR Date', mrDateStr],
+      ['MR Number', selectedMrNo, 'MR Date', mrDateStr, 'Agency', activeAgency?.name || ''],
       [],
       [
-        '#', 'JOB NO', 'KVA', 'WIND', 'H.V. Coil Limb', 'No. Of Dam. H.V Coil R', 'No. Of Dam. H.V Coil Y', 'No. Of Dam. H.V Coil B', 'Tot. Coil (ht)', 'Wt. of Coil (Kg.) (ht)', 'TOT. Wt. (ht)', 'L.V. COIL DMG. OR RI. R', 'L.V. COIL DMG. OR RI. Y', 'L.V. COIL DMG. OR RI. B', 'WT. OF Coil (Kg.) LT', 'TOT. Wt. (LT)', 'Wasring', 'In. Pnt', 'Tst Trn', 'Dc', 'Insula', 'Job Type'
+        '#',
+        'JOB NO',
+        'MAKE',
+        'KVA',
+        'TYPE / CORE',
+        'WIND',
+        'HV LIMB',
+        'DAMAGED HV COIL R',
+        'DAMAGED HV COIL Y',
+        'DAMAGED HV COIL B',
+        'TOT COIL (HT)',
+        'WT/COIL (KG) HT',
+        'TOT WT (HT)',
+        'LV COIL R',
+        'LV COIL Y',
+        'LV COIL B',
+        'WT/COIL (KG) LT',
+        'TOT WT (LT)',
+        'WAS RING',
+        'IN PNT',
+        'TST TRN',
+        'DC',
+        'INSULA',
+        'CONDITION'
       ]
     ];
     
@@ -193,34 +214,36 @@ export default function InternalInspection() {
       const data = formsData[job.id] || {} as InternalData;
       wsData.push([
         index + 1,
-        job.jobNo,
+        job.jobNo + (job.repairType === 'GP' ? ' (GP)' : ''),
+        job.make || '-',
         job.capacityKva,
-        data.windingType || '',
-        data.hvCoilLimb || '',
-        data.damR || '',
-        data.damY || '',
-        data.damB || '',
-        data.totCoil || '',
-        data.wtOfCoil || '',
-        data.totWt || '',
+        job.coreType || 'CRGO',
+        data.windingType || 'AL',
+        data.hvCoilLimb || '4',
+        data.damR || '0',
+        data.damY || '0',
+        data.damB || '0',
+        data.totCoil || '0',
+        data.wtOfCoil || '0',
+        data.totWt || '0',
         data.lvCoilR || 'OK',
         data.lvCoilY || 'OK',
         data.lvCoilB || 'OK',
-        data.wtOfCoilLv || '',
-        data.totWtLv || '',
-        data.wasring || '',
-        data.inPnt || '',
-        data.tstTrn || '',
-        data.dc || '',
-        data.insula || '',
-        job.coreType || '-'
+        data.wtOfCoilLv || '0',
+        data.totWtLv || '0',
+        data.wasring || '6',
+        data.inPnt || '-',
+        data.tstTrn || 'Y',
+        data.dc || 'Y',
+        data.insula || 'Y',
+        data.condition || 'Repairable'
       ]);
     });
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Internal Inspection");
-    XLSX.writeFile(wb, `Internal_Inspection_${selectedMrNo}.xlsx`);
+    XLSX.writeFile(wb, `Internal_Inspection_MR_${selectedMrNo}.xlsx`);
   };
 
   const handlePrint = () => {
@@ -247,7 +270,8 @@ export default function InternalInspection() {
       if (!jobData.wasring || jobData.wasring.trim() === '') missing.push('WAS Ring');
       if (!jobData.inPnt || jobData.inPnt.trim() === '') missing.push('Inside Paint');
 
-      if (jobData.condition === 'Repairable') {
+      const isAmorphousOrWound = (job.coreType || '').toUpperCase().includes('AMORPHOUS') || (job.coreType || '').toUpperCase().includes('AM') || (job.coreType || '').toUpperCase().includes('WOUND') || (job.coreType || '').toUpperCase().includes('WC');
+      if (jobData.condition === 'Repairable' && !isAmorphousOrWound) {
         const totalHvDam = (Number(jobData.damR) || 0) + (Number(jobData.damY) || 0) + (Number(jobData.damB) || 0);
         if (totalHvDam > 0 && (!jobData.wtOfCoil || jobData.wtOfCoil.trim() === '')) {
           missing.push('HV Coil Weight (Kg)');
@@ -380,8 +404,19 @@ export default function InternalInspection() {
       type={type}
       value={formsData[jobId]?.[field] || ''}
       onChange={(e) => handleChange(jobId, field, e.target.value)}
-      className={`px-2 py-1 text-[10px] border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
+      className={`px-1.5 py-1 text-[10px] font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
       step={step !== undefined ? step : (type === 'number' ? '0.01' : undefined)}
+    />
+  );
+
+  const renderIntegerField = (jobId: string, field: keyof InternalData, widthClass = 'w-12') => (
+    <input
+      type="number"
+      value={formsData[jobId]?.[field] || ''}
+      onChange={(e) => handleChange(jobId, field, e.target.value)}
+      className={`px-1.5 py-1 text-[10px] font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
+      step="1"
+      min="0"
     />
   );
 
@@ -389,7 +424,7 @@ export default function InternalInspection() {
     <select
       value={formsData[jobId]?.[field] || ''}
       onChange={(e) => handleChange(jobId, field, e.target.value)}
-      className={`px-1 py-1 text-[10px] border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
+      className={`px-1 py-1 text-[10px] font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs cursor-pointer ${widthClass}`}
     >
       {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
     </select>
@@ -489,72 +524,91 @@ export default function InternalInspection() {
 
                     <table className="w-full border-collapse border border-black text-[7.5px] text-center">
                       <thead>
+                        {/* Grouped High-Level Header */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
                           <th className="border border-black p-0.5 w-6" rowSpan={2}>Sr</th>
-                          <th className="border border-black p-0.5 min-w-[70px]" rowSpan={2}>Job No</th>
+                          <th className="border border-black p-0.5 min-w-[65px]" rowSpan={2}>Job No</th>
+                          <th className="border border-black p-0.5 min-w-[50px]" rowSpan={2}>Make</th>
                           <th className="border border-black p-0.5 w-8" rowSpan={2}>KVA</th>
+                          <th className="border border-black p-0.5 min-w-[55px]" rowSpan={2}>Type / Core</th>
                           <th className="border border-black p-0.5 w-8" rowSpan={2}>Wind</th>
                           <th className="border border-black p-0.5 w-8" rowSpan={2}>HV Limb</th>
-                          <th className="border border-black p-0.5" colSpan={3}>Damaged HV Coil</th>
-                          <th className="border border-black p-0.5 w-8" rowSpan={2}>Tot Coil (HT)</th>
+                          
+                          {/* HV SIDE COIL DAMAGE GROUP */}
+                          <th className="border-t border-b border-black border-l-2 border-r-2 border-black p-0.5 bg-slate-200 print:bg-transparent font-black" colSpan={3}>
+                            DAMAGED HV COIL (R / Y / B)
+                          </th>
+                          
+                          <th className="border border-black p-0.5 w-9" rowSpan={2}>Tot Coil (HT)</th>
                           <th className="border border-black p-0.5 w-10" rowSpan={2}>Wt/Coil (Kg)</th>
                           <th className="border border-black p-0.5 w-10" rowSpan={2}>Tot Wt (HT)</th>
-                          <th className="border border-black p-0.5" colSpan={3}>LV Coil (Dmg/RI/OK)</th>
+                          
+                          {/* LV SIDE COIL DAMAGE GROUP */}
+                          <th className="border-t border-b border-black border-l-2 border-r-2 border-black p-0.5 bg-slate-200 print:bg-transparent font-black" colSpan={3}>
+                            LV COIL (DMG / RI / OK)
+                          </th>
+                          
                           <th className="border border-black p-0.5 w-10" rowSpan={2}>Wt/Coil (LT)</th>
                           <th className="border border-black p-0.5 w-10" rowSpan={2}>Tot Wt (LT)</th>
                           <th className="border border-black p-0.5 w-7" rowSpan={2}>Was Ring</th>
-                          <th className="border border-black p-0.5 w-7" rowSpan={2}>In Pnt</th>
-                          <th className="border border-black p-0.5 w-7" rowSpan={2}>Tst Trn</th>
-                          <th className="border border-black p-0.5 w-7" rowSpan={2}>DC</th>
-                          <th className="border border-black p-0.5 w-7" rowSpan={2}>Insula</th>
-                          <th className="border border-black p-0.5 w-8" rowSpan={2}>Type</th>
-                          <th className="border border-black p-0.5 w-12" rowSpan={2}>Condition</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>In Pnt</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Tst Trn</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2} title="DC (Dismantling Charge / Dismantling of Transformer)">DC</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Insula</th>
+                          <th className="border border-black p-0.5 w-14" rowSpan={2}>Condition</th>
                         </tr>
+                        {/* Sub-Headers for HV & LV Phases */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
-                          <th className="border border-black p-0.5 w-6">R</th>
-                          <th className="border border-black p-0.5 w-6">Y</th>
-                          <th className="border border-black p-0.5 w-6">B</th>
-                          <th className="border border-black p-0.5 w-6">R</th>
-                          <th className="border border-black p-0.5 w-6">Y</th>
-                          <th className="border border-black p-0.5 w-6">B</th>
+                          <th className="border-b border-black border-l-2 border-r border-black p-0.5 w-6">R</th>
+                          <th className="border-b border-black border-r border-black p-0.5 w-6">Y</th>
+                          <th className="border-b border-black border-r-2 border-black p-0.5 w-6">B</th>
+                          <th className="border-b border-black border-l-2 border-r border-black p-0.5 w-6">R</th>
+                          <th className="border-b border-black border-r border-black p-0.5 w-6">Y</th>
+                          <th className="border-b border-black border-r-2 border-black p-0.5 w-6">B</th>
                         </tr>
                       </thead>
                       <tbody>
                         {chunk.map((job, cIdx) => {
                           const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
                           const data = formsData[job.id] || {} as any;
+                          const transCore = job.coreType || 'CRGO';
 
                           return (
                             <tr key={job.id} className="border border-black h-6">
                               <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
                               <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
-                                {job.jobNo}
+                                {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
                               </td>
+                              <td className="border border-black p-0.5 truncate max-w-[50px]">{job.make || '-'}</td>
                               <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
-                              <td className="border border-black p-0.5">{data.windingType || 'AL'}</td>
-                              <td className="border border-black p-0.5">{data.hvCoilLimb || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase text-[7px] text-blue-900">
+                                {transCore}
+                              </td>
+                              <td className="border border-black p-0.5 font-bold">{data.windingType || 'AL'}</td>
+                              <td className="border border-black p-0.5">{data.hvCoilLimb || '4'}</td>
                               
-                              <td className="border border-black p-0.5 font-mono">{data.damR || '-'}</td>
-                              <td className="border border-black p-0.5 font-mono">{data.damY || '-'}</td>
-                              <td className="border border-black p-0.5 font-mono">{data.damB || '-'}</td>
+                              {/* HV Coil Group Columns */}
+                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-mono">{data.damR || '0'}</td>
+                              <td className="border-b border-black border-r border-black p-0.5 font-mono">{data.damY || '0'}</td>
+                              <td className="border-b border-black border-r-2 border-black p-0.5 font-mono">{data.damB || '0'}</td>
                               
-                              <td className="border border-black p-0.5 font-bold">{data.totCoil || '-'}</td>
-                              <td className="border border-black p-0.5">{data.wtOfCoil || '-'}</td>
-                              <td className="border border-black p-0.5 font-bold">{data.totWt || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.totCoil || '0'}</td>
+                              <td className="border border-black p-0.5">{data.wtOfCoil || '0'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.totWt || '0'}</td>
                               
-                              <td className="border border-black p-0.5">{data.lvCoilR || 'OK'}</td>
-                              <td className="border border-black p-0.5">{data.lvCoilY || 'OK'}</td>
-                              <td className="border border-black p-0.5">{data.lvCoilB || 'OK'}</td>
+                              {/* LV Coil Group Columns */}
+                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.lvCoilR || 'OK'}</td>
+                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.lvCoilY || 'OK'}</td>
+                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.lvCoilB || 'OK'}</td>
                               
-                              <td className="border border-black p-0.5">{data.wtOfCoilLv || '-'}</td>
-                              <td className="border border-black p-0.5 font-bold">{data.totWtLv || '-'}</td>
+                              <td className="border border-black p-0.5">{data.wtOfCoilLv || '0'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.totWtLv || '0'}</td>
                               
-                              <td className="border border-black p-0.5">{data.wasring || '1'}</td>
-                              <td className="border border-black p-0.5">{data.inPnt || 'Y'}</td>
+                              <td className="border border-black p-0.5">{data.wasring || '6'}</td>
+                              <td className="border border-black p-0.5">{data.inPnt || '-'}</td>
                               <td className="border border-black p-0.5">{data.tstTrn || 'Y'}</td>
                               <td className="border border-black p-0.5">{data.dc || 'Y'}</td>
                               <td className="border border-black p-0.5">{data.insula || 'Y'}</td>
-                              <td className="border border-black p-0.5">{job.coreType || '-'}</td>
                               <td className={`border border-black p-0.5 font-bold ${data.condition === 'Scrap' ? 'text-red-600' : 'text-slate-800'}`}>
                                 {data.condition || 'Repairable'}
                               </td>
@@ -612,7 +666,16 @@ export default function InternalInspection() {
             Internal Inspection
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Fill internal inspection parameters for OGP repair jobs.
+            Capture internal coil damage details, winding weights, insulation status, and scrap proposals for transformers.
+          </p>
+        </div>
+        <div className="mt-3 md:mt-0 bg-blue-50 border border-blue-200 rounded-lg p-3 max-w-lg text-xs text-blue-900 shadow-2xs">
+          <p className="font-semibold flex items-center gap-1.5 text-blue-800">
+            <span className="inline-block w-2 h-2 rounded-full bg-blue-600"></span>
+            Amorphous & Wound Core Note
+          </p>
+          <p className="mt-1 text-[11px] text-blue-700 leading-relaxed">
+            Amorphous & Wound Core transformers have fixed tender package rates and can be estimated directly. Internal inspection is used for coil analysis or when proposing heavily damaged units for <strong>SCRAP</strong>.
           </p>
         </div>
       </div>
@@ -635,13 +698,13 @@ export default function InternalInspection() {
               <div className="flex bg-slate-200 p-1 rounded-md">
                 <button
                   onClick={() => setStatusFilter('Pending')}
-                  className={`px-4 py-1.5 text-xs font-bold uppercase rounded ${statusFilter === 'Pending' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 print:text-black'}`}
+                  className={`px-4 py-1.5 text-xs font-bold uppercase rounded cursor-pointer transition-colors ${statusFilter === 'Pending' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 print:text-black'}`}
                 >
                   Pending
                 </button>
                 <button
                   onClick={() => setStatusFilter('Completed')}
-                  className={`px-4 py-1.5 text-xs font-bold uppercase rounded ${statusFilter === 'Completed' ? 'bg-white text-green-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 print:text-black'}`}
+                  className={`px-4 py-1.5 text-xs font-bold uppercase rounded cursor-pointer transition-colors ${statusFilter === 'Completed' ? 'bg-white text-green-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 print:text-black'}`}
                 >
                   Completed
                 </button>
@@ -684,7 +747,7 @@ export default function InternalInspection() {
                         <div className="font-mono font-bold text-slate-900 print:text-black">{mr}</div>
                         <div className="text-xs text-slate-500">Date: <span className="font-mono text-slate-700 font-medium">({mrDateStr})</span></div>
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-500">{mrGroups[mr].length} Jobs</td>
+                      <td className="px-4 py-3 whitespace-nowrap text-slate-500 font-semibold">{mrGroups[mr].length} Jobs</td>
                       <td className="px-4 py-3 text-xs text-slate-500 max-w-xs truncate" title={mrGroups[mr].map(j => j.jobNo).join(', ')}>
                         {mrGroups[mr].map(j => j.jobNo).join(', ')}
                       </td>
@@ -692,7 +755,7 @@ export default function InternalInspection() {
                         <div className="flex items-center space-x-2">
                           <button 
                             onClick={() => handleSelectMr(mr)}
-                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors cursor-pointer"
                           >
                             {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
                           </button>
@@ -702,7 +765,7 @@ export default function InternalInspection() {
                                 handleSelectMr(mr);
                                 setIsPrintOpen(true);
                               }}
-                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors"
+                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors cursor-pointer"
                               title="Print Internal Inspection Report"
                             >
                               <Printer className="w-3 h-3 mr-1 text-slate-600" /> Print
@@ -741,20 +804,20 @@ export default function InternalInspection() {
               <button 
                 type="button"
                 onClick={handleExportExcel}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-green-400 hover:text-green-300 border border-green-400/30 px-3 py-1.5 rounded transition-colors print:hidden"
+                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-green-400 hover:text-green-300 border border-green-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
               >
                 <Download className="w-3 h-3 mr-1" /> Excel
               </button>
               <button 
                 type="button"
                 onClick={handlePrint}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-300 border border-slate-400/30 px-3 py-1.5 rounded transition-colors print:hidden"
+                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-300 border border-slate-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
               >
                 <Printer className="w-3 h-3 mr-1" /> Print
               </button>
               <button 
                 onClick={() => setSelectedMrNo(null)}
-                className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors print:hidden"
+                className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
               >
                 Back to List
               </button>
@@ -768,82 +831,186 @@ export default function InternalInspection() {
           </div>
 
           <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
-            <div className="hidden print:block mb-3">
-              <LetterheadHeader agency={activeAgency} documentTitle="INTERNAL INSPECTION REPORT" />
-              <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1.5 mb-2">
-                <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
-                <span>MR DATE: <strong className="font-mono">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong></span>
-                <span>DIVISION: <strong className="uppercase">{mrJobs[0]?.division || '-'}</strong></span>
-                <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
-              </div>
-            </div>
             <form onSubmit={handleSubmit}>
               <div className="min-w-max">
-                <table className="w-full text-left print:text-black print:text-[8px]">
+                <table className="w-full text-left print:text-black print:text-[8px] border-collapse">
                   <thead>
-                    <tr>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest sticky left-0 z-10 w-8" rowSpan={2}>#</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest sticky left-8 z-10 min-w-[80px]" rowSpan={2}>JOB NO</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>KVA</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>WIND</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>H.V<br/>Coil<br/>Limb</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center border-l border-slate-200" colSpan={3}>No. Of Dam.<br/>H.V Coil</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px] border-l border-slate-200" rowSpan={2}>Tot.<br/>Coil<br/>(ht)</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>Wt.<br/>of Coil<br/>(Kg.)<br/>(ht)</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>TOT.<br/>Wt.<br/>(ht)</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center border-l border-slate-200" colSpan={3}>L.V. COIL<br/>DMG. OR RI.</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px] border-l border-slate-200" rowSpan={2}>WT.<br/>OF<br/>Coil<br/>(Kg.)<br/>LT</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>TOT.<br/>Wt.<br/>(LT)</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px] border-l border-slate-200" rowSpan={2}>Wa<br/>sri<br/>ng</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>In.<br/>Pnt</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>Tst<br/>Trn</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>Dc</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>In<br/>su<br/>la</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]" rowSpan={2}>Job<br/>Type</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[50px] print:hidden" rowSpan={2}>Condition</th>
+                    {/* Top Grouped Header Row */}
+                    <tr className="border-b border-slate-200">
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider sticky left-0 z-20 w-8 border-r border-slate-200 text-center" rowSpan={2}>#</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider sticky left-8 z-20 min-w-[100px] border-r border-slate-200" rowSpan={2}>JOB NO</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[70px] border-r border-slate-200" rowSpan={2}>MAKE</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2}>KVA</th>
+                      <th className="p-2 bg-indigo-50/80 text-[10px] font-bold text-indigo-950 uppercase tracking-wider min-w-[90px] border-r border-slate-200 text-center" rowSpan={2}>
+                        <div className="flex items-center justify-center gap-1">
+                          <Cpu className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>TYPE / CORE</span>
+                        </div>
+                      </th>
+                      <th className="p-2 bg-amber-50/80 text-[10px] font-bold text-amber-950 uppercase tracking-wider min-w-[60px] border-r border-slate-200 text-center" rowSpan={2}>
+                        <div className="flex items-center justify-center gap-1">
+                          <Zap className="w-3.5 h-3.5 text-amber-600" />
+                          <span>WIND</span>
+                        </div>
+                      </th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[48px] border-r border-slate-200 text-center" rowSpan={2}>HV<br/>LIMB</th>
+                      
+                      {/* HV SIDE COIL DAMAGE GROUP */}
+                      <th className="p-1.5 bg-blue-100 text-[10px] font-black text-blue-950 uppercase tracking-wider text-center border-t-2 border-l-2 border-r-2 border-blue-500 shadow-xs" colSpan={3}>
+                        DAMAGED HV COIL (R / Y / B)
+                      </th>
+                      
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[55px] border-r border-slate-200 text-center" rowSpan={2}>TOT.<br/>COIL (HT)</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[65px] border-r border-slate-200 text-center" rowSpan={2}>WT/COIL<br/>(KG) (HT)</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[65px] border-r border-slate-200 text-center" rowSpan={2}>TOT.<br/>WT (HT)</th>
+                      
+                      {/* LV SIDE COIL DAMAGE GROUP */}
+                      <th className="p-1.5 bg-indigo-100 text-[10px] font-black text-indigo-950 uppercase tracking-wider text-center border-t-2 border-l-2 border-r-2 border-indigo-500 shadow-xs" colSpan={3}>
+                        LV COIL (DMG / RI / OK)
+                      </th>
+                      
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[65px] border-r border-slate-200 text-center" rowSpan={2}>WT/COIL<br/>(KG) LT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[65px] border-r border-slate-200 text-center" rowSpan={2}>TOT.<br/>WT (LT)</th>
+                      
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[48px] border-r border-slate-200 text-center" rowSpan={2}>WAS<br/>RING</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>IN.<br/>PNT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>TST<br/>TRN</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2} title="DC (Dismantling Charge / Dismantling of Transformer)">DC</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>INSU<br/>LA</th>
+                      <th className="p-2 bg-rose-50/80 text-[10px] font-bold text-rose-950 uppercase tracking-wider min-w-[95px] text-center" rowSpan={2}>
+                        CONDITION
+                      </th>
                     </tr>
-                    <tr>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center border-l border-slate-200 min-w-[32px]">R</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center min-w-[32px]">Y</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center min-w-[32px]">B</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center border-l border-slate-200 min-w-[36px]">R</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center min-w-[36px]">Y</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center min-w-[36px]">B</th>
+
+                    {/* Sub-Headers for HV and LV Coils */}
+                    <tr className="border-b border-slate-300 text-[9px]">
+                      {/* HV Sub-columns */}
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-l-2 border-r border-b-2 border-blue-500 min-w-[40px]" title="Damaged HV Coil - Phase R">
+                        R
+                      </th>
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r border-b-2 border-blue-500 min-w-[40px]" title="Damaged HV Coil - Phase Y">
+                        Y
+                      </th>
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r-2 border-b-2 border-blue-500 min-w-[40px]" title="Damaged HV Coil - Phase B">
+                        B
+                      </th>
+                      
+                      {/* LV Sub-columns */}
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-l-2 border-r border-b-2 border-indigo-500 min-w-[50px]" title="LV Coil Status - Phase R">
+                        R
+                      </th>
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r border-b-2 border-indigo-500 min-w-[50px]" title="LV Coil Status - Phase Y">
+                        Y
+                      </th>
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[50px]" title="LV Coil Status - Phase B">
+                        B
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {mrJobs.map((job, index) => {
+                      const isScrap = formsData[job.id]?.condition === 'Scrap';
                       return (
-                      <tr key={job.id} className="hover:bg-slate-50 print:bg-transparent group">
-                        <td className="p-1 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 z-10 text-center">{index + 1}</td>
-                        <td className="p-1 text-xs font-mono font-bold text-slate-900 print:text-black sticky left-8 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 min-w-[80px] z-10">{job.jobNo}</td>
-                        <td className="p-1 text-[10px] text-slate-700 print:text-black font-mono text-center">{job.capacityKva}</td>
+                      <tr key={job.id} className={`hover:bg-slate-50/80 transition-colors group ${isScrap ? 'bg-red-50/30' : ''}`}>
+                        <td className="p-2 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
+                          {index + 1}
+                        </td>
+                        <td className="p-2 text-xs font-mono font-bold text-slate-900 sticky left-8 bg-white group-hover:bg-slate-50 border-r border-slate-200 min-w-[100px] z-10">
+                          <div className="flex items-center gap-1.5">
+                            <span>{job.jobNo}</span>
+                            {job.repairType === 'GP' && (
+                              <span className="text-[9px] px-1 py-0.2 bg-amber-100 text-amber-800 rounded font-bold border border-amber-300">
+                                GP
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="p-2 text-xs text-slate-800 font-semibold min-w-[70px] truncate max-w-[90px] border-r border-slate-200" title={job.make}>
+                          {job.make || '-'}
+                        </td>
+                        <td className="p-2 text-xs text-slate-900 font-mono font-bold text-center border-r border-slate-200">
+                          {job.capacityKva}
+                        </td>
+                        <td className="p-1.5 text-[10px] text-indigo-900 font-bold text-center border-r border-slate-200 bg-indigo-50/30">
+                          <span className="px-1.5 py-0.5 bg-indigo-100/80 text-indigo-900 rounded font-bold uppercase tracking-tight">
+                            {job.coreType || 'CRGO'}
+                          </span>
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center bg-amber-50/30">
+                          {renderSelectField(job.id, 'windingType', ['AL', 'CU'], 'w-14')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderInputField(job.id, 'hvCoilLimb', 'number', 'w-12')}
+                        </td>
                         
-                        <td className="p-1">{renderSelectField(job.id, 'windingType', ['AL', 'CU'], 'min-w-[48px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'hvCoilLimb', 'number', 'min-w-[40px]')}</td>
+                        {/* HV Damaged Coil Inputs with Group Border */}
+                        <td className="p-1 border-l-2 border-r border-blue-400 bg-blue-50/20 text-center">
+                          {renderIntegerField(job.id, 'damR', 'w-10')}
+                        </td>
+                        <td className="p-1 border-r border-blue-400 bg-blue-50/20 text-center">
+                          {renderIntegerField(job.id, 'damY', 'w-10')}
+                        </td>
+                        <td className="p-1 border-r-2 border-blue-400 bg-blue-50/20 text-center">
+                          {renderIntegerField(job.id, 'damB', 'w-10')}
+                        </td>
                         
-                        <td className="p-0.5 border-l border-slate-100">{renderInputField(job.id, 'damR', 'number', 'min-w-[36px]', '1')}</td>
-                        <td className="p-0.5">{renderInputField(job.id, 'damY', 'number', 'min-w-[36px]', '1')}</td>
-                        <td className="p-0.5">{renderInputField(job.id, 'damB', 'number', 'min-w-[36px]', '1')}</td>
+                        <td className="p-1 border-r border-slate-200 text-center font-bold">
+                          {renderInputField(job.id, 'totCoil', 'number', 'w-14')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderInputField(job.id, 'wtOfCoil', 'number', 'w-16')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center font-bold text-blue-900">
+                          {renderInputField(job.id, 'totWt', 'number', 'w-16')}
+                        </td>
                         
-                        <td className="p-1 border-l border-slate-100">{renderInputField(job.id, 'totCoil', 'number', 'min-w-[48px]', '1')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'wtOfCoil', 'number', 'min-w-[56px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'totWt', 'number', 'min-w-[64px]')}</td>
+                        {/* LV Damaged Coil Selectors with Group Border */}
+                        <td className="p-1 border-l-2 border-r border-indigo-400 bg-indigo-50/20 text-center">
+                          {renderSelectField(job.id, 'lvCoilR', ['OK', 'RI', 'DAM'], 'w-14')}
+                        </td>
+                        <td className="p-1 border-r border-indigo-400 bg-indigo-50/20 text-center">
+                          {renderSelectField(job.id, 'lvCoilY', ['OK', 'RI', 'DAM'], 'w-14')}
+                        </td>
+                        <td className="p-1 border-r-2 border-indigo-400 bg-indigo-50/20 text-center">
+                          {renderSelectField(job.id, 'lvCoilB', ['OK', 'RI', 'DAM'], 'w-14')}
+                        </td>
                         
-                        <td className="p-0.5 border-l border-slate-100">{renderSelectField(job.id, 'lvCoilR', ['OK', 'RI', 'DAM'], 'min-w-[48px]')}</td>
-                        <td className="p-0.5">{renderSelectField(job.id, 'lvCoilY', ['OK', 'RI', 'DAM'], 'min-w-[48px]')}</td>
-                        <td className="p-0.5">{renderSelectField(job.id, 'lvCoilB', ['OK', 'RI', 'DAM'], 'min-w-[48px]')}</td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderInputField(job.id, 'wtOfCoilLv', 'number', 'w-16')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center font-bold text-indigo-900">
+                          {renderInputField(job.id, 'totWtLv', 'number', 'w-16')}
+                        </td>
                         
-                        <td className="p-1 border-l border-slate-100">{renderInputField(job.id, 'wtOfCoilLv', 'number', 'min-w-[56px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'totWtLv', 'number', 'min-w-[64px]')}</td>
-                        
-                        <td className="p-1 border-l border-slate-100">{renderInputField(job.id, 'wasring', 'text', 'min-w-[40px]')}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'inPnt', ['-', 'Y', 'N'], 'min-w-[40px]')}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'tstTrn', ['Y', 'N', '-'], 'min-w-[40px]')}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'dc', ['Y', 'N', '-'], 'min-w-[40px]')}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'insula', ['Y', 'N', '-'], 'min-w-[40px]')}</td>
-                        <td className="p-1 text-[10px] text-slate-700 print:text-black font-bold text-center bg-slate-50 print:bg-transparent">{job.coreType || '-'}</td>
-                        <td className="p-1 print:hidden">{renderSelectField(job.id, 'condition', ['Repairable', 'Scrap'], 'min-w-[70px]')}</td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderInputField(job.id, 'wasring', 'text', 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'inPnt', ['-', 'Y', 'N'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'tstTrn', ['Y', 'N', '-'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'dc', ['Y', 'N', '-'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'insula', ['Y', 'N', '-'], 'w-12')}
+                        </td>
+                        <td className="p-1 text-center">
+                          <select
+                            value={formsData[job.id]?.condition || 'Repairable'}
+                            onChange={(e) => handleChange(job.id, 'condition', e.target.value)}
+                            className={`px-2 py-1 text-xs font-bold border rounded focus:ring-1 bg-white cursor-pointer shadow-2xs w-full ${
+                              isScrap 
+                                ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500 ring-1 ring-red-400' 
+                                : 'border-slate-300 text-slate-800 focus:ring-blue-500'
+                            }`}
+                          >
+                            <option value="Repairable">Repairable</option>
+                            <option value="Scrap">Scrap</option>
+                          </select>
+                        </td>
                       </tr>
                     )})}
                   </tbody>
@@ -851,19 +1018,20 @@ export default function InternalInspection() {
               </div>
               
               {scrapNote && (
-                <div className="p-4 text-xs font-bold text-slate-800 print:text-black uppercase tracking-widest border-t border-slate-200">
-                  {scrapNote}
+                <div className="p-4 text-xs font-bold text-red-900 bg-red-50 uppercase tracking-wider border-t border-red-200 flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                  <span>{scrapNote}</span>
                 </div>
               )}
               
-              <div className="p-6 bg-slate-50 print:bg-transparent border-t border-slate-200 flex justify-end print:hidden">
+              <div className="p-4 bg-slate-50 print:bg-transparent border-t border-slate-200 flex justify-end print:hidden">
                 <button 
                   type="submit" 
                   disabled={isSubmitting}
-                  className="px-8 py-3 text-sm font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center shadow-sm"
+                  className="px-8 py-2.5 text-xs font-bold uppercase tracking-widest bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg transition-colors flex items-center shadow-sm cursor-pointer disabled:opacity-50"
                 >
-                  {isSubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                  <Save className="w-4 h-4 mr-2" /> Save All {mrJobs.length} Inspections
+                  {isSubmitting ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                  Save All {mrJobs.length} Inspections
                 </button>
               </div>
             </form>

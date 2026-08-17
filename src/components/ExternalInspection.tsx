@@ -3,11 +3,20 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
-import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles } from 'lucide-react';
+import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles, Scale, Cpu, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { RATING_LEVEL_OPTIONS } from '../lib/estimateData';
+
+export const TRANSFORMER_CORE_TYPES = [
+  'CRGO',
+  'Amorphous',
+  'Wound Core',
+  'LSTC',
+  'OH'
+];
 
 export interface ExternalData {
   kv: string;
@@ -32,7 +41,20 @@ export interface ExternalData {
   lvSideLvm: string;
   lvSideLvCc: string;
   transType: string;
+  starRating?: string;
+  ratingLevel?: string;
   inspectionId?: string; // added to track existing inspection ID
+}
+
+interface PendingChange {
+  jobId: string;
+  jobNo: string;
+  field: 'transType' | 'starRating';
+  oldValue: string;
+  newValue: string;
+  mrIntakeValue: string;
+  kva: string;
+  make: string;
 }
 
 export const getStandardOilCapacity = (kva: number | string): number => {
@@ -63,6 +85,7 @@ export default function ExternalInspection() {
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
+  const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
   
   const [statusFilter, setStatusFilter] = useState<'Pending' | 'Completed'>('Pending');
 
@@ -106,24 +129,29 @@ export default function ExternalInspection() {
     jobsForMr.forEach(j => {
       const existingInsp = allInspections.find(i => i.jobId === j.id);
       const stdOil = getStandardOilCapacity(j.capacityKva);
-      const isGP = j.repairType === 'GP';
+      const currentStar = j.starRating || j.ratingLevel || '3 Star & other';
+      const coreTypeFromJob = j.coreType || 'CRGO';
       
       if (existingInsp && existingInsp.data) {
         const savedOil = existingInsp.data.oilCapLtrs !== undefined && existingInsp.data.oilCapLtrs !== null && String(existingInsp.data.oilCapLtrs) !== '0'
-          ? existingInsp.data.oilCapLtrs.toString()
+          ? Math.round(Number(existingInsp.data.oilCapLtrs) || stdOil).toString()
           : String(stdOil);
         
         const savedLessOil = existingInsp.data.lessOilLtrs !== undefined && existingInsp.data.lessOilLtrs !== null
-          ? existingInsp.data.lessOilLtrs.toString()
+          ? Math.round(Number(existingInsp.data.lessOilLtrs) || 0).toString()
           : '0';
+
+        const savedTransType = existingInsp.data.transType && existingInsp.data.transType !== 'C'
+          ? existingInsp.data.transType
+          : coreTypeFromJob;
 
         initialForms[j.id] = {
           kv: existingInsp.data.kv || '11',
           oilCapLtrs: savedOil,
           lessOilLtrs: savedLessOil,
           sealType: existingInsp.data.sealType || 'BL',
-          gasket: existingInsp.data.gasket || '1',
-          hvLvRod: existingInsp.data.hvLvRod || '7',
+          gasket: (existingInsp.data.gasket !== undefined ? String(existingInsp.data.gasket) : '1').replace(/[^0-9]/g, '') || '1',
+          hvLvRod: (existingInsp.data.hvLvRod !== undefined ? String(existingInsp.data.hvLvRod) : '7').replace(/[^0-9]/g, '') || '7',
           nuteBolt: existingInsp.data.nuteBolt || 'Y',
           dryActPart: existingInsp.data.dryActPart || 'Y',
           clnDrtyTank: existingInsp.data.clnDrtyTank || 'Y',
@@ -131,19 +159,21 @@ export default function ExternalInspection() {
           oilLevGls: existingInsp.data.oilLevGls || 'Y',
           outsidePaint: existingInsp.data.outsidePaint || 'Y',
           namePlate: existingInsp.data.namePlate || '-',
-          damCtTank: (existingInsp.data.damCtTank !== undefined ? existingInsp.data.damCtTank : '0').toString(),
-          damRadNo: (existingInsp.data.damRadNo !== undefined ? existingInsp.data.damRadNo : '0').toString(),
-          hvSideHvb: existingInsp.data.hvSideHvb || '3',
-          hvSideHvm: existingInsp.data.hvSideHvm || '3',
-          hvSideHvCc: existingInsp.data.hvSideHvCc || '3',
-          lvSideLvb: existingInsp.data.lvSideLvb || '4',
-          lvSideLvm: existingInsp.data.lvSideLvm || '4',
-          lvSideLvCc: existingInsp.data.lvSideLvCc || '4',
-          transType: existingInsp.data.transType || 'C',
+          damCtTank: (existingInsp.data.damCtTank !== undefined ? String(Math.round(Number(existingInsp.data.damCtTank) || 0)) : '0'),
+          damRadNo: (existingInsp.data.damRadNo !== undefined ? String(Math.round(Number(existingInsp.data.damRadNo) || 0)) : '0'),
+          hvSideHvb: (existingInsp.data.hvSideHvb !== undefined ? String(existingInsp.data.hvSideHvb) : '3').replace(/[^0-9]/g, '') || '3',
+          hvSideHvm: (existingInsp.data.hvSideHvm !== undefined ? String(existingInsp.data.hvSideHvm) : '3').replace(/[^0-9]/g, '') || '3',
+          hvSideHvCc: (existingInsp.data.hvSideHvCc !== undefined ? String(existingInsp.data.hvSideHvCc) : '3').replace(/[^0-9]/g, '') || '3',
+          lvSideLvb: (existingInsp.data.lvSideLvb !== undefined ? String(existingInsp.data.lvSideLvb) : '4').replace(/[^0-9]/g, '') || '4',
+          lvSideLvm: (existingInsp.data.lvSideLvm !== undefined ? String(existingInsp.data.lvSideLvm) : '4').replace(/[^0-9]/g, '') || '4',
+          lvSideLvCc: (existingInsp.data.lvSideLvCc !== undefined ? String(existingInsp.data.lvSideLvCc) : '4').replace(/[^0-9]/g, '') || '4',
+          transType: savedTransType,
+          starRating: existingInsp.data.starRating || existingInsp.data.ratingLevel || currentStar,
+          ratingLevel: existingInsp.data.starRating || existingInsp.data.ratingLevel || currentStar,
           inspectionId: existingInsp.id
         };
       } else {
-        // Auto-fill standard oil capacity (e.g., 25 KVA -> 184 L, 63 KVA -> 240 L, 100 KVA -> 323 L) which remains standard & identical across GP jobs
+        // Auto-fill standard oil capacity (e.g., 25 KVA -> 184 L, 63 KVA -> 240 L, 100 KVA -> 323 L)
         initialForms[j.id] = {
           kv: '11',
           oilCapLtrs: String(stdOil),
@@ -158,7 +188,7 @@ export default function ExternalInspection() {
           oilLevGls: 'Y',
           outsidePaint: 'Y',
           namePlate: '-',
-          damCtTank: '0.00',
+          damCtTank: '0',
           damRadNo: '0',
           hvSideHvb: '3',
           hvSideHvm: '3',
@@ -166,7 +196,9 @@ export default function ExternalInspection() {
           lvSideLvb: '4',
           lvSideLvm: '4',
           lvSideLvCc: '4',
-          transType: 'C'
+          transType: coreTypeFromJob,
+          starRating: currentStar,
+          ratingLevel: currentStar
         };
       }
     });
@@ -176,13 +208,65 @@ export default function ExternalInspection() {
   };
 
   const handleChange = (jobId: string, field: keyof ExternalData, value: string) => {
-    setFormsData(prev => ({
-      ...prev,
-      [jobId]: {
+    let sanitized = value;
+    // Strict integer restriction: No decimals or non-numeric characters allowed in count/numeric measurement fields
+    const integerFields: (keyof ExternalData)[] = [
+      'oilCapLtrs', 'lessOilLtrs', 'gasket', 'hvLvRod', 'damRadNo', 'damCtTank',
+      'hvSideHvb', 'hvSideHvm', 'hvSideHvCc', 'lvSideLvb', 'lvSideLvm', 'lvSideLvCc'
+    ];
+    
+    if (integerFields.includes(field)) {
+      sanitized = sanitized.replace(/[^0-9]/g, '');
+    }
+
+    setFormsData(prev => {
+      const updated = {
         ...prev[jobId],
-        [field]: value
+        [field]: sanitized
+      };
+      if (field === 'starRating') {
+        updated.ratingLevel = sanitized;
       }
-    }));
+      return {
+        ...prev,
+        [jobId]: updated
+      };
+    });
+  };
+
+  // Trigger alert confirmation when user manually modifies Transformer Type from MR intake
+  const handleCoreTypeChangeAttempt = (job: any, newCoreType: string) => {
+    const currentVal = formsData[job.id]?.transType || job.coreType || 'CRGO';
+    const mrIntakeVal = job.coreType || 'CRGO';
+
+    if (newCoreType === currentVal) return;
+
+    if (newCoreType !== mrIntakeVal) {
+      // Trigger interactive alert modal
+      setPendingChange({
+        jobId: job.id,
+        jobNo: job.jobNo,
+        field: 'transType',
+        oldValue: currentVal,
+        newValue: newCoreType,
+        mrIntakeValue: mrIntakeVal,
+        kva: String(job.capacityKva || ''),
+        make: String(job.make || '')
+      });
+    } else {
+      // Reverting back to MR Intake type directly
+      handleChange(job.id, 'transType', newCoreType);
+    }
+  };
+
+  const handleConfirmPendingChange = () => {
+    if (!pendingChange) return;
+    handleChange(pendingChange.jobId, pendingChange.field, pendingChange.newValue);
+    setPendingChange(null);
+  };
+
+  const handleCancelPendingChange = () => {
+    setPendingChange(null);
   };
 
   const mrJobs = useMemo(() => {
@@ -190,7 +274,6 @@ export default function ExternalInspection() {
     return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
   }, [jobs, selectedMrNo]);
 
-  
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
     const mrDateStr = formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt);
@@ -198,7 +281,7 @@ export default function ExternalInspection() {
       ['MR Number', selectedMrNo, 'MR Date', mrDateStr],
       [],
       [
-        '#', 'JOB NO', 'KVA', 'MAKE', 'S.No.', 'KV', 'OIL CAP LTRS', 'LESS OIL LTRS', 'SEAL TYPE', 'GASKET', 'H.V.L.V ROD', 'NUTE/BOLT', 'DRY ACT. PART', 'CLN DRTY TANK', 'BREATHER', 'OIL LEV. GLS', 'OUTSIDE PAINT', 'NAME PLATE', 'DAM. CT. TANK', 'DAM. RAD. NO', 'H.V.B', 'H.V.M', 'H.V.C.C', 'L.V.B', 'L.V.M', 'L.V.C.C', 'TRANS. TYPE'
+        '#', 'JOB NO', 'MAKE', 'KVA', 'TRANS. TYPE / CORE', 'RATING / LEVEL', 'S.No.', 'KV', 'OIL CAP LTRS', 'LESS OIL LTRS', 'SEAL TYPE', 'GASKET', 'H.V.L.V ROD', 'NUTE/BOLT', 'DRY ACT. PART', 'CLN DRTY TANK', 'BREATHER', 'OIL LEV. GLS', 'OUTSIDE PAINT', 'NAME PLATE', 'DAM. CT. TANK', 'DAM. RAD. NO', 'H.V.B', 'H.V.M', 'H.V.C.C', 'L.V.B', 'L.V.M', 'L.V.C.C'
       ]
     ];
     
@@ -207,10 +290,12 @@ export default function ExternalInspection() {
       wsData.push([
         index + 1,
         job.jobNo,
-        job.capacityKva,
         job.make,
+        job.capacityKva,
+        data.transType || job.coreType || 'CRGO',
+        data.starRating || job.starRating || '3 Star & other',
         job.serialNo,
-        data.kv || '',
+        data.kv || '11',
         data.oilCapLtrs || '',
         data.lessOilLtrs || '',
         data.sealType || '',
@@ -230,8 +315,7 @@ export default function ExternalInspection() {
         data.hvSideHvCc || '',
         data.lvSideLvb || '',
         data.lvSideLvm || '',
-        data.lvSideLvCc || '',
-        data.transType || ''
+        data.lvSideLvCc || ''
       ]);
     });
 
@@ -276,6 +360,21 @@ export default function ExternalInspection() {
       alert(`⚠️ Blank or incomplete inspection forms are NOT acceptable!\n\nPlease fill in all required inspection details before saving:\n\n${incompleteJobs.join('\n')}`);
       return;
     }
+
+    // Check for any modified Core Types compared to original MR Intake
+    const modifiedCoreJobs = mrJobs.filter(j => {
+      const chosenType = formsData[j.id]?.transType || j.coreType || 'CRGO';
+      const mrType = j.coreType || 'CRGO';
+      return chosenType !== mrType;
+    });
+
+    if (modifiedCoreJobs.length > 0) {
+      const listStr = modifiedCoreJobs.map(j => `• Job #${j.jobNo} (${j.capacityKva} KVA): MR intake "${j.coreType || 'CRGO'}" ➔ Physical Inspection "${formsData[j.id]?.transType}"`).join('\n');
+      const userConfirmed = window.confirm(`⚠️ ALERT: Transformer Core Type Modifications Detected\n\nThe following transformers have different Core Types than originally entered during MR Intake:\n\n${listStr}\n\nBy accepting, these changes will be permanently finalized across the WHOLE JOB CYCLE (Estimate Master template, rate calculation, scrap allowances, and testing specs).\n\nDo you want to finalize these changes?`);
+      if (!userConfirmed) {
+        return;
+      }
+    }
     
     setIsSubmitting(true);
     try {
@@ -293,15 +392,18 @@ export default function ExternalInspection() {
           inspectionRef = doc(collection(db, 'inspections'));
         }
         
+        const currentStarRating = jobData.starRating || jobData.ratingLevel || job.starRating || job.ratingLevel || '3 Star & other';
+        const currentCoreType = jobData.transType || job.coreType || 'CRGO';
+
         const payload = {
           jobId: job.id,
           type: 'External',
           data: {
             kv: jobData.kv,
-            oilCapLtrs: Number(jobData.oilCapLtrs) || 0,
-            lessOilLtrs: Number(jobData.lessOilLtrs) || 0,
-            oilAvailable: (Number(jobData.oilCapLtrs) || 0) - (Number(jobData.lessOilLtrs) || 0),
-            netShortage: (((Number(jobData.oilCapLtrs) || 0) - (Number(jobData.lessOilLtrs) || 0)) * 0.05) + (Number(jobData.lessOilLtrs) || 0),
+            oilCapLtrs: Math.round(Number(jobData.oilCapLtrs) || 0),
+            lessOilLtrs: Math.round(Number(jobData.lessOilLtrs) || 0),
+            oilAvailable: Math.round((Number(jobData.oilCapLtrs) || 0) - (Number(jobData.lessOilLtrs) || 0)),
+            netShortage: Math.round((((Number(jobData.oilCapLtrs) || 0) - (Number(jobData.lessOilLtrs) || 0)) * 0.05) + (Number(jobData.lessOilLtrs) || 0)),
             sealType: jobData.sealType,
             gasket: jobData.gasket,
             hvLvRod: jobData.hvLvRod,
@@ -312,15 +414,17 @@ export default function ExternalInspection() {
             oilLevGls: jobData.oilLevGls,
             outsidePaint: jobData.outsidePaint,
             namePlate: jobData.namePlate,
-            damCtTank: Number(jobData.damCtTank) || 0,
-            damRadNo: Number(jobData.damRadNo) || 0,
+            damCtTank: Math.round(Number(jobData.damCtTank) || 0),
+            damRadNo: Math.round(Number(jobData.damRadNo) || 0),
             hvSideHvb: jobData.hvSideHvb,
             hvSideHvm: jobData.hvSideHvm,
             hvSideHvCc: jobData.hvSideHvCc,
             lvSideLvb: jobData.lvSideLvb,
             lvSideLvm: jobData.lvSideLvm,
             lvSideLvCc: jobData.lvSideLvCc,
-            transType: jobData.transType
+            transType: currentCoreType,
+            starRating: currentStarRating,
+            ratingLevel: currentStarRating
           },
           updatedAt: now,
           ownerId: auth.currentUser.uid,
@@ -332,15 +436,20 @@ export default function ExternalInspection() {
 
         batch.set(inspectionRef, payload, { merge: true });
 
-        // Update Job Status
+        // Update Job Status, persist inspected Star Rating and Transformer Core Type directly on Job
         const jobRef = doc(db, 'jobs', job.id);
-        // Only set to 'External Done' if it was previously 'Received' or still needs to advance
+        const jobUpdate: any = {
+          coreType: currentCoreType,
+          starRating: currentStarRating,
+          ratingLevel: currentStarRating,
+          updatedAt: now
+        };
+        
         if (job.status === 'Received') {
-          batch.update(jobRef, {
-            status: 'External Done',
-            updatedAt: now
-          });
+          jobUpdate.status = 'External Done';
         }
+
+        batch.update(jobRef, jobUpdate);
       }
 
       await batch.commit();
@@ -386,7 +495,6 @@ export default function ExternalInspection() {
     if (statusFilter === 'Pending') {
       return jobsForMr.some(j => !j.status || j.status === 'Received');
     } else {
-      // Completed if ALL jobs (or at least some) are past 'Received'. Let's say if it has External Done or beyond
       return jobsForMr.some(j => j.status !== 'Received' && j.status !== 'Pending');
     }
   }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -397,21 +505,37 @@ export default function ExternalInspection() {
     return mr.toLowerCase().includes(q) || mrGroups[mr].some(j => j.jobNo.toLowerCase().includes(q));
   });
 
+  const renderIntegerField = (jobId: string, field: keyof ExternalData, widthClass = 'w-14', placeholder = '0') => (
+    <input
+      type="text"
+      inputMode="numeric"
+      pattern="[0-9]*"
+      value={formsData[jobId]?.[field] ?? ''}
+      onChange={(e) => handleChange(jobId, field, e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === '.' || e.key === 'e' || e.key === 'E' || e.key === ',' || e.key === '-') {
+          e.preventDefault();
+        }
+      }}
+      placeholder={placeholder}
+      className={`px-1.5 py-1 text-xs font-mono font-bold text-center border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-2xs print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
+    />
+  );
+
   const renderInputField = (jobId: string, field: keyof ExternalData, type = 'text', widthClass = 'w-full') => (
     <input
       type={type}
       value={formsData[jobId]?.[field] || ''}
       onChange={(e) => handleChange(jobId, field, e.target.value)}
-      className={`px-2 py-1 text-[10px] border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
-      step={type === 'number' ? '0.01' : undefined}
+      className={`px-1.5 py-1 text-xs font-medium text-center border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-2xs print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
     />
   );
 
-  const renderSelectField = (jobId: string, field: keyof ExternalData, options: string[], widthClass = 'w-full') => (
+  const renderSelectField = (jobId: string, field: keyof ExternalData, options: string[], widthClass = 'w-14') => (
     <select
       value={formsData[jobId]?.[field] || ''}
       onChange={(e) => handleChange(jobId, field, e.target.value)}
-      className={`px-1 py-1 text-[10px] border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
+      className={`px-1 py-1 text-xs font-bold text-center border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-2xs print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
     >
       {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
     </select>
@@ -506,35 +630,54 @@ export default function ExternalInspection() {
 
                     <table className="w-full border-collapse border border-black text-[7.5px] text-center">
                       <thead>
+                        {/* Grouped High-Level Header */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
-                          <th className="border border-black p-0.5 w-6">Sr</th>
-                          <th className="border border-black p-0.5 min-w-[70px]">Job No</th>
-                          <th className="border border-black p-0.5 min-w-[50px]">Make</th>
-                          <th className="border border-black p-0.5 w-8">KVA</th>
-                          <th className="border border-black p-0.5 w-6">KV</th>
-                          <th className="border border-black p-0.5 w-10">Oil Cap (L)</th>
-                          <th className="border border-black p-0.5 w-10">Less Oil (L)</th>
-                          <th className="border border-black p-0.5 w-8">SL/BL</th>
-                          <th className="border border-black p-0.5 w-8">Gasket</th>
-                          <th className="border border-black p-0.5 w-8">HV/LV Rod</th>
-                          <th className="border border-black p-0.5 w-8">Nut/Bolt</th>
-                          <th className="border border-black p-0.5 w-8">Dry Act</th>
-                          <th className="border border-black p-0.5 w-8">Cln Tank</th>
-                          <th className="border border-black p-0.5 w-8">Breather</th>
-                          <th className="border border-black p-0.5 w-8">Oil Lev</th>
-                          <th className="border border-black p-0.5 w-8">Out Paint</th>
-                          <th className="border border-black p-0.5 w-8">Name Plt</th>
-                          <th className="border border-black p-0.5 w-10">Dam CT</th>
-                          <th className="border border-black p-0.5 w-10">Dam Rad</th>
-                          <th className="border border-black p-0.5" colSpan={3}>HV Side (B/M/CC)</th>
-                          <th className="border border-black p-0.5" colSpan={3}>LV Side (B/M/CC)</th>
-                          <th className="border border-black p-0.5 w-8">Type</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Sr</th>
+                          <th className="border border-black p-0.5 min-w-[65px]" rowSpan={2}>Job No</th>
+                          <th className="border border-black p-0.5 min-w-[50px]" rowSpan={2}>Make</th>
+                          <th className="border border-black p-0.5 w-10" rowSpan={2}>KVA</th>
+                          <th className="border border-black p-0.5 min-w-[55px]" rowSpan={2}>Type / Core</th>
+                          <th className="border border-black p-0.5 min-w-[55px]" rowSpan={2}>Rating / Level</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>KV</th>
+                          <th className="border border-black p-0.5 w-9" rowSpan={2}>Oil Cap (L)</th>
+                          <th className="border border-black p-0.5 w-9" rowSpan={2}>Less Oil (L)</th>
+                          <th className="border border-black p-0.5 w-7" rowSpan={2}>SL/BL</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Gasket</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>HV/LV Rod</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Nut/Bolt</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Dry Act</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Cln Tank</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Breather</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Oil Lev</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Out Paint</th>
+                          <th className="border border-black p-0.5 w-6" rowSpan={2}>Name Plt</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2} title="Damage Conservator (Damaged Conservator Tank)">Dam CT</th>
+                          <th className="border border-black p-0.5 w-8" rowSpan={2} title="Damage Radiator (Damaged Radiator fins/pipes)">Dam Rad</th>
+                          {/* HV SIDE GROUP WITH DISTINCT OUTER LINE */}
+                          <th className="border-t border-b border-black border-l-2 border-r-2 border-black p-0.5 bg-slate-200 print:bg-transparent font-black" colSpan={3}>
+                            HV SIDE (B / M / CC)
+                          </th>
+                          {/* LV SIDE GROUP WITH DISTINCT OUTER LINE */}
+                          <th className="border-t border-b border-black border-l-2 border-r-2 border-black p-0.5 bg-slate-200 print:bg-transparent font-black" colSpan={3}>
+                            LV SIDE (B / M / CC)
+                          </th>
+                        </tr>
+                        {/* Sub-Headers for HV & LV Bushing / Metal / CC */}
+                        <tr className="bg-slate-100 print:bg-transparent font-bold">
+                          <th className="border-b border-black border-l-2 border-r border-black p-0.5 w-6">B</th>
+                          <th className="border-b border-black border-r border-black p-0.5 w-6">M</th>
+                          <th className="border-b border-black border-r-2 border-black p-0.5 w-6">CC</th>
+                          <th className="border-b border-black border-l-2 border-r border-black p-0.5 w-6">B</th>
+                          <th className="border-b border-black border-r border-black p-0.5 w-6">M</th>
+                          <th className="border-b border-black border-r-2 border-black p-0.5 w-6">CC</th>
                         </tr>
                       </thead>
                       <tbody>
                         {chunk.map((job, cIdx) => {
                           const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
                           const data = formsData[job.id] || {} as any;
+                          const rating = data.starRating || job.starRating || '3 Star & other';
+                          const transCore = data.transType || job.coreType || 'CRGO';
 
                           return (
                             <tr key={job.id} className="border border-black h-6">
@@ -544,6 +687,12 @@ export default function ExternalInspection() {
                               </td>
                               <td className="border border-black p-0.5 truncate max-w-[50px]">{job.make || '-'}</td>
                               <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase text-[7px] text-blue-900">
+                                {transCore}
+                              </td>
+                              <td className="border border-black p-0.5 text-[6.5px] font-semibold truncate max-w-[55px]" title={rating}>
+                                {rating}
+                              </td>
                               <td className="border border-black p-0.5">{data.kv || '11'}</td>
                               <td className="border border-black p-0.5 font-bold">{data.oilCapLtrs || '0'}</td>
                               <td className="border border-black p-0.5">{data.lessOilLtrs || '0'}</td>
@@ -559,13 +708,16 @@ export default function ExternalInspection() {
                               <td className="border border-black p-0.5">{data.namePlate || '-'}</td>
                               <td className="border border-black p-0.5">{data.damCtTank || '0'}</td>
                               <td className="border border-black p-0.5">{data.damRadNo || '0'}</td>
-                              <td className="border border-black p-0.5">{data.hvSideHvb || '3'}</td>
-                              <td className="border border-black p-0.5">{data.hvSideHvm || '3'}</td>
-                              <td className="border border-black p-0.5">{data.hvSideHvCc || '3'}</td>
-                              <td className="border border-black p-0.5">{data.lvSideLvb || '4'}</td>
-                              <td className="border border-black p-0.5">{data.lvSideLvm || '4'}</td>
-                              <td className="border border-black p-0.5">{data.lvSideLvCc || '4'}</td>
-                              <td className="border border-black p-0.5">{data.transType || 'C'}</td>
+                              
+                              {/* HV Side Group Enclosed Columns */}
+                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.hvSideHvb || '3'}</td>
+                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.hvSideHvm || '3'}</td>
+                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.hvSideHvCc || '3'}</td>
+                              
+                              {/* LV Side Group Enclosed Columns */}
+                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.lvSideLvb || '4'}</td>
+                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.lvSideLvm || '4'}</td>
+                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.lvSideLvCc || '4'}</td>
                             </tr>
                           );
                         })}
@@ -607,6 +759,94 @@ export default function ExternalInspection() {
 
   return (
     <div className="space-y-6 print:space-y-0">
+      {/* PENDING CHANGE INTERACTIVE ALERT MODAL */}
+      {pendingChange && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="bg-amber-500 p-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle className="w-5 h-5 text-white shrink-0" />
+                <h3 className="font-bold text-sm uppercase tracking-wide">
+                  Confirm Transformer Type Change
+                </h3>
+              </div>
+              <button 
+                onClick={handleCancelPendingChange}
+                className="text-amber-100 hover:text-white p-1 rounded-full hover:bg-amber-600 transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="text-xs text-slate-600">
+                You are manually changing the core specifications for:
+              </div>
+
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 space-y-1.5">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500 font-medium">Job Number:</span>
+                  <span className="font-mono font-bold text-slate-900">{pendingChange.jobNo}</span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500 font-medium">Capacity & Make:</span>
+                  <span className="font-semibold text-slate-800">{pendingChange.kva} KVA • {pendingChange.make}</span>
+                </div>
+              </div>
+
+              {/* Comparison Box */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="p-3 bg-slate-100 rounded-lg border border-slate-200 text-center">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 block mb-1">
+                    MR Intake Type
+                  </span>
+                  <span className="font-mono font-bold text-slate-700 text-sm">
+                    {pendingChange.mrIntakeValue}
+                  </span>
+                </div>
+
+                <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 text-center shadow-xs">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 block mb-1">
+                    Physical Inspection
+                  </span>
+                  <span className="font-mono font-black text-amber-900 text-sm">
+                    {pendingChange.newValue}
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-amber-50/80 p-3 rounded-lg border-l-4 border-amber-500 text-xs text-amber-950 space-y-1">
+                <p className="font-bold flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                  Impact on Whole Job Cycle:
+                </p>
+                <p className="text-[11px] leading-relaxed text-amber-900">
+                  Accepting this change will update the core type permanently for this job. It directly determines which <strong>Estimate Master template</strong> (e.g. CRGO, Amorphous, Wound Core, LSTC, OH) and material scrap calculations will be used.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCancelPendingChange}
+                  className="px-4 py-2 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                >
+                  Cancel / Keep MR Type
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmPendingChange}
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  Accept & Finalize Change
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded shadow-sm border border-slate-200">
         <div>
           <h1 className="text-xl font-bold text-slate-900 print:text-black flex items-center">
@@ -614,7 +854,7 @@ export default function ExternalInspection() {
             External Inspection
           </h1>
           <p className="text-sm text-slate-500 mt-1">
-            Fill external inspection parameters for OGP repair jobs.
+            Capture physical external inspection parameters, transformer type (CRGO, Amorphous, Wound Core, LSTC, OH), star rating levels, and bushing parts.
           </p>
         </div>
       </div>
@@ -694,7 +934,7 @@ export default function ExternalInspection() {
                         <div className="flex items-center space-x-2">
                           <button 
                             onClick={() => handleSelectMr(mr)}
-                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors"
+                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors cursor-pointer"
                           >
                             {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
                           </button>
@@ -704,7 +944,7 @@ export default function ExternalInspection() {
                                 handleSelectMr(mr);
                                 setIsPrintOpen(true);
                               }}
-                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors"
+                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors cursor-pointer"
                               title="Print External Inspection Report"
                             >
                               <Printer className="w-3 h-3 mr-1 text-slate-600" /> Print
@@ -743,20 +983,20 @@ export default function ExternalInspection() {
               <button 
                 type="button"
                 onClick={handleExportExcel}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-green-400 hover:text-green-300 border border-green-400/30 px-3 py-1.5 rounded transition-colors print:hidden"
+                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-green-400 hover:text-green-300 border border-green-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
               >
                 <Download className="w-3 h-3 mr-1" /> Excel
               </button>
               <button 
                 type="button"
                 onClick={handlePrint}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-300 border border-slate-400/30 px-3 py-1.5 rounded transition-colors print:hidden"
+                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-300 border border-slate-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
               >
                 <Printer className="w-3 h-3 mr-1" /> Print
               </button>
               <button 
                 onClick={() => setSelectedMrNo(null)}
-                className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors print:hidden"
+                className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
               >
                 Back to List
               </button>
@@ -775,50 +1015,93 @@ export default function ExternalInspection() {
             </div>
           )}
 
-          <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm print:hidden">
-            <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
-            <span>Blank inspection reports are <strong>NOT acceptable</strong>. You must fill in Oil Capacity (Ltrs), Less Oil (Ltrs), Seal Type, and all inspection fields for every transformer before submitting.</span>
+          <div className="bg-blue-50 border-l-4 border-blue-500 p-3 rounded text-blue-950 text-xs flex items-center justify-between gap-2 shadow-sm print:hidden">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-sm">💡 Estimate Master Linkage:</span>
+              <span>Verify the <strong>Transformer Type / Core</strong> (CRGO, Amorphous, Wound Core, LSTC, OH) and <strong>Rating / Level</strong>. Any manual change from MR intake triggers an alert to confirm finalizing the change across the entire job cycle.</span>
+            </div>
           </div>
 
           <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
-            <div className="hidden print:block mb-3">
-              <LetterheadHeader agency={activeAgency} documentTitle="EXTERNAL INSPECTION REPORT" />
-              <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1.5 mb-2">
-                <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
-                <span>MR DATE: <strong className="font-mono">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong></span>
-                <span>DIVISION: <strong className="uppercase">{mrJobs[0]?.division || '-'}</strong></span>
-                <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
-              </div>
-            </div>
             <form onSubmit={handleSubmit}>
               <div className="min-w-max">
-                <table className="w-full text-left print:text-black print:text-[8px]">
+                <table className="w-full text-left print:text-black print:text-[8px] border-collapse">
                   <thead>
-                    <tr>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest sticky left-0 z-10 w-8">#</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest sticky left-8 z-10 min-w-[100px]">JOB NO</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[60px]">MAKE</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]">KVA</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest min-w-[40px]">KV</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">OIL<br/>CAP</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">LESS<br/>OIL</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">SL/<br/>BL</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">GA<br/>SK</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">HV<br/>LV</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Nute<br/>Bolt</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Dry<br/>Act</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Cln<br/>Tank</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">BR<br/>ETH</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">OIL<br/>LEV</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">OUT<br/>PAINT</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">NAME<br/>PLT</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">DAM<br/>CT</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">DAM<br/>RAD</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center" colSpan={3}>HV SIDE (B/M/CC)</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest text-center" colSpan={3}>LV SIDE (B/M/CC)</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest">TRANS<br/>TYPE</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest print:hidden">OIL<br/>AVL</th>
-                      <th className="p-1 border-b border-slate-200 bg-slate-50 print:bg-transparent text-[9px] font-bold text-slate-500 uppercase print:text-black tracking-widest print:hidden">NET<br/>SHRT</th>
+                    {/* Top Grouped Header Row */}
+                    <tr className="border-b border-slate-200">
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider sticky left-0 z-20 w-8 border-r border-slate-200" rowSpan={2}>#</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider sticky left-8 z-20 min-w-[100px] border-r border-slate-200" rowSpan={2}>JOB NO</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[70px] border-r border-slate-200" rowSpan={2}>MAKE</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2}>KVA</th>
+                      
+                      {/* Transformer Type / Core dropdown column */}
+                      <th className="p-2 bg-indigo-50/80 text-[10px] font-bold text-indigo-950 uppercase tracking-wider min-w-[140px] border-r border-slate-200 text-center" rowSpan={2}>
+                        <div className="flex items-center justify-center gap-1">
+                          <Cpu className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>TYPE / CORE</span>
+                        </div>
+                      </th>
+
+                      {/* Rating / Star Level beside KVA */}
+                      <th className="p-2 bg-blue-50/80 text-[10px] font-bold text-blue-900 uppercase tracking-wider min-w-[170px] border-r border-slate-200 text-center" rowSpan={2}>
+                        <div className="flex items-center justify-center gap-1">
+                          <Scale className="w-3.5 h-3.5 text-blue-600" />
+                          <span>RATING / LEVEL (Clause 4.0)</span>
+                        </div>
+                      </th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>KV</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[55px] border-r border-slate-200 text-center" rowSpan={2}>OIL<br/>CAP (L)</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[55px] border-r border-slate-200 text-center" rowSpan={2}>LESS<br/>OIL (L)</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2}>SEAL<br/>TYPE</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>GAS<br/>KET</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>HV/LV<br/>ROD</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>NUT/<br/>BOLT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>DRY<br/>ACT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>CLN<br/>TANK</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>BRE<br/>ATHER</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>OIL<br/>LEV</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>OUT<br/>PAINT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>NAME<br/>PLT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2} title="Damage Conservator (Damaged Conservator Tank)">DAM<br/>CT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r-2 border-blue-400 text-center" rowSpan={2} title="Damage Radiator (Damaged Radiator fins/pipes)">DAM<br/>RAD</th>
+                      
+                      {/* HV SIDE GROUP WITH DISTINCT OUTER BORDER */}
+                      <th className="p-1.5 bg-blue-100 text-[10px] font-black text-blue-950 uppercase tracking-wider text-center border-t-2 border-l-2 border-r-2 border-blue-500 shadow-xs" colSpan={3}>
+                        HV SIDE (B / M / CC)
+                      </th>
+                      
+                      {/* LV SIDE GROUP WITH DISTINCT OUTER BORDER */}
+                      <th className="p-1.5 bg-indigo-100 text-[10px] font-black text-indigo-950 uppercase tracking-wider text-center border-t-2 border-l-2 border-r-2 border-indigo-500 shadow-xs" colSpan={3}>
+                        LV SIDE (B / M / CC)
+                      </th>
+                      
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2}>OIL<br/>AVL</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] text-center" rowSpan={2}>NET<br/>SHRT</th>
+                    </tr>
+
+                    {/* Sub-Headers for HV and LV Bushing/Metal/Cap */}
+                    <tr className="border-b border-slate-300 text-[9px]">
+                      {/* HV Sub-columns */}
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-l-2 border-r border-b-2 border-blue-500 min-w-[44px]" title="HV Bushing">
+                        B (Bush)
+                      </th>
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r border-b-2 border-blue-500 min-w-[44px]" title="HV Metal Parts">
+                        M (Metal)
+                      </th>
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r-2 border-b-2 border-blue-500 min-w-[44px]" title="HV Bushing Cap / Connector">
+                        CC (Cap)
+                      </th>
+                      
+                      {/* LV Sub-columns */}
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-l-2 border-r border-b-2 border-indigo-500 min-w-[44px]" title="LV Bushing">
+                        B (Bush)
+                      </th>
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[44px]" title="LV Metal Parts">
+                        M (Metal)
+                      </th>
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[44px]" title="LV Bushing Cap / Connector">
+                        CC (Cap)
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -826,12 +1109,16 @@ export default function ExternalInspection() {
                       const oilCap = Number(formsData[job.id]?.oilCapLtrs) || 0;
                       const lessOil = Number(formsData[job.id]?.lessOilLtrs) || 0;
                       const oilAvl = oilCap - lessOil;
-                      const netShrt = (oilAvl * 0.05) + lessOil;
+                      const netShrt = Math.round((oilAvl * 0.05) + lessOil);
+                      const currentChosenCore = formsData[job.id]?.transType || job.coreType || 'CRGO';
+                      const isModifiedFromMr = currentChosenCore !== (job.coreType || 'CRGO');
 
                       return (
-                      <tr key={job.id} className="hover:bg-slate-50 print:bg-transparent group">
-                        <td className="p-1 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 z-10">{index + 1}</td>
-                        <td className="p-1 text-xs font-mono font-bold text-slate-900 print:text-black sticky left-8 bg-white group-hover:bg-slate-50 print:bg-transparent border-r border-slate-100 min-w-[100px] z-10">
+                      <tr key={job.id} className="hover:bg-slate-50/80 transition-colors group">
+                        <td className="p-2 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
+                          {index + 1}
+                        </td>
+                        <td className="p-2 text-xs font-mono font-bold text-slate-900 sticky left-8 bg-white group-hover:bg-slate-50 border-r border-slate-200 min-w-[100px] z-10">
                           <div className="flex items-center gap-1.5">
                             <span>{job.jobNo}</span>
                             {job.repairType === 'GP' && (
@@ -841,48 +1128,136 @@ export default function ExternalInspection() {
                             )}
                           </div>
                         </td>
-                        <td className="p-1 text-[10px] text-slate-700 print:text-black min-w-[60px] truncate max-w-[80px]" title={job.make}>{job.make}</td>
-                        <td className="p-1 text-[10px] text-slate-700 print:text-black font-mono">{job.capacityKva}</td>
+                        <td className="p-2 text-xs text-slate-800 font-semibold min-w-[70px] truncate max-w-[90px] border-r border-slate-200" title={job.make}>
+                          {job.make}
+                        </td>
+                        <td className="p-2 text-xs text-slate-900 font-mono font-bold text-center border-r border-slate-200">
+                          {job.capacityKva}
+                        </td>
+
+                        {/* Transformer Type / Core dropdown column with modification alert trigger */}
+                        <td className="p-1 border-r border-slate-200 bg-indigo-50/20">
+                          <select
+                            value={currentChosenCore}
+                            onChange={(e) => handleCoreTypeChangeAttempt(job, e.target.value)}
+                            className={`w-full px-2 py-1 text-xs font-bold border rounded focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 bg-white cursor-pointer shadow-2xs ${
+                              isModifiedFromMr 
+                                ? 'border-amber-500 text-amber-950 ring-1 ring-amber-400 bg-amber-50/40' 
+                                : 'border-indigo-300 text-indigo-950'
+                            }`}
+                          >
+                            {TRANSFORMER_CORE_TYPES.map(opt => (
+                              <option key={opt} value={opt}>{opt}</option>
+                            ))}
+                          </select>
+                          {isModifiedFromMr && (
+                            <span className="text-[8px] font-bold text-amber-800 bg-amber-100/80 px-1 py-0.5 rounded block text-center mt-0.5 border border-amber-300" title={`Original MR Intake: ${job.coreType || 'CRGO'}`}>
+                              ⚠️ Modified (MR: {job.coreType || 'CRGO'})
+                            </span>
+                          )}
+                        </td>
                         
-                        <td className="p-1">{renderInputField(job.id, 'kv', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'oilCapLtrs', 'number', 'min-w-[64px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'lessOilLtrs', 'number', 'min-w-[64px]')}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'sealType', ['BL', 'SL'])}</td>
-                        <td className="p-1">{renderInputField(job.id, 'gasket', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'hvLvRod', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'nuteBolt', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'dryActPart', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'clnDrtyTank', ['Y', 'N', '-', 'TBR'])}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'breather', ['Y', 'N', '-', 'TBR'])}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'oilLevGls', ['Y', 'N', '-', 'TBR'])}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'outsidePaint', ['Y', 'N', '-', 'TBR'])}</td>
-                        <td className="p-1">{renderSelectField(job.id, 'namePlate', ['-', 'Y', 'N', 'TBR'])}</td>
-                        <td className="p-1">{renderInputField(job.id, 'damCtTank', 'text', 'min-w-[64px]')}</td>
-                        <td className="p-1">{renderInputField(job.id, 'damRadNo', 'number', 'min-w-[48px]')}</td>
+                        {/* Rating Level selector directly beside KVA */}
+                        <td className="p-1 border-r border-slate-200 bg-blue-50/20">
+                          <select
+                            value={formsData[job.id]?.starRating || '3 Star & other'}
+                            onChange={(e) => handleChange(job.id, 'starRating', e.target.value)}
+                            className="w-full px-2 py-1 text-xs font-bold border border-blue-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-blue-950 cursor-pointer shadow-2xs"
+                          >
+                            {RATING_LEVEL_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                          </select>
+                        </td>
+
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderInputField(job.id, 'kv', 'text', 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderIntegerField(job.id, 'oilCapLtrs', 'w-14')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderIntegerField(job.id, 'lessOilLtrs', 'w-14')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'sealType', ['BL', 'SL'], 'w-14')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderIntegerField(job.id, 'gasket', 'w-12', '1')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderIntegerField(job.id, 'hvLvRod', 'w-12', '7')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'nuteBolt', ['Y', 'N', '-', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'dryActPart', ['Y', 'N', '-', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'clnDrtyTank', ['Y', 'N', '-', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'breather', ['Y', 'N', '-', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'oilLevGls', ['Y', 'N', '-', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'outsidePaint', ['Y', 'N', '-', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderSelectField(job.id, 'namePlate', ['-', 'Y', 'N', 'TBR'], 'w-12')}
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center">
+                          {renderIntegerField(job.id, 'damCtTank', 'w-12', '0')}
+                        </td>
+                        <td className="p-1 border-r-2 border-blue-400 text-center">
+                          {renderIntegerField(job.id, 'damRadNo', 'w-12', '0')}
+                        </td>
                         
-                        <td className="p-0.5">{renderInputField(job.id, 'hvSideHvb', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-0.5">{renderInputField(job.id, 'hvSideHvm', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-0.5 border-r border-slate-100">{renderInputField(job.id, 'hvSideHvCc', 'text', 'min-w-[48px]')}</td>
+                        {/* HV Side Grouped with distinct border */}
+                        <td className="p-1 bg-blue-50/30 border-l-2 border-r border-blue-500 text-center">
+                          {renderIntegerField(job.id, 'hvSideHvb', 'w-12', '3')}
+                        </td>
+                        <td className="p-1 bg-blue-50/30 border-r border-blue-500 text-center">
+                          {renderIntegerField(job.id, 'hvSideHvm', 'w-12', '3')}
+                        </td>
+                        <td className="p-1 bg-blue-50/30 border-r-2 border-blue-500 text-center">
+                          {renderIntegerField(job.id, 'hvSideHvCc', 'w-12', '3')}
+                        </td>
                         
-                        <td className="p-0.5">{renderInputField(job.id, 'lvSideLvb', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-0.5">{renderInputField(job.id, 'lvSideLvm', 'text', 'min-w-[48px]')}</td>
-                        <td className="p-0.5 border-r border-slate-100">{renderInputField(job.id, 'lvSideLvCc', 'text', 'min-w-[48px]')}</td>
+                        {/* LV Side Grouped with distinct border */}
+                        <td className="p-1 bg-indigo-50/30 border-l-2 border-r border-indigo-500 text-center">
+                          {renderIntegerField(job.id, 'lvSideLvb', 'w-12', '4')}
+                        </td>
+                        <td className="p-1 bg-indigo-50/30 border-r border-indigo-500 text-center">
+                          {renderIntegerField(job.id, 'lvSideLvm', 'w-12', '4')}
+                        </td>
+                        <td className="p-1 bg-indigo-50/30 border-r-2 border-indigo-500 text-center">
+                          {renderIntegerField(job.id, 'lvSideLvCc', 'w-12', '4')}
+                        </td>
                         
-                        <td className="p-1">{renderInputField(job.id, 'transType', 'text', 'min-w-[64px]')}</td>
-                        
-                        <td className="p-1 text-[10px] font-mono text-slate-700 print:text-black bg-slate-50 print:bg-transparent/50 text-center print:hidden">{oilAvl >= 0 ? oilAvl.toFixed(1) : '-'}</td>
-                        <td className="p-1 text-[10px] font-mono font-bold text-amber-600 bg-amber-50/30 text-center print:hidden">{netShrt >= 0 ? netShrt.toFixed(1) : '-'}</td>
+                        <td className="p-1 text-xs font-mono font-bold text-slate-800 bg-slate-50 text-center border-r border-slate-200">
+                          {oilAvl >= 0 ? Math.round(oilAvl) : '-'}
+                        </td>
+                        <td className="p-1 text-xs font-mono font-bold text-amber-700 bg-amber-50/50 text-center">
+                          {netShrt >= 0 ? Math.round(netShrt) : '-'}
+                        </td>
                       </tr>
                     )})}
                   </tbody>
                 </table>
               </div>
               
-              <div className="p-6 bg-slate-50 print:bg-transparent border-t border-slate-200 flex justify-end print:hidden">
+              <div className="p-6 bg-slate-50 print:bg-transparent border-t border-slate-200 flex justify-between items-center print:hidden">
+                <div className="text-xs text-slate-500">
+                  Total Transformers: <strong className="text-slate-800 font-mono">{mrJobs.length}</strong>
+                </div>
                 <button 
                   type="submit" 
                   disabled={isSubmitting}
-                  className="px-8 py-3 text-sm font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center shadow-sm"
+                  className="px-8 py-3 text-sm font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center shadow-sm cursor-pointer"
                 >
                   {isSubmitting && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                   <Save className="w-4 h-4 mr-2" /> Save All {mrJobs.length} Inspections

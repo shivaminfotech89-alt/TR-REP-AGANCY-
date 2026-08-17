@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { defaultEstimateData, defaultAmorphousEstimateData, EstimateItem } from '../lib/estimateData';
+import { 
+  defaultEstimateData, 
+  defaultAmorphousEstimateData, 
+  defaultWoundCoreEstimateData, 
+  defaultOverhaulingEstimateData,
+  defaultCircleLimitsEstimateData,
+  defaultRates, 
+  EstimateItem 
+} from '../lib/estimateData';
 import { 
   Edit2, Save, FileSpreadsheet, Loader2, X, ChevronDown, ChevronUp, Plus, Trash2, 
-  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, Sparkles, Check
+  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText
 } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
-
-const defaultRates = { "5": null, "10": null, "16": null, "25": null, "50": null, "63": null, "100": null, "200": null, "315": null, "500": null };
 
 function mergeDefaultRates(items: EstimateItem[]): EstimateItem[] {
   return items.map((item: any) => ({
@@ -21,23 +27,233 @@ function mergeDefaultRates(items: EstimateItem[]): EstimateItem[] {
   }));
 }
 
+function normalizeCircleLimitsData(items: EstimateItem[] | undefined, defaultData: EstimateItem[]): EstimateItem[] {
+  if (!items || items.length === 0) {
+    return JSON.parse(JSON.stringify(defaultData));
+  }
+
+  const itemMap = new Map<string, EstimateItem>();
+  items.forEach(it => {
+    const code = (it.itemCode || '').trim().toLowerCase();
+    if (code) itemMap.set(code, it);
+  });
+
+  const result: EstimateItem[] = [];
+  const processedCodes = new Set<string>();
+
+  defaultData.forEach(defItem => {
+    const code = (defItem.itemCode || '').trim().toLowerCase();
+    processedCodes.add(code);
+    const existing = itemMap.get(code);
+
+    if (existing) {
+      result.push({
+        itemCode: existing.itemCode || defItem.itemCode,
+        itemName: existing.itemName && existing.itemName.trim() !== '' ? existing.itemName : defItem.itemName,
+        unit: existing.unit || 'Rs.',
+        fixedRate: null,
+        rates: { ...defaultRates, ...defItem.rates, ...(existing.rates || {}) }
+      });
+    } else {
+      result.push(JSON.parse(JSON.stringify(defItem)));
+    }
+  });
+
+  items.forEach(it => {
+    const code = (it.itemCode || '').trim().toLowerCase();
+    if (code && !processedCodes.has(code)) {
+      result.push({
+        ...it,
+        unit: it.unit || 'Rs.',
+        rates: it.rates ? { ...defaultRates, ...it.rates } : { ...defaultRates }
+      });
+    }
+  });
+
+  return result;
+}
+
+function normalizeAmorphousOrWoundCoreData(items: EstimateItem[] | undefined, defaultData: EstimateItem[]): EstimateItem[] {
+  if (!items || items.length === 0) {
+    return JSON.parse(JSON.stringify(defaultData));
+  }
+  
+  // Check if it's the old CRGO array mistakenly stored as Wound Core / Amorphous
+  const isLegacyCrgo = items.some(it => {
+    const name = (it.itemName || '').toLowerCase();
+    return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
+  });
+
+  // Check if it's the old 10-item placeholder with 0 rates
+  const isOldPlaceholder = items.length <= 10 && items.every(it => (!it.fixedRate || it.fixedRate === 0) && (!it.rates || Object.values(it.rates).every(v => v === null || v === 0)));
+  
+  if (isLegacyCrgo || isOldPlaceholder) {
+    return JSON.parse(JSON.stringify(defaultData));
+  }
+
+  const itemMap = new Map<string, EstimateItem>();
+  items.forEach(it => {
+    const code = (it.itemCode || '').trim().toLowerCase();
+    if (code) itemMap.set(code, it);
+  });
+
+  const result: EstimateItem[] = [];
+  const processedCodes = new Set<string>();
+
+  defaultData.forEach(defItem => {
+    const code = (defItem.itemCode || '').trim().toLowerCase();
+    processedCodes.add(code);
+    const existing = itemMap.get(code);
+
+    if (existing) {
+      let fRate = existing.fixedRate;
+      if (fRate === undefined || fRate === null || fRate === 0) {
+        if (defItem.fixedRate) {
+          fRate = defItem.fixedRate;
+        } else if (existing.rates) {
+          const ratesObj = existing.rates as any;
+          const nonNull = Object.entries(ratesObj).find(([k, v]) => v !== null && !isNaN(Number(v)) && Number(v) > 0);
+          if (nonNull) fRate = Number(nonNull[1]);
+        }
+      }
+
+      // Merge rates
+      const mergedRates = { ...defaultRates, ...defItem.rates, ...(existing.rates || {}) };
+
+      let resolvedUnit = existing.unit;
+      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each') || resolvedUnit.toLowerCase().includes('coil weight')) {
+        resolvedUnit = 'QTY';
+      }
+
+      result.push({
+        itemCode: existing.itemCode || defItem.itemCode,
+        itemName: existing.itemName && existing.itemName.trim() !== '' ? existing.itemName : defItem.itemName, // Do not change user's saved description
+        unit: resolvedUnit, // Unit set to QTY
+        fixedRate: fRate !== undefined && fRate !== null && !isNaN(Number(fRate)) && Number(fRate) > 0 ? Number(fRate) : (defItem.fixedRate || 0),
+        rates: mergedRates
+      });
+    } else {
+      result.push(JSON.parse(JSON.stringify(defItem)));
+    }
+  });
+
+  items.forEach(it => {
+    const code = (it.itemCode || '').trim().toLowerCase();
+    if (code && !processedCodes.has(code)) {
+      let resolvedUnit = it.unit;
+      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each')) {
+        resolvedUnit = 'QTY';
+      }
+      result.push({
+        ...it,
+        unit: resolvedUnit,
+        fixedRate: it.fixedRate !== undefined && it.fixedRate !== null ? Number(it.fixedRate) : 0,
+        rates: it.rates ? { ...defaultRates, ...it.rates } : { ...defaultRates }
+      });
+    }
+  });
+
+  return result;
+}
+
+function normalizeOverhaulingData(items: EstimateItem[] | undefined, defaultData: EstimateItem[]): EstimateItem[] {
+  if (!items || items.length === 0) {
+    return JSON.parse(JSON.stringify(defaultData));
+  }
+
+  const itemMap = new Map<string, EstimateItem>();
+  items.forEach(it => {
+    const code = (it.itemCode || '').trim().toLowerCase();
+    if (code) itemMap.set(code, it);
+  });
+
+  const result: EstimateItem[] = [];
+  const processedCodes = new Set<string>();
+
+  defaultData.forEach(defItem => {
+    const code = (defItem.itemCode || '').trim().toLowerCase();
+    processedCodes.add(code);
+    const existing = itemMap.get(code);
+
+    if (existing) {
+      let fRate = existing.fixedRate;
+      if (fRate === undefined || fRate === null || fRate === 0) {
+        if (defItem.fixedRate) {
+          fRate = defItem.fixedRate;
+        } else if (existing.rates) {
+          const ratesObj = existing.rates as any;
+          const nonNull = Object.entries(ratesObj).find(([k, v]) => v !== null && !isNaN(Number(v)) && Number(v) > 0);
+          if (nonNull) fRate = Number(nonNull[1]);
+        }
+      }
+
+      let resolvedUnit = existing.unit;
+      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each') || resolvedUnit.toLowerCase().includes('transformer')) {
+        resolvedUnit = 'QTY';
+      }
+
+      result.push({
+        ...defItem,
+        ...existing,
+        unit: resolvedUnit,
+        fixedRate: fRate !== undefined && fRate !== null ? Number(fRate) : (defItem.fixedRate || 0),
+        rates: existing.rates ? { ...defItem.rates, ...existing.rates } : { ...defItem.rates }
+      });
+    } else {
+      result.push(JSON.parse(JSON.stringify(defItem)));
+    }
+  });
+
+  items.forEach(it => {
+    const code = (it.itemCode || '').trim().toLowerCase();
+    if (code && !processedCodes.has(code)) {
+      let resolvedUnit = it.unit;
+      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each') || resolvedUnit.toLowerCase().includes('transformer')) {
+        resolvedUnit = 'QTY';
+      }
+      result.push({
+        ...it,
+        unit: resolvedUnit,
+        fixedRate: it.fixedRate !== undefined && it.fixedRate !== null ? Number(it.fixedRate) : 0,
+        rates: it.rates ? { ...defaultRates, ...it.rates } : { ...defaultRates }
+      });
+    }
+  });
+
+  return result;
+}
+
 export default function EstimateMaster() {
-  const { agencies, activeAgency, updateAgency, updateAllAgenciesEstimateMaster } = useAgency();
+  const { 
+    agencies, 
+    activeAgency, 
+    updateAgency, 
+    updateAllAgenciesEstimateMaster, 
+    saveGlobalDefaultEstimateMaster,
+    globalDefaultEstimateMaster 
+  } = useAgency();
 
   const [crgoData, setCrgoData] = useState<EstimateItem[]>([]);
   const [amorphousData, setAmorphousData] = useState<EstimateItem[]>([]);
   const [woundCoreData, setWoundCoreData] = useState<EstimateItem[]>([]);
+  const [overhaulingData, setOverhaulingData] = useState<EstimateItem[]>([]);
+  const [circleLimitsData, setCircleLimitsData] = useState<EstimateItem[]>([]);
 
-  const [editingSection, setEditingSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | null>(null);
+  const [editingSection, setEditingSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Accordion minimize / expand state
   const [openCrgo, setOpenCrgo] = useState(true);
-  const [openAmorphous, setOpenAmorphous] = useState(false);
-  const [openWoundCore, setOpenWoundCore] = useState(false);
+  const [openAmorphous, setOpenAmorphous] = useState(true);
+  const [openWoundCore, setOpenWoundCore] = useState(true);
+  const [openOverhauling, setOpenOverhauling] = useState(true);
+  const [openCircleLimits, setOpenCircleLimits] = useState(true);
+
+  // Circle limits view toggle: Standard KVA Columns Grid vs Official Document Matrix View
+  const [circleLimitsViewMode, setCircleLimitsViewMode] = useState<'standard' | 'matrix'>('standard');
 
   // Multi-agency Save Confirmation Modal
-  const [pendingSaveSection, setPendingSaveSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | null>(null);
+  const [pendingSaveSection, setPendingSaveSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS' | null>(null);
   const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>('ALL');
 
   // Full Sync Modal
@@ -49,6 +265,8 @@ export default function EstimateMaster() {
       // Load CRGO
       if (activeAgency.estimateMasterCRGO && activeAgency.estimateMasterCRGO.length > 0) {
         setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterCRGO))));
+      } else if (globalDefaultEstimateMaster?.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
+        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
       } else if (activeAgency.estimateMaster && activeAgency.estimateMaster.length > 0) {
         setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMaster))));
       } else {
@@ -56,24 +274,49 @@ export default function EstimateMaster() {
       }
 
       // Load Amorphous
+      let currentAmorphous: EstimateItem[] = [];
       if (activeAgency.estimateMasterAmorphous && activeAgency.estimateMasterAmorphous.length > 0) {
-        setAmorphousData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterAmorphous))));
+        currentAmorphous = normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterAmorphous, defaultAmorphousEstimateData);
+      } else if (globalDefaultEstimateMaster?.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
+        currentAmorphous = normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData);
       } else {
-        setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
+        currentAmorphous = JSON.parse(JSON.stringify(defaultAmorphousEstimateData));
       }
+      setAmorphousData(currentAmorphous);
 
       // Load Wound Core
-      if (activeAgency.estimateMasterWoundCore && activeAgency.estimateMasterWoundCore.length > 0) {
-        setWoundCoreData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterWoundCore))));
-      } else if (activeAgency.estimateMasterCRGO && activeAgency.estimateMasterCRGO.length > 0) {
-        setWoundCoreData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterCRGO))));
-      } else if (activeAgency.estimateMaster && activeAgency.estimateMaster.length > 0) {
-        setWoundCoreData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMaster))));
+      const isLegacyWc = (arr?: EstimateItem[]) => !arr || arr.length === 0 || arr.some(it => {
+        const name = (it.itemName || '').toLowerCase();
+        return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
+      });
+
+      if (activeAgency.estimateMasterWoundCore && activeAgency.estimateMasterWoundCore.length > 0 && !isLegacyWc(activeAgency.estimateMasterWoundCore)) {
+        setWoundCoreData(normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterWoundCore, currentAmorphous));
+      } else if (globalDefaultEstimateMaster?.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0 && !isLegacyWc(globalDefaultEstimateMaster.estimateMasterWoundCore)) {
+        setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, currentAmorphous));
       } else {
-        setWoundCoreData(JSON.parse(JSON.stringify(defaultEstimateData)));
+        setWoundCoreData(JSON.parse(JSON.stringify(currentAmorphous)));
+      }
+
+      // Load Overhauling
+      if (activeAgency.estimateMasterOverhauling && activeAgency.estimateMasterOverhauling.length > 0) {
+        setOverhaulingData(normalizeOverhaulingData(activeAgency.estimateMasterOverhauling, defaultOverhaulingEstimateData));
+      } else if (globalDefaultEstimateMaster?.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
+        setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
+      } else {
+        setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
+      }
+
+      // Load Circle Approval Limits
+      if (activeAgency.estimateMasterCircleLimits && activeAgency.estimateMasterCircleLimits.length > 0) {
+        setCircleLimitsData(normalizeCircleLimitsData(activeAgency.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
+      } else if (globalDefaultEstimateMaster?.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
+        setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
+      } else {
+        setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
       }
     }
-  }, [activeAgency]);
+  }, [activeAgency, globalDefaultEstimateMaster]);
 
   if (!activeAgency) {
     return (
@@ -87,34 +330,42 @@ export default function EstimateMaster() {
     setOpenCrgo(true);
     setOpenAmorphous(true);
     setOpenWoundCore(true);
+    setOpenOverhauling(true);
+    setOpenCircleLimits(true);
   };
 
   const handleCollapseAll = () => {
     setOpenCrgo(false);
     setOpenAmorphous(false);
     setOpenWoundCore(false);
+    setOpenOverhauling(false);
+    setOpenCircleLimits(false);
   };
 
   // Section specific handlers
-  const getSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE') => {
+  const getSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     if (section === 'CRGO') return crgoData;
     if (section === 'AMORPHOUS') return amorphousData;
-    return woundCoreData;
+    if (section === 'WOUND_CORE') return woundCoreData;
+    if (section === 'OVERHAULING') return overhaulingData;
+    return circleLimitsData;
   };
 
-  const setSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE', newData: EstimateItem[]) => {
+  const setSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', newData: EstimateItem[]) => {
     if (section === 'CRGO') setCrgoData(newData);
     else if (section === 'AMORPHOUS') setAmorphousData(newData);
-    else setWoundCoreData(newData);
+    else if (section === 'WOUND_CORE') setWoundCoreData(newData);
+    else if (section === 'OVERHAULING') setOverhaulingData(newData);
+    else setCircleLimitsData(newData);
   };
 
-  const handleItemDetailsChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE', index: number, field: 'itemCode' | 'itemName' | 'unit', value: string) => {
+  const handleItemDetailsChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number, field: 'itemCode' | 'itemName' | 'unit', value: string) => {
     const data = [...getSectionData(section)];
     data[index] = { ...data[index], [field]: value };
     setSectionData(section, data);
   };
 
-  const handleRateChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE', index: number, kva: KvaType, value: string) => {
+  const handleRateChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number, kva: KvaType, value: string) => {
     const data = [...getSectionData(section)];
     if (value.trim() === '') {
       data[index].rates[kva] = null;
@@ -125,28 +376,154 @@ export default function EstimateMaster() {
     setSectionData(section, data);
   };
 
-  const handleAddItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE') => {
+  const handleFixedRateChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number, value: string) => {
     const data = [...getSectionData(section)];
+    const numValue = value.trim() === '' ? 0 : parseFloat(value);
+    const fixedRate = isNaN(numValue) ? 0 : numValue;
+    
+    data[index] = {
+      ...data[index],
+      fixedRate: fixedRate
+    };
+
+    // Also sync into rates object for backwards-compatibility
+    const itemCode = (data[index].itemCode || '').trim().toLowerCase();
+    const itemName = (data[index].itemName || '').toLowerCase();
+    
+    if (itemCode === '2' || itemName.includes('labour') || itemCode === '7' || itemName.includes('overhauling')) {
+      data[index].rates = { "5": fixedRate, "10": fixedRate, "16": fixedRate, "25": fixedRate, "50": fixedRate, "63": fixedRate, "100": fixedRate, "200": fixedRate, "315": fixedRate, "500": fixedRate };
+    } else if (itemCode === '6' || itemName.includes('sealing of uneconomical')) {
+      data[index].rates = { "5": fixedRate, "10": fixedRate, "16": fixedRate, "25": fixedRate, "50": fixedRate, "63": fixedRate, "100": fixedRate, "200": fixedRate, "315": fixedRate, "500": fixedRate };
+    } else if (itemCode === '3' || itemCode === '4') {
+      data[index].rates = { "5": fixedRate, "10": fixedRate, "16": fixedRate, "25": fixedRate, "50": fixedRate, "63": fixedRate, "100": fixedRate, "200": fixedRate, "315": fixedRate, "500": fixedRate };
+    } else if (itemCode === '1a' || itemName.includes('10 kva') || itemName.includes('10kva')) {
+      data[index].rates = { ...data[index].rates, "10": fixedRate };
+    } else if (itemCode === '1b' || itemName.includes('16 kva') || itemName.includes('16kva')) {
+      data[index].rates = { ...data[index].rates, "16": fixedRate };
+    } else if (itemCode === '1c' || itemName.includes('25 kva') || itemName.includes('25kva')) {
+      data[index].rates = { ...data[index].rates, "25": fixedRate };
+    } else if (itemCode === '1d-1' || itemCode === '1d-2' || itemCode === '1d' || itemName.includes('63 kva') || itemName.includes('63kva')) {
+      data[index].rates = { ...data[index].rates, "63": fixedRate };
+    } else if (itemCode === '1e' || itemName.includes('100 kva') || itemName.includes('100kva')) {
+      data[index].rates = { ...data[index].rates, "100": fixedRate };
+    } else if (itemCode === '1f' || itemName.includes('200 kva') || itemName.includes('200kva')) {
+      data[index].rates = { ...data[index].rates, "200": fixedRate };
+    }
+
+    setSectionData(section, data);
+  };
+
+  const handleAddItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
+    const data = [...getSectionData(section)];
+    const isFixedTable = section === 'AMORPHOUS' || section === 'WOUND_CORE' || section === 'OVERHAULING';
     data.push({
       itemCode: `${data.length + 1}`,
       itemName: '',
-      unit: 'QTY',
+      unit: section === 'CIRCLE_LIMITS' ? 'Rs.' : 'QTY',
+      fixedRate: isFixedTable ? 0 : undefined,
       rates: { ...defaultRates }
     });
     setSectionData(section, data);
     if (editingSection !== section) setEditingSection(section);
   };
 
-  const handleDeleteItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE', index: number) => {
+  // Reset Circle Limits to Official UGVCL Clause 4.0 Standard Schedule
+  const handleResetCircleLimitsToDefault = () => {
+    setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
+    setEditingSection('CIRCLE_LIMITS');
+    setOpenCircleLimits(true);
+    setSyncSuccessMsg('✓ Restored official UGVCL Clause 4.0 Circle Limit values! Click "Save as Default" to save.');
+    setTimeout(() => setSyncSuccessMsg(null), 6000);
+  };
+
+  const handleRestoreFromGlobalDefaults = () => {
+    if (globalDefaultEstimateMaster) {
+      if (globalDefaultEstimateMaster.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
+        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
+      } else {
+        setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
+      }
+      if (globalDefaultEstimateMaster.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
+        setAmorphousData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData));
+      } else {
+        setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
+      }
+      if (globalDefaultEstimateMaster.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0) {
+        setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, defaultWoundCoreEstimateData));
+      } else {
+        setWoundCoreData(JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)));
+      }
+      if (globalDefaultEstimateMaster.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
+        setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
+      } else {
+        setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
+      }
+      if (globalDefaultEstimateMaster.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
+        setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
+      } else {
+        setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
+      }
+      setSyncSuccessMsg('✓ Reloaded rates from Global Master! You can edit them as per your own preference or save.');
+      setTimeout(() => setSyncSuccessMsg(null), 5000);
+    } else {
+      setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
+      setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
+      setWoundCoreData(JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)));
+      setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
+      setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
+      setSyncSuccessMsg('✓ Reset to standard system defaults.');
+      setTimeout(() => setSyncSuccessMsg(null), 5000);
+    }
+  };
+
+  // Synchronize Wound Core to be exactly identical to Amorphous Estimate Master
+  const handleSyncWoundCoreWithAmorphous = () => {
+    const cloned = JSON.parse(JSON.stringify(amorphousData)).map((it: EstimateItem) => ({
+      ...it,
+      unit: (it.unit || '').toLowerCase().includes('each') ? 'QTY' : (it.unit || 'QTY')
+    }));
+    setWoundCoreData(cloned);
+    setEditingSection('WOUND_CORE');
+    setOpenWoundCore(true);
+    setSyncSuccessMsg('✓ Wound Core master updated to match your saved Amorphous items with unit "QTY"! Click "Save as Default" to save.');
+    setTimeout(() => setSyncSuccessMsg(null), 6000);
+  };
+
+  const handleDeleteItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number) => {
     const data = [...getSectionData(section)];
     data.splice(index, 1);
     setSectionData(section, data);
   };
 
   // Trigger Save Confirmation Prompt
-  const handleInitiateSave = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE') => {
+  const handleInitiateSave = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     setPendingSaveSection(section);
-    setSaveScope('ALL'); // Default to all agencies as requested
+    setSaveScope('SINGLE'); // Default to SINGLE agency so other users/agencies are not affected
+  };
+
+  // Direct 1-click Save for Active Agency Only (Safe & Isolated)
+  const handleSaveAllToCurrentAgency = async () => {
+    if (!activeAgency) return;
+    setIsSaving(true);
+    try {
+      const payload = {
+        estimateMasterCRGO: crgoData,
+        estimateMaster: crgoData,
+        estimateMasterAmorphous: amorphousData,
+        estimateMasterWoundCore: woundCoreData,
+        estimateMasterOverhauling: overhaulingData,
+        estimateMasterCircleLimits: circleLimitsData,
+      };
+      await updateAgency(activeAgency.id, payload);
+      setEditingSection(null);
+      setSyncSuccessMsg(`✓ Successfully saved all rates for "${activeAgency.name}". Other users and agencies are NOT affected.`);
+      setTimeout(() => setSyncSuccessMsg(null), 5000);
+    } catch (err) {
+      alert('Failed to save rates for active agency.');
+      console.error(err);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // Execute Save based on chosen scope
@@ -163,14 +540,20 @@ export default function EstimateMaster() {
         updatePayload.estimateMasterAmorphous = amorphousData;
       } else if (section === 'WOUND_CORE') {
         updatePayload.estimateMasterWoundCore = woundCoreData;
+      } else if (section === 'OVERHAULING') {
+        updatePayload.estimateMasterOverhauling = overhaulingData;
+      } else if (section === 'CIRCLE_LIMITS') {
+        updatePayload.estimateMasterCircleLimits = circleLimitsData;
       }
 
       if (saveScope === 'ALL') {
+        // Save as global system default in Firestore and across all agencies
         await updateAllAgenciesEstimateMaster(updatePayload);
-        setSyncSuccessMsg(`Successfully saved and applied ${section} rates across all ${agencies.length} agencies!`);
+        setSyncSuccessMsg(`✓ Successfully published ${section} rates as the GLOBAL DEFAULT for all users & agencies!`);
       } else {
+        // Save only for the current user's active agency document
         await updateAgency(activeAgency.id, updatePayload);
-        setSyncSuccessMsg(`Successfully saved ${section} rates for ${activeAgency.name}.`);
+        setSyncSuccessMsg(`✓ Saved ${section} rates specifically for "${activeAgency.name}". (Other users and agencies are NOT affected).`);
       }
 
       setEditingSection(null);
@@ -188,7 +571,7 @@ export default function EstimateMaster() {
     }
   };
 
-  // Execute full sync of all 3 sections across all agencies
+  // Execute full sync of all sections across all agencies and save as global default for all users
   const handleExecuteFullSync = async () => {
     setIsSaving(true);
     try {
@@ -197,26 +580,30 @@ export default function EstimateMaster() {
         estimateMaster: crgoData,
         estimateMasterAmorphous: amorphousData,
         estimateMasterWoundCore: woundCoreData,
+        estimateMasterOverhauling: overhaulingData,
+        estimateMasterCircleLimits: circleLimitsData,
       };
 
-      await updateAllAgenciesEstimateMaster(fullPayload);
+      await saveGlobalDefaultEstimateMaster(fullPayload);
       setShowFullSyncModal(false);
-      setSyncSuccessMsg(`Successfully synchronized all CRGO, Amorphous & Wound Core rates to all ${agencies.length} agencies!`);
+      setSyncSuccessMsg(`✓ Successfully saved all CRGO, Amorphous, Wound Core, Overhauling & Circle Limits rates as the SYSTEM DEFAULT for ALL users and agencies!`);
       setTimeout(() => {
         setSyncSuccessMsg(null);
-      }, 5000);
+      }, 6000);
     } catch (err) {
-      alert('Failed to sync master rates across agencies.');
+      alert('Failed to save default master rates for all users.');
       console.error(err);
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleCancelSection = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE') => {
+  const handleCancelSection = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     if (section === 'CRGO') {
       if (activeAgency.estimateMasterCRGO && activeAgency.estimateMasterCRGO.length > 0) {
         setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterCRGO))));
+      } else if (globalDefaultEstimateMaster?.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
+        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
       } else if (activeAgency.estimateMaster && activeAgency.estimateMaster.length > 0) {
         setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMaster))));
       } else {
@@ -224,24 +611,42 @@ export default function EstimateMaster() {
       }
     } else if (section === 'AMORPHOUS') {
       if (activeAgency.estimateMasterAmorphous && activeAgency.estimateMasterAmorphous.length > 0) {
-        setAmorphousData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterAmorphous))));
+        setAmorphousData(normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterAmorphous, defaultAmorphousEstimateData));
+      } else if (globalDefaultEstimateMaster?.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
+        setAmorphousData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData));
       } else {
         setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
       }
     } else if (section === 'WOUND_CORE') {
       if (activeAgency.estimateMasterWoundCore && activeAgency.estimateMasterWoundCore.length > 0) {
-        setWoundCoreData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterWoundCore))));
-      } else if (activeAgency.estimateMasterCRGO && activeAgency.estimateMasterCRGO.length > 0) {
-        setWoundCoreData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterCRGO))));
+        setWoundCoreData(normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterWoundCore, defaultWoundCoreEstimateData));
+      } else if (globalDefaultEstimateMaster?.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0) {
+        setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, defaultWoundCoreEstimateData));
       } else {
-        setWoundCoreData(JSON.parse(JSON.stringify(defaultEstimateData)));
+        setWoundCoreData(JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)));
+      }
+    } else if (section === 'OVERHAULING') {
+      if (activeAgency.estimateMasterOverhauling && activeAgency.estimateMasterOverhauling.length > 0) {
+        setOverhaulingData(normalizeOverhaulingData(activeAgency.estimateMasterOverhauling, defaultOverhaulingEstimateData));
+      } else if (globalDefaultEstimateMaster?.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
+        setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
+      } else {
+        setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
+      }
+    } else if (section === 'CIRCLE_LIMITS') {
+      if (activeAgency.estimateMasterCircleLimits && activeAgency.estimateMasterCircleLimits.length > 0) {
+        setCircleLimitsData(normalizeCircleLimitsData(activeAgency.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
+      } else if (globalDefaultEstimateMaster?.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
+        setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
+      } else {
+        setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
       }
     }
     setEditingSection(null);
   };
 
   const renderSectionTable = (
-    sectionKey: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE',
+    sectionKey: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS',
     sectionTitle: string,
     subtitle: string,
     isOpen: boolean,
@@ -263,10 +668,13 @@ export default function EstimateMaster() {
           <div className="flex items-center space-x-3">
             <span className={`w-3 h-3 rounded-full ${themeColor} shrink-0`}></span>
             <div>
-              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              <h2 className="text-base font-bold text-slate-900 flex items-center gap-2 flex-wrap">
                 {sectionTitle}
                 <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600 border border-slate-200">
                   {data.length} Items
+                </span>
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
+                  <Globe2 className="w-3 h-3" /> Default for all users
                 </span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
@@ -275,7 +683,58 @@ export default function EstimateMaster() {
 
           <div className="flex items-center space-x-2 self-end sm:self-center" onClick={e => e.stopPropagation()}>
             {isOpen && (
-              <div className="flex items-center space-x-2 mr-1">
+              <div className="flex items-center space-x-2 mr-1 flex-wrap gap-y-1.5">
+                {sectionKey === 'WOUND_CORE' && (
+                  <button 
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSyncWoundCoreWithAmorphous();
+                    }}
+                    className="flex items-center px-2.5 py-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg transition-colors shadow-2xs"
+                    title="Make Wound Core master identical to Amorphous Estimate Master"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 mr-1" />
+                    Make Same as Amorphous
+                  </button>
+                )}
+                {sectionKey === 'CIRCLE_LIMITS' && (
+                  <>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleResetCircleLimitsToDefault();
+                      }}
+                      className="flex items-center px-2.5 py-1.5 text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-lg transition-colors shadow-2xs"
+                      title="Restore official UGVCL Clause 4.0 standard limits schedule"
+                    >
+                      <Scale className="w-3.5 h-3.5 mr-1" />
+                      Restore Clause 4.0 Standard
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setCircleLimitsViewMode(prev => prev === 'standard' ? 'matrix' : 'standard');
+                      }}
+                      className="flex items-center px-2.5 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200 rounded-lg transition-colors shadow-2xs"
+                      title="Toggle between Standard Capacity Columns view and Matrix Capacity Rows view"
+                    >
+                      {circleLimitsViewMode === 'standard' ? (
+                        <>
+                          <FileText className="w-3.5 h-3.5 mr-1 text-slate-600" />
+                          Matrix View (KVA Rows)
+                        </>
+                      ) : (
+                        <>
+                          <LayoutGrid className="w-3.5 h-3.5 mr-1 text-slate-600" />
+                          Grid View (KVA Cols)
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
                 <button 
                   onClick={() => handleAddItem(sectionKey)}
                   className="flex items-center px-3 py-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg transition-colors shadow-2xs"
@@ -329,99 +788,174 @@ export default function EstimateMaster() {
         {/* Accordion Content Table */}
         {isOpen && (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-slate-600 min-w-max">
-              <thead className="bg-slate-50 text-[11px] uppercase text-slate-600 font-bold border-b border-slate-200">
-                <tr>
-                  <th className="px-3.5 py-3 whitespace-nowrap sticky left-0 bg-slate-50 z-10 border-r border-slate-200 w-16">Sr.</th>
-                  <th className="px-3.5 py-3 whitespace-nowrap sticky left-[64px] bg-slate-50 z-10 border-r border-slate-200 min-w-[260px]">Item Description</th>
-                  <th className="px-3 py-3 whitespace-nowrap border-r border-slate-200 w-20">Unit</th>
-                  {kvaColumns.map(kva => (
-                    <th key={kva} className="px-3 py-3 text-right bg-blue-50/50 text-blue-900 whitespace-nowrap font-mono">
-                      {kva} / 11 KVA
+            {sectionKey === 'CIRCLE_LIMITS' && circleLimitsViewMode === 'matrix' ? (
+              /* Transposed Matrix View (Capacity Rows x Level Columns) matching scanned circular */
+              <table className="w-full text-left text-sm text-slate-600 min-w-max">
+                <thead className="bg-rose-50/80 text-[11px] uppercase text-rose-950 font-bold border-b border-rose-200">
+                  <tr>
+                    <th className="px-3.5 py-3 whitespace-nowrap sticky left-0 bg-rose-50 z-10 border-r border-rose-200 w-24">
+                      Sr. No
                     </th>
+                    <th className="px-3.5 py-3 text-left sticky left-[96px] bg-rose-50 z-10 border-r border-rose-200 min-w-[140px] w-40">
+                      Capacity (KVA)
+                    </th>
+                    {data.map((item, idx) => (
+                      <th key={idx} className="px-3.5 py-3 text-right border-r border-rose-200 min-w-[170px] whitespace-normal">
+                        <div className="font-bold text-rose-900 leading-snug">{item.itemName}</div>
+                        <div className="text-[10px] text-rose-700 font-mono font-normal">Level Code: {item.itemCode}</div>
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {kvaColumns.map((kva, kvaIdx) => (
+                    <tr key={kva} className="hover:bg-rose-50/40 transition-colors">
+                      <td className="px-3.5 py-2.5 font-bold text-slate-700 whitespace-nowrap sticky left-0 bg-white border-r border-slate-100 text-center w-24 font-mono">
+                        {kvaIdx + 1}
+                      </td>
+                      <td className="px-3.5 py-2.5 font-bold text-slate-900 sticky left-[96px] bg-white border-r border-slate-100 min-w-[140px] w-40">
+                        <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono text-xs">
+                          {kva} / 11 KVA
+                        </span>
+                      </td>
+                      {data.map((item, itemIdx) => {
+                        const rateVal = item.rates?.[kva];
+                        return (
+                          <td key={itemIdx} className="px-3 py-2.5 text-right font-mono text-slate-700 border-r border-slate-100">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={rateVal ?? ''}
+                                onChange={(e) => handleRateChange('CIRCLE_LIMITS', itemIdx, kva, e.target.value)}
+                                className="w-24 px-2 py-1 text-right text-xs border border-rose-300 rounded focus:ring-1 focus:ring-rose-500 font-mono font-semibold"
+                                placeholder="-"
+                              />
+                            ) : (
+                              rateVal !== null && rateVal !== undefined && !isNaN(Number(rateVal)) && Number(rateVal) > 0 ? (
+                                <span className="font-bold text-slate-900 text-xs font-mono">
+                                  ₹ {Number(rateVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )
+                            )}
+                          </td>
+                        );
+                      })}
+                    </tr>
                   ))}
-                  {isEditing && <th className="px-2 py-3 text-center">Action</th>}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {data.map((item, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="px-3.5 py-2 font-medium text-slate-900 whitespace-nowrap sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-100">
-                      {isEditing ? (
-                        <input 
-                          type="text" 
-                          value={item.itemCode} 
-                          onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'itemCode', e.target.value)}
-                          className="w-14 px-1.5 py-1 text-xs border border-slate-300 rounded font-mono"
-                        />
-                      ) : (
-                        item.itemCode
-                      )}
-                    </td>
-                    <td className="px-3.5 py-2 whitespace-nowrap sticky left-[64px] bg-white group-hover:bg-slate-50 border-r border-slate-100">
-                      {isEditing ? (
-                        <input 
-                          type="text" 
-                          value={item.itemName} 
-                          onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'itemName', e.target.value)}
-                          className="w-full min-w-[280px] px-2 py-1 text-xs border border-slate-300 rounded font-medium text-slate-900"
-                        />
-                      ) : (
-                        <span className="font-medium text-slate-800">{item.itemName}</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 whitespace-nowrap border-r border-slate-100">
-                      {isEditing ? (
-                        <select 
-                          value={item.unit} 
-                          onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'unit', e.target.value)}
-                          className="px-1.5 py-1 text-xs border border-slate-300 rounded"
-                        >
-                          <option value="Y">Y</option>
-                          <option value="N">N</option>
-                          <option value="QTY">QTY</option>
-                          <option value="KG">KG</option>
-                        </select>
-                      ) : (
-                        <span className="text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-600 font-mono">{item.unit}</span>
-                      )}
-                    </td>
+                </tbody>
+              </table>
+            ) : (
+              /* Standard Table View (Top Row = Capacities, Left Column = Levels/Items) */
+              <table className="w-full text-left text-sm text-slate-600 min-w-max">
+                <thead className="bg-slate-50 text-[11px] uppercase text-slate-600 font-bold border-b border-slate-200">
+                  <tr>
+                    <th className="px-3.5 py-3 whitespace-nowrap sticky left-0 bg-slate-50 z-10 border-r border-slate-200 w-16">
+                      Sr.
+                    </th>
+                    <th className="px-3.5 py-3 text-left sticky left-[64px] bg-slate-50 z-10 border-r border-slate-200 min-w-[280px] max-w-md">
+                      {sectionKey === 'CIRCLE_LIMITS' ? 'Transformer Level / Rating' : 'Item Description'}
+                    </th>
+                    <th className="px-3.5 py-3 text-left border-r border-slate-200 min-w-[130px] w-36">
+                      Unit
+                    </th>
                     {kvaColumns.map(kva => (
-                      <td key={kva} className="px-3 py-2 text-right font-mono text-slate-700">
+                      <th key={kva} className="px-3 py-3 text-right bg-blue-50/50 text-blue-900 whitespace-nowrap font-mono">
+                        {kva} / 11 KVA
+                      </th>
+                    ))}
+                    {isEditing && <th className="px-2.5 py-3 text-center w-16">Action</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {data.map((item, idx) => (
+                    <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                      <td className="px-3.5 py-2.5 font-bold text-slate-900 whitespace-nowrap sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-100 align-top w-16">
                         {isEditing ? (
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={item.rates[kva] ?? ''}
-                            onChange={(e) => handleRateChange(sectionKey, idx, kva, e.target.value)}
-                            className="w-20 px-2 py-1 text-right text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 font-mono"
-                            placeholder="-"
+                          <input 
+                            type="text" 
+                            value={item.itemCode} 
+                            onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'itemCode', e.target.value)}
+                            className="w-14 px-1.5 py-1 text-xs border border-slate-300 rounded font-mono font-bold"
                           />
                         ) : (
-                          item.rates[kva] !== null && item.rates[kva] !== undefined ? (
-                            <span className="font-semibold text-slate-800">{item.rates[kva]!.toFixed(2)}</span>
-                          ) : (
-                            <span className="text-slate-300">-</span>
-                          )
+                          <span className="font-mono font-bold">{item.itemCode}</span>
                         )}
                       </td>
-                    ))}
-                    {isEditing && (
-                      <td className="px-2 py-2 text-center">
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteItem(sectionKey, idx)}
-                          className="p-1 text-red-500 hover:bg-red-50 rounded"
-                          title="Delete item row"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                      <td className="px-3.5 py-2.5 sticky left-[64px] bg-white group-hover:bg-slate-50 border-r border-slate-100 min-w-[280px] max-w-md whitespace-normal break-words align-top">
+                        {isEditing ? (
+                          <textarea 
+                            rows={item.itemName.length > 80 ? 4 : item.itemName.length > 30 ? 2 : 1}
+                            value={item.itemName} 
+                            onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'itemName', e.target.value)}
+                            className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded font-medium text-slate-900 leading-relaxed focus:ring-1 focus:ring-blue-500"
+                            placeholder="Enter description"
+                          />
+                        ) : (
+                          <div className="font-medium text-slate-800 text-xs sm:text-sm leading-relaxed whitespace-pre-line break-words">
+                            {item.itemName}
+                          </div>
+                        )}
                       </td>
-                    )}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                      <td className="px-3.5 py-2.5 border-r border-slate-100 min-w-[130px] w-36 whitespace-normal break-words align-top">
+                        {isEditing ? (
+                          <input 
+                            type="text" 
+                            value={item.unit} 
+                            onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'unit', e.target.value)}
+                            className="w-full px-2 py-1 text-xs border border-slate-300 rounded text-slate-700 font-medium focus:ring-1 focus:ring-blue-500"
+                            placeholder="e.g. Rs., QTY"
+                          />
+                        ) : (
+                          <span className="text-xs font-medium text-slate-700 bg-slate-100 px-2 py-1 rounded-md inline-block whitespace-normal break-words leading-snug">
+                            {item.unit}
+                          </span>
+                        )}
+                      </td>
+                      {kvaColumns.map(kva => {
+                        const rateVal = item.rates?.[kva];
+                        return (
+                          <td key={kva} className="px-2.5 py-2.5 text-right font-mono text-slate-700 align-top">
+                            {isEditing ? (
+                              <input
+                                type="number"
+                                step="0.01"
+                                value={rateVal ?? ''}
+                                onChange={(e) => handleRateChange(sectionKey, idx, kva, e.target.value)}
+                                className="w-20 px-1.5 py-1 text-right text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 font-mono font-medium"
+                                placeholder="-"
+                              />
+                            ) : (
+                              rateVal !== null && rateVal !== undefined && !isNaN(Number(rateVal)) && Number(rateVal) > 0 ? (
+                                <span className="font-semibold text-slate-800 text-xs font-mono">
+                                  {Number(rateVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )
+                            )}
+                          </td>
+                        );
+                      })}
+                      {isEditing && (
+                        <td className="px-2 py-2.5 text-center align-top w-16">
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteItem(sectionKey, idx)}
+                            className="p-1 text-red-500 hover:bg-red-50 rounded"
+                            title="Delete item row"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         )}
       </div>
@@ -432,10 +966,10 @@ export default function EstimateMaster() {
     <div className="space-y-6 pb-12">
       {/* Top Banner / Success Notification */}
       {syncSuccessMsg && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 p-4 rounded-xl flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 rounded-xl flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-            <span className="text-sm font-semibold">{syncSuccessMsg}</span>
+            <span className="text-sm font-bold">{syncSuccessMsg}</span>
           </div>
           <button 
             onClick={() => setSyncSuccessMsg(null)}
@@ -457,24 +991,43 @@ export default function EstimateMaster() {
             <span className="px-2.5 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
               Active: {activeAgency.name}
             </span>
-            <span className="px-2.5 py-0.5 text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200 rounded-full flex items-center gap-1">
-              <Building2 className="w-3.5 h-3.5 text-slate-500" />
-              {agencies.length} {agencies.length === 1 ? 'Agency' : 'Agencies'} Configured
+            <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+              Global Defaults Active for All Users
             </span>
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-            Standard tender repair and material rate master for CRGO, Amorphous, and Wound Core transformers. Rates can be unified across all agencies automatically.
+            Standard tender repair and material rate master for CRGO, Amorphous, Wound Core, and Overhauling (OH) transformers. All rates entered here are saved by default for all users and agencies.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
           <button 
-            onClick={() => setShowFullSyncModal(true)}
-            className="flex items-center px-3.5 py-2 text-xs font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-lg border border-indigo-200 transition-colors shadow-2xs"
-            title="Synchronize all CRGO, Amorphous & Wound Core rates across all agencies"
+            type="button"
+            onClick={handleRestoreFromGlobalDefaults}
+            className="flex items-center px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-300 transition-colors shadow-2xs"
+            title="Reload rates from the central Global Master into the editor"
           >
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-indigo-600" /> 
-            Sync Rates to All Agencies
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+            Reload Global Rates
+          </button>
+          <button 
+            type="button"
+            onClick={handleSaveAllToCurrentAgency}
+            disabled={isSaving}
+            className="flex items-center px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
+            title={`Save all rates specifically for ${activeAgency.name} without affecting other users`}
+          >
+            <Save className="w-3.5 h-3.5 mr-1.5" /> 
+            Save All for {activeAgency.name}
+          </button>
+          <button 
+            onClick={() => setShowFullSyncModal(true)}
+            className="flex items-center px-3.5 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 shadow-2xs transition-colors"
+            title="Publish all entered rates as system default for all users & agencies"
+          >
+            <Globe2 className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> 
+            Publish as Default for All Users
           </button>
           <div className="flex items-center space-x-1.5 border-l border-slate-200 pl-2">
             <button 
@@ -518,11 +1071,32 @@ export default function EstimateMaster() {
         {renderSectionTable(
           'WOUND_CORE',
           'Wound Core Estimate Master',
-          'Standard repair and material rates for Wound Core transformers',
+          'Standard repair and material rates for Wound Core transformers (same rate schedule as Amorphous)',
           openWoundCore,
           setOpenWoundCore,
           woundCoreData,
           'bg-indigo-600'
+        )}
+
+        {renderSectionTable(
+          'OVERHAULING',
+          'Overhauling (OH) Estimate Master',
+          'Official tender rate schedule for complete overhauling, servicing & testing of transformers',
+          openOverhauling,
+          setOpenOverhauling,
+          overhaulingData,
+          'bg-teal-600'
+        )}
+
+        {/* Circle Approval Limits Master (Clause 4.0) */}
+        {renderSectionTable(
+          'CIRCLE_LIMITS',
+          'Circle Authority Estimate Approval Power Limits (Clause 4.0 - 25% Limit)',
+          'Capacity and Rating/Star level wise financial limit of SE (O&M) Circle. The system automatically raises an alert if an estimate exceeds these values.',
+          openCircleLimits,
+          setOpenCircleLimits,
+          circleLimitsData,
+          'bg-rose-600'
         )}
       </div>
 
@@ -554,12 +1128,41 @@ export default function EstimateMaster() {
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3 rounded-lg border border-slate-200">
-              Estimate Master rates are typically unified across DISCOM tenders. Would you like to update this rate master across <strong>all registered agencies</strong> or only for the active agency?
+              Choose how you want to save your entered price rates for <strong className="text-slate-800">{activeAgency.name}</strong>.
             </p>
 
             {/* Scope Selection Cards */}
             <div className="space-y-2.5">
-              {/* Option 1: ALL Agencies (Recommended) */}
+              {/* Option 1: Single Agency (Default & Isolated) */}
+              <div 
+                onClick={() => setSaveScope('SINGLE')}
+                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                  saveScope === 'SINGLE' 
+                    ? 'border-emerald-600 bg-emerald-50/50 shadow-xs' 
+                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  <input 
+                    type="radio" 
+                    name="saveScope" 
+                    checked={saveScope === 'SINGLE'} 
+                    onChange={() => setSaveScope('SINGLE')}
+                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 mt-0.5"
+                  />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-slate-900">Save for Current Agency Only ({activeAgency.name})</span>
+                      <span className="text-[10px] uppercase font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">Recommended</span>
+                    </div>
+                    <p className="text-xs text-slate-600 mt-1">
+                      Saves your custom {pendingSaveSection} rates <strong>exclusively for this agency</strong>. Other users and other agencies will <strong>NOT</strong> be affected and will keep their own rates.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Option 2: ALL Users & Agencies */}
               <div 
                 onClick={() => setSaveScope('ALL')}
                 className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
@@ -579,11 +1182,11 @@ export default function EstimateMaster() {
                     />
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-slate-900">Apply to ALL Agencies ({agencies.length})</span>
-                        <span className="text-[10px] uppercase font-bold bg-blue-600 text-white px-2 py-0.5 rounded-full">Recommended</span>
+                        <span className="text-sm font-bold text-slate-900">Publish as Global Default for ALL Users</span>
+                        <span className="text-[10px] uppercase font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">System Wide</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-1">
-                        Saves and synchronizes these {pendingSaveSection} rates across all {agencies.length} agencies so all estimates use uniform rates.
+                        Updates the central cloud master so that all other users and new agencies will adopt these {pendingSaveSection} rates as their default.
                       </p>
                     </div>
                   </div>
@@ -603,32 +1206,6 @@ export default function EstimateMaster() {
                       {ag.name} {ag.id === activeAgency.id ? '(Active)' : ''}
                     </span>
                   ))}
-                </div>
-              </div>
-
-              {/* Option 2: Single Agency */}
-              <div 
-                onClick={() => setSaveScope('SINGLE')}
-                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                  saveScope === 'SINGLE' 
-                    ? 'border-blue-600 bg-blue-50/50 shadow-xs' 
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
-                <div className="flex items-start gap-2.5">
-                  <input 
-                    type="radio" 
-                    name="saveScope" 
-                    checked={saveScope === 'SINGLE'} 
-                    onChange={() => setSaveScope('SINGLE')}
-                    className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300"
-                  />
-                  <div>
-                    <span className="text-sm font-bold text-slate-900">Apply to Current Agency Only</span>
-                    <p className="text-xs text-slate-500 mt-1">
-                      Only updates {pendingSaveSection} rates for <strong className="text-slate-700">{activeAgency.name}</strong>. Other agencies will retain their previous rates.
-                    </p>
-                  </div>
                 </div>
               </div>
             </div>
@@ -657,7 +1234,7 @@ export default function EstimateMaster() {
                 ) : (
                   <>
                     <Check className="w-4 h-4 mr-1.5" />
-                    {saveScope === 'ALL' ? `Save & Apply to All (${agencies.length}) Agencies` : `Save for ${activeAgency.name}`}
+                    {saveScope === 'ALL' ? `Save as Default for All Users` : `Save for ${activeAgency.name}`}
                   </>
                 )}
               </button>
@@ -672,15 +1249,15 @@ export default function EstimateMaster() {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-indigo-50 text-indigo-600 rounded-xl border border-indigo-100">
-                  <RefreshCw className="w-6 h-6" />
+                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+                  <Globe2 className="w-6 h-6" />
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">
-                    Sync Entire Estimate Master
+                    Save Default Price Rates
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Synchronize all 3 rate categories across all agencies
+                    Set current entered rates as default for all users and all agencies
                   </p>
                 </div>
               </div>
@@ -694,30 +1271,38 @@ export default function EstimateMaster() {
             </div>
 
             <div className="space-y-3 text-xs text-slate-600">
-              <p className="bg-indigo-50/60 p-3 rounded-lg border border-indigo-100 text-indigo-900 font-medium">
-                This will copy the current rates from <span className="font-bold text-indigo-950">{activeAgency.name}</span> to all other <strong>{agencies.length - 1}</strong> registered agencies.
+              <p className="bg-blue-50/70 p-3 rounded-lg border border-blue-100 text-blue-950 font-medium">
+                This will save all rates (CRGO, Amorphous, Wound Core, Overhauling & Circle Limits) from <span className="font-bold text-blue-900">{activeAgency.name}</span> into the global database so that <strong>every user and every agency</strong> uses these rates by default.
               </p>
 
               <div className="border border-slate-200 rounded-xl p-3.5 space-y-2 bg-slate-50/50">
-                <div className="font-bold text-slate-800 text-xs mb-1">Rate Master Summary to be Synced:</div>
-                <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="font-bold text-slate-800 text-xs mb-1">Rate Master Summary to be Saved as Default:</div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
                   <div className="bg-white p-2 rounded-lg border border-slate-200">
                     <span className="block text-xs font-bold text-blue-700">{crgoData.length}</span>
                     <span className="text-[10px] text-slate-500">CRGO Items</span>
                   </div>
                   <div className="bg-white p-2 rounded-lg border border-slate-200">
                     <span className="block text-xs font-bold text-amber-700">{amorphousData.length}</span>
-                    <span className="text-[10px] text-slate-500">Amorphous Items</span>
+                    <span className="text-[10px] text-slate-500">Amorphous</span>
                   </div>
                   <div className="bg-white p-2 rounded-lg border border-slate-200">
                     <span className="block text-xs font-bold text-indigo-700">{woundCoreData.length}</span>
-                    <span className="text-[10px] text-slate-500">Wound Core Items</span>
+                    <span className="text-[10px] text-slate-500">Wound Core</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200">
+                    <span className="block text-xs font-bold text-teal-700">{overhaulingData.length}</span>
+                    <span className="text-[10px] text-slate-500">Overhauling</span>
+                  </div>
+                  <div className="bg-white p-2 rounded-lg border border-slate-200 col-span-2 sm:col-span-1">
+                    <span className="block text-xs font-bold text-rose-700">{circleLimitsData.length}</span>
+                    <span className="text-[10px] text-slate-500">Circle Limits</span>
                   </div>
                 </div>
               </div>
 
               <div>
-                <span className="font-semibold text-slate-700">Target Agencies to Receive Rates:</span>
+                <span className="font-semibold text-slate-700">Agencies receiving default rates:</span>
                 <div className="mt-2 flex flex-wrap gap-1.5">
                   {agencies.map(ag => (
                     <span 
@@ -728,7 +1313,7 @@ export default function EstimateMaster() {
                           : 'bg-white text-slate-800 border-slate-300 font-medium'
                       }`}
                     >
-                      {ag.name} {ag.id === activeAgency.id ? '(Source)' : '✓'}
+                      {ag.name} {ag.id === activeAgency.id ? '(Active)' : '✓'}
                     </span>
                   ))}
                 </div>
@@ -749,17 +1334,17 @@ export default function EstimateMaster() {
                 type="button"
                 onClick={handleExecuteFullSync}
                 disabled={isSaving}
-                className="flex items-center px-5 py-2.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm transition-colors disabled:opacity-50"
+                className="flex items-center px-5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors disabled:opacity-50"
               >
                 {isSaving ? (
                   <>
                     <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                    Synchronizing...
+                    Saving Defaults...
                   </>
                 ) : (
                   <>
-                    <RefreshCw className="w-4 h-4 mr-1.5" />
-                    Sync All Rates to All Agencies
+                    <Globe2 className="w-4 h-4 mr-1.5" />
+                    Save as Default for All Users
                   </>
                 )}
               </button>
@@ -770,3 +1355,4 @@ export default function EstimateMaster() {
     </div>
   );
 }
+

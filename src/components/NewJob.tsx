@@ -29,12 +29,14 @@ import {
   AlertCircle,
   ArrowRight,
   Info,
-  Tag
+  Tag,
+  Scale
 } from 'lucide-react';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
+import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 
 interface TransformerEntry {
   jobNo: string;
@@ -42,6 +44,8 @@ interface TransformerEntry {
   make: string;
   serialNo: string;
   coreType: string;
+  starRating?: string;
+  ratingLevel?: string;
   autoFilledFrom?: string;
   prevAtNo?: string;
   prevJobNo?: string;
@@ -203,6 +207,8 @@ export default function NewJob() {
       make: '', 
       serialNo: '', 
       coreType: 'CRGO',
+      starRating: '3 Star & other',
+      ratingLevel: '3 Star & other',
       prevAtNo: '',
       prevJobNo: '',
       prevDeliveryDate: '',
@@ -335,6 +341,8 @@ export default function NewJob() {
         make: pastJob.make || targetRow.make,
         serialNo: pastJob.serialNo || targetRow.serialNo,
         coreType: targetCoreType,
+        starRating: pastJob.starRating || pastJob.ratingLevel || targetRow.starRating || '3 Star & other',
+        ratingLevel: pastJob.starRating || pastJob.ratingLevel || targetRow.ratingLevel || '3 Star & other',
         autoFilledFrom: pastJob.jobNo || pastJob.serialNo,
         prevJobNo: pastJob.jobNo || '',
         prevAtNo: matchedAtNo,
@@ -476,6 +484,7 @@ export default function NewJob() {
     let nextJobNo = '';
     const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
     const lastKva = transformers.length > 0 ? transformers[transformers.length - 1].capacityKva : '63';
+    const lastStar = transformers.length > 0 ? (transformers[transformers.length - 1].starRating || '3 Star & other') : '3 Star & other';
     
     // Only generate new sequence Job No for fresh OGP repairs. GP reuses original Job No from 1st repair.
     if (commonData.repairType === 'OGP' && activeAgency) {
@@ -502,6 +511,8 @@ export default function NewJob() {
         make: '', 
         serialNo: '', 
         coreType: lastCoreType,
+        starRating: lastStar,
+        ratingLevel: lastStar,
         prevAtNo: '',
         prevJobNo: '',
         prevDeliveryDate: '',
@@ -899,6 +910,8 @@ export default function NewJob() {
               make: t.make.trim().toUpperCase(),
               serialNo: t.serialNo.trim().toUpperCase(),
               coreType: t.coreType,
+              starRating: t.starRating || t.ratingLevel || '3 Star & other',
+              ratingLevel: t.starRating || t.ratingLevel || '3 Star & other',
               status: 'Received',
               isClosed: false,
               atId: activeAtMaster ? activeAtMaster.id : '',

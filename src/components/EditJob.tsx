@@ -2,9 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { ArrowLeft, Loader2 } from 'lucide-react';
-
-import { useAgency } from '../lib/AgencyContext';
+import { ArrowLeft, Loader2, Scale } from 'lucide-react';
+import { getCircleLimitsEstimateMaster, useAgency } from '../lib/AgencyContext';
+import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { auth } from '../lib/firebase';
 
 export default function EditJob() {
@@ -17,7 +17,8 @@ export default function EditJob() {
     make: '',
     capacityKva: '',
     coreType: 'CRGO',
-    serialNo: ''
+    serialNo: '',
+    starRating: '3 Star & other'
   });
   const [jobNo, setJobNo] = useState('');
   const [isDispatched, setIsDispatched] = useState(false);
@@ -45,7 +46,8 @@ export default function EditJob() {
             make: data.make || '',
             capacityKva: data.capacityKva ? String(data.capacityKva) : '',
             coreType: data.coreType || 'CRGO',
-            serialNo: data.serialNo || ''
+            serialNo: data.serialNo || '',
+            starRating: data.starRating || data.ratingLevel || '3 Star & other'
           });
         }
       } catch (err) {
@@ -56,6 +58,9 @@ export default function EditJob() {
     }
     fetchJob();
   }, [jobId]);
+
+  const circleMaster = getCircleLimitsEstimateMaster(activeAgency);
+  const circleLimitInfo = getCircleLimitForJob(formData.capacityKva, formData.starRating, circleMaster);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,6 +76,8 @@ export default function EditJob() {
         capacityKva: Number(formData.capacityKva),
         coreType: formData.coreType,
         serialNo: formData.serialNo,
+        starRating: formData.starRating,
+        ratingLevel: formData.starRating,
         updatedAt: Date.now()
       });
       navigate('/');
@@ -163,6 +170,35 @@ export default function EditJob() {
                 <option value="LSTC">LSTC</option>
                 <option value="OH">OH (Overhauling)</option>
               </select>
+            </div>
+
+            <div className="md:col-span-2">
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">
+                Transformer Rating / Star Level (Clause 4.0 Circle Limit)
+              </label>
+              <select
+                disabled={isDispatched}
+                name="starRating"
+                value={formData.starRating}
+                onChange={handleChange}
+                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {RATING_LEVEL_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              
+              <div className="mt-2 p-2.5 bg-rose-50 border border-rose-200 rounded-lg flex items-center justify-between text-xs text-rose-900">
+                <div className="flex items-center gap-1.5 font-medium">
+                  <Scale className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>Clause 4.0 Circle Estimate Power Limit:</span>
+                </div>
+                <span className="font-mono font-bold text-rose-800 text-sm">
+                  {circleLimitInfo.hasLimit 
+                    ? `₹ ${circleLimitInfo.limit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` 
+                    : 'N/A / No Cap Specified'}
+                </span>
+              </div>
             </div>
           </div>
           

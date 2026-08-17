@@ -64,6 +64,8 @@
         "estimateMasterCRGO": { "type": "array" },
         "estimateMasterAmorphous": { "type": "array" },
         "estimateMasterWoundCore": { "type": "array" },
+        "estimateMasterOverhauling": { "type": "array" },
+        "estimateMasterCircleLimits": { "type": "array" },
         "ownerId": { "type": "string", "maxLength": 128, "minLength": 1 }
       },
       "required": ["name", "ownerId"]
@@ -144,10 +146,15 @@
     },
     "SystemConfig": {
       "title": "System Configuration",
-      "description": "Global workshop settings and payment gateway configuration.",
+      "description": "Global workshop settings, default estimate price rates, and configuration.",
       "type": "object",
       "properties": {
-        "updatedAt": { "type": "number" }
+        "estimateMaster": { "type": "array" },
+        "estimateMasterCRGO": { "type": "array" },
+        "estimateMasterAmorphous": { "type": "array" },
+        "estimateMasterWoundCore": { "type": "array" },
+        "updatedAt": { "type": "number" },
+        "updatedBy": { "type": "string", "maxLength": 150 }
       }
     }
   },

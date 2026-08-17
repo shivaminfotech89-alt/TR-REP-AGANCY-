@@ -1,7 +1,35 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, query, where, getDocs, doc, setDoc, updateDoc, runTransaction } from 'firebase/firestore';
-import { defaultEstimateData, defaultAmorphousEstimateData, EstimateItem } from './estimateData';
+import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, runTransaction } from 'firebase/firestore';
+import { 
+  defaultEstimateData, 
+  defaultAmorphousEstimateData, 
+  defaultWoundCoreEstimateData, 
+  defaultOverhaulingEstimateData, 
+  defaultCircleLimitsEstimateData,
+  EstimateItem 
+} from './estimateData';
+
+export interface GlobalDefaultEstimateMaster {
+  estimateMasterCRGO?: EstimateItem[];
+  estimateMasterAmorphous?: EstimateItem[];
+  estimateMasterWoundCore?: EstimateItem[];
+  estimateMasterOverhauling?: EstimateItem[];
+  estimateMasterCircleLimits?: EstimateItem[];
+  estimateMaster?: EstimateItem[];
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
+let cachedGlobalDefaultEstimateMaster: GlobalDefaultEstimateMaster | null = null;
+try {
+  const localCached = localStorage.getItem('cached_global_estimate_master');
+  if (localCached) {
+    cachedGlobalDefaultEstimateMaster = JSON.parse(localCached);
+  }
+} catch (e) {
+  // ignore storage error
+}
 
 export interface Agency {
   id: string;
@@ -56,6 +84,8 @@ export interface Agency {
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
   estimateMasterWoundCore?: EstimateItem[];
+  estimateMasterOverhauling?: EstimateItem[];
+  estimateMasterCircleLimits?: EstimateItem[];
 }
 
 export function getEstimateCircleRecipient(agency?: Agency | null, circleOrDivision?: string): string {
@@ -145,38 +175,88 @@ export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType
   return at.atPercentage !== undefined && !isNaN(Number(at.atPercentage)) ? Number(at.atPercentage) : 4;
 }
 
-export function getEstimateMasterForCore(agency: Agency | null | undefined, coreType: string = 'CRGO'): EstimateItem[] {
-  if (!agency) return defaultEstimateData;
+export function getEstimateMasterForCore(
+  agency: Agency | null | undefined, 
+  coreType: string = 'CRGO',
+  fallbackDefaults?: GlobalDefaultEstimateMaster | null
+): EstimateItem[] {
+  const globalDef = fallbackDefaults || cachedGlobalDefaultEstimateMaster;
   const type = (coreType || 'CRGO').trim().toUpperCase();
 
+  const normalizeUnits = (list: EstimateItem[]) => list.map(item => ({
+    ...item,
+    unit: (item.unit || '').toLowerCase().includes('each') || (item.unit || '').toLowerCase().includes('transformer') ? 'QTY' : (item.unit || 'QTY')
+  }));
+
+  if (type === 'OH' || type.includes('OVERHAUL')) {
+    if (agency?.estimateMasterOverhauling && agency.estimateMasterOverhauling.length > 0) {
+      return normalizeUnits(agency.estimateMasterOverhauling);
+    }
+    if (globalDef?.estimateMasterOverhauling && globalDef.estimateMasterOverhauling.length > 0) {
+      return normalizeUnits(globalDef.estimateMasterOverhauling);
+    }
+    return defaultOverhaulingEstimateData;
+  }
+
   if (type.includes('AMORPHOUS') || type.includes('AM')) {
-    if (agency.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0) {
-      return agency.estimateMasterAmorphous;
+    if (agency?.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0) {
+      return normalizeUnits(agency.estimateMasterAmorphous);
+    }
+    if (globalDef?.estimateMasterAmorphous && globalDef.estimateMasterAmorphous.length > 0) {
+      return normalizeUnits(globalDef.estimateMasterAmorphous);
     }
     return defaultAmorphousEstimateData;
   }
 
   if (type.includes('WOUND') || type.includes('WC')) {
-    if (agency.estimateMasterWoundCore && agency.estimateMasterWoundCore.length > 0) {
-      return agency.estimateMasterWoundCore;
+    const isLegacy = (arr?: EstimateItem[]) => arr && arr.some(it => {
+      const name = (it.itemName || '').toLowerCase();
+      return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
+    });
+
+    if (agency?.estimateMasterWoundCore && agency.estimateMasterWoundCore.length > 0 && !isLegacy(agency.estimateMasterWoundCore)) {
+      return normalizeUnits(agency.estimateMasterWoundCore);
     }
-    if (agency.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
-      return agency.estimateMasterCRGO;
+    if (globalDef?.estimateMasterWoundCore && globalDef.estimateMasterWoundCore.length > 0 && !isLegacy(globalDef.estimateMasterWoundCore)) {
+      return normalizeUnits(globalDef.estimateMasterWoundCore);
     }
-    if (agency.estimateMaster && agency.estimateMaster.length > 0) {
-      return agency.estimateMaster;
+    if (agency?.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0 && !isLegacy(agency.estimateMasterAmorphous)) {
+      return normalizeUnits(agency.estimateMasterAmorphous);
     }
-    return defaultEstimateData;
+    if (globalDef?.estimateMasterAmorphous && globalDef.estimateMasterAmorphous.length > 0 && !isLegacy(globalDef.estimateMasterAmorphous)) {
+      return normalizeUnits(globalDef.estimateMasterAmorphous);
+    }
+    return defaultWoundCoreEstimateData;
   }
 
   // CRGO
-  if (agency.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
+  if (agency?.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
     return agency.estimateMasterCRGO;
   }
-  if (agency.estimateMaster && agency.estimateMaster.length > 0) {
+  if (globalDef?.estimateMasterCRGO && globalDef.estimateMasterCRGO.length > 0) {
+    return globalDef.estimateMasterCRGO;
+  }
+  if (agency?.estimateMaster && agency.estimateMaster.length > 0) {
     return agency.estimateMaster;
   }
+  if (globalDef?.estimateMaster && globalDef.estimateMaster.length > 0) {
+    return globalDef.estimateMaster;
+  }
   return defaultEstimateData;
+}
+
+export function getCircleLimitsEstimateMaster(
+  agency: Agency | null | undefined,
+  fallbackDefaults?: GlobalDefaultEstimateMaster | null
+): EstimateItem[] {
+  const globalDef = fallbackDefaults || cachedGlobalDefaultEstimateMaster;
+  if (agency?.estimateMasterCircleLimits && agency.estimateMasterCircleLimits.length > 0) {
+    return agency.estimateMasterCircleLimits;
+  }
+  if (globalDef?.estimateMasterCircleLimits && globalDef.estimateMasterCircleLimits.length > 0) {
+    return globalDef.estimateMasterCircleLimits;
+  }
+  return defaultCircleLimitsEstimateData;
 }
 
 interface AgencyContextType {
@@ -184,12 +264,23 @@ interface AgencyContextType {
   activeAgency: Agency | null;
   setActiveAgencyId: (id: string) => void;
   loading: boolean;
+  globalDefaultEstimateMaster: GlobalDefaultEstimateMaster | null;
   addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<void>;
   updateAgency: (id: string, agencyData: Partial<Agency>) => Promise<void>;
   updateAllAgenciesEstimateMaster: (payload: {
     estimateMasterCRGO?: EstimateItem[];
     estimateMasterAmorphous?: EstimateItem[];
     estimateMasterWoundCore?: EstimateItem[];
+    estimateMasterOverhauling?: EstimateItem[];
+    estimateMasterCircleLimits?: EstimateItem[];
+    estimateMaster?: EstimateItem[];
+  }) => Promise<void>;
+  saveGlobalDefaultEstimateMaster: (payload: {
+    estimateMasterCRGO?: EstimateItem[];
+    estimateMasterAmorphous?: EstimateItem[];
+    estimateMasterWoundCore?: EstimateItem[];
+    estimateMasterOverhauling?: EstimateItem[];
+    estimateMasterCircleLimits?: EstimateItem[];
     estimateMaster?: EstimateItem[];
   }) => Promise<void>;
   
@@ -213,6 +304,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [atMasters, setAtMasters] = useState<AtMaster[]>([]);
   const [activeAtMasterId, setActiveAtMasterIdState] = useState<string | null>(localStorage.getItem('activeAtMasterId') || null);
   
+  const [globalDefaultEstimateMaster, setGlobalDefaultEstimateMaster] = useState<GlobalDefaultEstimateMaster | null>(cachedGlobalDefaultEstimateMaster);
   const [loading, setLoading] = useState(true);
 
   const setActiveAgencyId = (id: string | null) => {
@@ -231,6 +323,13 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     const handleStorage = (e: StorageEvent) => {
       if (e.key === 'activeAgencyId') setActiveAgencyIdState(e.newValue);
       if (e.key === 'activeAtMasterId') setActiveAtMasterIdState(e.newValue);
+      if (e.key === 'cached_global_estimate_master' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          setGlobalDefaultEstimateMaster(parsed);
+          cachedGlobalDefaultEstimateMaster = parsed;
+        } catch (_) {}
+      }
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
@@ -240,15 +339,56 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     async function fetchData() {
       if (!auth.currentUser) return;
       try {
+        // 1. Fetch Global System Default Estimate Rates from Firestore
+        let fetchedGlobalMaster: GlobalDefaultEstimateMaster | null = null;
+        try {
+          const globalConfigRef = doc(db, 'system_config', 'estimate_master');
+          const globalConfigSnap = await getDoc(globalConfigRef);
+          if (globalConfigSnap.exists()) {
+            fetchedGlobalMaster = globalConfigSnap.data() as GlobalDefaultEstimateMaster;
+            setGlobalDefaultEstimateMaster(fetchedGlobalMaster);
+            cachedGlobalDefaultEstimateMaster = fetchedGlobalMaster;
+            localStorage.setItem('cached_global_estimate_master', JSON.stringify(fetchedGlobalMaster));
+          }
+        } catch (e) {
+          console.warn('Could not fetch global system_config/estimate_master:', e);
+        }
+
+        // 2. Fetch Agencies
         const agQ = query(collection(db, 'agencies'), where('ownerId', '==', auth.currentUser.uid));
         const agSnapshot = await getDocs(agQ);
         const fetchedAgencies = agSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Agency));
-        setAgencies(fetchedAgencies);
         
-        if (fetchedAgencies.length > 0 && !fetchedAgencies.find(a => a.id === activeAgencyId)) {
-          setActiveAgencyId(fetchedAgencies[0].id);
+        // If agencies don't have rates or have empty rates, populate with global defaults
+        const enrichedAgencies = fetchedAgencies.map(ag => ({
+          ...ag,
+          estimateMasterCRGO: (ag.estimateMasterCRGO && ag.estimateMasterCRGO.length > 0) 
+            ? ag.estimateMasterCRGO 
+            : (fetchedGlobalMaster?.estimateMasterCRGO || defaultEstimateData),
+          estimateMaster: (ag.estimateMaster && ag.estimateMaster.length > 0) 
+            ? ag.estimateMaster 
+            : (fetchedGlobalMaster?.estimateMasterCRGO || defaultEstimateData),
+          estimateMasterAmorphous: (ag.estimateMasterAmorphous && ag.estimateMasterAmorphous.length > 0) 
+            ? ag.estimateMasterAmorphous 
+            : (fetchedGlobalMaster?.estimateMasterAmorphous || defaultAmorphousEstimateData),
+          estimateMasterWoundCore: (ag.estimateMasterWoundCore && ag.estimateMasterWoundCore.length > 0) 
+            ? ag.estimateMasterWoundCore 
+            : (fetchedGlobalMaster?.estimateMasterWoundCore || defaultWoundCoreEstimateData),
+          estimateMasterOverhauling: (ag.estimateMasterOverhauling && ag.estimateMasterOverhauling.length > 0) 
+            ? ag.estimateMasterOverhauling 
+            : (fetchedGlobalMaster?.estimateMasterOverhauling || defaultOverhaulingEstimateData),
+          estimateMasterCircleLimits: (ag.estimateMasterCircleLimits && ag.estimateMasterCircleLimits.length > 0) 
+            ? ag.estimateMasterCircleLimits 
+            : (fetchedGlobalMaster?.estimateMasterCircleLimits || defaultCircleLimitsEstimateData),
+        }));
+
+        setAgencies(enrichedAgencies);
+        
+        if (enrichedAgencies.length > 0 && !enrichedAgencies.find(a => a.id === activeAgencyId)) {
+          setActiveAgencyId(enrichedAgencies[0].id);
         }
 
+        // 3. Fetch AT Masters
         const atQ = query(collection(db, 'atMasters'), where('ownerId', '==', auth.currentUser.uid));
         const atSnapshot = await getDocs(atQ);
         const fetchedAts = atSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as AtMaster));
@@ -278,24 +418,82 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const activeAgency = agencies.find(a => a.id === activeAgencyId) || null;
   const activeAtMaster = atMasters.find(a => a.id === activeAtMasterId) || null;
 
+  const saveGlobalDefaultEstimateMaster = async (payload: {
+    estimateMasterCRGO?: EstimateItem[];
+    estimateMasterAmorphous?: EstimateItem[];
+    estimateMasterWoundCore?: EstimateItem[];
+    estimateMasterOverhauling?: EstimateItem[];
+    estimateMasterCircleLimits?: EstimateItem[];
+    estimateMaster?: EstimateItem[];
+  }) => {
+    try {
+      const globalPayload = {
+        ...payload,
+        updatedAt: Date.now(),
+        updatedBy: auth.currentUser?.email || auth.currentUser?.uid || 'user'
+      };
+
+      const globalRef = doc(db, 'system_config', 'estimate_master');
+      await setDoc(globalRef, globalPayload, { merge: true });
+
+      setGlobalDefaultEstimateMaster(prev => ({
+        ...(prev || {}),
+        ...globalPayload
+      }));
+      cachedGlobalDefaultEstimateMaster = {
+        ...(cachedGlobalDefaultEstimateMaster || {}),
+        ...globalPayload
+      };
+      localStorage.setItem('cached_global_estimate_master', JSON.stringify(cachedGlobalDefaultEstimateMaster));
+
+      // Also update all user agencies in database so they reflect the new default immediately
+      if (agencies.length > 0) {
+        const updatePromises = agencies.map(async (agency) => {
+          const ref = doc(db, 'agencies', agency.id);
+          await updateDoc(ref, payload);
+        });
+        await Promise.all(updatePromises);
+
+        setAgencies(prev => prev.map(a => ({
+          ...a,
+          ...payload
+        })));
+      }
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'system_config/estimate_master');
+      throw err;
+    }
+  };
+
   const addAgency = async (agencyData: Omit<Agency, 'id'>) => {
     if (!auth.currentUser) return;
     try {
       const newRef = doc(collection(db, 'agencies'));
-      // Inherit estimate master from active agency or existing agencies if not provided
-      const existingWithCRGO = agencies.find(a => a.estimateMasterCRGO && a.estimateMasterCRGO.length > 0);
-      const existingWithAm = agencies.find(a => a.estimateMasterAmorphous && a.estimateMasterAmorphous.length > 0);
-      const existingWithWC = agencies.find(a => a.estimateMasterWoundCore && a.estimateMasterWoundCore.length > 0);
-
-      const defaultCRGO = activeAgency?.estimateMasterCRGO || existingWithCRGO?.estimateMasterCRGO || activeAgency?.estimateMaster || defaultEstimateData;
-      const defaultAmorphous = activeAgency?.estimateMasterAmorphous || existingWithAm?.estimateMasterAmorphous || defaultAmorphousEstimateData;
-      const defaultWoundCore = activeAgency?.estimateMasterWoundCore || existingWithWC?.estimateMasterWoundCore || defaultEstimateData;
+      
+      // Default to global default master if available, otherwise active agency or code default
+      const defaultCRGO = globalDefaultEstimateMaster?.estimateMasterCRGO || 
+                          activeAgency?.estimateMasterCRGO || 
+                          defaultEstimateData;
+      const defaultAmorphous = globalDefaultEstimateMaster?.estimateMasterAmorphous || 
+                               activeAgency?.estimateMasterAmorphous || 
+                               defaultAmorphousEstimateData;
+      const defaultWoundCore = globalDefaultEstimateMaster?.estimateMasterWoundCore || 
+                               activeAgency?.estimateMasterWoundCore || 
+                               defaultWoundCoreEstimateData;
+      const defaultOverhauling = globalDefaultEstimateMaster?.estimateMasterOverhauling || 
+                                 activeAgency?.estimateMasterOverhauling || 
+                                 defaultOverhaulingEstimateData;
+      const defaultCircleLimits = globalDefaultEstimateMaster?.estimateMasterCircleLimits || 
+                                  activeAgency?.estimateMasterCircleLimits || 
+                                  defaultCircleLimitsEstimateData;
 
       const newAgency = { 
         estimateMasterCRGO: defaultCRGO,
         estimateMaster: defaultCRGO,
         estimateMasterAmorphous: defaultAmorphous,
         estimateMasterWoundCore: defaultWoundCore,
+        estimateMasterOverhauling: defaultOverhauling,
+        estimateMasterCircleLimits: defaultCircleLimits,
         ...agencyData, 
         ownerId: auth.currentUser.uid 
       };
@@ -323,24 +521,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     estimateMasterCRGO?: EstimateItem[];
     estimateMasterAmorphous?: EstimateItem[];
     estimateMasterWoundCore?: EstimateItem[];
+    estimateMasterOverhauling?: EstimateItem[];
+    estimateMasterCircleLimits?: EstimateItem[];
     estimateMaster?: EstimateItem[];
   }) => {
-    if (!auth.currentUser || agencies.length === 0) return;
-    try {
-      const updatePromises = agencies.map(async (agency) => {
-        const ref = doc(db, 'agencies', agency.id);
-        await updateDoc(ref, payload);
-      });
-      await Promise.all(updatePromises);
-
-      setAgencies(prev => prev.map(a => ({
-        ...a,
-        ...payload
-      })));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, 'agencies');
-      throw err;
-    }
+    // Automatically save as global default in system_config too!
+    await saveGlobalDefaultEstimateMaster(payload);
   };
 
   const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>) => {
@@ -460,7 +646,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     <AgencyContext.Provider value={{
       agencies, activeAgency, setActiveAgencyId,
       atMasters, activeAtMaster, setActiveAtMasterId,
-      loading, addAgency, updateAgency, updateAllAgenciesEstimateMaster, addAtMaster, updateAtMaster,
+      loading, globalDefaultEstimateMaster, addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
+      saveGlobalDefaultEstimateMaster, addAtMaster, updateAtMaster,
       getNextJobNoInfo, incrementJobNoCounter, syncCountersState
     }}>
       {children}
@@ -473,3 +660,4 @@ export function useAgency() {
   if (context === undefined) throw new Error('useAgency must be used within an AgencyProvider');
   return context;
 }
+
