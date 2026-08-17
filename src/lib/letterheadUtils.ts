@@ -1,8 +1,13 @@
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Configure pdfjs worker using reliable CDN or bundled worker
+// Configure pdfjs worker using reliable jsdelivr or unpkg CDN
 if (typeof window !== 'undefined') {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  try {
+    const version = pdfjsLib.version || '4.10.38';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${version}/build/pdf.worker.min.mjs`;
+  } catch (e) {
+    console.warn('Could not set pdf workerSrc', e);
+  }
 }
 
 /**

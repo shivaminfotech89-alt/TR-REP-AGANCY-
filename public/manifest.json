@@ -1,0 +1,15 @@
+{
+  "short_name": "TR Rep Agency",
+  "name": "TR Rep Agency - Transformer Repair Management",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "64x64 32x32 24x24 16x16"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0f172a",
+  "theme_color": "#2563eb",
+  "display": "standalone"
+}
