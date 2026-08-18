@@ -176,3 +176,19 @@
   }
 }
 
+.a4-page-footer {
+  position: absolute;
+  bottom: 8mm;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-size: 9pt;
+  color: #475569;
+}
+
+@media print {
+  .a4-page-footer {
+    color: #000;
+  }
+}
+

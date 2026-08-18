@@ -380,6 +380,20 @@ export function calculateJobItemDetails(
   return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
 }
 
+// Forwarding-letter job table pagination: fewer rows on page 1 since the recipient/ref
+// block eats vertical space; more room on continuation pages.
+const ROWS_FIRST_PAGE = 18;
+const ROWS_PER_PAGE = 26;
+
+function paginateRows<T>(rows: T[], first: number, rest: number): T[][] {
+  if (rows.length === 0) return [[]];
+  const pages: T[][] = [rows.slice(0, first)];
+  for (let i = first; i < rows.length; i += rest) {
+    pages.push(rows.slice(i, i + rest));
+  }
+  return pages;
+}
+
 export default function EstimateGenerate() {
   const { activeAgency, activeAtMaster, updateAgency } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
@@ -1030,7 +1044,143 @@ export default function EstimateGenerate() {
       pendingValue
     };
   }, [sentEstimatesList, approvedEstimatesList]);
-  
+
+  // Common Forwarding Letter (used by both 'batch_all' and 'forwarding_only' view modes),
+  // paginated so the job table never overflows a single A4 page on large MRs.
+  const renderForwardingLetterPages = () => {
+    const jobRows = selectedJobsData.map((job, idx) => ({ job, idx }));
+    const pages = paginateRows(jobRows, ROWS_FIRST_PAGE, ROWS_PER_PAGE);
+    const totalPages = pages.length;
+    const grandTotal = selectedJobsData.reduce((acc, job) => acc + getJobFullEstimate(job).finalAmount, 0);
+
+    return pages.map((rows, pageIdx) => {
+      const isFirst = pageIdx === 0;
+      const isLast = pageIdx === totalPages - 1;
+
+      return (
+        <PrintableA4Page key={pageIdx} agency={activeAgency} documentTitle="FORWARDING LETTER">
+          <div className="flex flex-col justify-between h-full text-black">
+            <div>
+              {isFirst && (
+                <>
+                  <div className="flex justify-between text-xs font-bold mb-4">
+                    <div className="whitespace-pre-wrap">
+                      {forwardingTo || `Superintending Engineer (O & M),
+Uttar Gujarat Vij Company Ltd.,
+Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
+                    </div>
+                    <div className="text-right whitespace-pre-wrap">
+                      <p>REF. NO. : {refNoText}</p>
+                      <p className="mt-1">DATE : {letterDateText}</p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
+                    Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
+                  </div>
+
+                  <p className="text-xs mb-2">Dear Sir,</p>
+                  <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
+                    {refBodyText}
+                  </p>
+                </>
+              )}
+
+              <table className="w-full text-center text-xs border-collapse border border-black mb-4">
+                <thead>
+                  <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                    <th className="p-1 border-r border-black">NO.</th>
+                    <th className="p-1 border-r border-black">JOB. NO.</th>
+                    <th className="p-1 border-r border-black">T.R. MAKE</th>
+                    <th className="p-1 border-r border-black">TR. SR. NO.</th>
+                    <th className="p-1 border-r border-black">KVA</th>
+                    <th className="p-1 border-r border-black">KV</th>
+                    <th className="p-1 border-r border-black">TYPE</th>
+                    <th className="p-1 border-r border-black">OGP/GP</th>
+                    <th className="p-1 border-r border-black">EST. AMT.</th>
+                    <th className="p-1">REMARK</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(({ job, idx }) => {
+                    const est = getJobFullEstimate(job);
+                    const finalAmt = est.finalAmount.toFixed(2);
+                    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                    const check = checkJobCircleLimit(job);
+
+                    return (
+                      <tr key={job.id} className="border-b border-black">
+                        <td className="p-1 border-r border-black">{idx + 1}</td>
+                        <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
+                        <td className="p-1 border-r border-black">{job.make}</td>
+                        <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
+                        <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
+                        <td className="p-1 border-r border-black">11</td>
+                        <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
+                        <td className="p-1 border-r border-black">OGP</td>
+                        <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
+                        <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
+                          {isScrapJob ? (
+                            'SCRAP'
+                          ) : check.exceeds ? (
+                            <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
+                              REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
+                            </span>
+                          ) : (
+                            'REPAIRABLE'
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {isLast && (
+                    <tr className="font-bold border-black">
+                      <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
+                      <td className="p-1 border-r border-black text-right font-mono font-bold">{grandTotal.toFixed(2)}</td>
+                      <td></td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+
+              {isLast && <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>}
+
+              {!isLast && (
+                <p className="text-right text-xs italic mt-2">Continued on page {pageIdx + 2}…</p>
+              )}
+            </div>
+
+            {isLast && (
+              <div>
+                <div className="flex justify-between text-xs mb-6">
+                  <p>Thanking you</p>
+                  <p>Yours faithfully</p>
+                </div>
+
+                <div className="flex justify-between text-xs mb-4">
+                  <p>Encl. : 1. Inspection Reports (Internal &amp; External) &nbsp;&bull;&nbsp; 2. Detailed Job-wise Estimates</p>
+                  <div className="text-center">
+                    <p className="mb-6 font-bold">{signedByText}</p>
+                    <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                  </div>
+                </div>
+
+                <div className="text-xs font-bold">
+                  <p className="mb-1">C . C. to :</p>
+                  <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || `E. E. (O & M) DIVISION - ${currentSelectedDivision || 'SABARMATI'}`}</p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <footer className="a4-page-footer">
+            Page {pageIdx + 1} of {totalPages}
+          </footer>
+        </PrintableA4Page>
+      );
+    });
+  };
+
   if (loading) {
     return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
   }
@@ -1487,113 +1637,7 @@ export default function EstimateGenerate() {
             {estimateViewMode === 'batch_all' && (
               <>
                 {/* 1. COMMON FORWARDING LETTER FOR ALL JOBS IN THIS MR */}
-                <PrintableA4Page agency={activeAgency} documentTitle="FORWARDING LETTER">
-                  <div className="flex flex-col justify-between h-full text-black">
-                    <div>
-                      <div className="flex justify-between text-xs font-bold mb-4">
-                        <div className="whitespace-pre-wrap">
-                          {forwardingTo || `Superintending Engineer (O & M),
-Uttar Gujarat Vij Company Ltd.,
-Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
-                        </div>
-                        <div className="text-right whitespace-pre-wrap">
-                          <p>REF. NO. : {refNoText}</p>
-                          <p className="mt-1">DATE : {letterDateText}</p>
-                        </div>
-                      </div>
-
-                      <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
-                        Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
-                      </div>
-
-                      <p className="text-xs mb-2">Dear Sir,</p>
-                      <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
-                        {refBodyText}
-                      </p>
-
-                      <table className="w-full text-center text-xs border-collapse border border-black mb-4">
-                        <thead>
-                          <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                            <th className="p-1 border-r border-black">NO.</th>
-                            <th className="p-1 border-r border-black">JOB. NO.</th>
-                            <th className="p-1 border-r border-black">T.R. MAKE</th>
-                            <th className="p-1 border-r border-black">TR. SR. NO.</th>
-                            <th className="p-1 border-r border-black">KVA</th>
-                            <th className="p-1 border-r border-black">KV</th>
-                            <th className="p-1 border-r border-black">TYPE</th>
-                            <th className="p-1 border-r border-black">OGP/GP</th>
-                            <th className="p-1 border-r border-black">EST. AMT.</th>
-                            <th className="p-1">REMARK</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedJobsData.map((job, idx) => {
-                             const est = getJobFullEstimate(job);
-                             const finalAmt = est.finalAmount.toFixed(2);
-                             const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                             const check = checkJobCircleLimit(job);
-                             
-                            return (
-                              <tr key={job.id} className="border-b border-black">
-                                <td className="p-1 border-r border-black">{idx + 1}</td>
-                                <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
-                                <td className="p-1 border-r border-black">{job.make}</td>
-                                <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
-                                <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
-                                <td className="p-1 border-r border-black">11</td>
-                                <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
-                                <td className="p-1 border-r border-black">OGP</td>
-                                <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
-                                <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
-                                  {isScrapJob ? (
-                                    'SCRAP'
-                                  ) : check.exceeds ? (
-                                    <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
-                                      REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
-                                    </span>
-                                  ) : (
-                                    'REPAIRABLE'
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          <tr className="font-bold border-black">
-                            <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
-                            <td className="p-1 border-r border-black text-right font-mono font-bold">
-                              {selectedJobsData.reduce((acc, job) => {
-                                return acc + getJobFullEstimate(job).finalAmount;
-                              }, 0).toFixed(2)}
-                            </td>
-                            <td></td>
-                          </tr>
-                        </tbody>
-                      </table>
-
-                      <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs mb-6">
-                        <p>Thanking you</p>
-                        <p>Yours faithfully</p>
-                      </div>
-
-                      <div className="flex justify-between text-xs mb-4">
-                        <p>Encl. : 1. Inspection Reports (Internal &amp; External) &nbsp;&bull;&nbsp; 2. Detailed Job-wise Estimates</p>
-                        <div className="text-center">
-                          <p className="mb-6 font-bold">{signedByText}</p>
-                          <p className="text-[10px] text-slate-500">Auth Sign.</p>
-                        </div>
-                      </div>
-
-                      <div className="text-xs font-bold">
-                        <p className="mb-1">C . C. to :</p>
-                        <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || `E. E. (O & M) DIVISION - ${currentSelectedDivision || 'SABARMATI'}`}</p>
-                      </div>
-                    </div>
-                  </div>
-                </PrintableA4Page>
+                {renderForwardingLetterPages()}
 
                 {/* 2. SEPARATE INDIVIDUAL ESTIMATE SHEETS (1 PAGE PER TRANSFORMER) */}
                 {selectedJobsData.map((job) => (
@@ -1611,115 +1655,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             )}
 
             {/* VIEW MODE 1B: COMMON FORWARDING LETTER ONLY */}
-            {estimateViewMode === 'forwarding_only' && (
-              <PrintableA4Page agency={activeAgency} documentTitle="FORWARDING LETTER">
-                <div className="flex flex-col justify-between h-full text-black">
-                  <div>
-                    <div className="flex justify-between text-xs font-bold mb-4">
-                      <div className="whitespace-pre-wrap">
-                        {forwardingTo || `Superintending Engineer (O & M),
-Uttar Gujarat Vij Company Ltd.,
-Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
-                      </div>
-                      <div className="text-right whitespace-pre-wrap">
-                        <p>REF. NO. : {refNoText}</p>
-                        <p className="mt-1">DATE : {letterDateText}</p>
-                      </div>
-                    </div>
-
-                    <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
-                      Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
-                    </div>
-
-                    <p className="text-xs mb-2">Dear Sir,</p>
-                    <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
-                      {refBodyText}
-                    </p>
-
-                    <table className="w-full text-center text-xs border-collapse border border-black mb-4">
-                      <thead>
-                        <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                          <th className="p-1 border-r border-black">NO.</th>
-                          <th className="p-1 border-r border-black">JOB. NO.</th>
-                          <th className="p-1 border-r border-black">T.R. MAKE</th>
-                          <th className="p-1 border-r border-black">TR. SR. NO.</th>
-                          <th className="p-1 border-r border-black">KVA</th>
-                          <th className="p-1 border-r border-black">KV</th>
-                          <th className="p-1 border-r border-black">TYPE</th>
-                          <th className="p-1 border-r border-black">OGP/GP</th>
-                          <th className="p-1 border-r border-black">EST. AMT.</th>
-                          <th className="p-1">REMARK</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedJobsData.map((job, idx) => {
-                           const est = getJobFullEstimate(job);
-                           const finalAmt = est.finalAmount.toFixed(2);
-                           const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                           const check = checkJobCircleLimit(job);
-                           
-                          return (
-                            <tr key={job.id} className="border-b border-black">
-                              <td className="p-1 border-r border-black">{idx + 1}</td>
-                              <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
-                              <td className="p-1 border-r border-black">{job.make}</td>
-                              <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
-                              <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
-                              <td className="p-1 border-r border-black">11</td>
-                              <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
-                              <td className="p-1 border-r border-black">OGP</td>
-                              <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
-                              <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
-                                {isScrapJob ? (
-                                  'SCRAP'
-                                ) : check.exceeds ? (
-                                  <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
-                                    REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
-                                  </span>
-                                ) : (
-                                  'REPAIRABLE'
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                        <tr className="font-bold border-black">
-                          <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
-                          <td className="p-1 border-r border-black text-right font-mono font-bold">
-                            {selectedJobsData.reduce((acc, job) => {
-                              return acc + getJobFullEstimate(job).finalAmount;
-                            }, 0).toFixed(2)}
-                          </td>
-                          <td></td>
-                        </tr>
-                      </tbody>
-                    </table>
-
-                    <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
-                  </div>
-
-                  <div>
-                    <div className="flex justify-between text-xs mb-6">
-                      <p>Thanking you</p>
-                      <p>Yours faithfully</p>
-                    </div>
-
-                    <div className="flex justify-between text-xs mb-4">
-                      <p>Encl. : 1. Inspection Reports (Internal &amp; External) &nbsp;&bull;&nbsp; 2. Detailed Job-wise Estimates</p>
-                      <div className="text-center">
-                        <p className="mb-6 font-bold">{signedByText}</p>
-                        <p className="text-[10px] text-slate-500">Auth Sign.</p>
-                      </div>
-                    </div>
-
-                    <div className="text-xs font-bold">
-                      <p className="mb-1">C . C. to :</p>
-                      <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || `E. E. (O & M) DIVISION - ${currentSelectedDivision || 'SABARMATI'}`}</p>
-                    </div>
-                  </div>
-                </div>
-              </PrintableA4Page>
-            )}
+            {estimateViewMode === 'forwarding_only' && renderForwardingLetterPages()}
 
             {/* VIEW MODE 2: SINGLE JOB ESTIMATE SHEET */}
             {estimateViewMode === 'single_job' && (
