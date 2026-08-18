@@ -79,6 +79,7 @@ export default function ExternalInspection() {
   const [loading, setLoading] = useState(true);
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
+  const [externalInspectionDate, setExternalInspectionDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [formsData, setFormsData] = useState<Record<string, ExternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
@@ -124,6 +125,21 @@ export default function ExternalInspection() {
     
     // Sort by Job No conceptually
     jobsForMr.sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
+
+    // Find any existing inspection date
+    let existingDate = '';
+    const sampleJob = jobsForMr[0];
+    if (sampleJob?.externalInspectionDate) {
+      existingDate = sampleJob.externalInspectionDate;
+    } else {
+      const existingInsp = allInspections.find(i => jobsForMr.some(j => j.id === i.jobId));
+      if (existingInsp?.data?.inspectionDate) {
+        existingDate = existingInsp.data.inspectionDate;
+      } else if (existingInsp?.inspectionDate) {
+        existingDate = existingInsp.inspectionDate;
+      }
+    }
+    setExternalInspectionDate(existingDate || new Date().toISOString().split('T')[0]);
 
     const initialForms: Record<string, ExternalData> = {};
     jobsForMr.forEach(j => {
@@ -276,28 +292,41 @@ export default function ExternalInspection() {
 
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
-    const mrDateStr = formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt);
+    const sampleJob = mrJobs[0];
+    const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
     const wsData = [
-      ['MR Number', selectedMrNo, 'MR Date', mrDateStr],
+      ['EXTERNAL INSPECTION & PRELIMINARY ASSESSMENT REPORT'],
+      ['Agency:', activeAgency?.name || '', 'Division:', sampleJob?.division || '', 'MR Number:', selectedMrNo, 'MR Date:', mrDateStr, 'Inspection Date:', externalInspectionDate],
       [],
       [
-        '#', 'JOB NO', 'MAKE', 'KVA', 'TRANS. TYPE / CORE', 'RATING / LEVEL', 'S.No.', 'KV', 'OIL CAP LTRS', 'LESS OIL LTRS', 'SEAL TYPE', 'GASKET', 'H.V.L.V ROD', 'NUTE/BOLT', 'DRY ACT. PART', 'CLN DRTY TANK', 'BREATHER', 'OIL LEV. GLS', 'OUTSIDE PAINT', 'NAME PLATE', 'DAM. CT. TANK', 'DAM. RAD. NO', 'H.V.B', 'H.V.M', 'H.V.C.C', 'L.V.B', 'L.V.M', 'L.V.C.C'
+        '#', 'JOB NO', 'TRANS. SR. NO', 'MAKE', 'DIVISION', 'MR NO', 'MR DATE', 'KVA', 'TRANS. TYPE / CORE', 'RATING / LEVEL', 'INSP. DATE', 'KV', 'OIL CAP LTRS', 'LESS OIL LTRS', 'OIL AVAIL LTRS', 'NET SHORT LTRS', 'SEAL TYPE', 'GASKET', 'H.V.L.V ROD', 'NUTE/BOLT', 'DRY ACT. PART', 'CLN DRTY TANK', 'BREATHER', 'OIL LEV. GLS', 'OUTSIDE PAINT', 'NAME PLATE', 'DAM. CT. TANK', 'DAM. RAD. NO', 'H.V.B', 'H.V.M', 'H.V.C.C', 'L.V.B', 'L.V.M', 'L.V.C.C'
       ]
     ];
     
     mrJobs.forEach((job, index) => {
       const data = formsData[job.id] || {} as ExternalData;
+      const oilCap = Number(data.oilCapLtrs) || 0;
+      const lessOil = Number(data.lessOilLtrs) || 0;
+      const oilAvl = Math.max(0, oilCap - lessOil);
+      const netShrt = Math.round((oilAvl * 0.05) + lessOil);
+
       wsData.push([
         index + 1,
-        job.jobNo,
-        job.make,
+        job.jobNo + (job.repairType === 'GP' ? ' (GP)' : ''),
+        job.serialNo || '-',
+        job.make || '-',
+        job.division || '-',
+        job.mrNo,
+        mrDateStr,
         job.capacityKva,
         data.transType || job.coreType || 'CRGO',
         data.starRating || job.starRating || '3 Star & other',
-        job.serialNo,
+        externalInspectionDate,
         data.kv || '11',
         data.oilCapLtrs || '',
         data.lessOilLtrs || '',
+        oilAvl,
+        netShrt,
         data.sealType || '',
         data.gasket || '',
         data.hvLvRod || '',
@@ -398,7 +427,9 @@ export default function ExternalInspection() {
         const payload = {
           jobId: job.id,
           type: 'External',
+          inspectionDate: externalInspectionDate,
           data: {
+            inspectionDate: externalInspectionDate,
             kv: jobData.kv,
             oilCapLtrs: Math.round(Number(jobData.oilCapLtrs) || 0),
             lessOilLtrs: Math.round(Number(jobData.lessOilLtrs) || 0),
@@ -436,12 +467,13 @@ export default function ExternalInspection() {
 
         batch.set(inspectionRef, payload, { merge: true });
 
-        // Update Job Status, persist inspected Star Rating and Transformer Core Type directly on Job
+        // Update Job Status, persist inspected Star Rating, Transformer Core Type, and External Inspection Date directly on Job
         const jobRef = doc(db, 'jobs', job.id);
         const jobUpdate: any = {
           coreType: currentCoreType,
           starRating: currentStarRating,
           ratingLevel: currentStarRating,
+          externalInspectionDate: externalInspectionDate,
           updatedAt: now
         };
         
@@ -908,35 +940,97 @@ export default function ExternalInspection() {
               </div>
             ) : (
               <table className="w-full text-left text-sm text-slate-600">
-                <thead className="bg-slate-100/50">
+                <thead className="bg-slate-100/70 border-b border-slate-200">
                   <tr>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">MR Number & Date</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Total Jobs</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Job Nos</th>
-                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase print:text-black tracking-widest">Action</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider w-10">#</th>
+                    <th className="px-4 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">MR Number & Date</th>
+                    <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Division</th>
+                    <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Capacity Summary</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">Total Units</th>
+                    <th className="px-3 py-3 text-left text-[10px] font-bold text-slate-500 uppercase tracking-wider">Job Numbers</th>
+                    <th className="px-3 py-3 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider">External Insp. Status</th>
+                    <th className="px-4 py-3 text-right text-[10px] font-bold text-slate-500 uppercase tracking-wider">Action</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
-                  {filteredMrNos.map(mr => {
-                    const sampleJob = mrGroups[mr][0];
+                  {filteredMrNos.map((mr, idx) => {
+                    const jobsForMr = mrGroups[mr] || [];
+                    const sampleJob = jobsForMr[0];
                     const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
+                    
+                    // Capacity summary calculation
+                    const capCountMap: Record<number, number> = {};
+                    let totalKva = 0;
+                    jobsForMr.forEach(j => {
+                      const k = Number(j.capacityKva) || 0;
+                      capCountMap[k] = (capCountMap[k] || 0) + 1;
+                      totalKva += k;
+                    });
+                    const capSummary = Object.entries(capCountMap)
+                      .sort((a, b) => Number(a[0]) - Number(b[0]))
+                      .map(([k, count]) => `${k} KVA (${count})`)
+                      .join(', ');
+
+                    // Check inspection date
+                    const inspDate = sampleJob?.externalInspectionDate || inspections.find(i => jobsForMr.some(j => j.id === i.jobId))?.data?.inspectionDate;
+                    const isDone = jobsForMr.every(j => j.status !== 'Received' && j.status !== 'Pending');
+
                     return (
-                    <tr key={mr} className="hover:bg-slate-50 print:bg-transparent transition-colors">
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="font-mono font-bold text-slate-900 print:text-black">{mr}</div>
-                        <div className="text-xs text-slate-500">Date: <span className="font-mono text-slate-700 font-medium">({mrDateStr})</span></div>
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-slate-500">{mrGroups[mr].length} Jobs</td>
-                      <td className="px-4 py-3 text-xs text-slate-500 max-w-xs truncate" title={mrGroups[mr].map(j => j.jobNo).join(', ')}>
-                        {mrGroups[mr].map(j => j.jobNo).join(', ')}
+                    <tr key={mr} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-3 py-3 text-center font-mono font-bold text-xs text-slate-400">
+                        {idx + 1}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="flex items-center space-x-2">
+                        <div className="font-mono font-bold text-slate-900 text-sm">{mr}</div>
+                        <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                          <span>MR Date:</span>
+                          <span className="font-mono text-slate-700 font-semibold">{mrDateStr}</span>
+                        </div>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 uppercase">
+                          {sampleJob?.division || '-'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs">
+                        <div className="font-medium text-slate-800">{capSummary}</div>
+                        <div className="text-[11px] text-blue-600 font-bold font-mono mt-0.5">Total: {totalKva} KVA</div>
+                      </td>
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        <span className="font-mono font-bold text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
+                          {jobsForMr.length} {jobsForMr.length === 1 ? 'Unit' : 'Units'}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-500 max-w-[200px] truncate" title={jobsForMr.map(j => j.jobNo).join(', ')}>
+                        <span className="font-mono text-slate-700 font-medium">
+                          {jobsForMr.map(j => j.jobNo).join(', ')}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-center whitespace-nowrap">
+                        {isDone ? (
+                          <div className="inline-flex flex-col items-center">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-green-50 text-green-700 border border-green-200">
+                              <CheckCircle2 className="w-3 h-3 text-green-600" /> Completed
+                            </span>
+                            {inspDate && (
+                              <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                                Date: {formatDDMMYYYY(inspDate)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                            Pending
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 whitespace-nowrap text-right">
+                        <div className="flex items-center justify-end space-x-2">
                           <button 
                             onClick={() => handleSelectMr(mr)}
-                            className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 rounded hover:bg-blue-100 transition-colors cursor-pointer"
+                            className="flex items-center px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors shadow-2xs cursor-pointer"
                           >
-                            {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3 h-3 ml-1 rotate-180" />
+                            {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3.5 h-3.5 ml-1 rotate-180" />
                           </button>
                           {statusFilter === 'Completed' && (
                             <button 
@@ -944,10 +1038,10 @@ export default function ExternalInspection() {
                                 handleSelectMr(mr);
                                 setIsPrintOpen(true);
                               }}
-                              className="flex items-center px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors cursor-pointer"
+                              className="flex items-center px-3 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 rounded border border-slate-200 transition-colors cursor-pointer"
                               title="Print External Inspection Report"
                             >
-                              <Printer className="w-3 h-3 mr-1 text-slate-600" /> Print
+                              <Printer className="w-3.5 h-3.5 mr-1 text-slate-600" /> Print
                             </button>
                           )}
                         </div>
@@ -957,7 +1051,9 @@ export default function ExternalInspection() {
                   })}
                   {filteredMrNos.length === 0 && (
                     <tr>
-                      <td colSpan={4} className="px-4 py-8 text-center text-slate-500">No {statusFilter.toLowerCase()} MR numbers found.</td>
+                      <td colSpan={8} className="px-4 py-12 text-center text-slate-500">
+                        No {statusFilter.toLowerCase()} MR numbers found.
+                      </td>
                     </tr>
                   )}
                 </tbody>
@@ -966,42 +1062,62 @@ export default function ExternalInspection() {
           </div>
         </div>
       ) : (
-        <div className="space-y-6">
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded flex justify-between items-center text-white print:hidden">
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Inspecting MR</p>
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-wrap justify-between items-center text-white shadow-md print:hidden gap-4">
+            <div className="space-y-1">
               <div className="flex items-center gap-3">
-                <p className="text-xl font-mono font-bold">{selectedMrNo}</p>
-                <span className="text-xs bg-slate-800 text-blue-300 font-mono px-2.5 py-1 rounded border border-slate-700">
-                  MR Date: <strong className="text-white">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong>
+                <span className="text-[10px] font-bold uppercase tracking-widest bg-blue-600/30 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">
+                  External Inspection
+                </span>
+                <span className="text-xs text-slate-400 font-medium">
+                  Division: <strong className="text-white uppercase">{mrJobs[0]?.division || '-'}</strong>
                 </span>
               </div>
-              <p className="text-xs text-slate-300 mt-1">{mrJobs.length} Transformers in this MR</p>
+              <div className="flex items-center gap-3 mt-1">
+                <p className="text-xl font-mono font-bold text-white tracking-tight">MR No: {selectedMrNo}</p>
+                <span className="text-xs bg-slate-800 text-slate-300 font-mono px-2.5 py-1 rounded border border-slate-700">
+                  MR Date: <strong className="text-white">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong>
+                </span>
+                <span className="text-xs bg-blue-950 text-blue-200 font-semibold px-2.5 py-1 rounded border border-blue-800">
+                  {mrJobs.length} Transformers • {mrJobs.reduce((acc, j) => acc + (Number(j.capacityKva) || 0), 0)} Total KVA
+                </span>
+              </div>
             </div>
             
-            <div className="flex items-center space-x-2">
+            <div className="flex items-center gap-3">
+              <div className="flex items-center bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-2">
+                  INSP. DATE:
+                </label>
+                <input
+                  type="date"
+                  value={externalInspectionDate}
+                  onChange={(e) => setExternalInspectionDate(e.target.value)}
+                  className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+                />
+              </div>
+
               <button 
                 type="button"
                 onClick={handleExportExcel}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-green-400 hover:text-green-300 border border-green-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
+                className="flex items-center text-xs font-bold text-green-400 hover:text-green-300 bg-green-950/40 border border-green-500/30 px-3 py-2 rounded-lg transition-colors cursor-pointer"
               >
-                <Download className="w-3 h-3 mr-1" /> Excel
+                <Download className="w-3.5 h-3.5 mr-1.5" /> Excel
               </button>
               <button 
                 type="button"
                 onClick={handlePrint}
-                className="flex items-center text-[10px] font-bold uppercase tracking-widest text-slate-400 hover:text-slate-300 border border-slate-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
+                className="flex items-center text-xs font-bold text-slate-300 hover:text-white bg-slate-800 border border-slate-700 px-3 py-2 rounded-lg transition-colors cursor-pointer"
               >
-                <Printer className="w-3 h-3 mr-1" /> Print
+                <Printer className="w-3.5 h-3.5 mr-1.5" /> Print
               </button>
               <button 
                 onClick={() => setSelectedMrNo(null)}
-                className="text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors print:hidden cursor-pointer"
+                className="text-xs font-bold text-slate-300 hover:text-white bg-slate-800 border border-slate-700 px-3 py-2 rounded-lg transition-colors cursor-pointer"
               >
                 Back to List
               </button>
             </div>
-
           </div>
 
           {mrJobs.some(j => j.repairType === 'GP') && (
@@ -1031,6 +1147,7 @@ export default function ExternalInspection() {
                     <tr className="border-b border-slate-200">
                       <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider sticky left-0 z-20 w-8 border-r border-slate-200" rowSpan={2}>#</th>
                       <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider sticky left-8 z-20 min-w-[100px] border-r border-slate-200" rowSpan={2}>JOB NO</th>
+                      <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[90px] border-r border-slate-200" rowSpan={2}>TRANS. S.NO</th>
                       <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[70px] border-r border-slate-200" rowSpan={2}>MAKE</th>
                       <th className="p-2 bg-slate-50 text-[10px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2}>KVA</th>
                       
@@ -1127,6 +1244,9 @@ export default function ExternalInspection() {
                               </span>
                             )}
                           </div>
+                        </td>
+                        <td className="p-2 text-xs font-mono font-medium text-slate-700 min-w-[90px] border-r border-slate-200">
+                          {job.serialNo || '-'}
                         </td>
                         <td className="p-2 text-xs text-slate-800 font-semibold min-w-[70px] truncate max-w-[90px] border-r border-slate-200" title={job.make}>
                           {job.make}

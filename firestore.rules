@@ -31,79 +31,125 @@ service cloud.firestore {
     // --- Entity Validation Helpers ---
 
     function isValidJob(data) {
-      return data.jobNo is string && data.jobNo.size() >= 1 && data.jobNo.size() <= 50 &&
-             data.mrNo is string && data.mrNo.size() >= 1 && data.mrNo.size() <= 50 &&
+      return data.jobNo is string && data.jobNo.size() >= 1 && data.jobNo.size() <= 100 &&
+             data.mrNo is string && data.mrNo.size() >= 1 && data.mrNo.size() <= 100 &&
              data.capacityKva is number &&
-             data.make is string && data.make.size() >= 1 && data.make.size() <= 100 &&
-             data.serialNo is string && data.serialNo.size() >= 1 && data.serialNo.size() <= 100 &&
+             data.make is string && data.make.size() >= 1 && data.make.size() <= 200 &&
+             data.serialNo is string && data.serialNo.size() >= 1 && data.serialNo.size() <= 200 &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
-             (!('dateOfIssue' in data) || (data.dateOfIssue is string && data.dateOfIssue.size() <= 30)) &&
-             (!('type' in data) || (data.type is string && data.type.size() <= 50)) &&
-             (!('repairType' in data) || (data.repairType is string && data.repairType.size() <= 50)) &&
-             (!('division' in data) || (data.division is string && data.division.size() <= 100)) &&
-             (!('coreType' in data) || (data.coreType is string && data.coreType.size() <= 50)) &&
-             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('dateOfIssue' in data) || (data.dateOfIssue is string && data.dateOfIssue.size() <= 50)) &&
+             (!('type' in data) || (data.type is string && data.type.size() <= 100)) &&
+             (!('repairType' in data) || (data.repairType is string && data.repairType.size() <= 100)) &&
+             (!('division' in data) || (data.division is string && data.division.size() <= 200)) &&
+             (!('coreType' in data) || (data.coreType is string && data.coreType.size() <= 100)) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 100)) &&
              (!('isClosed' in data) || (data.isClosed is bool)) &&
              (!('atId' in data) || (data.atId is string && data.atId.size() <= 128)) &&
              (!('agencyId' in data) || (data.agencyId is string && data.agencyId.size() <= 128)) &&
              (!('testingDetails' in data) || (data.testingDetails is map)) &&
              (!('testingDate' in data) || (data.testingDate is string && data.testingDate.size() <= 50)) &&
-             (!('challanNo' in data) || (data.challanNo is string && data.challanNo.size() <= 50)) &&
+             (!('testedBy' in data) || (data.testedBy is string && data.testedBy.size() <= 150)) &&
+             (!('testingStatus' in data) || (data.testingStatus is string && data.testingStatus.size() <= 100)) &&
+             (!('externalInspectionDate' in data) || (data.externalInspectionDate is string && data.externalInspectionDate.size() <= 50)) &&
+             (!('internalInspectionDate' in data) || (data.internalInspectionDate is string && data.internalInspectionDate.size() <= 50)) &&
+             (!('starRating' in data) || (data.starRating is string && data.starRating.size() <= 100)) &&
+             (!('ratingLevel' in data) || (data.ratingLevel is string && data.ratingLevel.size() <= 100)) &&
+             (!('challanNo' in data) || (data.challanNo is string && data.challanNo.size() <= 100)) &&
              (!('challanDate' in data) || (data.challanDate is string && data.challanDate.size() <= 50)) &&
-             (!('vehicleNo' in data) || (data.vehicleNo is string && data.vehicleNo.size() <= 50)) &&
-             (!('deliveryDate' in data) || (data.deliveryDate is string && data.deliveryDate.size() <= 50));
+             (!('vehicleNo' in data) || (data.vehicleNo is string && data.vehicleNo.size() <= 100)) &&
+             (!('driverName' in data) || (data.driverName is string && data.driverName.size() <= 150)) &&
+             (!('driverPhone' in data) || (data.driverPhone is string && data.driverPhone.size() <= 50)) &&
+             (!('deliveryDate' in data) || (data.deliveryDate is string && data.deliveryDate.size() <= 50)) &&
+             (!('billNo' in data) || (data.billNo is string && data.billNo.size() <= 100)) &&
+             (!('billDate' in data) || (data.billDate is string && data.billDate.size() <= 50)) &&
+             (!('billSentDate' in data) || (data.billSentDate is string && data.billSentDate.size() <= 50)) &&
+             (!('billGrossAmount' in data) || (data.billGrossAmount is number)) &&
+             (!('billTaxAmount' in data) || (data.billTaxAmount is number)) &&
+             (!('billGrandTotal' in data) || (data.billGrandTotal is number)) &&
+             (!('estimateNo' in data) || (data.estimateNo is string && data.estimateNo.size() <= 100)) &&
+             (!('estimateDate' in data) || (data.estimateDate is string && data.estimateDate.size() <= 50)) &&
+             (!('estimateAmount' in data) || (data.estimateAmount is number)) &&
+             (!('estimateSentDate' in data) || (data.estimateSentDate is string && data.estimateSentDate.size() <= 50)) &&
+             (!('estimateApprNo' in data) || (data.estimateApprNo is string && data.estimateApprNo.size() <= 100)) &&
+             (!('estimateApprDate' in data) || (data.estimateApprDate is string && data.estimateApprDate.size() <= 50)) &&
+             (!('estimateStatus' in data) || (data.estimateStatus is string && data.estimateStatus.size() <= 100)) &&
+             (!('paymentStatus' in data) || (data.paymentStatus is string && data.paymentStatus.size() <= 100)) &&
+             (!('paymentAmount' in data) || (data.paymentAmount is number)) &&
+             (!('paymentDate' in data) || (data.paymentDate is string && data.paymentDate.size() <= 50)) &&
+             (!('paymentRef' in data) || (data.paymentRef is string && data.paymentRef.size() <= 150)) &&
+             (!('paymentNotes' in data) || (data.paymentNotes is string && data.paymentNotes.size() <= 1000)) &&
+             (!('paymentDeductions' in data) || (data.paymentDeductions is number || data.paymentDeductions is map)) &&
+             (!('remarks' in data) || (data.remarks is string && data.remarks.size() <= 2000)) &&
+             (!('condition' in data) || (data.condition is string && data.condition.size() <= 200)) &&
+             (!('apprNo' in data) || (data.apprNo is string && data.apprNo.size() <= 100)) &&
+             (!('apprDate' in data) || (data.apprDate is string && data.apprDate.size() <= 50)) &&
+             (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string)) &&
+             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string));
     }
 
     function isValidInspection(data) {
       return data.jobId is string && data.jobId.size() >= 1 && data.jobId.size() <= 128 &&
              data.type is string && data.type.size() >= 1 && data.type.size() <= 20 && (data.type == 'External' || data.type == 'Internal') &&
              data.data is map &&
-             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128;
+             data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
+             (!('inspectionDate' in data) || (data.inspectionDate is string && data.inspectionDate.size() <= 50)) &&
+             (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string)) &&
+             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string));
     }
 
     function isValidAgency(data) {
-      return data.name is string && data.name.size() >= 1 && data.name.size() <= 150 &&
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
-             (!('address' in data) || (data.address is string && data.address.size() <= 1000)) &&
-             (!('contact' in data) || (data.contact is string && data.contact.size() <= 100)) &&
-             (!('email' in data) || (data.email is string && data.email.size() <= 150)) &&
-             (!('phone' in data) || (data.phone is string && data.phone.size() <= 50)) &&
-             (!('gstin' in data) || (data.gstin is string && data.gstin.size() <= 50)) &&
-             (!('pan' in data) || (data.pan is string && data.pan.size() <= 50)) &&
-             (!('msmeNo' in data) || (data.msmeNo is string && data.msmeNo.size() <= 100)) &&
-             (!('agencyState' in data) || (data.agencyState is string && data.agencyState.size() <= 100)) &&
+             (!('address' in data) || (data.address is string && data.address.size() <= 2000)) &&
+             (!('contact' in data) || (data.contact is string && data.contact.size() <= 200)) &&
+             (!('email' in data) || (data.email is string && data.email.size() <= 200)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() <= 100)) &&
+             (!('gstin' in data) || (data.gstin is string && data.gstin.size() <= 100)) &&
+             (!('pan' in data) || (data.pan is string && data.pan.size() <= 100)) &&
+             (!('msmeNo' in data) || (data.msmeNo is string && data.msmeNo.size() <= 150)) &&
+             (!('agencyCode' in data) || (data.agencyCode is string && data.agencyCode.size() <= 100)) &&
+             (!('agencyState' in data) || (data.agencyState is string && data.agencyState.size() <= 150)) &&
              (!('agencyStateCode' in data) || (data.agencyStateCode is string && data.agencyStateCode.size() <= 50)) &&
-             (!('bankName' in data) || (data.bankName is string && data.bankName.size() <= 200)) &&
-             (!('bankBranch' in data) || (data.bankBranch is string && data.bankBranch.size() <= 200)) &&
-             (!('accountNumber' in data) || (data.accountNumber is string && data.accountNumber.size() <= 100)) &&
-             (!('ifscCode' in data) || (data.ifscCode is string && data.ifscCode.size() <= 50)) &&
-             (!('discomName' in data) || (data.discomName is string && data.discomName.size() <= 200)) &&
-             (!('discomGstin' in data) || (data.discomGstin is string && data.discomGstin.size() <= 50)) &&
-             (!('discomPan' in data) || (data.discomPan is string && data.discomPan.size() <= 50)) &&
-             (!('discomAddress' in data) || (data.discomAddress is string && data.discomAddress.size() <= 1000)) &&
-             (!('discomState' in data) || (data.discomState is string && data.discomState.size() <= 100)) &&
+             (!('bankName' in data) || (data.bankName is string && data.bankName.size() <= 300)) &&
+             (!('bankBranch' in data) || (data.bankBranch is string && data.bankBranch.size() <= 300)) &&
+             (!('accountNumber' in data) || (data.accountNumber is string && data.accountNumber.size() <= 150)) &&
+             (!('ifscCode' in data) || (data.ifscCode is string && data.ifscCode.size() <= 100)) &&
+             (!('discomName' in data) || (data.discomName is string && data.discomName.size() <= 300)) &&
+             (!('discomGstin' in data) || (data.discomGstin is string && data.discomGstin.size() <= 100)) &&
+             (!('discomPan' in data) || (data.discomPan is string && data.discomPan.size() <= 100)) &&
+             (!('discomAddress' in data) || (data.discomAddress is string && data.discomAddress.size() <= 2000)) &&
+             (!('discomState' in data) || (data.discomState is string && data.discomState.size() <= 150)) &&
              (!('discomStateCode' in data) || (data.discomStateCode is string && data.discomStateCode.size() <= 50)) &&
-             (!('serviceSacCode' in data) || (data.serviceSacCode is string && data.serviceSacCode.size() <= 50)) &&
-             (!('circleOfficeName' in data) || (data.circleOfficeName is string && data.circleOfficeName.size() <= 200)) &&
-             (!('circleAuthority' in data) || (data.circleAuthority is string && data.circleAuthority.size() <= 200)) &&
-             (!('divisionAuthority' in data) || (data.divisionAuthority is string && data.divisionAuthority.size() <= 200)) &&
-             (!('estimateCcTemplate' in data) || (data.estimateCcTemplate is string && data.estimateCcTemplate.size() <= 500)) &&
-             (!('billCcTemplate' in data) || (data.billCcTemplate is string && data.billCcTemplate.size() <= 500)) &&
-             (!('forwardingToText' in data) || (data.forwardingToText is string && data.forwardingToText.size() <= 1000)) &&
-             (!('forwardingSubject' in data) || (data.forwardingSubject is string && data.forwardingSubject.size() <= 500)) &&
-             (!('forwardingCcText' in data) || (data.forwardingCcText is string && data.forwardingCcText.size() <= 1000)) &&
-             (!('letterheadUrl' in data) || (data.letterheadUrl is string && data.letterheadUrl.size() <= 2000)) &&
+             (!('serviceSacCode' in data) || (data.serviceSacCode is string && data.serviceSacCode.size() <= 100)) &&
+             (!('circleOfficeName' in data) || (data.circleOfficeName is string && data.circleOfficeName.size() <= 300)) &&
+             (!('circleAuthority' in data) || (data.circleAuthority is string && data.circleAuthority.size() <= 300)) &&
+             (!('divisionAuthority' in data) || (data.divisionAuthority is string && data.divisionAuthority.size() <= 300)) &&
+             (!('estimateCcTemplate' in data) || (data.estimateCcTemplate is string && data.estimateCcTemplate.size() <= 1000)) &&
+             (!('billCcTemplate' in data) || (data.billCcTemplate is string && data.billCcTemplate.size() <= 1000)) &&
+             (!('forwardingToText' in data) || (data.forwardingToText is string && data.forwardingToText.size() <= 2000)) &&
+             (!('forwardingSubject' in data) || (data.forwardingSubject is string && data.forwardingSubject.size() <= 1000)) &&
+             (!('forwardingCcText' in data) || (data.forwardingCcText is string && data.forwardingCcText.size() <= 2000)) &&
+             (!('letterheadUrl' in data) || (data.letterheadUrl is string && data.letterheadUrl.size() <= 2000000)) &&
              (!('letterheadMode' in data) || (data.letterheadMode is string && data.letterheadMode.size() <= 50)) &&
              (!('letterheadHeaderHeightMm' in data) || (data.letterheadHeaderHeightMm is number)) &&
              (!('letterheadFooterHeightMm' in data) || (data.letterheadFooterHeightMm is number)) &&
              (!('letterheadMarginLeftMm' in data) || (data.letterheadMarginLeftMm is number)) &&
              (!('letterheadMarginRightMm' in data) || (data.letterheadMarginRightMm is number)) &&
              (!('gpValidationMonths' in data) || (data.gpValidationMonths is number)) &&
-             (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 100)) &&
-             (!('bankDetails' in data) || (data.bankDetails is string && data.bankDetails.size() <= 500)) &&
+             (!('cgstPercent' in data) || (data.cgstPercent is number)) &&
+             (!('sgstPercent' in data) || (data.sgstPercent is number)) &&
+             (!('subscriptionStatus' in data) || (data.subscriptionStatus is string && data.subscriptionStatus.size() <= 50)) &&
+             (!('subscriptionExpiresAt' in data) || (data.subscriptionExpiresAt is number)) &&
+             (!('subscriptionPlan' in data) || (data.subscriptionPlan is string && data.subscriptionPlan.size() <= 50)) &&
+             (!('annualFee' in data) || (data.annualFee is number)) &&
+             (!('sharedWithEmails' in data) || (data.sharedWithEmails is list)) &&
+             (!('members' in data) || (data.members is map || data.members is list)) &&
+             (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 150)) &&
+             (!('bankDetails' in data) || (data.bankDetails is string && data.bankDetails.size() <= 1000)) &&
              (!('prefixes' in data) || (data.prefixes is map)) &&
              (!('lastJobNumbers' in data) || (data.lastJobNumbers is map)) &&
              (!('allotments' in data) || (data.allotments is map)) &&
+             (!('divisionCircles' in data) || (data.divisionCircles is map)) &&
              (!('divisions' in data) || (data.divisions is list)) &&
              (!('estimateMaster' in data) || (data.estimateMaster is list)) &&
              (!('estimateMasterCRGO' in data) || (data.estimateMasterCRGO is list)) &&
@@ -111,30 +157,46 @@ service cloud.firestore {
              (!('estimateMasterWoundCore' in data) || (data.estimateMasterWoundCore is list)) &&
              (!('estimateMasterOverhauling' in data) || (data.estimateMasterOverhauling is list)) &&
              (!('estimateMasterCircleLimits' in data) || (data.estimateMasterCircleLimits is list)) &&
-             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string));
+             (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string)) &&
+             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string)) &&
+             (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 150));
     }
 
     function isValidAtMaster(data) {
-      return data.atNumber is string && data.atNumber.size() >= 1 && data.atNumber.size() <= 100 &&
+      return data.atNumber is string && data.atNumber.size() >= 1 && data.atNumber.size() <= 150 &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
-             (!('workOrderNo' in data) || (data.workOrderNo is string && data.workOrderNo.size() <= 100)) &&
-             (!('dateOfAgreement' in data) || (data.dateOfAgreement is string && data.dateOfAgreement.size() <= 50)) &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 200)) &&
+             (!('startDate' in data) || (data.startDate is number || data.startDate is string)) &&
+             (!('endDate' in data) || (data.endDate is number || data.endDate is string)) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('workOrderNo' in data) || (data.workOrderNo is string && data.workOrderNo.size() <= 150)) &&
+             (!('dateOfAgreement' in data) || (data.dateOfAgreement is string && data.dateOfAgreement.size() <= 100)) &&
              (!('agencyId' in data) || (data.agencyId is string && data.agencyId.size() <= 128)) &&
+             (!('atPercentage' in data) || (data.atPercentage is number)) &&
+             (!('atPercentageCRGO' in data) || (data.atPercentageCRGO is number)) &&
+             (!('atPercentageAmorphous' in data) || (data.atPercentageAmorphous is number)) &&
+             (!('atPercentageWoundCore' in data) || (data.atPercentageWoundCore is number)) &&
              (!('prefixes' in data) || (data.prefixes is map)) &&
-             (!('lastJobNumbers' in data) || (data.lastJobNumbers is map));
+             (!('lastJobNumbers' in data) || (data.lastJobNumbers is map)) &&
+             (!('allotments' in data) || (data.allotments is map)) &&
+             (!('allotmentHistory' in data) || (data.allotmentHistory is list)) &&
+             (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string)) &&
+             (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string));
     }
 
     function isValidOilTransaction(data) {
       return data.agencyId is string && data.agencyId.size() >= 1 && data.agencyId.size() <= 128 &&
              data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 &&
-             data.mrNo is string && data.mrNo.size() >= 1 && data.mrNo.size() <= 50 &&
-             data.division is string && data.division.size() >= 1 && data.division.size() <= 100 &&
+             data.mrNo is string && data.mrNo.size() >= 1 && data.mrNo.size() <= 100 &&
+             data.division is string && data.division.size() >= 1 && data.division.size() <= 200 &&
              data.grossLiters is number &&
-             (!('mrDate' in data) || (data.mrDate is string && data.mrDate.size() <= 50)) &&
-             (!('oilType' in data) || (data.oilType is string && data.oilType.size() <= 50)) &&
+             (!('mrDate' in data) || (data.mrDate is string && data.mrDate.size() <= 100)) &&
+             (!('date' in data) || (data.date is number || data.date is string)) &&
+             (!('oilType' in data) || (data.oilType is string && data.oilType.size() <= 100)) &&
              (!('barrels' in data) || (data.barrels is number)) &&
              (!('filtrationLossPercent' in data) || (data.filtrationLossPercent is number)) &&
-             (!('netLiters' in data) || (data.netLiters is number));
+             (!('netLiters' in data) || (data.netLiters is number)) &&
+             (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string || data.createdAt is map));
     }
 
     function isValidSupportTicket(data) {
@@ -189,9 +251,9 @@ service cloud.firestore {
     }
 
     match /agencies/{agencyId} {
-      allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
+      allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin() || (('email' in resource.data) && resource.data.email == request.auth.token.email) || (('sharedWithEmails' in resource.data) && request.auth.token.email in resource.data.sharedWithEmails));
       allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidAgency(incoming());
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin()) && incoming().ownerId == existing().ownerId && isValidAgency(incoming());
+      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin() || (('email' in existing()) && existing().email == request.auth.token.email) || (('sharedWithEmails' in existing()) && request.auth.token.email in existing().sharedWithEmails)) && (incoming().ownerId == existing().ownerId || isSuperAdmin() || !('ownerId' in existing())) && isValidAgency(incoming());
       allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin());
     }
 

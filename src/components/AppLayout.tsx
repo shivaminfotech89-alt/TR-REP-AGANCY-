@@ -413,7 +413,10 @@ export default function AppLayout({ user }: { user: User }) {
             <Route path="/estimates/new" element={<EstimateGenerate />} />
             <Route path="/challan/new" element={<DispatchChallan />} />
             <Route path="/reports" element={<Reports />} />
+            <Route path="/bills" element={<BillingSystem />} />
             <Route path="/bills/new" element={<BillingSystem />} />
+            <Route path="/bills/:mrNo" element={<BillingSystem />} />
+            <Route path="/bills/view/:mrNo" element={<BillingSystem />} />
             <Route path="/oil-inward" element={<OilInward />} />
             <Route path="/agency-settings" element={<AgencySettings />} />
             <Route path="/admin" element={isSuperAdmin ? <AdminPanel /> : <Navigate to="/" replace />} />

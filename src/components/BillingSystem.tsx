@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -42,13 +43,17 @@ export function numberToIndianWords(num: number): string {
 
 export default function BillingSystem() {
   const { activeAgency, activeAtMaster, updateAgency } = useAgency();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const params = useParams<{ mrNo?: string }>();
+  const navigate = useNavigate();
+
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
 
-  // Tab State: 'generator' | 'sent'
+  // Tab State: 'generator' | 'sent' | 'payments'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'payments'>('generator');
 
   // Filters
@@ -180,6 +185,14 @@ export default function BillingSystem() {
     return groups;
   }, [jobs]);
 
+  // Handle URL route or query param (e.g., /bills/:mrNo or /bills?mr=MR-101)
+  useEffect(() => {
+    const urlMr = params.mrNo || searchParams.get('mr') || searchParams.get('mrNo');
+    if (urlMr && jobs.length > 0 && selectedMrNo !== urlMr) {
+      handleSelectMr(urlMr);
+    }
+  }, [params.mrNo, searchParams, jobs.length]);
+
   // Unsent bills count for stage tab
   const unsentBillCount = useMemo(() => {
     return Object.keys(mrGroups).filter(mr => {
@@ -209,15 +222,34 @@ export default function BillingSystem() {
     }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [mrGroups, searchQuery, selectedDivision, billTypeFilter]);
 
-  // Selected DELIVERED jobs for the active bill
+  // Selected jobs for the active bill (Resilient matching)
   const selectedJobsData = useMemo(() => {
     if (!selectedMrNo) return [];
     const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
-    return mrJobs.filter(j => {
-      if (j.status !== 'Dispatched') return false; // Must be delivered/dispatched
+    if (mrJobs.length === 0) return [];
+
+    // Filter by type (repairable vs scrap)
+    const matchingTypeJobs = mrJobs.filter(j => {
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
-    }).sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
+    });
+
+    // Check delivered / dispatched / billed / sent / paid jobs
+    const deliveredOrBilled = matchingTypeJobs.filter(j => 
+      j.status === 'Dispatched' || 
+      j.challanNo || 
+      j.deliveryDate || 
+      j.billNo || 
+      j.billSentDate || 
+      j.paymentStatus === 'Paid'
+    );
+
+    // If delivered/billed jobs exist, use them. Otherwise fallback to all matching jobs in this MR
+    const targetList = deliveredOrBilled.length > 0 
+      ? deliveredOrBilled 
+      : (matchingTypeJobs.length > 0 ? matchingTypeJobs : mrJobs);
+
+    return [...targetList].sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
   }, [jobs, selectedMrNo, billTypeFilter]);
 
   // Selected MR pending jobs count
@@ -228,7 +260,7 @@ export default function BillingSystem() {
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     });
-    return targetJobs.filter(j => j.status !== 'Dispatched').length;
+    return targetJobs.filter(j => j.status !== 'Dispatched' && !j.challanNo && !j.deliveryDate).length;
   }, [jobs, selectedMrNo, billTypeFilter]);
 
   // Selected MR Division Name
@@ -264,22 +296,41 @@ export default function BillingSystem() {
     }
   }, [activeAgency, currentDivision]);
 
-  // Set default bill metadata when an MR is picked
+  // Set bill metadata when an MR is picked
   const handleSelectMr = (mr: string) => {
+    if (!mr) return;
     setSelectedMrNo(mr);
     setCustomOilUptoDate('');
     const mrJobs = jobs.filter(j => j.mrNo === mr);
+    const scrapCount = mrJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+    const repairableCount = mrJobs.length - scrapCount;
+    if (scrapCount > 0 && repairableCount === 0) {
+      setBillTypeFilter('scrap');
+    } else if (repairableCount > 0) {
+      setBillTypeFilter('repairable');
+    }
+
     const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
-    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052';
+    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || activeAgency?.atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052';
     
-    setBillNo(`HE/T-${String(Math.floor(Math.random() * 90 + 10))}/26-27`);
-    setBillDate(new Date().toISOString().split('T')[0]);
-    setApprNo(orderNum);
-    setApprDate('02.03.2026');
-    setDivisionGstin(activeAgency?.discomGstin || '24AAACU6551F1ZI');
-    setDivisionPan(activeAgency?.discomPan || 'AAACU6551F');
+    // Check if bill details were already recorded on jobs in this MR
+    const savedJobWithBill = mrJobs.find(j => j.billNo);
+    const savedJobWithDate = mrJobs.find(j => j.billSentDate || j.billDate);
+    const savedJobWithAppr = mrJobs.find(j => j.apprNo || j.orderNo);
+    const savedJobWithApprDate = mrJobs.find(j => j.apprDate || j.orderDate);
+
+    const defaultBillNum = savedJobWithBill?.billNo || (activeAgency?.agencyCode ? `${activeAgency.agencyCode}/${new Date().getFullYear()}/${mr}` : `BILL/${mr}`);
+    const defaultBillDate = savedJobWithDate?.billSentDate || savedJobWithDate?.billDate || new Date().toISOString().split('T')[0];
+
+    setBillNo(defaultBillNum);
+    setBillDate(defaultBillDate);
+    setApprNo(savedJobWithAppr?.apprNo || savedJobWithAppr?.orderNo || orderNum);
+    setApprDate(savedJobWithApprDate?.apprDate || savedJobWithApprDate?.orderDate || '02.03.2026');
+    setDivisionGstin(mrJobs[0]?.divisionGstin || activeAgency?.discomGstin || '24AAACU6551F1ZI');
+    setDivisionPan(mrJobs[0]?.divisionPan || activeAgency?.discomPan || 'AAACU6551F');
     setServiceSacCode(activeAgency?.serviceSacCode || '998719');
     setForwardingTo(getBillDivisionRecipient(activeAgency, div));
+    setForwardingCc(activeAgency?.billCcTemplate || '');
   };
 
   const handleGenerateClick = (mr: string) => {
@@ -288,11 +339,17 @@ export default function BillingSystem() {
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     });
-    const delJobs = targetJobs.filter(j => j.status === 'Dispatched');
-    const pendJobs = targetJobs.filter(j => j.status !== 'Dispatched');
+    const delJobs = targetJobs.filter(j => j.status === 'Dispatched' || j.challanNo || j.deliveryDate);
+    const pendJobs = targetJobs.filter(j => j.status !== 'Dispatched' && !j.challanNo && !j.deliveryDate);
 
-    if (delJobs.length === 0) {
-      alert(`No delivered transformers found for MR ${mr}. Please create delivery challans and dispatch jobs first.`);
+    if (delJobs.length === 0 && pendJobs.length > 0) {
+      setPendingAlertModal({
+        isOpen: true,
+        mrNo: mr,
+        totalCount: targetJobs.length,
+        deliveredCount: 0,
+        pendingCount: pendJobs.length,
+      });
       return;
     }
 
@@ -1979,10 +2036,21 @@ export default function BillingSystem() {
                 <FileSpreadsheet className="w-4 h-4 mr-1.5 shrink-0" /> Excel
               </button>
               <button
-                onClick={() => setSelectedMrNo(null)}
-                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3 py-2 rounded-lg transition-colors"
+                onClick={() => {
+                  setSelectedMrNo(null);
+                  if (searchParams.has('mr') || searchParams.has('mrNo')) {
+                    searchParams.delete('mr');
+                    searchParams.delete('mrNo');
+                    setSearchParams(searchParams);
+                  }
+                  if (params.mrNo) {
+                    navigate('/bills', { replace: true });
+                  }
+                }}
+                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider text-slate-300 hover:text-white border border-slate-700 px-3 py-2 rounded-lg transition-colors cursor-pointer"
+                title="Return to Bill List & Stage Overview"
               >
-                <ArrowLeft className="w-4 h-4 mr-1 shrink-0" /> Change MR
+                <ArrowLeft className="w-4 h-4 mr-1 shrink-0" /> Back to Bill List
               </button>
             </div>
           </div>

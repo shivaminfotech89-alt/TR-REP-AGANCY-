@@ -13,6 +13,7 @@ import { PrintableA4Page } from './LetterheadHeader';
 interface Job {
   id: string;
   jobNo: string;
+  serialNo?: string;
   mrNo: string;
   dateOfIssue?: string;
   mrDate?: string;
@@ -22,8 +23,13 @@ interface Job {
   repairType: string;
   status: string;
   division?: string;
+  externalInspectionDate?: string;
+  internalInspectionDate?: string;
+  starRating?: number;
+  ratingLevel?: string;
   testingDetails?: TestingData;
   testingDate?: string;
+  isClosed?: boolean;
 }
 
 interface TestingData {
@@ -259,11 +265,12 @@ export default function TestingReport() {
 
     const wsData: any[][] = [];
     wsData.push(['TESTING REPORT - ' + (activeAgency?.name || 'IDEAL ENGINEERING CO.')]);
-    wsData.push(['Date: ' + new Date().toLocaleDateString()]);
+    wsData.push(['Export Date: ' + new Date().toLocaleDateString()]);
     wsData.push([]);
 
     wsData.push([
-      'S.N.', 'Job No', 'MR No', 'MR Date', 'KVA', 'Make', 'Repair Type',
+      'S.N.', 'Job No', 'Trans S.No', 'MR No', 'MR Date', 'Division', 'KVA', 'Make', 'Repair Type',
+      'Ext. Insp Date', 'Int. Insp Date', 'Testing Date',
       'No Load Volts', 'Excit Curr', 'No Load Loss', 'Full Load Curr',
       'Imp Volts', 'Load Loss', 'Neut Curr', 'HV Test', 'DVDF Test',
       'Insulation Res', 'Oil BDV', 'Ratio Test', '% Impedance', 'Remarks'
@@ -272,14 +279,23 @@ export default function TestingReport() {
     jobsToExport.forEach((job, idx) => {
       const data = job.testingDetails || defaultTestingData;
       const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
+      const extDateStr = job.externalInspectionDate ? formatDDMMYYYY(job.externalInspectionDate) : '-';
+      const intDateStr = job.internalInspectionDate ? formatDDMMYYYY(job.internalInspectionDate) : '-';
+      const testDateStr = job.testingDate ? formatDDMMYYYY(job.testingDate) : '-';
+
       wsData.push([
         idx + 1,
         job.jobNo,
+        job.serialNo || '-',
         job.mrNo,
         mrDateStr,
+        job.division || '-',
         job.capacityKva,
         job.make,
         job.repairType || '-',
+        extDateStr,
+        intDateStr,
+        testDateStr,
         data.noLoadVoltage || '',
         data.excitationCurrent || '',
         data.noLoadLoss || '',
@@ -390,20 +406,22 @@ export default function TestingReport() {
                     <table className="w-full border-collapse border border-black text-[8px] text-center">
                       <thead>
                         <tr className="bg-slate-100 print:bg-transparent">
-                          <th rowSpan={2} className="border border-black p-0.5 w-6">Sr.</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-16">Division</th>
-                          <th rowSpan={2} className="border border-black p-0.5 min-w-[70px]">Job No & MR</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-10">KVA</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-10">Type</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-5">Sr.</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-14">Division</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[65px]">Job No & S.No</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[60px]">MR No & Date</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-9">KVA</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-9">Type</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[55px]">Insp. Dates (Ext/Int)</th>
                           <th colSpan={3} className="border border-black p-0.5">No Load Losses (Rated Volt)</th>
                           <th colSpan={4} className="border border-black p-0.5">Full Load Losses (100% Load)</th>
-                          <th rowSpan={2} className="border border-black p-0.5 min-w-[65px]">HV/LV Withstand (HV:21KV/LV:3KV)</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-10">DVDF</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-12">IR Value</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-10">Oil BDV</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-10">Ratio</th>
-                          <th rowSpan={2} className="border border-black p-0.5 w-10">%Imp</th>
-                          <th rowSpan={2} className="border border-black p-0.5 min-w-[50px]">Remarks</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[60px]">HV/LV Withstand (HV:21KV/LV:3KV)</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-9">DVDF</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-11">IR Value</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-9">Oil BDV</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-9">Ratio</th>
+                          <th rowSpan={2} className="border border-black p-0.5 w-9">%Imp</th>
+                          <th rowSpan={2} className="border border-black p-0.5 min-w-[45px]">Remarks</th>
                         </tr>
                         <tr className="bg-slate-100 print:bg-transparent text-[7.5px]">
                           <th className="border border-black p-0.5 font-normal">LV Volts</th>
@@ -419,16 +437,29 @@ export default function TestingReport() {
                         {chunk.map((job, cIdx) => {
                           const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
                           const data = job.testingDetails || defaultTestingData;
+                          const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
+                          const extDateStr = job.externalInspectionDate ? formatDDMMYYYY(job.externalInspectionDate) : '-';
+                          const intDateStr = job.internalInspectionDate ? formatDDMMYYYY(job.internalInspectionDate) : '-';
                           return (
                             <tr key={job.id} className="border border-black h-6.5">
                               <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
-                              <td className="border border-black p-0.5 font-bold uppercase truncate max-w-[65px]">{job.division || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase truncate max-w-[60px]">{job.division || '-'}</td>
                               <td className="border border-black p-0.5 font-bold uppercase text-left pl-1">
                                 <div className="leading-tight">{job.jobNo}</div>
-                                <div className="text-[6.5px] font-mono font-normal text-slate-700 leading-tight">MR:{job.mrNo || '-'}</div>
+                                {job.serialNo && (
+                                  <div className="text-[6.5px] font-mono font-medium text-slate-600 leading-tight">SN: {job.serialNo}</div>
+                                )}
+                              </td>
+                              <td className="border border-black p-0.5 text-left pl-1">
+                                <div className="text-[7.5px] font-mono font-bold leading-tight">{job.mrNo || '-'}</div>
+                                <div className="text-[6.5px] font-mono text-slate-600 leading-tight">Dt: {mrDateStr}</div>
                               </td>
                               <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
                               <td className="border border-black p-0.5 font-bold uppercase">{job.repairType || 'GP'}</td>
+                              <td className="border border-black p-0.5 text-[7px] text-center font-mono leading-tight">
+                                <div>E: {extDateStr}</div>
+                                <div>I: {intDateStr}</div>
+                              </td>
                               
                               <td className="border border-black p-0.5">{data.noLoadVoltage || '433V'}</td>
                               <td className="border border-black p-0.5 font-bold">{data.excitationCurrent}</td>
@@ -569,54 +600,97 @@ export default function TestingReport() {
           
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-slate-100/70 border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-3 border-b border-slate-200 w-12">
-                    <button onClick={handleToggleAll} className="text-slate-400 hover:text-blue-600">
+                  <th className="px-3 py-3 w-10 text-center">
+                    <button onClick={handleToggleAll} className="text-slate-400 hover:text-blue-600 cursor-pointer">
                       {selectedJobIds.size === filteredJobs.length && filteredJobs.length > 0 ? (
-                        <CheckSquare className="w-5 h-5 text-blue-600" />
+                        <CheckSquare className="w-4 h-4 text-blue-600" />
                       ) : (
-                        <Square className="w-5 h-5" />
+                        <Square className="w-4 h-4" />
                       )}
                     </button>
                   </th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Job No</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Capacity</th>
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Make / MR</th>
+                  <th className="px-2 py-3 text-center font-bold text-slate-500 uppercase tracking-wider text-[10px] w-8">#</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px]">Job No & S.No</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px]">MR No & Date</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px]">Division</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px]">Capacity</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px]">Make / Type</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px] text-center">Ext. Insp.</th>
+                  <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px] text-center">Int. Insp.</th>
                   {tab === 'Completed' && (
-                    <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Tested On</th>
+                    <th className="px-3 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px] text-center">Tested On</th>
                   )}
-                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Action</th>
+                  <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-wider text-[10px] text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredJobs.map(job => (
-                  <tr key={job.id} className={`hover:bg-slate-50 ${selectedJobIds.has(job.id) ? 'bg-blue-50/50' : ''}`}>
-                    <td className="px-4 py-3">
-                      <button onClick={() => handleToggleJob(job.id)} className="text-slate-400 hover:text-blue-600">
+                {filteredJobs.map((job, idx) => (
+                  <tr key={job.id} className={`hover:bg-slate-50 transition-colors ${selectedJobIds.has(job.id) ? 'bg-blue-50/50' : ''}`}>
+                    <td className="px-3 py-3 text-center">
+                      <button onClick={() => handleToggleJob(job.id)} className="text-slate-400 hover:text-blue-600 cursor-pointer">
                         {selectedJobIds.has(job.id) ? (
-                          <CheckSquare className="w-5 h-5 text-blue-600" />
+                          <CheckSquare className="w-4 h-4 text-blue-600" />
                         ) : (
-                          <Square className="w-5 h-5" />
+                          <Square className="w-4 h-4" />
                         )}
                       </button>
                     </td>
-                    <td className="px-4 py-3 font-mono font-bold text-slate-900">{job.jobNo}</td>
-                    <td className="px-4 py-3 text-slate-600">{job.division || '-'}</td>
-                    <td className="px-4 py-3">
-                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-widest rounded">{job.capacityKva} KVA</span>
+                    <td className="px-2 py-3 text-center font-mono font-bold text-xs text-slate-400">
+                      {idx + 1}
                     </td>
-                    <td className="px-4 py-3 text-slate-500">
-                      <div>{job.make}</div>
-                      <div className="text-xs">
-                        MR: <span className="font-mono text-slate-700 font-medium">{job.mrNo}</span>{' '}
-                        <span className="text-slate-500 font-mono">({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</span>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <div className="font-mono font-bold text-slate-900 text-sm">{job.jobNo}</div>
+                      {job.serialNo ? (
+                        <div className="text-[11px] font-mono text-slate-500">
+                          S.No: <span className="font-semibold text-slate-700">{job.serialNo}</span>
+                        </div>
+                      ) : (
+                        <div className="text-[10px] text-slate-400 italic">No S.No</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <div className="font-mono font-bold text-slate-800 text-xs">{job.mrNo}</div>
+                      <div className="text-[11px] text-slate-500 font-mono">
+                        Dt: {formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)}
                       </div>
                     </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold bg-slate-100 text-slate-700 border border-slate-200 uppercase">
+                        {job.division || '-'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 whitespace-nowrap">
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold font-mono rounded border border-blue-100">
+                        {job.capacityKva} KVA
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-600">
+                      <div className="font-medium text-slate-900">{job.make || '-'}</div>
+                      <div className="text-[11px] text-slate-500 font-semibold">{job.repairType || 'GP'}</div>
+                    </td>
+                    <td className="px-3 py-3 text-center whitespace-nowrap">
+                      {job.externalInspectionDate ? (
+                        <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded font-mono">
+                          {formatDDMMYYYY(job.externalInspectionDate)}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">-</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3 text-center whitespace-nowrap">
+                      {job.internalInspectionDate ? (
+                        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-mono">
+                          {formatDDMMYYYY(job.internalInspectionDate)}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-slate-400 italic">-</span>
+                      )}
+                    </td>
                     {tab === 'Completed' && (
-                      <td className="px-4 py-3 text-slate-600 font-mono text-xs">
-                        {job.testingDate ? formatDate(job.testingDate) : '-'}
+                      <td className="px-3 py-3 text-center text-slate-700 font-mono text-xs whitespace-nowrap font-medium">
+                        {job.testingDate ? formatDDMMYYYY(job.testingDate) : '-'}
                       </td>
                     )}
                     <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -626,9 +700,9 @@ export default function TestingReport() {
                             setSelectedJobIds(new Set([job.id]));
                             setIsFormOpen(true);
                           }}
-                          className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-blue-50 text-blue-600 hover:bg-blue-100 rounded transition-colors"
+                          className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 rounded transition-colors shadow-2xs cursor-pointer"
                         >
-                          {tab === 'Pending' ? 'Test' : 'Edit'}
+                          {tab === 'Pending' ? 'Test Job' : 'Edit Test'}
                         </button>
                         {tab === 'Completed' && (
                           <button
@@ -636,10 +710,10 @@ export default function TestingReport() {
                               setSelectedJobIds(new Set([job.id]));
                               setIsPrintOpen(true);
                             }}
-                            className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-widest bg-slate-100 text-slate-700 hover:bg-slate-200 rounded transition-colors"
+                            className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 rounded transition-colors cursor-pointer"
                             title="Print Testing Report"
                           >
-                            <Printer className="w-3 h-3 text-slate-600" />
+                            <Printer className="w-3.5 h-3.5 text-slate-600" />
                           </button>
                         )}
                       </div>
@@ -648,7 +722,7 @@ export default function TestingReport() {
                 ))}
                 {filteredJobs.length === 0 && (
                   <tr>
-                    <td colSpan={tab === 'Completed' ? 7 : 6} className="px-4 py-12 text-center text-slate-500 bg-slate-50/50">
+                    <td colSpan={tab === 'Completed' ? 11 : 10} className="px-4 py-12 text-center text-slate-500 bg-slate-50/50">
                       <Activity className="w-8 h-8 text-slate-300 mx-auto mb-3" />
                       <p>No jobs found for the selected filters.</p>
                     </td>
@@ -660,10 +734,14 @@ export default function TestingReport() {
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="bg-slate-900 border border-slate-800 p-4 rounded flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-white">
+          <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 text-white shadow-md">
             <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Bulk Testing Entry</p>
-              <p className="text-lg font-mono font-bold">{selectedJobIds.size} Job{selectedJobIds.size > 1 ? 's' : ''} Selected</p>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest bg-blue-600/30 text-blue-300 px-2 py-0.5 rounded border border-blue-500/30">
+                  Transformer Routine Testing
+                </span>
+              </div>
+              <p className="text-lg font-mono font-bold mt-1">{selectedJobIds.size} Transformer{selectedJobIds.size > 1 ? 's' : ''} Selected for Testing</p>
             </div>
             <div className="flex items-center space-x-4 w-full md:w-auto">
               <div className="flex-1 md:flex-none">
@@ -673,12 +751,12 @@ export default function TestingReport() {
                   required
                   value={testingDate}
                   onChange={(e) => setTestingDate(e.target.value)}
-                  className="w-full px-3 py-1.5 text-sm border border-slate-700 bg-slate-800 text-white rounded focus:ring-1 focus:ring-blue-500" 
+                  className="w-full px-3 py-1.5 text-sm border border-slate-700 bg-slate-800 text-white rounded-lg focus:ring-1 focus:ring-blue-500" 
                 />
               </div>
               <button 
                 onClick={closeForm}
-                className="mt-4 md:mt-0 text-[10px] font-bold uppercase tracking-widest text-blue-400 hover:text-blue-300 border border-blue-400/30 px-3 py-1.5 rounded transition-colors whitespace-nowrap"
+                className="mt-4 md:mt-0 text-xs font-bold text-slate-300 hover:text-white bg-slate-800 border border-slate-700 px-3 py-2 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
               >
                 Back to List
               </button>
@@ -711,18 +789,42 @@ export default function TestingReport() {
               );
 
               return (
-                <div key={jobId} className="bg-white p-5 rounded shadow-sm border border-slate-200">
-                  <div className="flex items-center justify-between mb-4 border-b border-slate-100 pb-3">
+                <div key={jobId} className="bg-white p-5 rounded-xl shadow-sm border border-slate-200">
+                  <div className="flex flex-wrap items-center justify-between mb-4 border-b border-slate-100 pb-3 gap-2">
                     <div>
-                      <h3 className="font-mono font-bold text-slate-900 text-lg">{job.jobNo}</h3>
-                      <p className="text-xs text-slate-500 font-mono">
+                      <div className="flex items-center gap-3">
+                        <h3 className="font-mono font-bold text-slate-900 text-lg">{job.jobNo}</h3>
+                        {job.serialNo && (
+                          <span className="text-xs font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                            S.No: {job.serialNo}
+                          </span>
+                        )}
+                        <span className="text-xs font-bold uppercase bg-slate-100 text-slate-600 px-2 py-0.5 rounded">
+                          {job.division || '-'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-500 font-mono mt-1">
                         MR: <span className="text-slate-700 font-semibold">{job.mrNo}</span>{' '}
                         <span>({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</span>
                       </p>
                     </div>
-                    <div className="text-right">
-                      <span className="px-2 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-bold uppercase tracking-widest rounded mr-2">{job.capacityKva} KVA</span>
-                      <span className="text-xs text-slate-500">{job.make}</span>
+                    <div className="flex items-center gap-2">
+                      {job.externalInspectionDate && (
+                        <span className="text-[11px] bg-blue-50 text-blue-800 font-mono px-2 py-1 rounded border border-blue-200 font-medium">
+                          Ext: {formatDDMMYYYY(job.externalInspectionDate)}
+                        </span>
+                      )}
+                      {job.internalInspectionDate && (
+                        <span className="text-[11px] bg-emerald-50 text-emerald-800 font-mono px-2 py-1 rounded border border-emerald-200 font-medium">
+                          Int: {formatDDMMYYYY(job.internalInspectionDate)}
+                        </span>
+                      )}
+                      <span className="px-2.5 py-1 bg-slate-900 text-white text-xs font-bold font-mono rounded-lg">
+                        {job.capacityKva} KVA
+                      </span>
+                      <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
+                        {job.make}
+                      </span>
                     </div>
                   </div>
 
