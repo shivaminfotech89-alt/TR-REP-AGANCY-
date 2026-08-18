@@ -1,19 +1,15 @@
 import { AtSettings } from './AtSettings';
 import React, { useState, useRef } from 'react';
 import { useAgency } from '../lib/AgencyContext';
-import { useTheme } from '../lib/ThemeContext';
 import EditAgencyForm from "./EditAgencyForm";
-import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, Palette, Check, Sparkles, Sun, Moon, Layers, ChevronDown, ChevronUp } from 'lucide-react';
+import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { db, auth } from '../lib/firebase';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
 
 export default function AgencySettings() {
-  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading } = useAgency();
-  const { currentTheme, themeId, setThemeId, availableThemes } = useTheme();
-  const [themeFilter, setThemeFilter] = useState<'all' | 'light' | 'dark'>('all');
-  const [isThemeExpanded, setIsThemeExpanded] = useState(false);
+  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading, atMasters } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAgencyName, setNewAgencyName] = useState('');
   
@@ -197,219 +193,88 @@ export default function AgencySettings() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      {/* Visual Theme Customizer Card */}
-      <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2 border-b border-slate-100">
-          <div className="flex items-center gap-2.5">
-            <div className="p-2 bg-gradient-to-br from-blue-500 to-indigo-600 text-white rounded-lg shadow-xs shrink-0">
-              <Sparkles className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900">Next-Gen Themes & Appearance</h2>
-              <p className="text-xs text-slate-500">Personalize color theme, cyber accents, and workspace canvas</p>
-            </div>
-          </div>
-          
-          <div className="flex items-center gap-2 self-end sm:self-auto">
-            <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1.5 shadow-2xs">
-              <span 
-                className="w-2.5 h-2.5 rounded-full border border-slate-300 shadow-2xs" 
-                style={{ backgroundColor: currentTheme.previewColors.accent }}
-              />
-              {currentTheme.name}
-            </span>
-
-            <button
-              type="button"
-              onClick={() => setIsThemeExpanded(!isThemeExpanded)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
-                isThemeExpanded 
-                  ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300' 
-                  : 'bg-blue-50 text-blue-700 hover:bg-blue-100 border-blue-200 shadow-2xs'
-              }`}
-            >
-              {isThemeExpanded ? (
-                <>
-                  <ChevronUp className="w-3.5 h-3.5" />
-                  <span>Minimise</span>
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                  <span>Change Theme</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-
-        {/* Minimized Theme Preview */}
-        {!isThemeExpanded && (
-          <div className="pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs text-slate-600">
-            <div className="flex items-center gap-3">
-              <div className="flex items-center -space-x-1 shadow-2xs rounded overflow-hidden border border-slate-300 shrink-0 p-0.5 bg-white">
-                <span className="w-4 h-5 rounded-l-xs border-r border-slate-200/50" style={{ backgroundColor: currentTheme.previewColors.sidebar }} />
-                <span className="w-3 h-5" style={{ backgroundColor: currentTheme.previewColors.accent }} />
-                <span className="w-3 h-5 rounded-r-xs border-l border-slate-200" style={{ backgroundColor: currentTheme.previewColors.canvas }} />
-              </div>
-              <div>
-                <span className="font-bold text-slate-900">{currentTheme.name}</span>
-                <span className="text-slate-500 ml-1.5">({currentTheme.category} • {currentTheme.themeMode === 'light' ? '☀️ Light' : '🌙 Dark'})</span>
-              </div>
-            </div>
-            <span className="text-blue-600 font-semibold cursor-pointer hover:underline text-[11px]" onClick={() => setIsThemeExpanded(true)}>
-              Click to choose from {availableThemes.length} themes
-            </span>
-          </div>
-        )}
-
-        {/* Expanded Theme Grid */}
-        {isThemeExpanded && (
-          <div className="pt-3 space-y-4">
-            {/* Theme mode filter tabs */}
-            <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200 w-fit">
-              <button
-                type="button"
-                onClick={() => setThemeFilter('all')}
-                className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
-                  themeFilter === 'all' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <Layers className="w-3 h-3" />
-                <span>All ({availableThemes.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setThemeFilter('light')}
-                className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
-                  themeFilter === 'light' ? 'bg-amber-500 text-white shadow-xs font-black' : 'text-amber-800 hover:bg-amber-100/60'
-                }`}
-              >
-                <Sun className="w-3 h-3" />
-                <span>☀️ Light ({availableThemes.filter(t => t.themeMode === 'light').length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setThemeFilter('dark')}
-                className={`px-2.5 py-1 rounded text-xs font-bold transition-all flex items-center gap-1 ${
-                  themeFilter === 'dark' ? 'bg-slate-900 text-white shadow-xs font-black' : 'text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                <Moon className="w-3 h-3" />
-                <span>🌙 Dark ({availableThemes.filter(t => t.themeMode === 'dark').length})</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {availableThemes
-                .filter(t => {
-                  if (themeFilter === 'light') return t.themeMode === 'light';
-                  if (themeFilter === 'dark') return t.themeMode === 'dark';
-                  return true;
-                })
-                .map(t => {
-                const isSelected = t.id === themeId;
-                const isLight = t.themeMode === 'light';
-                return (
-                  <div
-                    key={t.id}
-                    onClick={() => setThemeId(t.id)}
-                    className={`p-3 rounded-lg border-2 cursor-pointer transition-all flex items-center justify-between ${
-                      isSelected 
-                        ? 'border-blue-600 bg-blue-50/50 shadow-xs ring-1 ring-blue-600/30' 
-                        : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white'
-                    }`}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div className="flex items-center -space-x-1 shadow-2xs rounded overflow-hidden border border-slate-300 shrink-0 p-0.5 bg-white">
-                        <span className="w-4 h-5 rounded-l-xs border-r border-slate-200/50" style={{ backgroundColor: t.previewColors.sidebar }} />
-                        <span className="w-3 h-5" style={{ backgroundColor: t.previewColors.accent }} />
-                        <span className="w-3 h-5 rounded-r-xs border-l border-slate-200" style={{ backgroundColor: t.previewColors.canvas }} />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-1.5">
-                          <span className="block text-xs font-bold text-slate-900 truncate">{t.name}</span>
-                          {isLight ? (
-                            <Sun className="w-2.5 h-2.5 text-amber-500 shrink-0" />
-                          ) : (
-                            <Moon className="w-2.5 h-2.5 text-slate-500 shrink-0" />
-                          )}
-                          {t.tag && (
-                            <span 
-                              className="text-[8px] font-black px-1 py-0.2 rounded uppercase"
-                              style={{
-                                backgroundColor: `${t.previewColors.accent}20`,
-                                color: t.previewColors.accent
-                              }}
-                            >
-                              {t.tag}
-                            </span>
-                          )}
-                        </div>
-                        <span className="block text-[10px] text-slate-500 truncate">{t.category}</span>
-                      </div>
-                    </div>
-                    {isSelected && (
-                      <Check className="w-4 h-4 text-blue-600 stroke-[3] shrink-0 ml-1" />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="flex justify-end pt-2">
-              <button
-                type="button"
-                onClick={() => setIsThemeExpanded(false)}
-                className="px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                Minimise Themes Table
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-
       <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
         <h2 className="text-lg font-bold text-slate-900 mb-4">Switch Agency</h2>
         {agencies.length === 0 ? (
           <p className="text-sm text-slate-500 mb-4">No agencies found. Please create one.</p>
         ) : (
           <div className="space-y-3">
-            {agencies.map(agency => (
-              <div 
-                key={agency.id} 
-                onClick={() => setActiveAgencyId(agency.id)}
-                className={`p-4 rounded-xl border cursor-pointer flex items-center justify-between transition-colors ${activeAgency?.id === agency.id ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500' : 'bg-slate-50 border-slate-200 hover:border-blue-300'}`}
-              >
-                <div className="flex items-center space-x-3">
-                  <Building className={`w-5 h-5 ${activeAgency?.id === agency.id ? 'text-blue-600' : 'text-slate-400'}`} />
-                  <span className="font-bold text-slate-700">{agency.name}</span>
+            {agencies.map(agency => {
+              const isActive = activeAgency?.id === agency.id;
+              const divisionCount = Object.keys(agency.prefixes || {}).length;
+              const atCount = atMasters.filter(at => at.agencyId === agency.id).length;
+              const warnings: string[] = [];
+              if (divisionCount === 0) warnings.push('No divisions');
+              if (atCount === 0) warnings.push('No AT period');
+              if (!agency.gstin) warnings.push('No GSTIN');
+
+              return (
+                <div
+                  key={agency.id}
+                  onClick={() => setActiveAgencyId(agency.id)}
+                  className={`group relative p-4 rounded-xl border border-l-4 cursor-pointer transition-colors ${
+                    isActive
+                      ? 'border-l-blue-600 border-blue-200 bg-blue-50/70'
+                      : 'border-l-transparent border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50/40'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <Building className={`w-5 h-5 mt-0.5 shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-bold text-slate-900 truncate">{agency.name}</h3>
+                          {isActive && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white bg-blue-600 px-2 py-0.5 rounded-full shrink-0">
+                              <CheckCircle2 className="w-3 h-3" />
+                              Currently open
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-500 flex-wrap">
+                          <span className="flex items-center gap-1">
+                            <Layers className="w-3.5 h-3.5" />
+                            {divisionCount} division{divisionCount === 1 ? '' : 's'}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <FileText className="w-3.5 h-3.5" />
+                            {atCount} AT{atCount === 1 ? '' : 's'}
+                          </span>
+                        </div>
+
+                        {(agency.gstin || agency.discomName) && (
+                          <div className="mt-1.5 text-[11px] text-slate-500 space-y-0.5">
+                            {agency.gstin && <div>GSTIN: {agency.gstin}</div>}
+                            {agency.discomName && <div className="truncate">{agency.discomName}</div>}
+                          </div>
+                        )}
+
+                        {warnings.length > 0 && (
+                          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                            {warnings.map(w => (
+                              <span key={w} className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
+                                <AlertTriangle className="w-3 h-3" />
+                                {w}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {!isActive && (
+                      <span className="hidden group-hover:flex items-center gap-1 text-xs font-bold text-blue-600 shrink-0 self-center whitespace-nowrap">
+                        Switch to this <ArrowRight className="w-3.5 h-3.5" />
+                      </span>
+                    )}
+                  </div>
                 </div>
-                {activeAgency?.id === agency.id && <span className="text-[10px] font-bold uppercase tracking-widest text-blue-600 bg-blue-100 px-2 py-1 rounded">Active</span>}
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="mt-6 pt-4 border-t border-slate-200">
-           <button onClick={handleMigrateData} disabled={migrating} className="flex items-center space-x-2 text-sm text-slate-600 hover:text-blue-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors">
-              <DatabaseZap className="w-4 h-4" />
-              <span>{migrating ? 'Moving data...' : 'Move ALL My Data To Active Agency'}</span>
-           </button>
-           <p className="text-[10px] text-slate-400 mt-2">Use this if your older jobs are not showing up in the current agency.</p>
-        </div>
-        
-        {activeAgency && (
-          <div className="mt-8 border-t border-slate-200 pt-6">
-            <h3 className="text-md font-bold text-slate-900 mb-4">Edit Active Agency: {activeAgency.name}</h3>
-            <EditAgencyForm agency={activeAgency} />
+              );
+            })}
           </div>
         )}
       </div>
-      
-      {activeAgency && (
-        <AtSettings />
-      )}
 
       <div className="bg-white p-6 rounded shadow-sm border border-slate-200">
         <div className="flex justify-between items-center mb-4">
@@ -430,43 +295,60 @@ export default function AgencySettings() {
 
             <div className="border-t border-slate-200 pt-6 mt-6">
               <h3 className="text-sm font-bold uppercase tracking-widest text-slate-800 mb-4">Company Profile (Billing Details)</h3>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Company Address</label>
-                  <textarea value={address} onChange={e => setAddress(e.target.value)} rows={3} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Full address" />
-                </div>
+
+              <div className="space-y-5">
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">GSTIN</label>
-                  <input type="text" value={gstin} onChange={e => setGstin(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="GST Number" />
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">Identity</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="md:col-span-2">
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Company Address</label>
+                      <textarea value={address} onChange={e => setAddress(e.target.value)} rows={3} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Full address" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Email</label>
+                      <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Email Address" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Phone Number</label>
+                      <input type="text" value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Phone Number" />
+                    </div>
+                  </div>
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">PAN Number</label>
-                  <input type="text" value={pan} onChange={e => setPan(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="PAN Number" />
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tax details</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">GSTIN</label>
+                      <input type="text" value={gstin} onChange={e => setGstin(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="GST Number" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">PAN Number</label>
+                      <input type="text" value={pan} onChange={e => setPan(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="PAN Number" />
+                    </div>
+                  </div>
                 </div>
+
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Bank Name</label>
-                  <input type="text" value={bankName} onChange={e => setBankName(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Bank Name" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Account Number</label>
-                  <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Account Number" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">IFSC Code</label>
-                  <input type="text" value={ifscCode} onChange={e => setIfscCode(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="IFSC Code" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Email</label>
-                  <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Email Address" />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Phone Number</label>
-                  <input type="text" value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Phone Number" />
+                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">Bank details</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Bank Name</label>
+                      <input type="text" value={bankName} onChange={e => setBankName(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Bank Name" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Account Number</label>
+                      <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Account Number" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">IFSC Code</label>
+                      <input type="text" value={ifscCode} onChange={e => setIfscCode(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="IFSC Code" />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
-            
+
             <div className="pt-2">
               <LetterheadCalibrator
                 letterheadUrl={letterheadBase64}
@@ -566,6 +448,27 @@ export default function AgencySettings() {
             </div>
           </form>
         )}
+      </div>
+
+      {activeAgency && (
+        <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+          <h3 className="text-md font-bold text-slate-900 mb-4">Edit Active Agency: {activeAgency.name}</h3>
+          <EditAgencyForm agency={activeAgency} />
+        </div>
+      )}
+
+      {activeAgency && (
+        <AtSettings />
+      )}
+
+      <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+        <h2 className="text-lg font-bold text-slate-900 mb-1">Data Tools</h2>
+        <p className="text-xs text-slate-500 mb-4">Rarely-needed maintenance actions.</p>
+        <button onClick={handleMigrateData} disabled={migrating} className="flex items-center space-x-2 text-sm text-slate-600 hover:text-blue-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors">
+          <DatabaseZap className="w-4 h-4" />
+          <span>{migrating ? 'Moving data...' : 'Move ALL My Data To Active Agency'}</span>
+        </button>
+        <p className="text-[10px] text-slate-400 mt-2">Use this if your older jobs are not showing up in the current agency.</p>
       </div>
     </div>
   );
