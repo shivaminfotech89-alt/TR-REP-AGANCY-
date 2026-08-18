@@ -486,7 +486,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   }, [auth.currentUser]);
 
   const activeAgency = agencies.find(a => a.id === activeAgencyId) || null;
-  const activeAtMaster = atMasters.find(a => a.id === activeAtMasterId) || null;
+  const activeAtMaster = atMasters.find(a => a.id === activeAtMasterId && a.agencyId === activeAgencyId) || null;
 
   const isSuperAdmin = auth.currentUser?.email?.toLowerCase().trim() === 'shivaminfotech89@gmail.com';
 
