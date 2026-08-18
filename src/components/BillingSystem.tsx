@@ -343,12 +343,15 @@ export default function BillingSystem() {
   };
 
   // Billing Financial Calculations
+  const cgstRate = typeof activeAgency?.cgstPercent === 'number' ? activeAgency.cgstPercent : 9;
+  const sgstRate = typeof activeAgency?.sgstPercent === 'number' ? activeAgency.sgstPercent : 9;
+
   const subTotal = useMemo(() => {
     return selectedJobsData.reduce((acc, job) => acc + calculateJobTotal(job), 0);
   }, [selectedJobsData, masterData]);
 
-  const cgst = useMemo(() => subTotal * 0.09, [subTotal]);
-  const sgst = useMemo(() => subTotal * 0.09, [subTotal]);
+  const cgst = useMemo(() => subTotal * (cgstRate / 100), [subTotal, cgstRate]);
+  const sgst = useMemo(() => subTotal * (sgstRate / 100), [subTotal, sgstRate]);
   const grandTotal = useMemo(() => subTotal + cgst + sgst, [subTotal, cgst, sgst]);
 
   // Oil Data Calculations for Oil Account Document (Page 4)
@@ -2315,7 +2318,7 @@ export default function BillingSystem() {
                       <div>
                         <span className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-0.5">Billed To (Client / Consignee):</span>
                         <p className="font-bold uppercase text-[9px]">{activeAgency?.divisionAuthority || 'EXECUTIVE ENGINEER (O&M)'}</p>
-                        <p className="font-bold text-black">{activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}</p>
+                        <p className="font-bold text-black">{activeAgency?.discomName || 'DISCOM'}</p>
                         <p className="text-[9px]">Division Office: <strong className="font-bold">{currentDivision}</strong></p>
                         {activeAgency?.discomAddress && (
                           <p className="text-[8px] text-slate-700 mt-0.5 leading-tight">{activeAgency.discomAddress}</p>
@@ -2323,15 +2326,15 @@ export default function BillingSystem() {
                       </div>
                       <div className="border-l border-slate-300 pl-2 flex flex-col justify-between space-y-0.5">
                         <div>
-                          <div><span className="font-bold">DISCOM GSTIN:</span> <strong className="font-mono">{divisionGstin || activeAgency?.discomGstin || '24AAACU6551F1ZI'}</strong></div>
-                          <div><span className="font-bold">DISCOM PAN:</span> <strong className="font-mono">{divisionPan || activeAgency?.discomPan || 'AAACU6551F'}</strong></div>
+                          <div><span className="font-bold">DISCOM GSTIN:</span> <strong className="font-mono">{divisionGstin || activeAgency?.discomGstin || '-'}</strong></div>
+                          <div><span className="font-bold">DISCOM PAN:</span> <strong className="font-mono">{divisionPan || activeAgency?.discomPan || '-'}</strong></div>
                           <div className="flex justify-between text-[8px] text-slate-700 mt-0.5">
                             <span><strong>State:</strong> {activeAgency?.discomState || 'Gujarat'}</span>
                             <span><strong>State Code:</strong> {activeAgency?.discomStateCode || '24'}</span>
                           </div>
                         </div>
                         <div className="text-[8px]">
-                          <span className="font-bold">SAC:</span> Maintenance of Transformers <strong className="font-mono">(998719)</strong>
+                          <span className="font-bold">SAC:</span> Maintenance of Transformers <strong className="font-mono">({serviceSacCode || '998719'})</strong>
                         </div>
                       </div>
                     </div>
@@ -2382,11 +2385,11 @@ export default function BillingSystem() {
                         <td className="p-1 text-right font-mono">{subTotal.toFixed(2)}</td>
                       </tr>
                       <tr className="font-bold border-t border-black">
-                        <td colSpan={9} className="p-1 border-r border-black text-right">CGST (9.00%):</td>
+                        <td colSpan={9} className="p-1 border-r border-black text-right">CGST ({cgstRate.toFixed(2)}%):</td>
                         <td className="p-1 text-right font-mono">{cgst.toFixed(2)}</td>
                       </tr>
                       <tr className="font-bold border-t border-black">
-                        <td colSpan={9} className="p-1 border-r border-black text-right">SGST (9.00%):</td>
+                        <td colSpan={9} className="p-1 border-r border-black text-right">SGST ({sgstRate.toFixed(2)}%):</td>
                         <td className="p-1 text-right font-mono">{sgst.toFixed(2)}</td>
                       </tr>
                       <tr className="font-black border-t border-black text-[10px]">

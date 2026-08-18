@@ -54,7 +54,7 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
       <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider">Job Allotment Usage ({atMaster.atNumber})</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {divisions.map(div => {
-          const allot = activeAgency.allotments?.[div] || {};
+          const allot = atMaster?.allotments?.[div] || activeAtMaster?.allotments?.[div] || activeAgency.allotments?.[div] || {};
           const cTypes = ['CRGO', 'Amorphous', 'Wound Core'];
           const hasAny = cTypes.some(c => allot[c] > 0);
           

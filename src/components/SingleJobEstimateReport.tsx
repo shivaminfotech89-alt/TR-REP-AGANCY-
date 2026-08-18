@@ -70,25 +70,25 @@ export function buildSingleJobEstimateData(
 
   // 1. Name Plating
   const npRate = getItemRate('16', 143);
-  const npQtyStr = (externalData?.namePlate === 'N' || externalData?.namePlate === 'NR' || externalData?.namePlate === '0') ? 'NR' : 'R';
-  const npAmt = npQtyStr === 'R' ? npRate : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '16', desc: 'Name Plating', unit: 'NO', qty: npQtyStr, numQty: npQtyStr === 'R' ? 1 : 0, rate: npRate, amt: npAmt });
+  const npQtyStr = (externalData?.namePlate === 'N' || externalData?.namePlate === '0' || externalData?.namePlate === '-') ? 'N' : 'Y';
+  const npAmt = npQtyStr === 'Y' ? npRate : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '16', desc: 'Name Plating', unit: 'NO', qty: npQtyStr, numQty: npQtyStr === 'Y' ? 1 : 0, rate: npRate, amt: npAmt });
 
   // 2. Spray painting
   const spRate = getItemRate('2b', 149);
-  const spQtyStr = (externalData?.outsidePaint === 'N' || externalData?.outsidePaint === 'NR') ? 'NR' : 'R';
-  const spAmt = spQtyStr === 'R' ? spRate : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '2b', desc: 'Spray painting', unit: 'NO', qty: spQtyStr, numQty: spQtyStr === 'R' ? 1 : 0, rate: spRate, amt: spAmt });
+  const spQtyStr = (externalData?.outsidePaint === 'N' || externalData?.outsidePaint === '0') ? 'N' : 'Y';
+  const spAmt = spQtyStr === 'Y' ? spRate : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '2b', desc: 'Spray painting', unit: 'NO', qty: spQtyStr, numQty: spQtyStr === 'Y' ? 1 : 0, rate: spRate, amt: spAmt });
 
   // 3. Conservator Tank Replacement
   const ctRate = getItemRate('4', 54);
   const ctQty = Number(externalData?.damCtTank) || 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '4', desc: 'Conservator Tank Replacement', unit: 'KG', qty: ctQty.toString(), numQty: ctQty, rate: ctRate, amt: ctQty * ctRate });
+  physicalItems.push({ sr: srCounter++, itemCode: '4', desc: 'Conservator Tank Replacement', unit: 'KG', qty: ctQty > 0 ? ctQty.toString() : '0', numQty: ctQty, rate: ctRate, amt: ctQty * ctRate });
 
   // 4. Radiator Replacement
   const radRate = getItemRate('21', 1248);
   const radQty = Number(externalData?.damRadNo) || 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '21', desc: 'Radiator Replacement', unit: 'NO', qty: radQty.toString(), numQty: radQty, rate: radRate, amt: radQty * radRate });
+  physicalItems.push({ sr: srCounter++, itemCode: '21', desc: 'Radiator Replacement', unit: 'NO', qty: radQty > 0 ? radQty.toString() : '0', numQty: radQty, rate: radRate, amt: radQty * radRate });
 
   // 5. Rod Gasket
   const rodRate = getItemRate('1c', 34);
@@ -97,9 +97,9 @@ export function buildSingleJobEstimateData(
 
   // 6. M/S Bolt Nuts
   const bnRate = getItemRate('1e', 57);
-  const bnQtyStr = (externalData?.nuteBolt === 'N' || externalData?.nuteBolt === 'NR') ? 'NR' : 'R';
-  const bnAmt = bnQtyStr === 'R' ? bnRate : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '1e', desc: 'M/S Bolt Nuts', unit: 'JOB', qty: bnQtyStr, numQty: bnQtyStr === 'R' ? 1 : 0, rate: bnRate, amt: bnAmt });
+  const bnQtyStr = (externalData?.nuteBolt === 'N' || externalData?.nuteBolt === '0') ? 'N' : 'Y';
+  const bnAmt = bnQtyStr === 'Y' ? bnRate : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '1e', desc: 'M/S Bolt Nuts', unit: 'JOB', qty: bnQtyStr, numQty: bnQtyStr === 'Y' ? 1 : 0, rate: bnRate, amt: bnAmt });
 
   // 7. Top Cover Gasket
   const gaskRate = getItemRate('1b', 46);
@@ -108,15 +108,15 @@ export function buildSingleJobEstimateData(
 
   // 8. Oil Guage Glass
   const oggRate = getItemRate('5', 46);
-  const oggQtyStr = (externalData?.oilLevGls === 'N' || externalData?.oilLevGls === 'NR') ? 'NR' : 'R';
-  const oggAmt = oggQtyStr === 'R' ? oggRate : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '5', desc: 'Oil Guage Glass', unit: 'NO', qty: oggQtyStr, numQty: oggQtyStr === 'R' ? 1 : 0, rate: oggRate, amt: oggAmt });
+  const oggQtyStr = (externalData?.oilLevGls === 'N' || externalData?.oilLevGls === '0') ? 'N' : 'Y';
+  const oggAmt = oggQtyStr === 'Y' ? oggRate : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '5', desc: 'Oil Guage Glass', unit: 'NO', qty: oggQtyStr, numQty: oggQtyStr === 'Y' ? 1 : 0, rate: oggRate, amt: oggAmt });
 
   // 9. Breather
   const brRate = getItemRate('6', 309);
-  const brQtyStr = (externalData?.breather === 'Y' || externalData?.breather === 'R' || externalData?.breather === '1') ? 'R' : 'NR';
-  const brAmt = brQtyStr === 'R' ? brRate : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '6', desc: 'Breather', unit: 'NO', qty: brQtyStr, numQty: brQtyStr === 'R' ? 1 : 0, rate: brRate, amt: brAmt });
+  const brQtyStr = (externalData?.breather === 'N' || externalData?.breather === '0') ? 'N' : 'Y';
+  const brAmt = brQtyStr === 'Y' ? brRate : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '6', desc: 'Breather', unit: 'NO', qty: brQtyStr, numQty: brQtyStr === 'Y' ? 1 : 0, rate: brRate, amt: brAmt });
 
   // 10. HV Bushing
   const hvbRate = getItemRate('8', 176);
@@ -150,9 +150,10 @@ export function buildSingleJobEstimateData(
 
   // 16. Sealed to Bolted
   const stbRate = getItemRate('17', 1511);
-  const stbQtyStr = (externalData?.sealType === 'B' || externalData?.sealType === 'Bolted') ? 'B' : 'NR';
-  const stbAmt = stbQtyStr === 'B' ? stbRate : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '17', desc: 'Sealed to Bolted', unit: 'NO', qty: stbQtyStr === 'B' ? 'B' : '0', numQty: stbQtyStr === 'B' ? 1 : 0, rate: stbRate, amt: stbAmt });
+  const stbIsBolted = (externalData?.sealType === 'B' || externalData?.sealType === 'Bolted' || externalData?.sealType === 'Y');
+  const stbQtyStr = stbIsBolted ? 'Y' : 'N';
+  const stbAmt = stbIsBolted ? stbRate : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '17', desc: 'Sealed to Bolted', unit: 'NO', qty: stbQtyStr, numQty: stbIsBolted ? 1 : 0, rate: stbRate, amt: stbAmt });
 
 
   // 2. INTERNAL ESTIMATION ITEMS
@@ -160,15 +161,15 @@ export function buildSingleJobEstimateData(
 
   // 17. Inside Painting
   const ipRate = getItemRate('3', 156);
-  const ipQtyStr = (internalData?.inPnt === 'Y' || internalData?.inPnt === 'R') ? 'R' : 'NR';
-  const ipAmt = ipQtyStr === 'R' ? ipRate : 0;
-  internalItems.push({ sr: srCounter++, itemCode: '3', desc: 'Inside Painting', unit: 'NO', qty: ipQtyStr, numQty: ipQtyStr === 'R' ? 1 : 0, rate: ipRate, amt: ipAmt });
+  const ipQtyStr = (internalData?.inPnt === 'N' || internalData?.inPnt === '0') ? 'N' : 'Y';
+  const ipAmt = ipQtyStr === 'Y' ? ipRate : 0;
+  internalItems.push({ sr: srCounter++, itemCode: '3', desc: 'Inside Painting', unit: 'NO', qty: ipQtyStr, numQty: ipQtyStr === 'Y' ? 1 : 0, rate: ipRate, amt: ipAmt });
 
   // 18. Insulating Material
   const insRate = getItemRate('1d', 286);
-  const insQtyStr = (internalData?.insula === 'N' || isScrap) ? 'NR' : 'R';
-  const insAmt = insQtyStr === 'R' ? insRate : 0;
-  internalItems.push({ sr: srCounter++, itemCode: '1d', desc: 'Insulating Material', unit: 'JOB', qty: insQtyStr, numQty: insQtyStr === 'R' ? 1 : 0, rate: insRate, amt: insAmt });
+  const insQtyStr = (internalData?.insula === 'N' || internalData?.insula === '0' || isScrap) ? 'N' : 'Y';
+  const insAmt = insQtyStr === 'Y' ? insRate : 0;
+  internalItems.push({ sr: srCounter++, itemCode: '1d', desc: 'Insulating Material', unit: 'JOB', qty: insQtyStr, numQty: insQtyStr === 'Y' ? 1 : 0, rate: insRate, amt: insAmt });
 
   // 19. Washer Ring
   const wrRate = getItemRate('15', 54);
@@ -246,24 +247,27 @@ export function buildSingleJobEstimateData(
 
   // 24. Cleaning dirty tank
   const cdtRate = getItemRate('2a', 34);
-  const cdtQty = externalData?.clnDrtyTank === 'N' ? 0 : 1;
-  labourItems.push({ sr: srCounter++, itemCode: '2a', desc: 'Cleaning dirty tank', unit: 'NO', qty: cdtQty.toString(), numQty: cdtQty, rate: cdtRate, amt: cdtQty * cdtRate });
+  const cdtQtyStr = (externalData?.clnDrtyTank === 'N' || externalData?.clnDrtyTank === '0') ? 'N' : 'Y';
+  const cdtAmt = cdtQtyStr === 'Y' ? cdtRate : 0;
+  labourItems.push({ sr: srCounter++, itemCode: '2a', desc: 'Cleaning dirty tank', unit: 'NO', qty: cdtQtyStr, numQty: cdtQtyStr === 'Y' ? 1 : 0, rate: cdtRate, amt: cdtAmt });
 
   // 25. Drying of active parts
   const dryRate = getItemRate('1f', 229);
-  const dryQty = internalData?.dc === 'N' || isScrap ? 0 : 1;
-  labourItems.push({ sr: srCounter++, itemCode: '1f', desc: 'Drying of active parts', unit: 'JOB', qty: dryQty.toString(), numQty: dryQty, rate: dryRate, amt: dryQty * dryRate });
+  const dryQtyStr = (internalData?.dc === 'N' || internalData?.dc === '0' || externalData?.dryActPart === 'N' || isScrap) ? 'N' : 'Y';
+  const dryAmt = dryQtyStr === 'Y' ? dryRate : 0;
+  labourItems.push({ sr: srCounter++, itemCode: '1f', desc: 'Drying of active parts', unit: 'JOB', qty: dryQtyStr, numQty: dryQtyStr === 'Y' ? 1 : 0, rate: dryRate, amt: dryAmt });
 
   // 26. Scrap
   const scrapRate = getItemRate('19', 0);
-  const scrapQty = isScrap ? 1 : 0;
-  labourItems.push({ sr: srCounter++, itemCode: '19', desc: 'Scrap', unit: '0', qty: scrapQty.toString(), numQty: scrapQty, rate: scrapRate, amt: scrapQty * scrapRate });
+  const scrapQtyStr = isScrap ? 'Y' : 'N';
+  const scrapAmt = isScrap ? scrapRate : 0;
+  labourItems.push({ sr: srCounter++, itemCode: '19', desc: 'Scrap', unit: '0', qty: scrapQtyStr, numQty: isScrap ? 1 : 0, rate: scrapRate, amt: scrapAmt });
 
   // 27. Testing Charge
   const testRate = getItemRate('20', 172);
-  const testQtyStr = (internalData?.tstTrn === 'N' || isScrap) ? 'NR' : 'R';
-  const testAmt = testQtyStr === 'R' ? testRate : 0;
-  labourItems.push({ sr: srCounter++, itemCode: '20', desc: 'Testing Charge', unit: 'NO', qty: testQtyStr, numQty: testQtyStr === 'R' ? 1 : 0, rate: testRate, amt: testAmt });
+  const testQtyStr = (internalData?.tstTrn === 'N' || internalData?.tstTrn === '0' || isScrap) ? 'N' : 'Y';
+  const testAmt = testQtyStr === 'Y' ? testRate : 0;
+  labourItems.push({ sr: srCounter++, itemCode: '20', desc: 'Testing Charge', unit: 'NO', qty: testQtyStr, numQty: testQtyStr === 'Y' ? 1 : 0, rate: testRate, amt: testAmt });
 
   // 28. Labour HV Coil(Aluminium)
   const lbrHvRate = getItemRate('12C', 34);
@@ -536,11 +540,11 @@ export default function SingleJobEstimateReport({
         <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
           <div className="text-left">
             <div className="h-10"></div>
-            <p className="font-bold">For U.G.V.C.L.</p>
+            <p className="font-bold">For, {agency?.discomName || 'DISCOM'}</p>
           </div>
           <div className="text-right">
             <div className="h-10"></div>
-            <p className="font-bold">For, {agency?.name || 'RAVI ELECTRIC'}</p>
+            <p className="font-bold">For, {agency?.name || 'CONTRACTOR'}</p>
           </div>
         </div>
       </div>

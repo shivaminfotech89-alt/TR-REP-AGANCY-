@@ -217,14 +217,21 @@ service cloud.firestore {
     }
 
     match /user_roles/{roleId} {
-      allow get, list: if isSignedIn();
+      allow get, list: if isSuperAdmin()
+                          || (isSignedIn() && resource.data.email == request.auth.token.email);
       allow create, update: if isSuperAdmin() && isValidUserRole(incoming());
       allow delete: if isSuperAdmin();
     }
 
-    match /system_config/{configId} {
+    match /public_config/{configId} {
       allow get, list: if isSignedIn();
-      allow create, update: if isSignedIn() && isValidSystemConfig(incoming());
+      allow create, update: if isSuperAdmin();
+      allow delete: if isSuperAdmin();
+    }
+
+    match /system_config/{configId} {
+      allow get, list: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() && isValidSystemConfig(incoming());
       allow delete: if isSuperAdmin();
     }
   }

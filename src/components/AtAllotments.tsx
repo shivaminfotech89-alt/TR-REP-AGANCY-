@@ -36,8 +36,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   // Confirmation Modal state
   const [confirmationData, setConfirmationData] = useState<AllotmentConfirmationData | null>(null);
   
-  if (!activeAgency) return null;
-  const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency.prefixes || {});
+  const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency?.prefixes || {});
   const divisions = Object.keys(currentPrefixes);
   
   React.useEffect(() => {
@@ -51,6 +50,8 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   React.useEffect(() => {
     setAllotments(at.allotments || activeAgency?.allotments || {});
   }, [at.allotments, activeAgency?.allotments]);
+
+  if (!activeAgency) return null;
 
   const getPrefixString = (divName: string, coreType: string) => {
      const prefixSource = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency.prefixes || {});
@@ -87,15 +88,12 @@ export function AtAllotments({ at }: { at: AtMaster }) {
         
         const history = [...(at.allotmentHistory || []), newRecord];
         
-        // Auto-increment the net allotment
+        // Auto-increment the net allotment on AT Master
         const updatedAllotments = JSON.parse(JSON.stringify(allotments));
         if (!updatedAllotments[letterDivision]) updatedAllotments[letterDivision] = {};
         const previousNet = updatedAllotments[letterDivision][letterCoreType] || 0;
         const newNet = previousNet + qty;
         updatedAllotments[letterDivision][letterCoreType] = newNet;
-        
-        // AUTO UPDATE IN DIVISION WITH PREFIX (Agency Settings)
-        await updateAgency(activeAgency.id, { allotments: updatedAllotments });
         
         await updateAtMaster(at.id, { 
             allotmentHistory: history,

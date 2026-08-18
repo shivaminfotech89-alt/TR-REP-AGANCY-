@@ -77,6 +77,7 @@ export interface Agency {
   estimateCcTemplate?: string; // e.g. "E. E. (O & M) DIVISION - {division}"
   billCcTemplate?: string;
 
+  divisionCircles?: Record<string, string>;
   forwardingToText?: string;
   forwardingSubject?: string;
   forwardingCcText?: string;
@@ -90,15 +91,21 @@ export interface Agency {
 
 export function getEstimateCircleRecipient(agency?: Agency | null, circleOrDivision?: string): string {
   const authority = agency?.circleAuthority || 'Superintending Engineer (O & M)';
-  const company = agency?.discomName || 'Uttar Gujarat Vij Company Ltd.';
-  const circle = agency?.circleOfficeName || circleOrDivision || 'SABARMATI';
+  const company = agency?.discomName || 'DISCOM';
+  let circle = circleOrDivision;
+  if (circleOrDivision && agency?.divisionCircles?.[circleOrDivision]) {
+    circle = agency.divisionCircles[circleOrDivision];
+  } else if (!circle) {
+    circle = agency?.circleOfficeName || 'CIRCLE OFFICE';
+  }
   return `TO, ${authority},\n${company}\nCircle Office : ${circle}`;
 }
 
 export function getEstimateCcText(agency?: Agency | null, division?: string): string {
-  const div = division || agency?.circleOfficeName || 'SABARMATI';
+  const div = division || 'DIVISION';
+  const circle = (division && agency?.divisionCircles?.[division]) || agency?.circleOfficeName || div;
   if (agency?.estimateCcTemplate && agency.estimateCcTemplate.trim()) {
-    return agency.estimateCcTemplate.replace(/{division}/gi, div).replace(/{circle}/gi, agency.circleOfficeName || div);
+    return agency.estimateCcTemplate.replace(/{division}/gi, div).replace(/{circle}/gi, circle);
   }
   if (agency?.forwardingCcText && agency.forwardingCcText.trim()) {
     return agency.forwardingCcText.replace(/{division}/gi, div);
@@ -107,9 +114,9 @@ export function getEstimateCcText(agency?: Agency | null, division?: string): st
 }
 
 export function getBillDivisionRecipient(agency?: Agency | null, division?: string): string {
-  const div = division || agency?.circleOfficeName || 'SABARMATI';
+  const div = division || 'DIVISION';
   const authority = agency?.divisionAuthority || 'The Executive Engineer ,';
-  const company = agency?.discomName || 'Uttar Gujarat Vij Company Ltd.';
+  const company = agency?.discomName || 'DISCOM';
   return `To\n${authority}\n${company}\nDivision Office : ${div}`;
 }
 
@@ -264,6 +271,7 @@ interface AgencyContextType {
   activeAgency: Agency | null;
   setActiveAgencyId: (id: string) => void;
   loading: boolean;
+  isSuperAdmin: boolean;
   globalDefaultEstimateMaster: GlobalDefaultEstimateMaster | null;
   addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<void>;
   updateAgency: (id: string, agencyData: Partial<Agency>) => Promise<void>;
@@ -302,27 +310,68 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [activeAgencyId, setActiveAgencyIdState] = useState<string | null>(localStorage.getItem('activeAgencyId') || null);
   
   const [atMasters, setAtMasters] = useState<AtMaster[]>([]);
-  const [activeAtMasterId, setActiveAtMasterIdState] = useState<string | null>(localStorage.getItem('activeAtMasterId') || null);
+  
+  const getInitialAtId = () => {
+    const agId = localStorage.getItem('activeAgencyId');
+    if (agId && localStorage.getItem(`activeAtMasterId_${agId}`)) {
+      return localStorage.getItem(`activeAtMasterId_${agId}`);
+    }
+    return localStorage.getItem('activeAtMasterId') || null;
+  };
+
+  const [activeAtMasterId, setActiveAtMasterIdState] = useState<string | null>(getInitialAtId());
   
   const [globalDefaultEstimateMaster, setGlobalDefaultEstimateMaster] = useState<GlobalDefaultEstimateMaster | null>(cachedGlobalDefaultEstimateMaster);
   const [loading, setLoading] = useState(true);
 
   const setActiveAgencyId = (id: string | null) => {
     setActiveAgencyIdState(id);
-    if (id) localStorage.setItem('activeAgencyId', id);
-    else localStorage.removeItem('activeAgencyId');
+    if (id) {
+      localStorage.setItem('activeAgencyId', id);
+      const scopedAtId = localStorage.getItem(`activeAtMasterId_${id}`);
+      if (scopedAtId) {
+        setActiveAtMasterIdState(scopedAtId);
+      } else {
+        const agencyAts = atMasters.filter(at => at.agencyId === id);
+        const activeAts = agencyAts.filter(at => at.status === 'Active');
+        const chosenAt = activeAts.length > 0 ? activeAts[0] : agencyAts[0];
+        if (chosenAt) {
+          setActiveAtMasterIdState(chosenAt.id);
+          localStorage.setItem(`activeAtMasterId_${id}`, chosenAt.id);
+        }
+      }
+    } else {
+      localStorage.removeItem('activeAgencyId');
+    }
   };
 
   const setActiveAtMasterId = (id: string | null) => {
     setActiveAtMasterIdState(id);
-    if (id) localStorage.setItem('activeAtMasterId', id);
-    else localStorage.removeItem('activeAtMasterId');
+    if (id) {
+      localStorage.setItem('activeAtMasterId', id);
+      if (activeAgencyId) {
+        localStorage.setItem(`activeAtMasterId_${activeAgencyId}`, id);
+      }
+    } else {
+      localStorage.removeItem('activeAtMasterId');
+      if (activeAgencyId) {
+        localStorage.removeItem(`activeAtMasterId_${activeAgencyId}`);
+      }
+    }
   };
 
   useEffect(() => {
     const handleStorage = (e: StorageEvent) => {
-      if (e.key === 'activeAgencyId') setActiveAgencyIdState(e.newValue);
-      if (e.key === 'activeAtMasterId') setActiveAtMasterIdState(e.newValue);
+      if (e.key === 'activeAgencyId') {
+        setActiveAgencyIdState(e.newValue);
+        if (e.newValue) {
+          const scopedAt = localStorage.getItem(`activeAtMasterId_${e.newValue}`);
+          if (scopedAt) setActiveAtMasterIdState(scopedAt);
+        }
+      }
+      if (e.key === 'activeAtMasterId' || (activeAgencyId && e.key === `activeAtMasterId_${activeAgencyId}`)) {
+        setActiveAtMasterIdState(e.newValue);
+      }
       if (e.key === 'cached_global_estimate_master' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
@@ -333,25 +382,34 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener('storage', handleStorage);
     return () => window.removeEventListener('storage', handleStorage);
-  }, []);
+  }, [activeAgencyId]);
 
   useEffect(() => {
     async function fetchData() {
       if (!auth.currentUser) return;
       try {
-        // 1. Fetch Global System Default Estimate Rates from Firestore
+        // 1. Fetch Global System Default Estimate Rates from Firestore public_config
         let fetchedGlobalMaster: GlobalDefaultEstimateMaster | null = null;
         try {
-          const globalConfigRef = doc(db, 'system_config', 'estimate_master');
-          const globalConfigSnap = await getDoc(globalConfigRef);
-          if (globalConfigSnap.exists()) {
-            fetchedGlobalMaster = globalConfigSnap.data() as GlobalDefaultEstimateMaster;
+          const publicConfigRef = doc(db, 'public_config', 'estimate_master');
+          const publicConfigSnap = await getDoc(publicConfigRef);
+          if (publicConfigSnap.exists()) {
+            fetchedGlobalMaster = publicConfigSnap.data() as GlobalDefaultEstimateMaster;
             setGlobalDefaultEstimateMaster(fetchedGlobalMaster);
             cachedGlobalDefaultEstimateMaster = fetchedGlobalMaster;
             localStorage.setItem('cached_global_estimate_master', JSON.stringify(fetchedGlobalMaster));
+          } else {
+            const globalConfigRef = doc(db, 'system_config', 'estimate_master');
+            const globalConfigSnap = await getDoc(globalConfigRef);
+            if (globalConfigSnap.exists()) {
+              fetchedGlobalMaster = globalConfigSnap.data() as GlobalDefaultEstimateMaster;
+              setGlobalDefaultEstimateMaster(fetchedGlobalMaster);
+              cachedGlobalDefaultEstimateMaster = fetchedGlobalMaster;
+              localStorage.setItem('cached_global_estimate_master', JSON.stringify(fetchedGlobalMaster));
+            }
           }
         } catch (e) {
-          console.warn('Could not fetch global system_config/estimate_master:', e);
+          console.warn('Could not fetch global public_config/estimate_master:', e);
         }
 
         // 2. Fetch Agencies
@@ -384,8 +442,10 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
         setAgencies(enrichedAgencies);
         
+        let currentActiveAgId = activeAgencyId;
         if (enrichedAgencies.length > 0 && !enrichedAgencies.find(a => a.id === activeAgencyId)) {
-          setActiveAgencyId(enrichedAgencies[0].id);
+          currentActiveAgId = enrichedAgencies[0].id;
+          setActiveAgencyId(currentActiveAgId);
         }
 
         // 3. Fetch AT Masters
@@ -394,7 +454,17 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         const fetchedAts = atSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as AtMaster));
         setAtMasters(fetchedAts);
         
-        if (fetchedAts.length > 0 && !fetchedAts.find(a => a.id === activeAtMasterId)) {
+        const targetAgId = currentActiveAgId || (enrichedAgencies[0]?.id);
+        const agencyAts = targetAgId ? fetchedAts.filter(at => at.agencyId === targetAgId) : fetchedAts;
+        const scopedStoredAt = targetAgId ? localStorage.getItem(`activeAtMasterId_${targetAgId}`) : null;
+
+        if (scopedStoredAt && agencyAts.some(at => at.id === scopedStoredAt)) {
+          setActiveAtMasterIdState(scopedStoredAt);
+        } else if (agencyAts.length > 0 && !agencyAts.find(a => a.id === activeAtMasterId)) {
+          const activeAts = agencyAts.filter(at => at.status === 'Active');
+          const chosen = activeAts.length > 0 ? activeAts[0] : agencyAts[0];
+          setActiveAtMasterId(chosen.id);
+        } else if (fetchedAts.length > 0 && !fetchedAts.find(a => a.id === activeAtMasterId)) {
           const activeAts = fetchedAts.filter(at => at.status === 'Active');
           setActiveAtMasterId(activeAts.length > 0 ? activeAts[0].id : fetchedAts[0].id);
         }
@@ -413,10 +483,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       setActiveAtMasterId(null);
       setLoading(false);
     }
-  }, [auth.currentUser, activeAgencyId, activeAtMasterId]);
+  }, [auth.currentUser]);
 
   const activeAgency = agencies.find(a => a.id === activeAgencyId) || null;
   const activeAtMaster = atMasters.find(a => a.id === activeAtMasterId) || null;
+
+  const isSuperAdmin = auth.currentUser?.email?.toLowerCase().trim() === 'shivaminfotech89@gmail.com';
 
   const saveGlobalDefaultEstimateMaster = async (payload: {
     estimateMasterCRGO?: EstimateItem[];
@@ -426,15 +498,24 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     estimateMasterCircleLimits?: EstimateItem[];
     estimateMaster?: EstimateItem[];
   }) => {
+    if (!isSuperAdmin) {
+      throw new Error('Permission denied: Only system administrators can publish global default estimate rates.');
+    }
     try {
       const globalPayload = {
         ...payload,
         updatedAt: Date.now(),
-        updatedBy: auth.currentUser?.email || auth.currentUser?.uid || 'user'
+        updatedBy: auth.currentUser?.email || auth.currentUser?.uid || 'superadmin'
       };
 
-      const globalRef = doc(db, 'system_config', 'estimate_master');
-      await setDoc(globalRef, globalPayload, { merge: true });
+      const publicRef = doc(db, 'public_config', 'estimate_master');
+      await setDoc(publicRef, globalPayload, { merge: true });
+
+      // Also mirror to system_config for backwards compatibility
+      try {
+        const globalRef = doc(db, 'system_config', 'estimate_master');
+        await setDoc(globalRef, globalPayload, { merge: true });
+      } catch (_) {}
 
       setGlobalDefaultEstimateMaster(prev => ({
         ...(prev || {}),
@@ -446,7 +527,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       };
       localStorage.setItem('cached_global_estimate_master', JSON.stringify(cachedGlobalDefaultEstimateMaster));
 
-      // Also update all user agencies in database so they reflect the new default immediately
+      // Also update all current agencies in database so they reflect the new default immediately
       if (agencies.length > 0) {
         const updatePromises = agencies.map(async (agency) => {
           const ref = doc(db, 'agencies', agency.id);
@@ -460,7 +541,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         })));
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, 'system_config/estimate_master');
+      handleFirestoreError(err, OperationType.WRITE, 'public_config');
       throw err;
     }
   };
@@ -646,7 +727,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     <AgencyContext.Provider value={{
       agencies, activeAgency, setActiveAgencyId,
       atMasters, activeAtMaster, setActiveAtMasterId,
-      loading, globalDefaultEstimateMaster, addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
+      loading, isSuperAdmin, globalDefaultEstimateMaster, addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
       saveGlobalDefaultEstimateMaster, addAtMaster, updateAtMaster,
       getNextJobNoInfo, incrementJobNoCounter, syncCountersState
     }}>

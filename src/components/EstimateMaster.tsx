@@ -10,7 +10,7 @@ import {
 } from '../lib/estimateData';
 import { 
   Edit2, Save, FileSpreadsheet, Loader2, X, ChevronDown, ChevronUp, Plus, Trash2, 
-  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText
+  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
 } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
 
@@ -227,6 +227,7 @@ export default function EstimateMaster() {
   const { 
     agencies, 
     activeAgency, 
+    isSuperAdmin,
     updateAgency, 
     updateAllAgenciesEstimateMaster, 
     saveGlobalDefaultEstimateMaster,
@@ -495,10 +496,48 @@ export default function EstimateMaster() {
     setSectionData(section, data);
   };
 
-  // Trigger Save Confirmation Prompt
+  // Direct save for active agency
+  const handleSaveSectionToActiveAgency = async (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
+    if (!activeAgency) return;
+    setIsSaving(true);
+    try {
+      const updatePayload: any = {};
+      if (section === 'CRGO') {
+        updatePayload.estimateMasterCRGO = crgoData;
+        updatePayload.estimateMaster = crgoData; // Legacy support
+      } else if (section === 'AMORPHOUS') {
+        updatePayload.estimateMasterAmorphous = amorphousData;
+      } else if (section === 'WOUND_CORE') {
+        updatePayload.estimateMasterWoundCore = woundCoreData;
+      } else if (section === 'OVERHAULING') {
+        updatePayload.estimateMasterOverhauling = overhaulingData;
+      } else if (section === 'CIRCLE_LIMITS') {
+        updatePayload.estimateMasterCircleLimits = circleLimitsData;
+      }
+
+      await updateAgency(activeAgency.id, updatePayload);
+      setEditingSection(null);
+      setPendingSaveSection(null);
+      setSyncSuccessMsg(`✓ Saved ${section} rates specifically for "${activeAgency.name}". (Other users and agencies are NOT affected).`);
+      setTimeout(() => setSyncSuccessMsg(null), 5000);
+    } catch (err) {
+      alert(`Failed to save ${section} Estimate Master data for active agency.`);
+      console.error(err);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Trigger Save
   const handleInitiateSave = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
-    setPendingSaveSection(section);
-    setSaveScope('SINGLE'); // Default to SINGLE agency so other users/agencies are not affected
+    if (!isSuperAdmin) {
+      // Regular user: directly save to current agency without affecting any other user
+      handleSaveSectionToActiveAgency(section);
+    } else {
+      // Super Admin: allow choice between saving for active agency or publishing globally
+      setPendingSaveSection(section);
+      setSaveScope('SINGLE');
+    }
   };
 
   // Direct 1-click Save for Active Agency Only (Safe & Isolated)
@@ -526,16 +565,20 @@ export default function EstimateMaster() {
     }
   };
 
-  // Execute Save based on chosen scope
+  // Execute Save based on chosen scope (Admin modal)
   const handleConfirmSaveSection = async () => {
     if (!pendingSaveSection) return;
     const section = pendingSaveSection;
+    if (saveScope !== 'ALL' || !isSuperAdmin) {
+      return handleSaveSectionToActiveAgency(section);
+    }
+
     setIsSaving(true);
     try {
       const updatePayload: any = {};
       if (section === 'CRGO') {
         updatePayload.estimateMasterCRGO = crgoData;
-        updatePayload.estimateMaster = crgoData; // Legacy support
+        updatePayload.estimateMaster = crgoData;
       } else if (section === 'AMORPHOUS') {
         updatePayload.estimateMasterAmorphous = amorphousData;
       } else if (section === 'WOUND_CORE') {
@@ -546,33 +589,28 @@ export default function EstimateMaster() {
         updatePayload.estimateMasterCircleLimits = circleLimitsData;
       }
 
-      if (saveScope === 'ALL') {
-        // Save as global system default in Firestore and across all agencies
-        await updateAllAgenciesEstimateMaster(updatePayload);
-        setSyncSuccessMsg(`✓ Successfully published ${section} rates as the GLOBAL DEFAULT for all users & agencies!`);
-      } else {
-        // Save only for the current user's active agency document
-        await updateAgency(activeAgency.id, updatePayload);
-        setSyncSuccessMsg(`✓ Saved ${section} rates specifically for "${activeAgency.name}". (Other users and agencies are NOT affected).`);
-      }
+      // Save as global system default in Firestore and across all agencies
+      await updateAllAgenciesEstimateMaster(updatePayload);
+      setSyncSuccessMsg(`✓ Successfully published ${section} rates as the GLOBAL DEFAULT for all users & agencies!`);
 
       setEditingSection(null);
       setPendingSaveSection(null);
-
-      // Clear success notification after 5 seconds
-      setTimeout(() => {
-        setSyncSuccessMsg(null);
-      }, 5000);
+      setTimeout(() => setSyncSuccessMsg(null), 5000);
     } catch (err) {
-      alert(`Failed to save ${section} Estimate Master data.`);
+      alert(`Failed to publish ${section} Estimate Master data globally.`);
       console.error(err);
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Execute full sync of all sections across all agencies and save as global default for all users
+  // Execute full sync of all sections across all agencies and save as global default for all users (Admin only)
   const handleExecuteFullSync = async () => {
+    if (!isSuperAdmin) {
+      alert('Permission Denied: Only system administrators can publish global default rates.');
+      setShowFullSyncModal(false);
+      return;
+    }
     setIsSaving(true);
     try {
       const fullPayload = {
@@ -586,7 +624,7 @@ export default function EstimateMaster() {
 
       await saveGlobalDefaultEstimateMaster(fullPayload);
       setShowFullSyncModal(false);
-      setSyncSuccessMsg(`✓ Successfully saved all CRGO, Amorphous, Wound Core, Overhauling & Circle Limits rates as the SYSTEM DEFAULT for ALL users and agencies!`);
+      setSyncSuccessMsg(`✓ Successfully published all CRGO, Amorphous, Wound Core, Overhauling & Circle Limits rates as the SYSTEM DEFAULT for ALL users and agencies!`);
       setTimeout(() => {
         setSyncSuccessMsg(null);
       }, 6000);
@@ -991,13 +1029,22 @@ export default function EstimateMaster() {
             <span className="px-2.5 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
               Active: {activeAgency.name}
             </span>
-            <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-              Global Defaults Active for All Users
-            </span>
+            {isSuperAdmin ? (
+              <span className="px-2.5 py-0.5 text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 rounded-full flex items-center gap-1">
+                <Crown className="w-3.5 h-3.5 text-purple-600" />
+                Admin: Global Rate Publishing Enabled
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full flex items-center gap-1">
+                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                Agency-Isolated Custom Pricing
+              </span>
+            )}
           </div>
           <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-            Standard tender repair and material rate master for CRGO, Amorphous, Wound Core, and Overhauling (OH) transformers. All rates entered here are saved by default for all users and agencies.
+            {isSuperAdmin 
+              ? 'Administrator Mode: Standard tender rate master for CRGO, Amorphous, Wound Core, Overhauling & Circle Limits. You can edit for your agency or publish system-wide defaults.'
+              : 'Standard tender repair and material rates for your agency. Any rates you customize here are strictly saved for your agency and will not affect any other user.'}
           </p>
         </div>
 
@@ -1021,14 +1068,17 @@ export default function EstimateMaster() {
             <Save className="w-3.5 h-3.5 mr-1.5" /> 
             Save All for {activeAgency.name}
           </button>
-          <button 
-            onClick={() => setShowFullSyncModal(true)}
-            className="flex items-center px-3.5 py-2 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 shadow-2xs transition-colors"
-            title="Publish all entered rates as system default for all users & agencies"
-          >
-            <Globe2 className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> 
-            Publish as Default for All Users
-          </button>
+          {isSuperAdmin && (
+            <button 
+              type="button"
+              onClick={() => setShowFullSyncModal(true)}
+              className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors"
+              title="Admin Only: Publish all entered rates as system default for all users & agencies"
+            >
+              <Crown className="w-3.5 h-3.5 mr-1.5 text-purple-600" /> 
+              Publish as Default for All Users
+            </button>
+          )}
           <div className="flex items-center space-x-1.5 border-l border-slate-200 pl-2">
             <button 
               onClick={handleExpandAll}

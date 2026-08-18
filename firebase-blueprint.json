@@ -190,6 +190,10 @@
     "/system_config/{configId}": {
       "schema": { "$ref": "#/entities/SystemConfig" },
       "description": "Stores system configurations."
+    },
+    "/public_config/{configId}": {
+      "schema": { "$ref": "#/entities/SystemConfig" },
+      "description": "Stores non-secret public configurations accessible to signed-in users."
     }
   }
 }

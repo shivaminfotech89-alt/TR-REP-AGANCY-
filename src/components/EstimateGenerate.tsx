@@ -18,31 +18,37 @@ import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
 
 // Helper function to calculate item rate, quantity, and amount for any core type
-export function calculateJobItemDetails(item: EstimateItem, job: any): { qty: number; qtyDisplay: string; rate: number; amt: number } {
+export function calculateJobItemDetails(
+  item: EstimateItem, 
+  job: any,
+  externalData?: any,
+  internalData?: any
+): { qty: number; qtyDisplay: string; rate: number; amt: number } {
   if (!item || !job) return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
   
   const kva = String(job.capacityKva || '25').trim();
   const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
   const isOverhauling = coreType === 'OH' || coreType.includes('OVERHAUL');
   const isAmorphousOrWound = coreType.includes('AMORPHOUS') || coreType.includes('AM') || coreType.includes('WOUND') || coreType.includes('WC');
-  const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+  const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap' || internalData?.condition === 'Scrap';
+
+  const itemCode = (item.itemCode || '').trim();
+  const itemCodeLower = itemCode.toLowerCase();
+  const itemName = (item.itemName || '').toLowerCase();
+
+  // Determine rate: Prefer rates[kva] first, fallback to item.fixedRate
+  let rate = 0;
+  if (item.rates && item.rates[kva as keyof typeof item.rates] !== null && item.rates[kva as keyof typeof item.rates] !== undefined) {
+    rate = Number(item.rates[kva as keyof typeof item.rates]) || 0;
+  } else if (item.fixedRate !== undefined && item.fixedRate !== null && !isNaN(Number(item.fixedRate)) && Number(item.fixedRate) > 0) {
+    rate = Number(item.fixedRate);
+  } else if (item.rates) {
+    const nonNull = Object.values(item.rates).find(v => v !== null && !isNaN(Number(v)) && Number(v) > 0);
+    if (nonNull) rate = Number(nonNull);
+  }
 
   if (isOverhauling) {
-    const itemCode = (item.itemCode || '').trim().toLowerCase();
-    const itemName = (item.itemName || '').toLowerCase();
-
-    // Determine rate
-    let rate = 0;
-    if (item.rates && item.rates[kva as keyof typeof item.rates] !== null && item.rates[kva as keyof typeof item.rates] !== undefined) {
-      rate = Number(item.rates[kva as keyof typeof item.rates]) || 0;
-    } else if (item.fixedRate !== undefined && item.fixedRate !== null && !isNaN(Number(item.fixedRate)) && Number(item.fixedRate) > 0) {
-      rate = Number(item.fixedRate);
-    } else if (item.rates) {
-      const nonNull = Object.values(item.rates).find(v => v !== null && !isNaN(Number(v)) && Number(v) > 0);
-      if (nonNull) rate = Number(nonNull);
-    }
-
-    if (itemCode === '7' || itemName.includes('overhauling of complete transformer') || itemName.includes('overhauling')) {
+    if (itemCodeLower === '7' || itemName.includes('overhauling of complete transformer') || itemName.includes('overhauling')) {
       if (!isScrapJob) {
         return { qty: 1, qtyDisplay: '1', rate, amt: rate };
       }
@@ -62,36 +68,22 @@ export function calculateJobItemDetails(item: EstimateItem, job: any): { qty: nu
   }
 
   if (isAmorphousOrWound) {
-    const itemCode = (item.itemCode || '').trim().toLowerCase();
-    const itemName = (item.itemName || '').toLowerCase();
-
     // Check capacity match
-    const is10Kva = (itemCode === '1a' || itemName.startsWith('10 kva') || itemName.includes('10kva') || itemName.includes('10 kva')) && kva === '10';
-    const is16Kva = (itemCode === '1b' || itemName.startsWith('16 kva') || itemName.includes('16kva') || itemName.includes('16 kva')) && kva === '16';
-    const is25Kva = (itemCode === '1c' || itemName.startsWith('25 kva') || itemName.includes('25kva') || itemName.includes('25 kva')) && kva === '25';
+    const is10Kva = (itemCodeLower === '1a' || itemName.startsWith('10 kva') || itemName.includes('10kva') || itemName.includes('10 kva')) && kva === '10';
+    const is16Kva = (itemCodeLower === '1b' || itemName.startsWith('16 kva') || itemName.includes('16kva') || itemName.includes('16 kva')) && kva === '16';
+    const is25Kva = (itemCodeLower === '1c' || itemName.startsWith('25 kva') || itemName.includes('25kva') || itemName.includes('25 kva')) && kva === '25';
 
     const isVijayMake = (job.make || '').toLowerCase().includes('vijay');
-    const is63KvaVijay = (itemCode === '1d-2' || (itemName.includes('63') && itemName.includes('vijay'))) && kva === '63' && isVijayMake;
-    const is63KvaStd = (itemCode === '1d-1' || (itemName.includes('63') && !itemName.includes('vijay'))) && kva === '63' && !isVijayMake;
-    const is63KvaGeneric = (itemCode === '1d' || (itemName.includes('63') && !itemName.includes('vijay') && !is63KvaStd)) && kva === '63';
+    const is63KvaVijay = (itemCodeLower === '1d-2' || (itemName.includes('63') && itemName.includes('vijay'))) && kva === '63' && isVijayMake;
+    const is63KvaStd = (itemCodeLower === '1d-1' || (itemName.includes('63') && !itemName.includes('vijay'))) && kva === '63' && !isVijayMake;
+    const is63KvaGeneric = (itemCodeLower === '1d' || (itemName.includes('63') && !itemName.includes('vijay') && !is63KvaStd)) && kva === '63';
 
-    const is100Kva = (itemCode === '1e' || itemName.startsWith('100 kva') || itemName.includes('100kva') || itemName.includes('100 kva')) && kva === '100';
-    const is200Kva = (itemCode === '1f' || itemName.startsWith('200 kva') || itemName.includes('200kva') || itemName.includes('200 kva')) && kva === '200';
+    const is100Kva = (itemCodeLower === '1e' || itemName.startsWith('100 kva') || itemName.includes('100kva') || itemName.includes('100 kva')) && kva === '100';
+    const is200Kva = (itemCodeLower === '1f' || itemName.startsWith('200 kva') || itemName.includes('200kva') || itemName.includes('200 kva')) && kva === '200';
 
-    const isLabourCharge = itemCode === '2' || itemName.includes('labour charge') || itemName.includes('labor charge');
-    const isSealingScrap = itemCode === '6' || itemName.includes('sealing of uneconomical') || itemName.includes('welding at six places');
-    const isScrapDismantling = itemCode === '0' || itemCode === '1s' || itemCode === '1a-scrap' || itemName.includes('inspection & dismantling') || (itemName.includes('scrap') && (itemName.includes('dismantl') || itemName.includes('inspection') || itemName.includes('charges')));
-
-    // Determine rate: Prefer rates[kva] first (for user manually entered KVA rates), fallback to item.fixedRate
-    let rate = 0;
-    if (item.rates && item.rates[kva as keyof typeof item.rates] !== null && item.rates[kva as keyof typeof item.rates] !== undefined && Number(item.rates[kva as keyof typeof item.rates]) > 0) {
-      rate = Number(item.rates[kva as keyof typeof item.rates]);
-    } else if (item.fixedRate !== undefined && item.fixedRate !== null && !isNaN(Number(item.fixedRate)) && Number(item.fixedRate) > 0) {
-      rate = Number(item.fixedRate);
-    } else if (item.rates) {
-      const nonNull = Object.values(item.rates).find(v => v !== null && !isNaN(Number(v)) && Number(v) > 0);
-      if (nonNull) rate = Number(nonNull);
-    }
+    const isLabourCharge = itemCodeLower === '2' || itemName.includes('labour charge') || itemName.includes('labor charge');
+    const isSealingScrap = itemCodeLower === '6' || itemName.includes('sealing of uneconomical') || itemName.includes('welding at six places');
+    const isScrapDismantling = itemCodeLower === '0' || itemCodeLower === '1s' || itemCodeLower === '1a-scrap' || itemName.includes('inspection & dismantling') || (itemName.includes('scrap') && (itemName.includes('dismantl') || itemName.includes('inspection') || itemName.includes('charges')));
 
     // Default fallback rates from official UGVCL schedule if not set
     if (rate === 0) {
@@ -105,8 +97,8 @@ export function calculateJobItemDetails(item: EstimateItem, job: any): { qty: nu
       else if (is200Kva) rate = 10148;
       else if (isLabourCharge) rate = 2345;
       else if (isSealingScrap) rate = 189;
-      else if (itemCode === '3' || itemCode === '4') rate = 54;
-      else if (itemCode === '5') rate = kva === '25' ? 1057 : kva === '63' ? 1256 : kva === '100' ? 1452 : 1057;
+      else if (itemCodeLower === '3' || itemCodeLower === '4') rate = 54;
+      else if (itemCodeLower === '5') rate = kva === '25' ? 1057 : kva === '63' ? 1256 : kva === '100' ? 1452 : 1057;
     }
 
     // Scrap Dismantling Charges (Rs. 500)
@@ -141,14 +133,14 @@ export function calculateJobItemDetails(item: EstimateItem, job: any): { qty: nu
 
     if (is200Kva) {
       if (!isScrapJob) {
-        const qty = 3; // 3 coils / limbs for 200 KVA
+        const qty = 3;
         return { qty, qtyDisplay: '3', rate, amt: rate * qty };
       }
       return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
     }
 
     // If it's a capacity-specific winding item (e.g. 10 KVA coil evaluated for 25 KVA job), skip it
-    const isAnyWindingItem = itemCode.startsWith('1') || itemName.includes('winding') || itemName.includes('coil weight');
+    const isAnyWindingItem = itemCodeLower.startsWith('1') || itemName.includes('winding') || itemName.includes('coil weight');
     if (isAnyWindingItem) {
       return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
     }
@@ -166,50 +158,226 @@ export function calculateJobItemDetails(item: EstimateItem, job: any): { qty: nu
     }
 
     return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-  } else {
-    // Standard CRGO Stacked Core
-    const rawRate = item.rates ? item.rates[kva as keyof typeof item.rates] || 0 : 0;
-    const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
-
-    let qty = 0;
-    let qtyDisplay = '0';
-    const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemCode === '19';
-    const isDismantling = item.itemCode === '1a' || item.itemName.toLowerCase().includes('dismentaling') || item.itemName.toLowerCase().includes('dismantl');
-
-    if (isScrapJob) {
-      // In scrap jobs, only Dismantling (1a) and Scrap items are charged
-      if (isDismantling || isScrapItem || item.itemCode === '0') {
-        qty = 1;
-        qtyDisplay = '1';
-      }
-    } else {
-      // In regular repairable jobs, all non-scrap items with valid rate are evaluated
-      if (!isScrapItem && rate > 0) {
-        if (item.unit === 'Y') {
-          qtyDisplay = 'Y';
-          qty = 1;
-        } else if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Job' || item.unit === 'Set') {
-          qty = 1;
-          if (item.itemCode === '1c') qty = 7;
-          if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-          if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-          if (item.itemCode === '15') qty = 6;
-          qtyDisplay = qty.toString();
-        } else if (item.unit === 'KG') {
-          qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-          qtyDisplay = qty.toFixed(2);
-        }
-      }
-    }
-
-    if (item.unit === 'N') {
-      qtyDisplay = 'N';
-      qty = 0;
-    }
-
-    const amt = qty * rate;
-    return { qty, qtyDisplay, rate, amt };
   }
+
+  // Standard CRGO Stacked Core - Evaluated with exact inspection data & Y/N matching
+  const isScrapItem = itemName.includes('scrap') || itemCodeLower === '19';
+  const isDismantling = itemCodeLower === '1a' || itemName.includes('dismentaling') || itemName.includes('dismantl');
+
+  if (isScrapJob) {
+    if (isDismantling || isScrapItem || itemCodeLower === '0') {
+      return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+    }
+    return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
+  }
+
+  // 1. Name Plating (16)
+  if (itemCodeLower === '16' || itemName.includes('name plating')) {
+    const isYes = externalData?.namePlate !== 'N' && externalData?.namePlate !== '0' && externalData?.namePlate !== '-';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 2. Spray Painting (2b)
+  if (itemCodeLower === '2b' || itemName.includes('spray paint') || itemName.includes('outside paint')) {
+    const isYes = externalData?.outsidePaint !== 'N' && externalData?.outsidePaint !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 3. Conservator Tank (4)
+  if (itemCodeLower === '4' || itemName.includes('conservator tank')) {
+    const qty = Number(externalData?.damCtTank) || 0;
+    return { qty, qtyDisplay: qty > 0 ? qty.toString() : '0', rate, amt: qty * rate };
+  }
+
+  // 4. Radiator Replacement (21)
+  if (itemCodeLower === '21' || itemName.includes('radiator')) {
+    const qty = Number(externalData?.damRadNo) || 0;
+    return { qty, qtyDisplay: qty > 0 ? qty.toString() : '0', rate, amt: qty * rate };
+  }
+
+  // 5. Rod Gasket (1c)
+  if (itemCodeLower === '1c' || itemName.includes('rod gasket')) {
+    const qty = externalData?.hvLvRod !== undefined && externalData?.hvLvRod !== '' ? Number(externalData.hvLvRod) : 7;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 6. M/S Bolt Nuts (1e)
+  if (itemCodeLower === '1e' || itemName.includes('bolt nuts') || itemName.includes('nute bolt')) {
+    const isYes = externalData?.nuteBolt !== 'N' && externalData?.nuteBolt !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 7. Top Cover Gasket (1b)
+  if (itemCodeLower === '1b' || itemName.includes('top cover gasket')) {
+    const qty = externalData?.gasket !== undefined && externalData?.gasket !== '' ? Number(externalData.gasket) : (Number(kva) >= 63 ? 3 : 1);
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 8. Oil Guage Glass (5)
+  if (itemCodeLower === '5' || itemName.includes('oil guage') || itemName.includes('oil gauge') || itemName.includes('oil lev')) {
+    const isYes = externalData?.oilLevGls !== 'N' && externalData?.oilLevGls !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 9. Breather (6)
+  if (itemCodeLower === '6' || itemName.includes('breather')) {
+    const isYes = externalData?.breather !== 'N' && externalData?.breather !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 10. HV Bushing (8)
+  if (itemCodeLower === '8' || itemName.includes('hv bushing')) {
+    const qty = externalData?.hvSideHvb !== undefined && externalData?.hvSideHvb !== '' ? Number(externalData.hvSideHvb) : 3;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 11. HV Metal Parts (9A)
+  if (itemCodeLower === '9a' || itemName.includes('hv metal')) {
+    const qty = externalData?.hvSideHvm !== undefined && externalData?.hvSideHvm !== '' ? Number(externalData.hvSideHvm) : 2;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 12. HV Connectors (9B)
+  if (itemCodeLower === '9b' || itemName.includes('hv connector')) {
+    const qty = externalData?.hvSideHvCc !== undefined && externalData?.hvSideHvCc !== '' ? Number(externalData.hvSideHvCc) : 0;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 13. LV Bushing (10)
+  if (itemCodeLower === '10' || itemName.includes('lv bushing')) {
+    const qty = externalData?.lvSideLvb !== undefined && externalData?.lvSideLvb !== '' ? Number(externalData.lvSideLvb) : 1;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 14. LV Metal Parts (11A)
+  if (itemCodeLower === '11a' || itemName.includes('lv metal')) {
+    const qty = externalData?.lvSideLvm !== undefined && externalData?.lvSideLvm !== '' ? Number(externalData.lvSideLvm) : 4;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 15. LV Connectors (11B)
+  if (itemCodeLower === '11b' || itemName.includes('lv connector')) {
+    const qty = externalData?.lvSideLvCc !== undefined && externalData?.lvSideLvCc !== '' ? Number(externalData.lvSideLvCc) : 0;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 16. Sealed to Bolted (17)
+  if (itemCodeLower === '17' || itemName.includes('sealed to bolted')) {
+    const isBolted = externalData?.sealType === 'B' || externalData?.sealType === 'Bolted' || externalData?.sealType === 'Y';
+    return { qty: isBolted ? 1 : 0, qtyDisplay: isBolted ? 'Y' : 'N', rate, amt: isBolted ? rate : 0 };
+  }
+
+  // 17. Inside Painting (3)
+  if (itemCodeLower === '3' || itemName.includes('inside paint')) {
+    const isYes = internalData?.inPnt !== 'N' && internalData?.inPnt !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 18. Insulating Material (1d)
+  if (itemCodeLower === '1d' || itemName.includes('insulating material')) {
+    const isYes = internalData?.insula !== 'N' && internalData?.insula !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 19. Washer Ring (15)
+  if (itemCodeLower === '15' || itemName.includes('washer ring')) {
+    const qty = internalData?.wasring !== undefined && internalData?.wasring !== '' ? Number(internalData.wasring) : 6;
+    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
+  }
+
+  // 20. HV Coil (12A)
+  if (itemCodeLower === '12a' || itemName.includes('hv coil') && !itemName.includes('labour')) {
+    let weight = 0;
+    if (internalData?.totWt && Number(internalData.totWt) > 0) {
+      weight = Number(internalData.totWt);
+    } else if (internalData?.wtOfCoil && internalData?.totCoil) {
+      weight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
+    } else {
+      weight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
+    }
+    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
+  }
+
+  // 21. LV Coil (13A)
+  if (itemCodeLower === '13a' || itemName.includes('lv coil') && !itemName.includes('labour') && !itemName.includes('re-insulation')) {
+    let weight = 0;
+    if (internalData?.totWtLv && Number(internalData.totWtLv) > 0) {
+      weight = Number(internalData.totWtLv);
+    }
+    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
+  }
+
+  // 22. Re-insulation LV Coil (14)
+  if (itemCodeLower === '14' || itemName.includes('re-insulation')) {
+    let weight = 0;
+    let lvWeight = Number(internalData?.totWtLv) || 0;
+    if (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG') {
+      if (lvWeight === 0) {
+        weight = Number(kva) === 63 ? 24.30 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 35.00 : 12.00));
+      }
+    }
+    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
+  }
+
+  // 23. Labour Charge (1a)
+  if (isDismantling) {
+    return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+  }
+
+  // 24. Cleaning dirty tank (2a)
+  if (itemCodeLower === '2a' || itemName.includes('cleaning dirty')) {
+    const isYes = externalData?.clnDrtyTank !== 'N' && externalData?.clnDrtyTank !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 25. Drying of active parts (1f)
+  if (itemCodeLower === '1f' || itemName.includes('drying of active')) {
+    const isYes = internalData?.dc !== 'N' && internalData?.dc !== '0' && externalData?.dryActPart !== 'N';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 26. Testing Charge (20)
+  if (itemCodeLower === '20' || itemName.includes('testing charge')) {
+    const isYes = internalData?.tstTrn !== 'N' && internalData?.tstTrn !== '0';
+    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
+  }
+
+  // 27. Labour HV Coil (12C)
+  if (itemCodeLower === '12c' || (itemName.includes('labour') && itemName.includes('hv coil'))) {
+    let weight = 0;
+    if (internalData?.totWt && Number(internalData.totWt) > 0) {
+      weight = Number(internalData.totWt);
+    } else if (internalData?.wtOfCoil && internalData?.totCoil) {
+      weight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
+    } else {
+      weight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
+    }
+    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
+  }
+
+  // 28. Labour LV Coil (13C)
+  if (itemCodeLower === '13c' || (itemName.includes('labour') && itemName.includes('lv coil'))) {
+    let weight = 0;
+    if (internalData?.totWtLv && Number(internalData.totWtLv) > 0) {
+      weight = Number(internalData.totWtLv);
+    }
+    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
+  }
+
+  // Fallback for custom or unmapped items
+  if (rate > 0) {
+    if (item.unit === 'Y') return { qty: 1, qtyDisplay: 'Y', rate, amt: rate };
+    if (item.unit === 'N') return { qty: 0, qtyDisplay: 'N', rate, amt: 0 };
+    if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Job' || item.unit === 'Set') {
+      return { qty: 1, qtyDisplay: '1', rate, amt: rate };
+    }
+    if (item.unit === 'KG') {
+      const kgQty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
+      return { qty: kgQty, qtyDisplay: kgQty.toFixed(2), rate, amt: rate * kgQty };
+    }
+  }
+
+  return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
 }
 
 export default function EstimateGenerate() {
@@ -222,8 +390,8 @@ export default function EstimateGenerate() {
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
 
-  // Estimate view modes: 'matrix' (Default official multi-job matrix + forwarding letter) | 'batch_all' | 'single_job'
-  const [estimateViewMode, setEstimateViewMode] = useState<'matrix' | 'batch_all' | 'single_job'>('matrix');
+  // Estimate view modes: 'batch_all' (Default official common forwarding letter + separate job estimates) | 'forwarding_only' | 'single_job' | 'matrix'
+  const [estimateViewMode, setEstimateViewMode] = useState<'batch_all' | 'forwarding_only' | 'single_job' | 'matrix'>('batch_all');
   const [activeSingleJobId, setActiveSingleJobId] = useState<string | null>(null);
 
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
@@ -292,10 +460,11 @@ export default function EstimateGenerate() {
   useEffect(() => {
     const todayStr = new Date().toLocaleDateString('en-GB');
     setLetterDateText(todayStr);
-    setRefNoText(`UGVCL/EE-T-1/TRANS-REP/${selectedMrNo || '001'}`);
+    const discomPrefix = activeAgency?.discomName ? activeAgency.discomName.split(' ')[0].toUpperCase() : 'EST';
+    setRefNoText(`${discomPrefix}/EE-T-1/TRANS-REP/${selectedMrNo || '001'}`);
     setRefBodyText(`With reference to the abvoe subject , we are submitting you inspection reports and estimates of following transformers received from ${currentSelectedDivision}`);
     setClosingText('We Request you to send the approval of above transformers earliest as possible.');
-  }, [selectedMrNo, currentSelectedDivision]);
+  }, [selectedMrNo, currentSelectedDivision, activeAgency]);
 
   useEffect(() => {
     async function fetchData() {
@@ -514,22 +683,21 @@ export default function EstimateGenerate() {
   const today = new Date();
   const dateString = today.toLocaleDateString('en-GB'); // dd/mm/yyyy
 
-  const calculateJobTotal = (job: any) => {
-    let jobTotal = 0;
-    const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+  const getJobFullEstimate = (job: any) => {
+    const ext = externalInspMap[job.id];
+    const int = internalInspMap[job.id];
+    return buildSingleJobEstimateData(job, activeAgency, activeAtMaster, ext, int);
+  };
 
-    jobMasterData.forEach(item => {
-      const { amt } = calculateJobItemDetails(item, job);
-      jobTotal += amt;
-    });
-    return jobTotal;
+  const calculateJobTotal = (job: any) => {
+    const est = getJobFullEstimate(job);
+    return est.baseTotal;
   };
 
   // Helper to evaluate a job against Clause 4.0 Circle Estimate Power Limit
   const checkJobCircleLimit = (job: any) => {
-    const baseTot = calculateJobTotal(job);
-    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-    const finalAmt = baseTot * (1 + atPct / 100);
+    const est = getJobFullEstimate(job);
+    const finalAmt = est.finalAmount;
     const circleMaster = getCircleLimitsEstimateMaster(activeAgency);
     const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
     const limitInfo = getCircleLimitForJob(job.capacityKva, ratingKey, circleMaster);
@@ -573,17 +741,15 @@ export default function EstimateGenerate() {
     return selectedJobsData
       .map(job => ({ job, check: checkJobCircleLimit(job) }))
       .filter(item => item.check.exceeds);
-  }, [selectedJobsData, activeAgency, activeAtMaster]);
+  }, [selectedJobsData, activeAgency, activeAtMaster, externalInspMap, internalInspMap]);
 
   const calculateMrEstimateTotal = (mr: string) => {
     const mrJobs = mrGroups[mr] || [];
     let total = 0;
     mrJobs.forEach(job => {
-      const baseTot = calculateJobTotal(job);
-      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-      total += Math.round(baseTot * (1 + atPct / 100));
+      total += getJobFullEstimate(job).finalAmount;
     });
-    return total;
+    return Math.round(total);
   };
 
   // Open Send Estimate Modal
@@ -609,9 +775,8 @@ export default function EstimateGenerate() {
       const batch = writeBatch(db);
 
       targetJobs.forEach(job => {
-        const baseTot = calculateJobTotal(job);
-        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-        const grandTot = Math.round(baseTot * (1 + atPct / 100));
+        const est = getJobFullEstimate(job);
+        const grandTot = Math.round(est.finalAmount);
 
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
@@ -630,9 +795,8 @@ export default function EstimateGenerate() {
       // Update local state
       setJobs(prev => prev.map(j => {
         if (j.mrNo === sendTargetMr) {
-          const baseTot = calculateJobTotal(j);
-          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
-          const grandTot = Math.round(baseTot * (1 + atPct / 100));
+          const est = getJobFullEstimate(j);
+          const grandTot = Math.round(est.finalAmount);
           return {
             ...j,
             estimateSentDate: sendDate,
@@ -1200,10 +1364,22 @@ export default function EstimateGenerate() {
                     ? 'bg-blue-600 text-white shadow-xs'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
-                title="Prints each transformer on its own 3-section A4 sheet, followed by the common forwarding letter"
+                title="Prints 1 Common Forwarding Letter for the MR on Page 1, followed by individual detailed 3-section A4 estimate sheets for each transformer"
               >
                 <FileStack className="w-3.5 h-3.5" />
-                <span>Complete Submission Package (All Individual Reports + Common Letter)</span>
+                <span>Complete MR Package (Common Letter + All Job Estimates)</span>
+              </button>
+              <button
+                onClick={() => setEstimateViewMode('forwarding_only')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  estimateViewMode === 'forwarding_only'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                title="View or print the consolidated MR-wise Common Forwarding Letter"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>Common Forwarding Letter (MR Wise)</span>
               </button>
               <button
                 onClick={() => setEstimateViewMode('single_job')}
@@ -1231,7 +1407,8 @@ export default function EstimateGenerate() {
               </button>
             </div>
             <div className="text-[11px] text-slate-500 font-medium italic">
-              {estimateViewMode === 'batch_all' && '📌 Standard format: Individual A4 sheets per transformer + 1 Common Forwarding Letter'}
+              {estimateViewMode === 'batch_all' && '📌 Standard format: 1 Common Forwarding Letter (Cover) + Individual Job Estimate Sheets'}
+              {estimateViewMode === 'forwarding_only' && '📌 Common Forwarding Letter for MR submission'}
               {estimateViewMode === 'single_job' && '📌 Inspecting individual 3-section breakdown (Physical, Internal, Labour)'}
               {estimateViewMode === 'matrix' && '📌 Side-by-side comparison format'}
             </div>
@@ -1323,22 +1500,10 @@ export default function EstimateGenerate() {
           )}
 
           <div id="printable-estimate-container" className="space-y-6 print:space-y-0">
-            {/* VIEW MODE 1: BATCH ALL (INDIVIDUAL 3-SECTION REPORTS + COMMON FORWARDING LETTER) */}
+            {/* VIEW MODE 1: COMPLETE SUBMISSION PACKAGE (PAGE 1: COMMON FORWARDING LETTER + PAGE 2..N: SEPARATE JOB ESTIMATES) */}
             {estimateViewMode === 'batch_all' && (
               <>
-                {selectedJobsData.map((job) => (
-                  <SingleJobEstimateReport
-                    key={job.id}
-                    job={job}
-                    agency={activeAgency}
-                    atMaster={activeAtMaster}
-                    externalData={externalInspMap[job.id]}
-                    internalData={internalInspMap[job.id]}
-                    letterDateText={letterDateText || dateString}
-                  />
-                ))}
-
-                {/* COMMON FORWARDING LETTER FOR ALL JOBS IN THIS MR */}
+                {/* 1. COMMON FORWARDING LETTER FOR ALL JOBS IN THIS MR */}
                 <PrintableA4Page agency={activeAgency} documentTitle="FORWARDING LETTER">
                   <div className="flex flex-col justify-between h-full text-black">
                     <div>
@@ -1346,7 +1511,7 @@ export default function EstimateGenerate() {
                         <div className="whitespace-pre-wrap">
                           {forwardingTo || `Superintending Engineer (O & M),
 Uttar Gujarat Vij Company Ltd.,
-Circle Office : SABARMATI`}
+Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                         </div>
                         <div className="text-right whitespace-pre-wrap">
                           <p>REF. NO. : {refNoText}</p>
@@ -1380,9 +1545,8 @@ Circle Office : SABARMATI`}
                         </thead>
                         <tbody>
                           {selectedJobsData.map((job, idx) => {
-                             const jobBaseTotal = calculateJobTotal(job);
-                             const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                             const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
+                             const est = getJobFullEstimate(job);
+                             const finalAmt = est.finalAmount.toFixed(2);
                              const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
                              const check = checkJobCircleLimit(job);
                              
@@ -1415,9 +1579,7 @@ Circle Office : SABARMATI`}
                             <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
                             <td className="p-1 border-r border-black text-right font-mono font-bold">
                               {selectedJobsData.reduce((acc, job) => {
-                                const baseAmt = calculateJobTotal(job);
-                                const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-                                return acc + (baseAmt * (1 + atPct / 100));
+                                return acc + getJobFullEstimate(job).finalAmount;
                               }, 0).toFixed(2)}
                             </td>
                             <td></td>
@@ -1435,7 +1597,7 @@ Circle Office : SABARMATI`}
                       </div>
 
                       <div className="flex justify-between text-xs mb-4">
-                        <p>Encl. : Estimate & Inspection Reports</p>
+                        <p>Encl. : 1. Inspection Reports (Internal &amp; External) &nbsp;&bull;&nbsp; 2. Detailed Job-wise Estimates</p>
                         <div className="text-center">
                           <p className="mb-6 font-bold">{signedByText}</p>
                           <p className="text-[10px] text-slate-500">Auth Sign.</p>
@@ -1444,12 +1606,136 @@ Circle Office : SABARMATI`}
 
                       <div className="text-xs font-bold">
                         <p className="mb-1">C . C. to :</p>
-                        <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
+                        <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || `E. E. (O & M) DIVISION - ${currentSelectedDivision || 'SABARMATI'}`}</p>
                       </div>
                     </div>
                   </div>
                 </PrintableA4Page>
+
+                {/* 2. SEPARATE INDIVIDUAL ESTIMATE SHEETS (1 PAGE PER TRANSFORMER) */}
+                {selectedJobsData.map((job) => (
+                  <SingleJobEstimateReport
+                    key={job.id}
+                    job={job}
+                    agency={activeAgency}
+                    atMaster={activeAtMaster}
+                    externalData={externalInspMap[job.id]}
+                    internalData={internalInspMap[job.id]}
+                    letterDateText={letterDateText || dateString}
+                  />
+                ))}
               </>
+            )}
+
+            {/* VIEW MODE 1B: COMMON FORWARDING LETTER ONLY */}
+            {estimateViewMode === 'forwarding_only' && (
+              <PrintableA4Page agency={activeAgency} documentTitle="FORWARDING LETTER">
+                <div className="flex flex-col justify-between h-full text-black">
+                  <div>
+                    <div className="flex justify-between text-xs font-bold mb-4">
+                      <div className="whitespace-pre-wrap">
+                        {forwardingTo || `Superintending Engineer (O & M),
+Uttar Gujarat Vij Company Ltd.,
+Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
+                      </div>
+                      <div className="text-right whitespace-pre-wrap">
+                        <p>REF. NO. : {refNoText}</p>
+                        <p className="mt-1">DATE : {letterDateText}</p>
+                      </div>
+                    </div>
+
+                    <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
+                      Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
+                    </div>
+
+                    <p className="text-xs mb-2">Dear Sir,</p>
+                    <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
+                      {refBodyText}
+                    </p>
+
+                    <table className="w-full text-center text-xs border-collapse border border-black mb-4">
+                      <thead>
+                        <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
+                          <th className="p-1 border-r border-black">NO.</th>
+                          <th className="p-1 border-r border-black">JOB. NO.</th>
+                          <th className="p-1 border-r border-black">T.R. MAKE</th>
+                          <th className="p-1 border-r border-black">TR. SR. NO.</th>
+                          <th className="p-1 border-r border-black">KVA</th>
+                          <th className="p-1 border-r border-black">KV</th>
+                          <th className="p-1 border-r border-black">TYPE</th>
+                          <th className="p-1 border-r border-black">OGP/GP</th>
+                          <th className="p-1 border-r border-black">EST. AMT.</th>
+                          <th className="p-1">REMARK</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedJobsData.map((job, idx) => {
+                           const est = getJobFullEstimate(job);
+                           const finalAmt = est.finalAmount.toFixed(2);
+                           const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                           const check = checkJobCircleLimit(job);
+                           
+                          return (
+                            <tr key={job.id} className="border-b border-black">
+                              <td className="p-1 border-r border-black">{idx + 1}</td>
+                              <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
+                              <td className="p-1 border-r border-black">{job.make}</td>
+                              <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
+                              <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
+                              <td className="p-1 border-r border-black">11</td>
+                              <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
+                              <td className="p-1 border-r border-black">OGP</td>
+                              <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
+                              <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
+                                {isScrapJob ? (
+                                  'SCRAP'
+                                ) : check.exceeds ? (
+                                  <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
+                                    REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
+                                  </span>
+                                ) : (
+                                  'REPAIRABLE'
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        <tr className="font-bold border-black">
+                          <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
+                          <td className="p-1 border-r border-black text-right font-mono font-bold">
+                            {selectedJobsData.reduce((acc, job) => {
+                              return acc + getJobFullEstimate(job).finalAmount;
+                            }, 0).toFixed(2)}
+                          </td>
+                          <td></td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-xs mb-6">
+                      <p>Thanking you</p>
+                      <p>Yours faithfully</p>
+                    </div>
+
+                    <div className="flex justify-between text-xs mb-4">
+                      <p>Encl. : 1. Inspection Reports (Internal &amp; External) &nbsp;&bull;&nbsp; 2. Detailed Job-wise Estimates</p>
+                      <div className="text-center">
+                        <p className="mb-6 font-bold">{signedByText}</p>
+                        <p className="text-[10px] text-slate-500">Auth Sign.</p>
+                      </div>
+                    </div>
+
+                    <div className="text-xs font-bold">
+                      <p className="mb-1">C . C. to :</p>
+                      <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || `E. E. (O & M) DIVISION - ${currentSelectedDivision || 'SABARMATI'}`}</p>
+                    </div>
+                  </div>
+                </div>
+              </PrintableA4Page>
             )}
 
             {/* VIEW MODE 2: SINGLE JOB ESTIMATE SHEET */}
@@ -1586,7 +1872,12 @@ Circle Office : SABARMATI`}
                               {selectedJobsData.map(job => {
                                 const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
                                 const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-                                const { qtyDisplay, rate, amt } = calculateJobItemDetails(itemForJob, job);
+                                const { qtyDisplay, rate, amt } = calculateJobItemDetails(
+                                  itemForJob, 
+                                  job,
+                                  externalInspMap[job.id],
+                                  internalInspMap[job.id]
+                                );
 
                                 return (
                                   <td key={job.id} className="p-0 border-r border-black">

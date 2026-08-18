@@ -118,9 +118,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     // Parse divisions
     const divs: any[] = [];
     Object.entries(agency.prefixes || {}).forEach(([name, prefixData]: [string, any]) => {
+      const circle = agency.divisionCircles?.[name] || agency.circleOfficeName || '';
       if (typeof prefixData === 'string') {
         divs.push({
           name,
+          circle,
           prefixCRGO: prefixData,
           prefixAmorphous: prefixData,
           prefixWoundCore: prefixData,
@@ -133,6 +135,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       } else {
         divs.push({
           name,
+          circle,
           prefixCRGO: prefixData['CRGO'] || '',
           prefixAmorphous: prefixData['Amorphous'] || '',
           prefixWoundCore: prefixData['Wound Core'] || '',
@@ -147,15 +150,16 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
     if (divs.length === 0) {
       divs.push({
-        name: 'SABARMATI',
-        prefixCRGO: '21 IS',
-        prefixAmorphous: 'AM21 IS',
-        prefixWoundCore: 'WC21 IS',
-        prefixLSTC: 'LS21 IS',
-        prefixOH: 'OH21 IS',
-        allotmentCRGO: '20',
-        allotmentAmorphous: '15',
-        allotmentWoundCore: '10'
+        name: '',
+        circle: agency.circleOfficeName || '',
+        prefixCRGO: '',
+        prefixAmorphous: '',
+        prefixWoundCore: '',
+        prefixLSTC: '',
+        prefixOH: '',
+        allotmentCRGO: '',
+        allotmentAmorphous: '',
+        allotmentWoundCore: ''
       });
     }
     setDivisions(divs);
@@ -205,11 +209,13 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     try {
       const prefixes: Record<string, Record<string, string>> = {};
       const allotments: Record<string, Record<string, number>> = {};
+      const divisionCircles: Record<string, string> = {};
       const lastJobNumbers: Record<string, number> = { ...(agency.lastJobNumbers || {}) };
 
       divisions.forEach(d => {
         if (d.name.trim() && d.prefixCRGO.trim()) {
           const divName = d.name.trim();
+          divisionCircles[divName] = (d.circle || circleOfficeName || divName).trim();
           prefixes[divName] = {
             'CRGO': d.prefixCRGO.trim(),
             'Amorphous': (d.prefixAmorphous || '').trim(),
@@ -336,6 +342,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         ifscCode,
 
         // Divisions & quotas
+        divisionCircles,
         prefixes,
         allotments,
         lastJobNumbers
@@ -937,8 +944,8 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   <div key={index} className={`p-4 bg-white border rounded-lg shadow-sm space-y-3 ${
                     divErr ? 'border-red-300' : 'border-slate-300'
                   }`}>
-                    <div className="flex items-center justify-between border-b border-slate-100 pb-2">
-                      <div className="flex-1 max-w-sm">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-2">
+                      <div className="flex-1 w-full max-w-sm">
                         <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Division Name *</label>
                         <input
                           required
@@ -949,11 +956,21 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                           placeholder="e.g. SABARMATI"
                         />
                       </div>
+                      <div className="flex-1 w-full max-w-xs">
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Circle Office (Routing / Forwarding)</label>
+                        <input
+                          type="text"
+                          value={div.circle || ''}
+                          onChange={e => handleDivisionChange(index, 'circle', e.target.value)}
+                          className="w-full px-3 py-1.5 text-sm font-semibold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                          placeholder={circleOfficeName || "e.g. SABARMATI"}
+                        />
+                      </div>
                       {divisions.length > 1 && (
                         <button
                           type="button"
                           onClick={() => handleRemoveDivision(index)}
-                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors"
+                          className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors self-end sm:self-center"
                           title="Remove Division"
                         >
                           <Trash2 className="w-4 h-4" />
