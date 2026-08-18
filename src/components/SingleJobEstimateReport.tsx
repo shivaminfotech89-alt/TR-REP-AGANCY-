@@ -1,12 +1,8 @@
-import React from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
-import { paginateRows } from '../lib/pagination';
-
-const ROWS_FIRST_PAGE = 20;
-const ROWS_PER_PAGE = 30;
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
 const SECTION_LABELS: Record<EstimateSection, string> = {
@@ -14,6 +10,89 @@ const SECTION_LABELS: Record<EstimateSection, string> = {
   internal: 'Internal Estimation',
   labour: 'Labour Charge',
 };
+
+// --- Print-layout constants, all in mm, measured against real printed/rendered output ---
+// Adjust these here (not the pagination logic below) if a real print still clips
+// content or leaves a page looking half empty. FALLBACK_CONTENT_MM is what layout uses
+// before the actual PrintableA4Page content-area height has been measured at runtime.
+const FALLBACK_CONTENT_MM = 259.1;
+const ROW_MM = 4.8;          // one item row
+const SECTION_ROW_MM = 4.9;  // PHYSICAL / INTERNAL / LABOUR header row (incl. "(contd.)" repeats)
+const TABLE_HEAD_MM = 9.1;   // column header, repeats every page
+const JOB_BOX_MM = 38.1;     // job metadata box, page 1 only
+const TOTALS_MM = 32.3;      // totals box, last page only
+const SIGN_MM = 18.0;        // signature block, last page only
+const CONTINUED_MM = 5;      // "Continued on page N..." line
+const PAGENUM_MM = 5;        // "Page N of M" line
+const SAFETY_MM = 4;
+
+type EstimateRow = SingleEstimateLineItem & { section: EstimateSection };
+
+// contentMm is PrintableA4Page's actual usable content-area height (measured at runtime via
+// a ref - see measureContentAreaRef in the component below), not derived from letterhead
+// header/footer dimensions: that area is already excluded from what PrintableA4Page reports.
+function usableMm(isFirst: boolean, isLast: boolean, contentMm: number): number {
+  return contentMm - TABLE_HEAD_MM - PAGENUM_MM - SAFETY_MM
+    - (isFirst ? JOB_BOX_MM : 0)
+    - (isLast ? TOTALS_MM + SIGN_MM : CONTINUED_MM);
+}
+
+// Fills pages to their (non-last) capacity, one row/section-header at a time. Used only
+// to discover how many pages are actually needed - the real split comes from greedy fill below.
+function greedyFillToMax(rows: EstimateRow[], contentMm: number): EstimateRow[][] {
+  const pages: EstimateRow[][] = [];
+  let idx = 0;
+  while (idx < rows.length) {
+    const cap = usableMm(pages.length === 0, false, contentMm);
+    let used = 0;
+    let openSection: EstimateSection | null = null;
+    const pageRows: EstimateRow[] = [];
+    while (idx < rows.length) {
+      const row = rows[idx];
+      const opensHeader = openSection !== row.section;
+      const cost = ROW_MM + (opensHeader ? SECTION_ROW_MM : 0);
+      if (pageRows.length > 0 && used + cost > cap) break;
+      used += cost;
+      if (opensHeader) openSection = row.section;
+      pageRows.push(row);
+      idx++;
+    }
+    pages.push(pageRows);
+  }
+  return pages;
+}
+
+// The true last page reserves TOTALS_MM + SIGN_MM instead of CONTINUED_MM, which is much
+// less room. If the rows greedily assigned to the last page don't actually fit once that
+// real reservation is applied, push the overflow onto a new page and re-check. Capped at
+// 10 iterations to guarantee termination.
+function fixLastPageOverflow(pages: EstimateRow[][], contentMm: number): EstimateRow[][] {
+  const result = pages.map(p => [...p]);
+  for (let iter = 0; iter < 10; iter++) {
+    const lastIdx = result.length - 1;
+    const cap = usableMm(lastIdx === 0, true, contentMm);
+    let used = 0;
+    let openSection: EstimateSection | null = null;
+    let overflowAt = -1;
+    for (let i = 0; i < result[lastIdx].length; i++) {
+      const row = result[lastIdx][i];
+      const opensHeader = openSection !== row.section;
+      const cost = ROW_MM + (opensHeader ? SECTION_ROW_MM : 0);
+      if (used + cost > cap) { overflowAt = i; break; }
+      used += cost;
+      if (opensHeader) openSection = row.section;
+    }
+    if (overflowAt <= 0) break; // fits, or a single row alone already exceeds the cap - nothing more to push
+    result.push(result[lastIdx].splice(overflowAt));
+  }
+  return result;
+}
+
+function layoutEstimatePages(rows: EstimateRow[], contentMm: number): EstimateRow[][] {
+  if (rows.length === 0) return [[]];
+  const greedy = greedyFillToMax(rows, contentMm);
+  return fixLastPageOverflow(greedy, contentMm);
+}
 
 export interface SingleEstimateLineItem {
   sr: number;
@@ -374,8 +453,21 @@ export default function SingleJobEstimateReport({
     return val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
+  // PrintableA4Page's actual usable content-area height, measured at runtime (it already
+  // excludes the letterhead header/footer zones). First render lays out with the fallback;
+  // once measured, state updates and the second render lays out with the real value.
+  const measureContentAreaRef = useRef<HTMLDivElement | null>(null);
+  const [contentMm, setContentMm] = useState<number>(FALLBACK_CONTENT_MM);
+
+  useEffect(() => {
+    const contentArea = measureContentAreaRef.current?.parentElement;
+    if (!contentArea) return;
+    const measured = (contentArea.getBoundingClientRect().height / 96) * 25.4;
+    if (measured > 0) setContentMm(measured);
+  }, []);
+
   // Flatten the three sections into one continuously-numbered row list, chunked across pages.
-  const allRows: Array<SingleEstimateLineItem & { section: EstimateSection }> = [
+  const allRows: EstimateRow[] = [
     ...estimate.physicalItems.map(i => ({ ...i, section: 'physical' as const })),
     ...estimate.internalItems.map(i => ({ ...i, section: 'internal' as const })),
     ...estimate.labourItems.map(i => ({ ...i, section: 'labour' as const })),
@@ -386,7 +478,7 @@ export default function SingleJobEstimateReport({
     labour: estimate.physicalItems.length + estimate.internalItems.length,
   };
 
-  const pages = paginateRows(allRows, ROWS_FIRST_PAGE, ROWS_PER_PAGE);
+  const pages = layoutEstimatePages(allRows, contentMm);
   const totalPages = pages.length;
 
   return (
@@ -411,7 +503,7 @@ export default function SingleJobEstimateReport({
 
         return (
           <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
-            <div className="flex flex-col justify-between h-full text-black">
+            <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
               <div>
                 {/* Header Title */}
                 <div className="text-center mb-2 pb-1 border-b-2 border-black">
@@ -508,7 +600,7 @@ export default function SingleJobEstimateReport({
                             </td>
                           </tr>
                           {group.rows.map((item) => (
-                            <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-4.5">
+                            <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-4">
                               <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
                               <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
                               <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
