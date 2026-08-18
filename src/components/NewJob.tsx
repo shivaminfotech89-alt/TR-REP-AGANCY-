@@ -225,21 +225,32 @@ export default function NewJob() {
     return keys.length > 0 ? keys : ['SABARMATI', 'GANDHINAGAR', 'AHMEDABAD'];
   }, [activeAtMaster, activeAgency]);
 
-  // Initialize initial division & first Job No
+  // Initialize initial division
   useEffect(() => {
     if (availableDivisions.length > 0 && (!commonData.division || !availableDivisions.includes(commonData.division))) {
       const firstDiv = availableDivisions[0];
       setCommonData(prev => ({ ...prev, division: firstDiv }));
-      
-      const { prefix, nextNum } = getNextJobNoInfo(firstDiv, 'CRGO', commonData.repairType);
-      setTransformers(prev => {
-        if (prev.length === 1 && (!prev[0].jobNo || prev[0].jobNo.startsWith('JOB'))) {
-          return [{ ...prev[0], jobNo: `${prefix}-${nextNum}` }];
-        }
-        return prev;
-      });
     }
   }, [availableDivisions, activeAgency, activeAtMaster]);
+
+  // Fill any blank / placeholder job numbers once agency & division context are ready.
+  // Only touches rows the user (or GP auto-fill) hasn't already set a real job number on.
+  useEffect(() => {
+    if (!activeAgency || !commonData.division) return;
+
+    setTransformers(prev => {
+      let changed = false;
+      const updated = prev.map((t, idx) => {
+        if (t.jobNo && !t.jobNo.startsWith('JOB')) return t;
+        const { prefix, nextNum } = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
+        const newJobNo = `${prefix}-${nextNum + idx}`;
+        if (newJobNo === t.jobNo) return t;
+        changed = true;
+        return { ...t, jobNo: newJobNo };
+      });
+      return changed ? updated : prev;
+    });
+  }, [activeAgency, activeAtMaster, commonData.division, commonData.repairType, transformers]);
 
   // Load past jobs across ALL saved ATs & historical records in user profile
   useEffect(() => {
