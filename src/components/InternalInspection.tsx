@@ -6,7 +6,7 @@ import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, 
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { PrintableA4Page } from './LetterheadHeader';
-import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { triggerUniversalPrint } from '../lib/printUtils';
 
 export interface InternalData {
   windingType: string;
@@ -42,7 +42,6 @@ export default function InternalInspection() {
   const [formsData, setFormsData] = useState<Record<string, InternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
   
@@ -498,23 +497,7 @@ export default function InternalInspection() {
             >
               <Printer className="w-4 h-4 mr-2" /> Print (Landscape)
             </button>
-            <button 
-              disabled={isExportingPdf}
-              onClick={async () => {
-                setIsExportingPdf(true);
-                try {
-                  await downloadElementAsPdf('printable-internal-inspection-sheet', `Internal_Inspection_MR_${selectedMrNo}.pdf`, 'landscape');
-                } finally {
-                  setIsExportingPdf(false);
-                }
-              }}
-              className="px-5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer disabled:opacity-50 transition-colors"
-              title="Download crisp PDF file"
-            >
-              {isExportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-              {isExportingPdf ? 'Generating PDF...' : 'Download PDF'}
-            </button>
-            <button 
+            <button
               onClick={handleExportExcel}
               className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-xs cursor-pointer transition-colors flex items-center"
             >

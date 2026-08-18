@@ -5,14 +5,14 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, 
-  Droplets, AlertTriangle, AlertCircle, X, Calendar, Download, Save, Edit3, Check, Send,
+  Droplets, AlertTriangle, AlertCircle, X, Calendar, Save, Edit3, Check, Send,
   IndianRupee, Clock, CheckSquare, Eye, CreditCard, Banknote, Filter
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData } from '../lib/estimateData';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { downloadHtmlAsWord } from '../lib/wordExport';
-import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { triggerUniversalPrint } from '../lib/printUtils';
 
 // Helper to convert number to Indian Rupees in words
 export function numberToIndianWords(num: number): string {
@@ -51,7 +51,6 @@ export default function BillingSystem() {
   const [inspections, setInspections] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
 
   // Tab State: 'generator' | 'sent' | 'payments'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'payments'>('generator');
@@ -2012,22 +2011,6 @@ export default function BillingSystem() {
                 title="Print documents or open print dialog"
               >
                 <Printer className="w-4 h-4 mr-1.5 shrink-0" /> Print
-              </button>
-              <button
-                disabled={isExportingPdf}
-                onClick={async () => {
-                  setIsExportingPdf(true);
-                  try {
-                    await downloadElementAsPdf('printable-billing-container', `Bill_Package_MR_${selectedMrNo || 'Package'}.pdf`);
-                  } finally {
-                    setIsExportingPdf(false);
-                  }
-                }}
-                className="flex-1 sm:flex-none flex items-center justify-center text-xs font-bold uppercase tracking-wider bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white px-3.5 py-2 rounded-lg transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-                title="Download crisp A4 PDF file"
-              >
-                {isExportingPdf ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin shrink-0" /> : <Download className="w-4 h-4 mr-1.5 shrink-0" />}
-                {isExportingPdf ? 'Saving...' : 'PDF'}
               </button>
               <button
                 onClick={handleExportExcel}

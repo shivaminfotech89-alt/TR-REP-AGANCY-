@@ -1,68 +1,8 @@
-import html2pdf from 'html2pdf.js';
-
-export interface PrintOptions {
-  filename?: string;
-  documentTitle?: string;
-  letterheadMode?: 'full_a4' | 'header_only' | 'none';
-  orientation?: 'portrait' | 'landscape';
-}
-
 /**
- * Downloads the specified DOM element as a crisp, print-ready A4 PDF.
- * Each child page with .a4-print-page is rendered as a clean, standalone A4 page.
- */
-export async function downloadElementAsPdf(
-  elementId: string,
-  filename: string = 'document.pdf',
-  orientation: 'portrait' | 'landscape' = 'portrait'
-): Promise<boolean> {
-  const element = document.getElementById(elementId);
-  if (!element) {
-    console.error(`Element with id "${elementId}" not found for PDF export.`);
-    return false;
-  }
-
-  const isLandscape = orientation === 'landscape';
-
-  const opt = {
-    margin: [0, 0, 0, 0],
-    filename: filename.endsWith('.pdf') ? filename : `${filename}.pdf`,
-    image: { type: 'jpeg', quality: 0.98 },
-    html2canvas: {
-      scale: 2,
-      useCORS: true,
-      logging: false,
-      letterRendering: true,
-      scrollY: 0,
-      windowWidth: isLandscape ? 1400 : 1024,
-    },
-    jsPDF: {
-      unit: 'mm',
-      format: 'a4',
-      orientation: orientation,
-      compress: true
-    },
-    pagebreak: { 
-      mode: ['css', 'legacy'],
-      after: ['.a4-print-page', '.print-page-break-after', '.break-after-page'],
-      avoid: ['.a4-print-page', '.print-avoid-break', 'tr']
-    }
-  };
-
-  try {
-    // @ts-ignore
-    await html2pdf().set(opt).from(element).save();
-    return true;
-  } catch (err) {
-    console.error('Failed to generate PDF via html2pdf:', err);
-    return false;
-  }
-}
-
-/**
- * Universal Print & PDF trigger:
- * 1. Attempts to open a dedicated standalone print tab formatted with exact A4 pages (portrait or landscape).
- * 2. If blocked or running inside a sandboxed iframe, falls back to direct A4 PDF download.
+ * Universal print trigger:
+ * Opens a dedicated standalone print tab formatted with exact A4 pages (portrait or landscape)
+ * and invokes the browser's native print dialog inside it. If the popup is blocked, alerts the
+ * user to allow pop-ups and try again.
  */
 export async function triggerUniversalPrint(
   elementId: string,
@@ -164,13 +104,7 @@ export async function triggerUniversalPrint(
   }
 
   if (!printWindowOpened) {
-    try {
-      window.focus();
-      window.print();
-    } catch (e) {
-      console.warn('Direct window.print() failed:', e);
-      await downloadElementAsPdf(elementId, filename, orientation);
-    }
+    alert('Your browser blocked the print window. Please allow pop-ups for this site, then try again.');
   }
 }
 

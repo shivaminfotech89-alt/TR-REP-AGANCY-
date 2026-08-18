@@ -4,10 +4,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
-import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet, Download } from 'lucide-react';
+import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
-import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { triggerUniversalPrint } from '../lib/printUtils';
 import { PrintableA4Page } from './LetterheadHeader';
 
 interface Job {
@@ -71,7 +71,6 @@ export default function TestingReport() {
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   const [tab, setTab] = useState<'Pending' | 'Completed'>('Pending');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
@@ -358,24 +357,8 @@ export default function TestingReport() {
             >
               <Printer className="w-4 h-4 mr-2" /> Print (Landscape)
             </button>
-            <button 
-              disabled={isExportingPdf}
-              onClick={async () => {
-                setIsExportingPdf(true);
-                try {
-                  await downloadElementAsPdf('printable-testing-sheet', `Testing_Report_${printDate}.pdf`, 'landscape');
-                } finally {
-                  setIsExportingPdf(false);
-                }
-              }}
-              className="px-5 py-2 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white rounded-lg flex items-center shadow-sm font-bold text-xs cursor-pointer disabled:opacity-50 transition-colors"
-              title="Download crisp PDF file"
-            >
-              {isExportingPdf ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Download className="w-4 h-4 mr-2" />}
-              {isExportingPdf ? 'Generating PDF...' : 'Download PDF'}
-            </button>
-            <button 
-              onClick={closePrint} 
+            <button
+              onClick={closePrint}
               className="px-4 py-2 border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 rounded-lg font-bold text-xs cursor-pointer transition-colors"
             >
               Close Preview

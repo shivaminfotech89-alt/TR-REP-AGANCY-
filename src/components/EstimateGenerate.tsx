@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
-  Loader2, Printer, Search, FileSpreadsheet, Download, Edit3, Check, Save, FileText, X,
+  Loader2, Printer, Search, FileSpreadsheet, Edit3, Check, Save, FileText, X,
   Lock, Unlock, AlertTriangle, RotateCcw, Calendar, Send, CheckCircle2, Clock, CheckSquare,
   Eye, ArrowLeft, ArrowUpRight, Filter, IndianRupee, Scale, ShieldAlert, FileStack, Layers,
   FileCheck2, ChevronRight
@@ -15,7 +15,7 @@ import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import SingleJobEstimateReport, { buildSingleJobEstimateData } from './SingleJobEstimateReport';
 import { downloadHtmlAsWord } from '../lib/wordExport';
-import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { triggerUniversalPrint } from '../lib/printUtils';
 
 // Helper function to calculate item rate, quantity, and amount for any core type
 export function calculateJobItemDetails(
@@ -385,7 +385,6 @@ export default function EstimateGenerate() {
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
@@ -1322,23 +1321,7 @@ export default function EstimateGenerate() {
                   >
                     <Printer className="w-3.5 h-3.5 mr-1.5" /> Print
                   </button>
-                  <button 
-                    disabled={isExportingPdf}
-                    onClick={async () => {
-                      setIsExportingPdf(true);
-                      try {
-                        await downloadElementAsPdf('printable-estimate-container', `Estimate_MR_${selectedMrNo || 'Report'}.pdf`);
-                      } finally {
-                        setIsExportingPdf(false);
-                      }
-                    }}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white px-3.5 py-2 rounded transition-colors shadow-sm cursor-pointer disabled:opacity-50"
-                    title="Download crisp A4 PDF file"
-                  >
-                    {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-1.5" />}
-                    {isExportingPdf ? 'Saving...' : 'PDF'}
-                  </button>
-                  <button 
+                  <button
                     onClick={handleExportExcel}
                     className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
                   >

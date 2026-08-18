@@ -17,8 +17,7 @@ import {
   List, 
   X, 
   CheckSquare, 
-  Calendar, 
-  Download,
+  Calendar,
   PackageCheck,
   Hash,
   Sparkles,
@@ -31,14 +30,13 @@ import * as XLSX from 'xlsx';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { downloadHtmlAsWord } from '../lib/wordExport';
-import { triggerUniversalPrint, downloadElementAsPdf } from '../lib/printUtils';
+import { triggerUniversalPrint } from '../lib/printUtils';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function DispatchChallan() {
   const { activeAgency, activeAtMaster } = useAgency();
   const [allJobs, setAllJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isExportingPdf, setIsExportingPdf] = useState(false);
   
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   
@@ -1496,23 +1494,6 @@ export default function DispatchChallan() {
                   title="Print document or open print dialog"
                 >
                   <Printer className="w-3.5 h-3.5" /> <span>Print</span>
-                </button>
-                <button
-                  type="button"
-                  disabled={isExportingPdf}
-                  onClick={async () => {
-                    setIsExportingPdf(true);
-                    try {
-                      await downloadElementAsPdf('printable-challan-sheet', `Delivery_Challan_${printData.challanNo || 'Draft'}.pdf`);
-                    } finally {
-                      setIsExportingPdf(false);
-                    }
-                  }}
-                  className="flex items-center gap-1 bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white font-bold text-xs px-3 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer disabled:opacity-50"
-                  title="Download crisp A4 PDF file"
-                >
-                  {isExportingPdf ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
-                  <span>{isExportingPdf ? 'Saving...' : 'PDF'}</span>
                 </button>
                 <button
                   type="button"
