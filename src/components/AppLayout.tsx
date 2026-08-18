@@ -44,6 +44,7 @@ import OilInward from './OilInward';
 import AgencySettings from './AgencySettings';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
+import AgencySwitcher from './AgencySwitcher';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function AppLayout({ user }: { user: User }) {
@@ -328,27 +329,7 @@ export default function AppLayout({ user }: { user: User }) {
               <Menu className="w-5 h-5" />
             </button>
 
-            {activeAgency ? (
-              <div className="flex items-center space-x-2 sm:space-x-2.5 min-w-0">
-                <img 
-                  src={appLogo} 
-                  alt="Logo" 
-                  className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" 
-                  referrerPolicy="no-referrer"
-                />
-                <div className="min-w-0">
-                  <h2 className="text-xs sm:text-sm font-bold text-slate-900 leading-tight truncate">{activeAgency.name}</h2>
-                  <p className="text-[10px] sm:text-xs text-slate-500 truncate hidden xs:block">
-                    Active Workspace {activeAtMaster ? `• ${activeAtMaster.atNumber}` : ''}
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="text-xs sm:text-sm font-semibold text-amber-600 flex items-center truncate">
-                <span className="w-2 h-2 rounded-full bg-amber-500 mr-1.5 shrink-0"></span>
-                <span className="truncate">Select agency in Settings</span>
-              </div>
-            )}
+            <AgencySwitcher appLogo={appLogo} />
           </div>
           
           <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
