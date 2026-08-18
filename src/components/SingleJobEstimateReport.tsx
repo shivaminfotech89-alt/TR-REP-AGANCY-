@@ -3,6 +3,17 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { defaultEstimateData, EstimateItem } from '../lib/estimateData';
+import { paginateRows } from '../lib/pagination';
+
+const ROWS_FIRST_PAGE = 20;
+const ROWS_PER_PAGE = 30;
+
+type EstimateSection = 'physical' | 'internal' | 'labour';
+const SECTION_LABELS: Record<EstimateSection, string> = {
+  physical: 'Physical Estimation',
+  internal: 'Internal Estimation',
+  labour: 'Labour Charge',
+};
 
 export interface SingleEstimateLineItem {
   sr: number;
@@ -363,191 +374,217 @@ export default function SingleJobEstimateReport({
     return val.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   };
 
+  // Flatten the three sections into one continuously-numbered row list, chunked across pages.
+  const allRows: Array<SingleEstimateLineItem & { section: EstimateSection }> = [
+    ...estimate.physicalItems.map(i => ({ ...i, section: 'physical' as const })),
+    ...estimate.internalItems.map(i => ({ ...i, section: 'internal' as const })),
+    ...estimate.labourItems.map(i => ({ ...i, section: 'labour' as const })),
+  ];
+  const sectionStartIndex: Record<EstimateSection, number> = {
+    physical: 0,
+    internal: estimate.physicalItems.length,
+    labour: estimate.physicalItems.length + estimate.internalItems.length,
+  };
+
+  const pages = paginateRows(allRows, ROWS_FIRST_PAGE, ROWS_PER_PAGE);
+  const totalPages = pages.length;
+
   return (
-    <PrintableA4Page agency={agency} orientation="portrait" className={`text-black ${className}`}>
-      <div className="flex flex-col justify-between h-full text-black">
-        <div>
-          {/* Header Title */}
-          <div className="text-center mb-2 pb-1 border-b-2 border-black">
-            <h2 className="text-base font-black uppercase tracking-wider">ESTIMATION REPORT</h2>
-          </div>
+    <>
+      {pages.map((rows, pageIdx) => {
+        const isFirst = pageIdx === 0;
+        const isLast = pageIdx === totalPages - 1;
 
-          {/* 2-Column Metadata Box */}
-          <div className="grid grid-cols-2 text-[10px] border border-black p-2 mb-2 leading-relaxed bg-white">
-            <div className="space-y-0.5 border-r border-black pr-2">
-              <div className="flex">
-                <span className="font-bold w-24">Job No.:</span>
-                <span className="font-mono font-bold">{job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}</span>
+        // Group this page's rows into consecutive runs by section, so each run
+        // gets its own section header row (marked "(contd.)" if it's a continuation
+        // of a section that already started on an earlier page).
+        const groups: Array<{ section: EstimateSection; rows: typeof rows; globalStartIdx: number }> = [];
+        rows.forEach((row) => {
+          const globalIdx = row.sr - 1;
+          const lastGroup = groups[groups.length - 1];
+          if (lastGroup && lastGroup.section === row.section) {
+            lastGroup.rows.push(row);
+          } else {
+            groups.push({ section: row.section, rows: [row], globalStartIdx: globalIdx });
+          }
+        });
+
+        return (
+          <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
+            <div className="flex flex-col justify-between h-full text-black">
+              <div>
+                {/* Header Title */}
+                <div className="text-center mb-2 pb-1 border-b-2 border-black">
+                  <h2 className="text-base font-black uppercase tracking-wider">ESTIMATION REPORT</h2>
+                </div>
+
+                {/* 2-Column Metadata Box (page 1 only) */}
+                {isFirst && (
+                  <div className="grid grid-cols-2 text-[10px] border border-black p-2 mb-2 leading-relaxed bg-white">
+                    <div className="space-y-0.5 border-r border-black pr-2">
+                      <div className="flex">
+                        <span className="font-bold w-24">Job No.:</span>
+                        <span className="font-mono font-bold">{job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Manufacturer:</span>
+                        <span className="font-bold uppercase truncate">{job.make || '-'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Serial No.:</span>
+                        <span className="font-mono">{job.serialNo || '-'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">KVA/KV:</span>
+                        <span className="font-bold">{job.capacityKva}/11</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Oil Capacity:</span>
+                        <span className="font-mono">{Number(oilCap).toFixed(2)}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Oil Shortage:</span>
+                        <span className="font-mono">{Number(oilShort).toFixed(2)}</span>
+                      </div>
+                      <div className="flex text-[9px] pt-0.5">
+                        <span className="font-bold w-24">Order No.:</span>
+                        <span className="font-mono truncate">{orderNo}, Dt.: {orderDate}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-0.5 pl-2">
+                      <div className="flex">
+                        <span className="font-bold w-24">Date:</span>
+                        <span className="font-mono">{dateFormatted}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Division:</span>
+                        <span className="font-bold uppercase">{job.division || 'SABARMATI'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Mr. No.:</span>
+                        <span className="font-mono font-bold">{job.mrNo}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Mr. Date:</span>
+                        <span className="font-mono">{mrDateFormatted}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Service Type:</span>
+                        <span className="font-bold">{job.repairType || 'OGP'}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Winding Type:</span>
+                        <span className="font-bold">{windingTypeStr}</span>
+                      </div>
+                      <div className="flex">
+                        <span className="font-bold w-24">Voltage Class:</span>
+                        <span className="font-bold">{voltageRating}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Line Items Table */}
+                <table className="w-full border-collapse border border-black text-[8.5px]">
+                  <thead>
+                    <tr className="bg-slate-100 print:bg-transparent font-bold border-b border-black text-center">
+                      <th className="border border-black p-1 w-8">Sr. No.</th>
+                      <th className="border border-black p-1 text-left min-w-[200px]">Item Description</th>
+                      <th className="border border-black p-1 w-12">Unit</th>
+                      <th className="border border-black p-1 w-14">Quantity</th>
+                      <th className="border border-black p-1 text-right w-16">Unit Rate</th>
+                      <th className="border border-black p-1 text-right w-20">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {groups.map((group, gi) => {
+                      const isContd = gi === 0 && group.globalStartIdx > sectionStartIndex[group.section];
+                      return (
+                        <React.Fragment key={`${group.section}-${group.globalStartIdx}`}>
+                          <tr className="bg-slate-200 print:bg-slate-100 font-bold border-t border-b border-black">
+                            <td colSpan={6} className="p-0.5 text-center uppercase tracking-wider text-[9px]">
+                              {SECTION_LABELS[group.section]}{isContd ? ' (contd.)' : ''}
+                            </td>
+                          </tr>
+                          {group.rows.map((item) => (
+                            <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-4.5">
+                              <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
+                              <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
+                              <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
+                              <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
+                              <td className="border-r border-black p-0.5 text-right font-mono">{formatCurrency(item.rate)}</td>
+                              <td className="border-r border-black p-0.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
+                            </tr>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+
+                {/* Bottom Calculation Box (last page only) */}
+                {isLast && (
+                  <div className="flex justify-end mt-1 text-[9.5px]">
+                    <table className="border-collapse border border-black w-64 text-right">
+                      <tbody>
+                        <tr className="border-b border-black">
+                          <td className="p-1 font-bold border-r border-black">Total Amount:</td>
+                          <td className="p-1 font-mono font-bold w-24">{formatCurrency(estimate.baseTotal)}</td>
+                        </tr>
+                        <tr className="border-b border-black">
+                          <td className="p-1 font-bold border-r border-black">
+                            Percentage ({estimate.atPercentage > 0 ? `+${estimate.atPercentage.toFixed(1)}%` : `${estimate.atPercentage.toFixed(1)}%`}):
+                          </td>
+                          <td className="p-1 font-mono font-medium">{formatCurrency(estimate.percentageAmount)}</td>
+                        </tr>
+                        <tr className="border-b border-black">
+                          <td className="p-1 font-bold border-r border-black">
+                            Amount {estimate.atPercentage >= 0 ? `+ (${estimate.atPercentage.toFixed(1)}%)` : `(${estimate.atPercentage.toFixed(1)}%)`}:
+                          </td>
+                          <td className="p-1 font-mono font-bold">{formatCurrency(estimate.amountWithPercentage)}</td>
+                        </tr>
+                        <tr className="border-b border-black">
+                          <td className="p-1 font-bold border-r border-black">Less:</td>
+                          <td className="p-1 font-mono">{formatCurrency(estimate.lessAmount)}</td>
+                        </tr>
+                        <tr className="bg-slate-100 print:bg-transparent font-black text-[10.5px]">
+                          <td className="p-1.5 border-r border-black">Final Amount:</td>
+                          <td className="p-1.5 font-mono">{formatCurrency(estimate.finalAmount)}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {!isLast && (
+                  <p className="text-right text-xs italic mt-2">Continued on page {pageIdx + 2}…</p>
+                )}
               </div>
-              <div className="flex">
-                <span className="font-bold w-24">Manufacturer:</span>
-                <span className="font-bold uppercase truncate">{job.make || '-'}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Serial No.:</span>
-                <span className="font-mono">{job.serialNo || '-'}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">KVA/KV:</span>
-                <span className="font-bold">{job.capacityKva}/11</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Oil Capacity:</span>
-                <span className="font-mono">{Number(oilCap).toFixed(2)}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Oil Shortage:</span>
-                <span className="font-mono">{Number(oilShort).toFixed(2)}</span>
-              </div>
-              <div className="flex text-[9px] pt-0.5">
-                <span className="font-bold w-24">Order No.:</span>
-                <span className="font-mono truncate">{orderNo}, Dt.: {orderDate}</span>
-              </div>
+
+              {/* Dual Signatures Block (last page only) */}
+              {isLast && (
+                <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
+                  <div className="text-left">
+                    <div className="h-10"></div>
+                    <p className="font-bold">For, {agency?.discomName || 'DISCOM'}</p>
+                  </div>
+                  <div className="text-right">
+                    <div className="h-10"></div>
+                    <p className="font-bold">For, {agency?.name || 'CONTRACTOR'}</p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <div className="space-y-0.5 pl-2">
-              <div className="flex">
-                <span className="font-bold w-24">Date:</span>
-                <span className="font-mono">{dateFormatted}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Division:</span>
-                <span className="font-bold uppercase">{job.division || 'SABARMATI'}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Mr. No.:</span>
-                <span className="font-mono font-bold">{job.mrNo}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Mr. Date:</span>
-                <span className="font-mono">{mrDateFormatted}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Service Type:</span>
-                <span className="font-bold">{job.repairType || 'OGP'}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Winding Type:</span>
-                <span className="font-bold">{windingTypeStr}</span>
-              </div>
-              <div className="flex">
-                <span className="font-bold w-24">Voltage Class:</span>
-                <span className="font-bold">{voltageRating}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Line Items Table */}
-          <table className="w-full border-collapse border border-black text-[8.5px]">
-            <thead>
-              <tr className="bg-slate-100 print:bg-transparent font-bold border-b border-black text-center">
-                <th className="border border-black p-1 w-8">Sr. No.</th>
-                <th className="border border-black p-1 text-left min-w-[200px]">Item Description</th>
-                <th className="border border-black p-1 w-12">Unit</th>
-                <th className="border border-black p-1 w-14">Quantity</th>
-                <th className="border border-black p-1 text-right w-16">Unit Rate</th>
-                <th className="border border-black p-1 text-right w-20">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* SECTION 1: PHYSICAL ESTIMATION */}
-              <tr className="bg-slate-200 print:bg-slate-100 font-bold border-b border-black">
-                <td colSpan={6} className="p-0.5 text-center uppercase tracking-wider text-[9px]">
-                  Physical Estimation
-                </td>
-              </tr>
-              {estimate.physicalItems.map((item) => (
-                <tr key={`phys-${item.sr}`} className="border-b border-slate-300 print:border-black h-4.5">
-                  <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
-                  <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
-                  <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
-                  <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
-                  <td className="border-r border-black p-0.5 text-right font-mono">{formatCurrency(item.rate)}</td>
-                  <td className="border-r border-black p-0.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
-                </tr>
-              ))}
-
-              {/* SECTION 2: INTERNAL ESTIMATION */}
-              <tr className="bg-slate-200 print:bg-slate-100 font-bold border-t border-b border-black">
-                <td colSpan={6} className="p-0.5 text-center uppercase tracking-wider text-[9px]">
-                  Internal Estimation
-                </td>
-              </tr>
-              {estimate.internalItems.map((item) => (
-                <tr key={`int-${item.sr}`} className="border-b border-slate-300 print:border-black h-4.5">
-                  <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
-                  <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
-                  <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
-                  <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
-                  <td className="border-r border-black p-0.5 text-right font-mono">{formatCurrency(item.rate)}</td>
-                  <td className="border-r border-black p-0.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
-                </tr>
-              ))}
-
-              {/* SECTION 3: LABOUR CHARGE */}
-              <tr className="bg-slate-200 print:bg-slate-100 font-bold border-t border-b border-black">
-                <td colSpan={6} className="p-0.5 text-center uppercase tracking-wider text-[9px]">
-                  Labour Charge
-                </td>
-              </tr>
-              {estimate.labourItems.map((item) => (
-                <tr key={`lab-${item.sr}`} className="border-b border-slate-300 print:border-black h-4.5">
-                  <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
-                  <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
-                  <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
-                  <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
-                  <td className="border-r border-black p-0.5 text-right font-mono">{formatCurrency(item.rate)}</td>
-                  <td className="border-r border-black p-0.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          {/* Bottom Calculation Box */}
-          <div className="flex justify-end mt-1 text-[9.5px]">
-            <table className="border-collapse border border-black w-64 text-right">
-              <tbody>
-                <tr className="border-b border-black">
-                  <td className="p-1 font-bold border-r border-black">Total Amount:</td>
-                  <td className="p-1 font-mono font-bold w-24">{formatCurrency(estimate.baseTotal)}</td>
-                </tr>
-                <tr className="border-b border-black">
-                  <td className="p-1 font-bold border-r border-black">
-                    Percentage ({estimate.atPercentage > 0 ? `+${estimate.atPercentage.toFixed(1)}%` : `${estimate.atPercentage.toFixed(1)}%`}):
-                  </td>
-                  <td className="p-1 font-mono font-medium">{formatCurrency(estimate.percentageAmount)}</td>
-                </tr>
-                <tr className="border-b border-black">
-                  <td className="p-1 font-bold border-r border-black">
-                    Amount {estimate.atPercentage >= 0 ? `+ (${estimate.atPercentage.toFixed(1)}%)` : `(${estimate.atPercentage.toFixed(1)}%)`}:
-                  </td>
-                  <td className="p-1 font-mono font-bold">{formatCurrency(estimate.amountWithPercentage)}</td>
-                </tr>
-                <tr className="border-b border-black">
-                  <td className="p-1 font-bold border-r border-black">Less:</td>
-                  <td className="p-1 font-mono">{formatCurrency(estimate.lessAmount)}</td>
-                </tr>
-                <tr className="bg-slate-100 print:bg-transparent font-black text-[10.5px]">
-                  <td className="p-1.5 border-r border-black">Final Amount:</td>
-                  <td className="p-1.5 font-mono">{formatCurrency(estimate.finalAmount)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Dual Signatures Block */}
-        <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
-          <div className="text-left">
-            <div className="h-10"></div>
-            <p className="font-bold">For, {agency?.discomName || 'DISCOM'}</p>
-          </div>
-          <div className="text-right">
-            <div className="h-10"></div>
-            <p className="font-bold">For, {agency?.name || 'CONTRACTOR'}</p>
-          </div>
-        </div>
-      </div>
-    </PrintableA4Page>
+            {agency?.showPageNumbers !== false && (
+              <footer className="a4-page-footer">
+                Page {pageIdx + 1} of {totalPages}
+              </footer>
+            )}
+          </PrintableA4Page>
+        );
+      })}
+    </>
   );
 }

@@ -16,6 +16,7 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import SingleJobEstimateReport, { buildSingleJobEstimateData } from './SingleJobEstimateReport';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
+import { paginateRows } from '../lib/pagination';
 
 // Helper function to calculate item rate, quantity, and amount for any core type
 export function calculateJobItemDetails(
@@ -382,17 +383,8 @@ export function calculateJobItemDetails(
 
 // Forwarding-letter job table pagination: fewer rows on page 1 since the recipient/ref
 // block eats vertical space; more room on continuation pages.
-const ROWS_FIRST_PAGE = 18;
-const ROWS_PER_PAGE = 26;
-
-function paginateRows<T>(rows: T[], first: number, rest: number): T[][] {
-  if (rows.length === 0) return [[]];
-  const pages: T[][] = [rows.slice(0, first)];
-  for (let i = first; i < rows.length; i += rest) {
-    pages.push(rows.slice(i, i + rest));
-  }
-  return pages;
-}
+const ROWS_FIRST_PAGE = 14;
+const ROWS_PER_PAGE = 22;
 
 export default function EstimateGenerate() {
   const { activeAgency, activeAtMaster, updateAgency } = useAgency();
@@ -1173,9 +1165,11 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             )}
           </div>
 
-          <footer className="a4-page-footer">
-            Page {pageIdx + 1} of {totalPages}
-          </footer>
+          {activeAgency?.showPageNumbers !== false && (
+            <footer className="a4-page-footer">
+              Page {pageIdx + 1} of {totalPages}
+            </footer>
+          )}
         </PrintableA4Page>
       );
     });

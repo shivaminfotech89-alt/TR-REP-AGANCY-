@@ -35,6 +35,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [footerHeightMm, setFooterHeightMm] = useState<number>(agency.letterheadFooterHeightMm ?? 24);
   const [marginLeftMm, setMarginLeftMm] = useState<number>(agency.letterheadMarginLeftMm ?? 12);
   const [marginRightMm, setMarginRightMm] = useState<number>(agency.letterheadMarginRightMm ?? 12);
+  const [showPageNumbers, setShowPageNumbers] = useState<boolean>(agency.showPageNumbers !== false);
 
   // DISCOM / Client (Buyer) & Tax Details
   const [discomName, setDiscomName] = useState(agency.discomName || 'Uttar Gujarat Vij Company Ltd.');
@@ -114,6 +115,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setFooterHeightMm(agency.letterheadFooterHeightMm ?? 24);
     setMarginLeftMm(agency.letterheadMarginLeftMm ?? 12);
     setMarginRightMm(agency.letterheadMarginRightMm ?? 12);
+    setShowPageNumbers(agency.showPageNumbers !== false);
 
     // Parse divisions
     const divs: any[] = [];
@@ -306,6 +308,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         letterheadFooterHeightMm: footerHeightMm,
         letterheadMarginLeftMm: marginLeftMm,
         letterheadMarginRightMm: marginRightMm,
+        showPageNumbers,
         gpValidationMonths,
         
         // Agency details
@@ -584,6 +587,18 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   onMarginLeftChange={setMarginLeftMm}
                   onMarginRightChange={setMarginRightMm}
                 />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={showPageNumbers}
+                    onChange={e => setShowPageNumbers(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-1 focus:ring-blue-500"
+                  />
+                  Print page numbers (turn off if your letterhead already shows them)
+                </label>
               </div>
             </div>
           </div>

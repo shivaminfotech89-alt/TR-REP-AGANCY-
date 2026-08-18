@@ -40,6 +40,7 @@ export interface Agency {
   letterheadFooterHeightMm?: number;
   letterheadMarginLeftMm?: number;
   letterheadMarginRightMm?: number;
+  showPageNumbers?: boolean; // Default true when undefined; turn off if the letterhead already prints page numbers
   prefixes: Record<string, string | Record<string, string>>;
   lastJobNumbers: Record<string, number>;
   allotments?: Record<string, Record<string, number>>;
