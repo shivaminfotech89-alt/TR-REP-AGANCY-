@@ -18,26 +18,22 @@ const INTERNAL_DONE_STATUSES = new Set([
 
 /**
  * Whether a saved inspection record actually has meaningful data in it, rather than
- * being an empty shell that only exists because a save happened. Checked two ways:
+ * being an empty shell that only exists because a save happened.
  *
- * 1. `data.inspectedBy` - the reliable signal going forward. The External/Internal
- *    forms now require an inspector name before they'll save at all, so any record
- *    saved from here on has this set. A record with a name on it is unambiguously
- *    a real inspection.
- * 2. For legacy records saved before that field existed, a per-type heuristic:
- *    - Internal: at least one coil/winding weight field, or a per-phase damage note,
- *      or an explicit Scrap condition. These fields genuinely default to blank on
- *      the form, so a non-blank value is a reliable signal someone filled them in.
- *    - External: `namePlate !== '-'`. Every other External field auto-fills a
- *      plausible-looking default the moment the form opens (sealType='BL',
- *      nuteBolt='Y', etc.), so none of them can distinguish "reviewed and OK" from
- *      "never touched" - namePlate is the only field with a genuine unset sentinel.
- *      This is a heuristic for old data, not a permanent rule.
+ * - Internal: requires at least one coil/winding weight field, a per-phase damage
+ *   note, or an explicit Scrap condition. These fields genuinely default to blank
+ *   on the form (Amorphous/Wound Core jobs are exempt from needing them at the
+ *   form-validation level, since those core types never use coil weight data -
+ *   see the isAmorphousOrWound check in InternalInspection.tsx's handleSubmit), so
+ *   a non-blank value here is a reliable signal someone filled them in.
+ * - External: any saved record with a data object counts as real. External's
+ *   fields all auto-fill a plausible-looking default the moment the form opens, so
+ *   no field value can distinguish "reviewed and OK" from "never touched" - there
+ *   is no reliable per-field signal, so record existence is what's checked instead.
  */
 export function hasInspectionData(record: any): boolean {
   const data = record?.data;
   if (!data) return false;
-  if (data.inspectedBy && String(data.inspectedBy).trim() !== '') return true;
 
   if (record.type === 'Internal') {
     const hasCoilWeight = [data.totWt, data.wtOfCoil, data.totWtLv, data.wtOfCoilLv]
@@ -48,8 +44,8 @@ export function hasInspectionData(record: any): boolean {
     return hasCoilWeight || hasDamageNote || isScrapDecision;
   }
 
-  // External (or unrecognized type): legacy namePlate heuristic.
-  return data.namePlate !== undefined && data.namePlate !== '-';
+  // External (or unrecognized type): any saved record counts.
+  return true;
 }
 
 /**

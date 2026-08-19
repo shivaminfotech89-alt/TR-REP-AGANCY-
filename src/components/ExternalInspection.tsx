@@ -9,7 +9,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { RATING_LEVEL_OPTIONS } from '../lib/estimateData';
-import { isJobExternallyDone, isMrExternalComplete, latestJobDate, hasInspectionData } from '../lib/inspectionStage';
+import { isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 
 export const TRANSFORMER_CORE_TYPES = [
   'CRGO',
@@ -81,7 +81,6 @@ export default function ExternalInspection() {
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [externalInspectionDate, setExternalInspectionDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [inspectedBy, setInspectedBy] = useState<string>('');
   const [formsData, setFormsData] = useState<Record<string, ExternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
@@ -141,18 +140,6 @@ export default function ExternalInspection() {
       }
     }
     setExternalInspectionDate(existingDate || new Date().toISOString().split('T')[0]);
-
-    // Find any existing "inspected by" name for this MR
-    let existingInspectedBy = '';
-    if (sampleJob?.externalInspectedBy) {
-      existingInspectedBy = sampleJob.externalInspectedBy;
-    } else {
-      const existingInsp = allInspections.find(i => jobsForMr.some(j => j.id === i.jobId));
-      if (existingInsp?.data?.inspectedBy) {
-        existingInspectedBy = existingInsp.data.inspectedBy;
-      }
-    }
-    setInspectedBy(existingInspectedBy);
 
     const initialForms: Record<string, ExternalData> = {};
     jobsForMr.forEach(j => {
@@ -375,27 +362,6 @@ export default function ExternalInspection() {
     e.preventDefault();
     if (!auth.currentUser || !selectedMrNo) return;
 
-    // An inspector name is required before anything can save - it's the reliable,
-    // going-forward signal that this batch was actually worked on by someone.
-    if (!inspectedBy || inspectedBy.trim() === '') {
-      alert('⚠️ Inspected By is required before saving.');
-      return;
-    }
-
-    // Catch jobs where nothing appears to have actually been reviewed. Every other
-    // field on this form auto-fills a plausible-looking default the moment it opens,
-    // so namePlate (the only field left at its genuine unset sentinel, '-') is the
-    // one reliable signal that a specific transformer was never looked at.
-    const emptyJobs = mrJobs
-      .filter(job => !(job.status === 'Dispatched' || job.isClosed === true))
-      .filter(job => (formsData[job.id]?.namePlate ?? '-') === '-')
-      .map(job => job.jobNo);
-
-    if (emptyJobs.length > 0) {
-      alert(`⚠️ ${emptyJobs.join(', ')} ${emptyJobs.length === 1 ? 'has' : 'have'} no inspection data entered.\n\nPlease review each transformer before saving.`);
-      return;
-    }
-
     // Strict validation: Ensure no blank or incomplete inspection form is submitted
     const incompleteJobs: string[] = [];
     for (const job of mrJobs) {
@@ -464,7 +430,6 @@ export default function ExternalInspection() {
           inspectionDate: externalInspectionDate,
           data: {
             inspectionDate: externalInspectionDate,
-            inspectedBy: inspectedBy.trim(),
             kv: jobData.kv,
             oilCapLtrs: Math.round(Number(jobData.oilCapLtrs) || 0),
             lessOilLtrs: Math.round(Number(jobData.lessOilLtrs) || 0),
@@ -509,7 +474,6 @@ export default function ExternalInspection() {
           starRating: currentStarRating,
           ratingLevel: currentStarRating,
           externalInspectionDate: externalInspectionDate,
-          externalInspectedBy: inspectedBy.trim(),
           updatedAt: now
         };
         
@@ -781,13 +745,12 @@ export default function ExternalInspection() {
                     <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
                       <div className="text-center">
                         <div className="h-8"></div>
-                        <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY (TESTING ENG.)</div>
-                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer / Inspector</div>
+                        <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer</div>
                       </div>
                       <div className="text-center">
                         <div className="h-8"></div>
-                        <div className="border-t border-dotted border-black pt-0.5">WITNESSED & RECEIVED BY</div>
-                        <div className="text-[8px] text-slate-700 font-normal">AEE / Sub-Division Officer</div>
+                        <div className="border-t border-dotted border-black pt-0.5">EXECUTIVE ENGINEER</div>
                       </div>
                       <div className="text-center">
                         <div className="h-8 flex items-center justify-center">
@@ -995,10 +958,6 @@ export default function ExternalInspection() {
                     const inspDate = latestJobDate(jobsForMr, 'externalInspectionDate');
                     const isDone = isMrExternalComplete(jobsForMr, inspections);
                     const inspectedCount = jobsForMr.filter(j => isJobExternallyDone(j, inspections)).length;
-                    const emptyRecordJobs = jobsForMr.filter(j => {
-                      const rec = inspections.find(i => i.jobId === j.id);
-                      return rec && !hasInspectionData(rec);
-                    });
 
                     return (
                     <React.Fragment key={mr}>
@@ -1081,16 +1040,6 @@ export default function ExternalInspection() {
                         </div>
                       </td>
                     </tr>
-                    {emptyRecordJobs.length > 0 && (
-                      <tr>
-                        <td colSpan={8} className="px-4 py-2 bg-amber-50 border-t border-amber-200">
-                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            Inspection record is empty - please re-enter: {emptyRecordJobs.map(j => j.jobNo).join(', ')}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                     </React.Fragment>
                     );
                   })}
@@ -1139,20 +1088,6 @@ export default function ExternalInspection() {
                   value={externalInspectionDate}
                   onChange={(e) => setExternalInspectionDate(e.target.value)}
                   className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div className="flex items-center bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-2">
-                  INSPECTED BY:
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={inspectedBy}
-                  onChange={(e) => setInspectedBy(e.target.value)}
-                  placeholder="Name"
-                  className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden w-28"
                 />
               </div>
 

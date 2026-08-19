@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
-import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate, hasInspectionData } from '../lib/inspectionStage';
+import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 
 export interface InternalData {
   windingType: string;
@@ -41,7 +41,6 @@ export default function InternalInspection() {
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [internalInspectionDate, setInternalInspectionDate] = useState<string>(new Date().toISOString().split('T')[0]);
-  const [inspectedBy, setInspectedBy] = useState<string>('');
   const [formsData, setFormsData] = useState<Record<string, InternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
@@ -97,9 +96,6 @@ export default function InternalInspection() {
     // Pick saved internalInspectionDate if already recorded, or default to current date
     const initialDate = sampleJob?.internalInspectionDate || existingSampleInsp?.data?.inspectionDate || new Date().toISOString().split('T')[0];
     setInternalInspectionDate(initialDate);
-
-    const initialInspectedBy = sampleJob?.internalInspectedBy || existingSampleInsp?.data?.inspectedBy || '';
-    setInspectedBy(initialInspectedBy);
 
     const initialForms: Record<string, InternalData> = {};
     jobsForMr.forEach(j => {
@@ -302,13 +298,6 @@ export default function InternalInspection() {
       return;
     }
 
-    // An inspector name is required before anything can save - it's the reliable,
-    // going-forward signal that this batch was actually worked on by someone.
-    if (!inspectedBy || inspectedBy.trim() === '') {
-      alert('⚠️ Inspected By is required before saving.');
-      return;
-    }
-
     // Catch jobs where nothing appears to have actually been reviewed. The existing
     // check below only requires HV coil weight when damage was actually recorded
     // against that job (damR/damY/damB > 0) - a job left entirely at its blank
@@ -320,8 +309,8 @@ export default function InternalInspection() {
       .filter(job => !(job.status === 'Dispatched' || job.isClosed === true))
       .filter(job => {
         // Amorphous/Wound Core is fixed-rate and never uses coil weight data (see the
-        // isAmorphousOrWound exemption in the validation below) - inspectedBy above is
-        // the only reliable signal for those, so don't flag them here.
+        // isAmorphousOrWound exemption in the validation below), so this check simply
+        // doesn't apply to them - don't flag them here.
         const coreTypeUpper = (job.coreType || '').toUpperCase();
         const isAmorphousOrWound = coreTypeUpper.includes('AMORPHOUS') || coreTypeUpper.includes('AM') || coreTypeUpper.includes('WOUND') || coreTypeUpper.includes('WC');
         if (isAmorphousOrWound) return false;
@@ -398,7 +387,6 @@ export default function InternalInspection() {
           inspectionDate: internalInspectionDate,
           data: {
             inspectionDate: internalInspectionDate,
-            inspectedBy: inspectedBy.trim(),
             windingType: jobData.windingType,
             condition: jobData.condition || 'Repairable',
             hvCoilLimb: jobData.hvCoilLimb,
@@ -433,7 +421,6 @@ export default function InternalInspection() {
         const jobRef = doc(db, 'jobs', job.id);
         const jobUpdates: any = {
           internalInspectionDate: internalInspectionDate,
-          internalInspectedBy: inspectedBy.trim(),
           updatedAt: now
         };
         if (job.status === 'External Done' || job.status === 'Received' || job.status === 'Internal Done' || job.status === 'Scrap') {
@@ -711,13 +698,12 @@ export default function InternalInspection() {
                     <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
                       <div className="text-center">
                         <div className="h-8"></div>
-                        <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY (TESTING ENG.)</div>
-                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer / Inspector</div>
+                        <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY</div>
+                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer</div>
                       </div>
                       <div className="text-center">
                         <div className="h-8"></div>
-                        <div className="border-t border-dotted border-black pt-0.5">WITNESSED & VERIFIED BY</div>
-                        <div className="text-[8px] text-slate-700 font-normal">AEE / Sub-Division Officer</div>
+                        <div className="border-t border-dotted border-black pt-0.5">EXECUTIVE ENGINEER</div>
                       </div>
                       <div className="text-center">
                         <div className="h-8 flex items-center justify-center">
@@ -848,10 +834,6 @@ export default function InternalInspection() {
                     const intInspDate = latestJobDate(jobsForMr, 'internalInspectionDate');
                     const isDone = isMrInternalComplete(jobsForMr, inspections);
                     const inspectedCount = jobsForMr.filter(j => isJobInternallyDone(j, inspections)).length;
-                    const emptyRecordJobs = jobsForMr.filter(j => {
-                      const rec = inspections.find(i => i.jobId === j.id);
-                      return rec && !hasInspectionData(rec);
-                    });
 
                     // Internal inspection cannot start until every job in the MR is
                     // genuinely externally done (real data, not just a record).
@@ -967,16 +949,6 @@ export default function InternalInspection() {
                         </td>
                       </tr>
                     )}
-                    {emptyRecordJobs.length > 0 && (
-                      <tr>
-                        <td colSpan={9} className="px-4 py-2 bg-amber-50 border-t border-amber-200">
-                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
-                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                            Inspection record is empty - please re-enter: {emptyRecordJobs.map(j => j.jobNo).join(', ')}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
                     </React.Fragment>
                     );
                   })}
@@ -1030,20 +1002,6 @@ export default function InternalInspection() {
                   value={internalInspectionDate}
                   onChange={(e) => setInternalInspectionDate(e.target.value)}
                   className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
-                />
-              </div>
-
-              <div className="flex items-center bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-2">
-                  INSPECTED BY:
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={inspectedBy}
-                  onChange={(e) => setInspectedBy(e.target.value)}
-                  placeholder="Name"
-                  className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden w-28"
                 />
               </div>
 
