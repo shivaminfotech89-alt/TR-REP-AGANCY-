@@ -4,6 +4,18 @@ import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X,
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
 
+// Live hint for an AT percentage field while it's still a string mid-edit (e.g. "-",
+// "-.", "." are valid intermediate states that aren't a usable number yet).
+function atPercentageHint(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '' || trimmed === '-' || trimmed === '.' || trimmed === '-.') return '';
+  const n = Number(trimmed);
+  if (isNaN(n)) return '';
+  if (n > 0) return `+${n}% above tender`;
+  if (n < 0) return `${n}% below tender`;
+  return 'at tender rate';
+}
+
 export function AtSettings() {
   const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
@@ -17,9 +29,9 @@ export function AtSettings() {
     name: string;
     startDate: string;
     endDate: string;
-    atPercentageCRGO: number;
-    atPercentageAmorphous: number;
-    atPercentageWoundCore: number;
+    atPercentageCRGO: string;
+    atPercentageAmorphous: string;
+    atPercentageWoundCore: string;
   } | null>(null);
 
   const [newAt, setNewAt] = useState({
@@ -27,9 +39,9 @@ export function AtSettings() {
     name: '',
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-    atPercentageCRGO: 4,
-    atPercentageAmorphous: 4,
-    atPercentageWoundCore: 4,
+    atPercentageCRGO: '4',
+    atPercentageAmorphous: '4',
+    atPercentageWoundCore: '4',
   });
 
   const agencyAts = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -58,9 +70,9 @@ export function AtSettings() {
         name: '',
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-        atPercentageCRGO: 4,
-        atPercentageAmorphous: 4,
-        atPercentageWoundCore: 4,
+        atPercentageCRGO: '4',
+        atPercentageAmorphous: '4',
+        atPercentageWoundCore: '4',
       });
     } catch (err) {
       alert("Failed to create AT Master");
@@ -77,9 +89,9 @@ export function AtSettings() {
       name: at.name || '',
       startDate: at.startDate ? new Date(at.startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       endDate: at.endDate ? new Date(at.endDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      atPercentageCRGO: at.atPercentageCRGO ?? at.atPercentage ?? 4,
-      atPercentageAmorphous: at.atPercentageAmorphous ?? at.atPercentage ?? 4,
-      atPercentageWoundCore: at.atPercentageWoundCore ?? at.atPercentage ?? 4,
+      atPercentageCRGO: String(at.atPercentageCRGO ?? at.atPercentage ?? 4),
+      atPercentageAmorphous: String(at.atPercentageAmorphous ?? at.atPercentage ?? 4),
+      atPercentageWoundCore: String(at.atPercentageWoundCore ?? at.atPercentage ?? 4),
     });
   };
 
@@ -297,15 +309,24 @@ export function AtSettings() {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                                 <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">CRGO Core %</label>
-                                <input required type="number" step="0.01" value={editFormData?.atPercentageCRGO ?? 4} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageCRGO: parseFloat(e.target.value) || 0} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                <input required type="number" step="0.01" value={editFormData?.atPercentageCRGO ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageCRGO: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                {editFormData && atPercentageHint(editFormData.atPercentageCRGO) && (
+                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentageCRGO)}</span>
+                                )}
                               </div>
                               <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                                 <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">Amorphous Core %</label>
-                                <input required type="number" step="0.01" value={editFormData?.atPercentageAmorphous ?? 4} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageAmorphous: parseFloat(e.target.value) || 0} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                <input required type="number" step="0.01" value={editFormData?.atPercentageAmorphous ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageAmorphous: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                {editFormData && atPercentageHint(editFormData.atPercentageAmorphous) && (
+                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentageAmorphous)}</span>
+                                )}
                               </div>
                               <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                                 <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">Wound Core %</label>
-                                <input required type="number" step="0.01" value={editFormData?.atPercentageWoundCore ?? 4} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageWoundCore: parseFloat(e.target.value) || 0} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                <input required type="number" step="0.01" value={editFormData?.atPercentageWoundCore ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageWoundCore: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                {editFormData && atPercentageHint(editFormData.atPercentageWoundCore) && (
+                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentageWoundCore)}</span>
+                                )}
                               </div>
                             </div>
                           </div>
@@ -421,15 +442,24 @@ export function AtSettings() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                     <label className="block text-xs font-bold text-slate-700 mb-1">CRGO Core %</label>
-                    <input required type="number" step="0.01" value={newAt.atPercentageCRGO} onChange={e => setNewAt({...newAt, atPercentageCRGO: parseFloat(e.target.value) || 0})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    <input required type="number" step="0.01" value={newAt.atPercentageCRGO} onChange={e => setNewAt({...newAt, atPercentageCRGO: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    {atPercentageHint(newAt.atPercentageCRGO) && (
+                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentageCRGO)}</span>
+                    )}
                   </div>
                   <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                     <label className="block text-xs font-bold text-slate-700 mb-1">Amorphous Core %</label>
-                    <input required type="number" step="0.01" value={newAt.atPercentageAmorphous} onChange={e => setNewAt({...newAt, atPercentageAmorphous: parseFloat(e.target.value) || 0})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    <input required type="number" step="0.01" value={newAt.atPercentageAmorphous} onChange={e => setNewAt({...newAt, atPercentageAmorphous: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    {atPercentageHint(newAt.atPercentageAmorphous) && (
+                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentageAmorphous)}</span>
+                    )}
                   </div>
                   <div className="bg-white p-2.5 rounded-lg border border-slate-200">
                     <label className="block text-xs font-bold text-slate-700 mb-1">Wound Core %</label>
-                    <input required type="number" step="0.01" value={newAt.atPercentageWoundCore} onChange={e => setNewAt({...newAt, atPercentageWoundCore: parseFloat(e.target.value) || 0})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    <input required type="number" step="0.01" value={newAt.atPercentageWoundCore} onChange={e => setNewAt({...newAt, atPercentageWoundCore: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    {atPercentageHint(newAt.atPercentageWoundCore) && (
+                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentageWoundCore)}</span>
+                    )}
                   </div>
                 </div>
               </div>
