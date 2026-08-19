@@ -9,6 +9,7 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { PrintableA4Page } from './LetterheadHeader';
+import { isMrReadyForTesting } from '../lib/inspectionStage';
 
 interface Job {
   id: string;
@@ -70,6 +71,7 @@ export default function TestingReport() {
   const { activeAgency } = useAgency();
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [tab, setTab] = useState<'Pending' | 'Completed'>('Pending');
@@ -88,9 +90,17 @@ export default function TestingReport() {
       if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
       try {
         const q = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid), where('agencyId', '==', activeAgency.id));
-        const snapshot = await getDocs(q);
+        const [snapshot, extInspSnap, intInspSnap] = await Promise.all([
+          getDocs(q),
+          getDocs(query(collection(db, 'inspections'), where('ownerId', '==', auth.currentUser.uid), where('type', '==', 'External'))),
+          getDocs(query(collection(db, 'inspections'), where('ownerId', '==', auth.currentUser.uid), where('type', '==', 'Internal'))),
+        ]);
         const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
         setJobs(fetchedJobs);
+        setInspections([
+          ...extInspSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+          ...intInspSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+        ]);
       } catch (err) {
         handleFirestoreError(err, OperationType.LIST, 'jobs');
       } finally {
@@ -105,16 +115,30 @@ export default function TestingReport() {
     return ['All', ...Array.from(divs).sort()];
   }, [jobs]);
 
+  // Jobs grouped by MR, so testing visibility can be gated on the whole MR's
+  // external+internal readiness, not just this one job's own status.
+  const mrGroups = useMemo(() => {
+    const groups: Record<string, Job[]> = {};
+    jobs.forEach(j => {
+      if (!groups[j.mrNo]) groups[j.mrNo] = [];
+      groups[j.mrNo].push(j);
+    });
+    return groups;
+  }, [jobs]);
+
   const filteredJobs = useMemo(() => {
     return jobs.filter(j => {
+      const jobsForMr = mrGroups[j.mrNo] || [j];
+      if (!isMrReadyForTesting(jobsForMr, inspections)) return false;
+
       if (tab === 'Pending' && j.status !== 'Internal Done') return false;
       if (tab === 'Completed' && (j.status === 'Received' || j.status === 'External Done' || j.status === 'Internal Done')) return false;
-      
+
       if (divisionFilter !== 'All' && (j.division || 'Unknown') !== divisionFilter) return false;
       if (jobNoFilter && !j.jobNo.toLowerCase().includes(jobNoFilter.toLowerCase())) return false;
       return true;
     }).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
-  }, [jobs, tab, divisionFilter, jobNoFilter]);
+  }, [jobs, mrGroups, inspections, tab, divisionFilter, jobNoFilter]);
 
   const handleToggleJob = (id: string) => {
     const newSet = new Set(selectedJobIds);
@@ -677,29 +701,35 @@ export default function TestingReport() {
                       </td>
                     )}
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end space-x-2">
-                        <button
-                          onClick={() => {
-                            setSelectedJobIds(new Set([job.id]));
-                            setIsFormOpen(true);
-                          }}
-                          className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 rounded transition-colors shadow-2xs cursor-pointer"
-                        >
-                          {tab === 'Pending' ? 'Test Job' : 'Edit Test'}
-                        </button>
-                        {tab === 'Completed' && (
+                      {job.status === 'Scrap' ? (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                          Scrap - not tested
+                        </span>
+                      ) : (
+                        <div className="flex items-center justify-end space-x-2">
                           <button
                             onClick={() => {
                               setSelectedJobIds(new Set([job.id]));
-                              setIsPrintOpen(true);
+                              setIsFormOpen(true);
                             }}
-                            className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 rounded transition-colors cursor-pointer"
-                            title="Print Testing Report"
+                            className="px-3 py-1.5 text-xs font-bold bg-blue-600 text-white hover:bg-blue-700 rounded transition-colors shadow-2xs cursor-pointer"
                           >
-                            <Printer className="w-3.5 h-3.5 text-slate-600" />
+                            {tab === 'Pending' ? 'Test Job' : 'Edit Test'}
                           </button>
-                        )}
-                      </div>
+                          {tab === 'Completed' && (
+                            <button
+                              onClick={() => {
+                                setSelectedJobIds(new Set([job.id]));
+                                setIsPrintOpen(true);
+                              }}
+                              className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200 rounded transition-colors cursor-pointer"
+                              title="Print Testing Report"
+                            >
+                              <Printer className="w-3.5 h-3.5 text-slate-600" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 ))}

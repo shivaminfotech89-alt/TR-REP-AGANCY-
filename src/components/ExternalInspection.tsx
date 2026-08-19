@@ -9,6 +9,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { RATING_LEVEL_OPTIONS } from '../lib/estimateData';
+import { isJobExternallyDone, isMrExternalComplete, latestJobDate, hasInspectionData } from '../lib/inspectionStage';
 
 export const TRANSFORMER_CORE_TYPES = [
   'CRGO',
@@ -80,6 +81,7 @@ export default function ExternalInspection() {
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [externalInspectionDate, setExternalInspectionDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [inspectedBy, setInspectedBy] = useState<string>('');
   const [formsData, setFormsData] = useState<Record<string, ExternalData>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isPrintOpen, setIsPrintOpen] = useState(false);
@@ -139,6 +141,18 @@ export default function ExternalInspection() {
       }
     }
     setExternalInspectionDate(existingDate || new Date().toISOString().split('T')[0]);
+
+    // Find any existing "inspected by" name for this MR
+    let existingInspectedBy = '';
+    if (sampleJob?.externalInspectedBy) {
+      existingInspectedBy = sampleJob.externalInspectedBy;
+    } else {
+      const existingInsp = allInspections.find(i => jobsForMr.some(j => j.id === i.jobId));
+      if (existingInsp?.data?.inspectedBy) {
+        existingInspectedBy = existingInsp.data.inspectedBy;
+      }
+    }
+    setInspectedBy(existingInspectedBy);
 
     const initialForms: Record<string, ExternalData> = {};
     jobsForMr.forEach(j => {
@@ -361,6 +375,27 @@ export default function ExternalInspection() {
     e.preventDefault();
     if (!auth.currentUser || !selectedMrNo) return;
 
+    // An inspector name is required before anything can save - it's the reliable,
+    // going-forward signal that this batch was actually worked on by someone.
+    if (!inspectedBy || inspectedBy.trim() === '') {
+      alert('⚠️ Inspected By is required before saving.');
+      return;
+    }
+
+    // Catch jobs where nothing appears to have actually been reviewed. Every other
+    // field on this form auto-fills a plausible-looking default the moment it opens,
+    // so namePlate (the only field left at its genuine unset sentinel, '-') is the
+    // one reliable signal that a specific transformer was never looked at.
+    const emptyJobs = mrJobs
+      .filter(job => !(job.status === 'Dispatched' || job.isClosed === true))
+      .filter(job => (formsData[job.id]?.namePlate ?? '-') === '-')
+      .map(job => job.jobNo);
+
+    if (emptyJobs.length > 0) {
+      alert(`⚠️ ${emptyJobs.join(', ')} ${emptyJobs.length === 1 ? 'has' : 'have'} no inspection data entered.\n\nPlease review each transformer before saving.`);
+      return;
+    }
+
     // Strict validation: Ensure no blank or incomplete inspection form is submitted
     const incompleteJobs: string[] = [];
     for (const job of mrJobs) {
@@ -429,6 +464,7 @@ export default function ExternalInspection() {
           inspectionDate: externalInspectionDate,
           data: {
             inspectionDate: externalInspectionDate,
+            inspectedBy: inspectedBy.trim(),
             kv: jobData.kv,
             oilCapLtrs: Math.round(Number(jobData.oilCapLtrs) || 0),
             lessOilLtrs: Math.round(Number(jobData.lessOilLtrs) || 0),
@@ -473,6 +509,7 @@ export default function ExternalInspection() {
           starRating: currentStarRating,
           ratingLevel: currentStarRating,
           externalInspectionDate: externalInspectionDate,
+          externalInspectedBy: inspectedBy.trim(),
           updatedAt: now
         };
         
@@ -523,11 +560,11 @@ export default function ExternalInspection() {
   // Filter MRs by Pending/Completed based on job statuses
   const uniqueMrNos = Object.keys(mrGroups).filter(mr => {
     const jobsForMr = mrGroups[mr];
-    if (statusFilter === 'Pending') {
-      return jobsForMr.some(j => !j.status || j.status === 'Received');
-    } else {
-      return jobsForMr.some(j => j.status !== 'Received' && j.status !== 'Pending');
+    const isComplete = isMrExternalComplete(jobsForMr, inspections);
+    if (statusFilter === 'Completed') {
+      return isComplete;
     }
+    return !isComplete && jobsForMr.some(j => !j.status || j.status === 'Received');
   }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   const filteredMrNos = uniqueMrNos.filter(mr => {
@@ -955,11 +992,17 @@ export default function ExternalInspection() {
                       .join(', ');
 
                     // Check inspection date
-                    const inspDate = sampleJob?.externalInspectionDate || inspections.find(i => jobsForMr.some(j => j.id === i.jobId))?.data?.inspectionDate;
-                    const isDone = jobsForMr.every(j => j.status !== 'Received' && j.status !== 'Pending');
+                    const inspDate = latestJobDate(jobsForMr, 'externalInspectionDate');
+                    const isDone = isMrExternalComplete(jobsForMr, inspections);
+                    const inspectedCount = jobsForMr.filter(j => isJobExternallyDone(j, inspections)).length;
+                    const emptyRecordJobs = jobsForMr.filter(j => {
+                      const rec = inspections.find(i => i.jobId === j.id);
+                      return rec && !hasInspectionData(rec);
+                    });
 
                     return (
-                    <tr key={mr} className="hover:bg-slate-50 transition-colors">
+                    <React.Fragment key={mr}>
+                    <tr className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-3 text-center font-mono font-bold text-xs text-slate-400">
                         {idx + 1}
                       </td>
@@ -995,6 +1038,9 @@ export default function ExternalInspection() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-green-50 text-green-700 border border-green-200">
                               <CheckCircle2 className="w-3 h-3 text-green-600" /> Completed
                             </span>
+                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              {inspectedCount} of {jobsForMr.length} inspected
+                            </span>
                             {inspDate && (
                               <span className="text-[10px] text-slate-500 font-mono mt-0.5">
                                 Date: {formatDDMMYYYY(inspDate)}
@@ -1002,9 +1048,14 @@ export default function ExternalInspection() {
                             )}
                           </div>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                            Pending
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              Pending
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              {inspectedCount} of {jobsForMr.length} inspected
+                            </span>
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right">
@@ -1013,7 +1064,7 @@ export default function ExternalInspection() {
                             onClick={() => handleSelectMr(mr)}
                             className="flex items-center px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors shadow-2xs cursor-pointer"
                           >
-                            {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit MR'} <ArrowLeft className="w-3.5 h-3.5 ml-1 rotate-180" />
+                            {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit Inspection Report'} <ArrowLeft className="w-3.5 h-3.5 ml-1 rotate-180" />
                           </button>
                           {statusFilter === 'Completed' && (
                             <button 
@@ -1030,6 +1081,17 @@ export default function ExternalInspection() {
                         </div>
                       </td>
                     </tr>
+                    {emptyRecordJobs.length > 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-2 bg-amber-50 border-t border-amber-200">
+                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            Inspection record is empty - please re-enter: {emptyRecordJobs.map(j => j.jobNo).join(', ')}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                     );
                   })}
                   {filteredMrNos.length === 0 && (
@@ -1080,7 +1142,21 @@ export default function ExternalInspection() {
                 />
               </div>
 
-              <button 
+              <div className="flex items-center bg-slate-800 px-3 py-1.5 rounded-lg border border-slate-700">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-2">
+                  INSPECTED BY:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={inspectedBy}
+                  onChange={(e) => setInspectedBy(e.target.value)}
+                  placeholder="Name"
+                  className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden w-28"
+                />
+              </div>
+
+              <button
                 type="button"
                 onClick={handleExportExcel}
                 className="flex items-center text-xs font-bold text-green-400 hover:text-green-300 bg-green-950/40 border border-green-500/30 px-3 py-2 rounded-lg transition-colors cursor-pointer"
