@@ -7,7 +7,7 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
-import { isJobInternallyDone, isMrInternalComplete, latestJobDate, hasInspectionData } from '../lib/inspectionStage';
+import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate, hasInspectionData } from '../lib/inspectionStage';
 
 export interface InternalData {
   windingType: string;
@@ -35,7 +35,8 @@ export interface InternalData {
 export default function InternalInspection() {
   const { activeAgency } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
+  const [inspections, setInspections] = useState<any[]>([]); // Internal-type only
+  const [externalInspections, setExternalInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
@@ -59,16 +60,23 @@ export default function InternalInspection() {
           where('ownerId', '==', auth.currentUser.uid),
           where('agencyId', '==', activeAgency.id)
         );
-        const [jobsSnap, inspSnap] = await Promise.all([
+        const [jobsSnap, inspSnap, extInspSnap] = await Promise.all([
           getDocs(jobsQ),
           getDocs(query(
             collection(db, 'inspections'),
-            where('ownerId', '==', auth.currentUser.uid)
+            where('ownerId', '==', auth.currentUser.uid),
+            where('type', '==', 'Internal')
+          )),
+          getDocs(query(
+            collection(db, 'inspections'),
+            where('ownerId', '==', auth.currentUser.uid),
+            where('type', '==', 'External')
           ))
         ]);
-        
+
         setJobs(jobsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
         setInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setExternalInspections(extInspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
       } catch (error) {
         handleFirestoreError(error, OperationType.LIST, null);
       } finally {
@@ -281,6 +289,18 @@ export default function InternalInspection() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!auth.currentUser || !selectedMrNo) return;
+
+    // Enforce the cycle: internal inspection cannot save for a job until it's
+    // genuinely externally done. The Inspect/Edit button is disabled for this
+    // already, but that's not enforcement by itself - guard the write too, in case
+    // this form is reached another way.
+    const notExternallyDone = mrJobs
+      .filter(job => !isJobExternallyDone(job, externalInspections))
+      .map(job => job.jobNo);
+    if (notExternallyDone.length > 0) {
+      alert(`⚠️ External inspection is not complete for: ${notExternallyDone.join(', ')}.\n\nInternal inspection cannot be saved until every job in this MR has been externally inspected.`);
+      return;
+    }
 
     // An inspector name is required before anything can save - it's the reliable,
     // going-forward signal that this batch was actually worked on by someone.
@@ -833,6 +853,12 @@ export default function InternalInspection() {
                       return rec && !hasInspectionData(rec);
                     });
 
+                    // Internal inspection cannot start until every job in the MR is
+                    // genuinely externally done (real data, not just a record).
+                    const isExternallyReady = isMrExternalComplete(jobsForMr, externalInspections);
+                    const externallyDoneCount = jobsForMr.filter(j => isJobExternallyDone(j, externalInspections)).length;
+                    const externalPendingJobNos = jobsForMr.filter(j => !isJobExternallyDone(j, externalInspections)).map(j => j.jobNo);
+
                     return (
                     <React.Fragment key={mr}>
                     <tr className="hover:bg-slate-50 transition-colors">
@@ -904,14 +930,20 @@ export default function InternalInspection() {
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right">
                         <div className="flex items-center justify-end space-x-2">
-                          <button 
-                            onClick={() => handleSelectMr(mr)}
-                            className="flex items-center px-3 py-1.5 text-xs font-bold bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors shadow-2xs cursor-pointer"
+                          <button
+                            onClick={() => isExternallyReady && handleSelectMr(mr)}
+                            disabled={!isExternallyReady}
+                            title={isExternallyReady ? undefined : 'External inspection must be completed for every job in this MR first'}
+                            className={`flex items-center px-3 py-1.5 text-xs font-bold rounded transition-colors shadow-2xs ${
+                              isExternallyReady
+                                ? 'bg-blue-600 text-white hover:bg-blue-700 cursor-pointer'
+                                : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                            }`}
                           >
                             {statusFilter === 'Pending' ? 'Inspect MR' : 'Edit Inspection Report'} <ArrowLeft className="w-3.5 h-3.5 ml-1 rotate-180" />
                           </button>
                           {statusFilter === 'Completed' && (
-                            <button 
+                            <button
                               onClick={() => {
                                 handleSelectMr(mr);
                                 setIsPrintOpen(true);
@@ -925,6 +957,16 @@ export default function InternalInspection() {
                         </div>
                       </td>
                     </tr>
+                    {!isExternallyReady && (
+                      <tr>
+                        <td colSpan={9} className="px-4 py-2 bg-amber-50 border-t border-amber-200">
+                          <div className="flex items-center gap-1.5 text-[11px] font-semibold text-amber-800">
+                            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                            Awaiting external inspection - {externallyDoneCount} of {jobsForMr.length} done. Outstanding: {externalPendingJobNos.join(', ')}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
                     {emptyRecordJobs.length > 0 && (
                       <tr>
                         <td colSpan={9} className="px-4 py-2 bg-amber-50 border-t border-amber-200">

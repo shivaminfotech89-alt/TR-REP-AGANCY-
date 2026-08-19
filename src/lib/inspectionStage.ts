@@ -3,14 +3,17 @@
 // must both go through these so they can never disagree with each other again.
 
 // Statuses at or past External inspection in the job lifecycle
-// (blank / 'Received') -> External Done -> Internal Done -> Ready for Testing ->
-// Testing Completed -> Dispatched, with Scrap reachable as an alternate terminal status.
+// (blank / 'Received') -> External Done -> Internal Done -> Tested - Ready for
+// Dispatch -> Dispatched, with Scrap reachable as an alternate terminal status
+// during internal inspection. 'Tested - Ready for Dispatch' is the real status
+// TestingReport.tsx saves (see its handleSubmit) - not 'Testing Completed' or
+// 'Ready for Testing', which no code in the app ever actually sets.
 const EXTERNAL_DONE_STATUSES = new Set([
-  'External Done', 'Internal Done', 'Ready for Testing', 'Testing Completed', 'Dispatched'
+  'External Done', 'Internal Done', 'Tested - Ready for Dispatch', 'Dispatched'
 ]);
 
 const INTERNAL_DONE_STATUSES = new Set([
-  'Internal Done', 'Ready for Testing', 'Testing Completed', 'Dispatched'
+  'Internal Done', 'Tested - Ready for Dispatch', 'Dispatched'
 ]);
 
 /**
@@ -51,17 +54,24 @@ export function hasInspectionData(record: any): boolean {
 
 /**
  * A job counts as externally done when it has an External-type inspection record
- * with real data in it, its status is at/past External Done, it's Scrap (a scrapped
- * transformer isn't inspected further), or it's closed.
+ * with real data in it, its status is at/past External Done, or it's closed.
+ *
+ * Scrap does NOT count as done here. Scrap is declared during internal inspection,
+ * when the unit is opened - external (physical) inspection happens for every job
+ * without exception, before that. A job that's Scrap with no external record is a
+ * data error and must surface as such, not be silently masked as "done".
  */
 export function isJobExternallyDone(job: any, inspections: any[]): boolean {
   return inspections.some(i => i.jobId === job.id && hasInspectionData(i))
     || EXTERNAL_DONE_STATUSES.has(job.status)
-    || job.status === 'Scrap'
     || job.isClosed === true;
 }
 
-/** Same idea, for internal inspection. */
+/**
+ * Same idea, for internal inspection - except Scrap DOES count as done here, since
+ * Scrap is declared during internal inspection itself, so a scrapped job has an
+ * internal record by definition.
+ */
 export function isJobInternallyDone(job: any, inspections: any[]): boolean {
   return inspections.some(i => i.jobId === job.id && hasInspectionData(i))
     || INTERNAL_DONE_STATUSES.has(job.status)
@@ -80,14 +90,20 @@ export function isMrInternalComplete(jobsForMr: any[], inspections: any[]): bool
 }
 
 /**
- * An MR is ready for testing once it's both externally and internally complete.
+ * An MR is ready for testing once every job that still needs testing is both
+ * externally and internally complete. Scrap jobs are excluded from this check
+ * entirely - they're never tested, so their own external/internal state must never
+ * block their MR (an MR that is ALL scrap simply never becomes ready for testing,
+ * since there's nothing left in it to test).
  * `inspections` is the combined External + Internal inspection list - each record's
  * own `type` field is used to split it, so callers don't need to pre-filter.
  */
 export function isMrReadyForTesting(jobsForMr: any[], inspections: any[]): boolean {
+  const testableJobs = jobsForMr.filter(j => j.status !== 'Scrap');
+  if (testableJobs.length === 0) return false;
   const externalInspections = inspections.filter(i => i.type === 'External');
   const internalInspections = inspections.filter(i => i.type === 'Internal');
-  return isMrExternalComplete(jobsForMr, externalInspections) && isMrInternalComplete(jobsForMr, internalInspections);
+  return isMrExternalComplete(testableJobs, externalInspections) && isMrInternalComplete(testableJobs, internalInspections);
 }
 
 /**

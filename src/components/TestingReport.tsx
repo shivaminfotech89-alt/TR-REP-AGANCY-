@@ -9,7 +9,7 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { PrintableA4Page } from './LetterheadHeader';
-import { isMrReadyForTesting } from '../lib/inspectionStage';
+import { isMrReadyForTesting, isJobExternallyDone, isJobInternallyDone } from '../lib/inspectionStage';
 
 interface Job {
   id: string;
@@ -220,11 +220,30 @@ export default function TestingReport() {
       return;
     }
 
+    // Enforce the cycle: testing cannot save for a job until it's genuinely both
+    // externally and internally done. The MR-level gate on the list view already
+    // hides jobs whose MR isn't ready, but that's not enforcement by itself - guard
+    // the write too, in case this form is reached another way.
+    const externalInspections = inspections.filter(i => i.type === 'External');
+    const internalInspections = inspections.filter(i => i.type === 'Internal');
+    const notReadyJobs: string[] = [];
+    Array.from<string>(selectedJobIds).forEach((id: string) => {
+      const targetJob = jobs.find(j => j.id === id);
+      if (!targetJob || targetJob.status === 'Dispatched' || targetJob.isClosed === true || targetJob.status === 'Scrap') return;
+      if (!isJobExternallyDone(targetJob, externalInspections) || !isJobInternallyDone(targetJob, internalInspections)) {
+        notReadyJobs.push(targetJob.jobNo);
+      }
+    });
+    if (notReadyJobs.length > 0) {
+      alert(`⚠️ External or internal inspection is not complete for: ${notReadyJobs.join(', ')}.\n\nTesting cannot be saved until both are done for every selected job.`);
+      return;
+    }
+
     // Strict validation: Blank or incomplete testing forms are NOT acceptable
     const incompleteJobs: string[] = [];
     Array.from<string>(selectedJobIds).forEach((id: string) => {
       const targetJob = jobs.find(j => j.id === id);
-      if (targetJob?.status === 'Dispatched' || targetJob?.isClosed === true) return;
+      if (targetJob?.status === 'Dispatched' || targetJob?.isClosed === true || targetJob?.status === 'Scrap') return;
       
       const data = formsData[id];
       if (!data) {
@@ -260,7 +279,7 @@ export default function TestingReport() {
       const batch = writeBatch(db);
       Array.from<string>(selectedJobIds).forEach((id: string) => {
         const targetJob = jobs.find(j => j.id === id);
-        if (targetJob?.status === 'Dispatched' || targetJob?.isClosed === true) return;
+        if (targetJob?.status === 'Dispatched' || targetJob?.isClosed === true || targetJob?.status === 'Scrap') return;
         const docRef = doc(db, 'jobs', id);
         batch.update(docRef, {
           testingDetails: formsData[id],
