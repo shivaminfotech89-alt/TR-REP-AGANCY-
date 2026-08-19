@@ -144,15 +144,17 @@ export default function ExternalInspection() {
     const initialForms: Record<string, ExternalData> = {};
     jobsForMr.forEach(j => {
       const existingInsp = allInspections.find(i => i.jobId === j.id);
-      const stdOil = getStandardOilCapacity(j.capacityKva);
       const currentStar = j.starRating || j.ratingLevel || '3 Star & other';
       const coreTypeFromJob = j.coreType || 'CRGO';
       
       if (existingInsp && existingInsp.data) {
-        const savedOil = existingInsp.data.oilCapLtrs !== undefined && existingInsp.data.oilCapLtrs !== null && String(existingInsp.data.oilCapLtrs) !== '0'
-          ? Math.round(Number(existingInsp.data.oilCapLtrs) || stdOil).toString()
-          : String(stdOil);
-        
+        // A saved oil capacity - including a genuine 0 - loads back exactly as
+        // stored. No fallback to the standard capacity table: that's an assumption,
+        // not what the operator measured.
+        const savedOil = existingInsp.data.oilCapLtrs !== undefined && existingInsp.data.oilCapLtrs !== null
+          ? String(existingInsp.data.oilCapLtrs)
+          : '';
+
         const savedLessOil = existingInsp.data.lessOilLtrs !== undefined && existingInsp.data.lessOilLtrs !== null
           ? Math.round(Number(existingInsp.data.lessOilLtrs) || 0).toString()
           : '0';
@@ -177,22 +179,24 @@ export default function ExternalInspection() {
           namePlate: existingInsp.data.namePlate || '-',
           damCtTank: (existingInsp.data.damCtTank !== undefined ? String(Math.round(Number(existingInsp.data.damCtTank) || 0)) : '0'),
           damRadNo: (existingInsp.data.damRadNo !== undefined ? String(Math.round(Number(existingInsp.data.damRadNo) || 0)) : '0'),
-          hvSideHvb: (existingInsp.data.hvSideHvb !== undefined ? String(existingInsp.data.hvSideHvb) : '3').replace(/[^0-9]/g, '') || '3',
-          hvSideHvm: (existingInsp.data.hvSideHvm !== undefined ? String(existingInsp.data.hvSideHvm) : '3').replace(/[^0-9]/g, '') || '3',
-          hvSideHvCc: (existingInsp.data.hvSideHvCc !== undefined ? String(existingInsp.data.hvSideHvCc) : '3').replace(/[^0-9]/g, '') || '3',
-          lvSideLvb: (existingInsp.data.lvSideLvb !== undefined ? String(existingInsp.data.lvSideLvb) : '4').replace(/[^0-9]/g, '') || '4',
-          lvSideLvm: (existingInsp.data.lvSideLvm !== undefined ? String(existingInsp.data.lvSideLvm) : '4').replace(/[^0-9]/g, '') || '4',
-          lvSideLvCc: (existingInsp.data.lvSideLvCc !== undefined ? String(existingInsp.data.lvSideLvCc) : '4').replace(/[^0-9]/g, '') || '4',
+          hvSideHvb: (existingInsp.data.hvSideHvb !== undefined ? String(existingInsp.data.hvSideHvb) : '3').replace(/[^0-9]/g, ''),
+          hvSideHvm: (existingInsp.data.hvSideHvm !== undefined ? String(existingInsp.data.hvSideHvm) : '3').replace(/[^0-9]/g, ''),
+          hvSideHvCc: (existingInsp.data.hvSideHvCc !== undefined ? String(existingInsp.data.hvSideHvCc) : '3').replace(/[^0-9]/g, ''),
+          lvSideLvb: (existingInsp.data.lvSideLvb !== undefined ? String(existingInsp.data.lvSideLvb) : '4').replace(/[^0-9]/g, ''),
+          lvSideLvm: (existingInsp.data.lvSideLvm !== undefined ? String(existingInsp.data.lvSideLvm) : '4').replace(/[^0-9]/g, ''),
+          lvSideLvCc: (existingInsp.data.lvSideLvCc !== undefined ? String(existingInsp.data.lvSideLvCc) : '4').replace(/[^0-9]/g, ''),
           transType: savedTransType,
           starRating: existingInsp.data.starRating || existingInsp.data.ratingLevel || currentStar,
           ratingLevel: existingInsp.data.starRating || existingInsp.data.ratingLevel || currentStar,
           inspectionId: existingInsp.id
         };
       } else {
-        // Auto-fill standard oil capacity (e.g., 25 KVA -> 184 L, 63 KVA -> 240 L, 100 KVA -> 323 L)
+        // Oil capacity and HV/LV side counts are measured/counted from the actual
+        // transformer, not assumptions - they open blank, not pre-filled from the
+        // standard capacity table or a guessed bushing count.
         initialForms[j.id] = {
           kv: '11',
-          oilCapLtrs: String(stdOil),
+          oilCapLtrs: '',
           lessOilLtrs: '0',
           sealType: 'BL',
           gasket: '1',
@@ -206,12 +210,12 @@ export default function ExternalInspection() {
           namePlate: '-',
           damCtTank: '0',
           damRadNo: '0',
-          hvSideHvb: '3',
-          hvSideHvm: '3',
-          hvSideHvCc: '3',
-          lvSideLvb: '4',
-          lvSideLvm: '4',
-          lvSideLvCc: '4',
+          hvSideHvb: '',
+          hvSideHvm: '',
+          hvSideHvCc: '',
+          lvSideLvb: '',
+          lvSideLvm: '',
+          lvSideLvCc: '',
           transType: coreTypeFromJob,
           starRating: currentStar,
           ratingLevel: currentStar
@@ -362,6 +366,37 @@ export default function ExternalInspection() {
     e.preventDefault();
     if (!auth.currentUser || !selectedMrNo) return;
 
+    // HV/LV side counts have hard maximums (3 bushings/metal-parts/connectors on the
+    // HV side, 4 on the LV side). The input already rejects entries above the max as
+    // they're typed, but a legacy record saved before that limit existed could still
+    // carry an over-range value through unchanged - catch that here too.
+    const HV_MAX = 3;
+    const LV_MAX = 4;
+    const rangeErrors: string[] = [];
+    for (const job of mrJobs) {
+      if (job.status === 'Dispatched' || job.isClosed === true) continue;
+      const jobData = formsData[job.id];
+      if (!jobData) continue;
+
+      const checks: Array<[string, string | undefined, number]> = [
+        ['HV Side B', jobData.hvSideHvb, HV_MAX],
+        ['HV Side M', jobData.hvSideHvm, HV_MAX],
+        ['HV Side CC', jobData.hvSideHvCc, HV_MAX],
+        ['LV Side B', jobData.lvSideLvb, LV_MAX],
+        ['LV Side M', jobData.lvSideLvm, LV_MAX],
+        ['LV Side CC', jobData.lvSideLvCc, LV_MAX],
+      ];
+      for (const [label, value, max] of checks) {
+        if (value !== undefined && value.trim() !== '' && Number(value) > max) {
+          rangeErrors.push(`${job.jobNo}: ${label} cannot exceed ${max}.`);
+        }
+      }
+    }
+    if (rangeErrors.length > 0) {
+      alert(`⚠️ Value out of range:\n\n${rangeErrors.join('\n')}`);
+      return;
+    }
+
     // Strict validation: Ensure no blank or incomplete inspection form is submitted
     const incompleteJobs: string[] = [];
     for (const job of mrJobs) {
@@ -379,6 +414,12 @@ export default function ExternalInspection() {
       if (!jobData.sealType || jobData.sealType.trim() === '') missing.push('Seal Type');
       if (!jobData.gasket || jobData.gasket.trim() === '') missing.push('Gasket');
       if (!jobData.transType || jobData.transType.trim() === '') missing.push('Transformer Type');
+      if (jobData.hvSideHvb === undefined || jobData.hvSideHvb.trim() === '') missing.push('HV Side B');
+      if (jobData.hvSideHvm === undefined || jobData.hvSideHvm.trim() === '') missing.push('HV Side M');
+      if (jobData.hvSideHvCc === undefined || jobData.hvSideHvCc.trim() === '') missing.push('HV Side CC');
+      if (jobData.lvSideLvb === undefined || jobData.lvSideLvb.trim() === '') missing.push('LV Side B');
+      if (jobData.lvSideLvm === undefined || jobData.lvSideLvm.trim() === '') missing.push('LV Side M');
+      if (jobData.lvSideLvCc === undefined || jobData.lvSideLvCc.trim() === '') missing.push('LV Side CC');
 
       if (missing.length > 0) {
         incompleteJobs.push(`Job #${job.jobNo}: Missing (${missing.join(', ')})`);
@@ -537,13 +578,24 @@ export default function ExternalInspection() {
     return mr.toLowerCase().includes(q) || mrGroups[mr].some(j => j.jobNo.toLowerCase().includes(q));
   });
 
-  const renderIntegerField = (jobId: string, field: keyof ExternalData, widthClass = 'w-14', placeholder = '0') => (
+  const renderIntegerField = (jobId: string, field: keyof ExternalData, widthClass = 'w-14', placeholder = '0', max?: number) => (
     <input
       type="text"
       inputMode="numeric"
       pattern="[0-9]*"
+      min={max !== undefined ? 0 : undefined}
+      max={max}
       value={formsData[jobId]?.[field] ?? ''}
-      onChange={(e) => handleChange(jobId, field, e.target.value)}
+      onChange={(e) => {
+        if (max !== undefined) {
+          const digitsOnly = e.target.value.replace(/[^0-9]/g, '');
+          // Reject rather than clamp: a clamped value looks entered, but this one
+          // wasn't - the operator typed something out of range and should see that
+          // rejection, not a silently substituted number.
+          if (digitsOnly !== '' && Number(digitsOnly) > max) return;
+        }
+        handleChange(jobId, field, e.target.value);
+      }}
       onKeyDown={(e) => {
         if (e.key === '.' || e.key === 'e' || e.key === 'E' || e.key === ',' || e.key === '-') {
           e.preventDefault();
@@ -710,7 +762,7 @@ export default function ExternalInspection() {
                                 {rating}
                               </td>
                               <td className="border border-black p-0.5">{data.kv || '11'}</td>
-                              <td className="border border-black p-0.5 font-bold">{data.oilCapLtrs || '0'}</td>
+                              <td className="border border-black p-0.5 font-bold">{data.oilCapLtrs !== undefined && data.oilCapLtrs !== null && data.oilCapLtrs !== '' ? data.oilCapLtrs : '-'}</td>
                               <td className="border border-black p-0.5">{data.lessOilLtrs || '0'}</td>
                               <td className="border border-black p-0.5 font-bold">{data.sealType || 'BL'}</td>
                               <td className="border border-black p-0.5">{data.gasket || '1'}</td>
@@ -726,14 +778,14 @@ export default function ExternalInspection() {
                               <td className="border border-black p-0.5">{data.damRadNo || '0'}</td>
                               
                               {/* HV Side Group Enclosed Columns */}
-                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.hvSideHvb || '3'}</td>
-                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.hvSideHvm || '3'}</td>
-                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.hvSideHvCc || '3'}</td>
-                              
+                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.hvSideHvb !== undefined && data.hvSideHvb !== null && data.hvSideHvb !== '' ? data.hvSideHvb : '-'}</td>
+                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.hvSideHvm !== undefined && data.hvSideHvm !== null && data.hvSideHvm !== '' ? data.hvSideHvm : '-'}</td>
+                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.hvSideHvCc !== undefined && data.hvSideHvCc !== null && data.hvSideHvCc !== '' ? data.hvSideHvCc : '-'}</td>
+
                               {/* LV Side Group Enclosed Columns */}
-                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.lvSideLvb || '4'}</td>
-                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.lvSideLvm || '4'}</td>
-                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.lvSideLvCc || '4'}</td>
+                              <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-bold">{data.lvSideLvb !== undefined && data.lvSideLvb !== null && data.lvSideLvb !== '' ? data.lvSideLvb : '-'}</td>
+                              <td className="border-b border-black border-r border-black p-0.5 font-bold">{data.lvSideLvm !== undefined && data.lvSideLvm !== null && data.lvSideLvm !== '' ? data.lvSideLvm : '-'}</td>
+                              <td className="border-b border-black border-r-2 border-black p-0.5 font-bold">{data.lvSideLvCc !== undefined && data.lvSideLvCc !== null && data.lvSideLvCc !== '' ? data.lvSideLvCc : '-'}</td>
                             </tr>
                           );
                         })}
@@ -1332,24 +1384,24 @@ export default function ExternalInspection() {
                         
                         {/* HV Side Grouped with distinct border */}
                         <td className="p-1 bg-blue-50/30 border-l-2 border-r border-blue-500 text-center">
-                          {renderIntegerField(job.id, 'hvSideHvb', 'w-12', '3')}
+                          {renderIntegerField(job.id, 'hvSideHvb', 'w-12', '3', 3)}
                         </td>
                         <td className="p-1 bg-blue-50/30 border-r border-blue-500 text-center">
-                          {renderIntegerField(job.id, 'hvSideHvm', 'w-12', '3')}
+                          {renderIntegerField(job.id, 'hvSideHvm', 'w-12', '3', 3)}
                         </td>
                         <td className="p-1 bg-blue-50/30 border-r-2 border-blue-500 text-center">
-                          {renderIntegerField(job.id, 'hvSideHvCc', 'w-12', '3')}
+                          {renderIntegerField(job.id, 'hvSideHvCc', 'w-12', '3', 3)}
                         </td>
                         
                         {/* LV Side Grouped with distinct border */}
                         <td className="p-1 bg-indigo-50/30 border-l-2 border-r border-indigo-500 text-center">
-                          {renderIntegerField(job.id, 'lvSideLvb', 'w-12', '4')}
+                          {renderIntegerField(job.id, 'lvSideLvb', 'w-12', '4', 4)}
                         </td>
                         <td className="p-1 bg-indigo-50/30 border-r border-indigo-500 text-center">
-                          {renderIntegerField(job.id, 'lvSideLvm', 'w-12', '4')}
+                          {renderIntegerField(job.id, 'lvSideLvm', 'w-12', '4', 4)}
                         </td>
                         <td className="p-1 bg-indigo-50/30 border-r-2 border-indigo-500 text-center">
-                          {renderIntegerField(job.id, 'lvSideLvCc', 'w-12', '4')}
+                          {renderIntegerField(job.id, 'lvSideLvCc', 'w-12', '4', 4)}
                         </td>
                         
                         <td className="p-1 text-xs font-mono font-bold text-slate-800 bg-slate-50 text-center border-r border-slate-200">
