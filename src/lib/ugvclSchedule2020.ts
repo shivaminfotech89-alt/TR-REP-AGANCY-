@@ -237,3 +237,15 @@ export const SCHEDULE_NOTES = {
   ltCoilDamage: 'In case of damage to the LT coil, the damaged coil is replaced at the same cost, without extra charge.',
   estimateApproval: 'Repairing cost is capped at 25% of the cost of a NEW transformer. Failed transformers may not be opened before approval of the estimate, except in the presence of an authorised UGVCL representative.',
 };
+
+/**
+ * Default printed text for the Amorphous / CRGO Wound Core fixed-rate estimate report
+ * (verbatim from the tender). Agencies can override each via amorphousClauseText /
+ * amorphousNoteLtCoil / amorphousNoteRadiator, since another DISCOM's tender wording
+ * may differ - these are only the fallback when an agency hasn't set its own.
+ */
+export const AMORPHOUS_ESTIMATE_TEXT = {
+  clause: 'Repairing of the transformer of below rating, winding material and winding design for internal items including Re-insulation/replacement of all the LV windings, Replacement of all the HV windings, replacement of burnt/damaged external parts like bushing/nut-bolts/breather with Dismantling of bushing replacement of all the old gaskets by new, opening welding of top cover plate if necessary un-tanking of the winding, removal of the core plate assembly and reassembly of the same including replacement of all types of insulations whenever necessary replacement of diaphragm of explosion vent, drying out of the repaired transformers, internal & external painting, testing of the same, assembly of LV/HV coils and connectors, loading & unloading of transformers, repairing of Tanks & radiators by welding to stop leakage of oil, dismantling includes removing of core, lamination and rebuilding after cleaning, fixing of name plates on unit rate basis as mentioned herein and wherever mentioned in this tender.',
+  noteLtCoil: 'Note: In case of damage of LT coil if any, the damaged coil should be replaced at the same cost i.e. without any extra charge.',
+  noteRadiator: "If the Radiator/s of tank or Conservator tank required to replace instead of repairing as demanded by the concerned UGVCL Engineer, the charges for that is required to pay extra as per the 'Item No. 3 to 6' of schedule, for which old material is required to credit in the respective Division Store.",
+};

@@ -1,12 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgency } from '../lib/AgencyContext';
-import { 
-  Loader2, Plus, Trash2, FileUp, Check, Building2, 
+import {
+  Loader2, Plus, Trash2, FileUp, Check, Building2,
   CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
-  Lock, Unlock, AlertTriangle, RotateCcw
+  Lock, Unlock, AlertTriangle, RotateCcw, FileText
 } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
+import { AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
 
 export default function EditAgencyForm({ agency }: { agency: any }) {
   const { updateAgency } = useAgency();
@@ -56,6 +57,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [billCcTemplate, setBillCcTemplate] = useState(agency.billCcTemplate || '');
   const [forwardingSubject, setForwardingSubject] = useState(agency.forwardingSubject || 'Submiting Inspection Report & Estimate of Transformer');
 
+  // Amorphous / Wound Core Fixed-Rate Estimate Report Text (Schedule-B)
+  const [amorphousClauseText, setAmorphousClauseText] = useState(agency.amorphousClauseText || AMORPHOUS_ESTIMATE_TEXT.clause);
+  const [amorphousNoteLtCoil, setAmorphousNoteLtCoil] = useState(agency.amorphousNoteLtCoil || AMORPHOUS_ESTIMATE_TEXT.noteLtCoil);
+  const [amorphousNoteRadiator, setAmorphousNoteRadiator] = useState(agency.amorphousNoteRadiator || AMORPHOUS_ESTIMATE_TEXT.noteRadiator);
+
   // Lock state & Unlock Alert Modal for Estimate C.C. Template
   const [isCcTemplateLocked, setIsCcTemplateLocked] = useState(true);
   const [showCcUnlockModal, setShowCcUnlockModal] = useState(false);
@@ -104,6 +110,10 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setEstimateCcTemplate(agency.estimateCcTemplate || 'E. E. (O & M) DIVISION - {division}');
     setBillCcTemplate(agency.billCcTemplate || '');
     setForwardingSubject(agency.forwardingSubject || 'Submiting Inspection Report & Estimate of Transformer');
+
+    setAmorphousClauseText(agency.amorphousClauseText || AMORPHOUS_ESTIMATE_TEXT.clause);
+    setAmorphousNoteLtCoil(agency.amorphousNoteLtCoil || AMORPHOUS_ESTIMATE_TEXT.noteLtCoil);
+    setAmorphousNoteRadiator(agency.amorphousNoteRadiator || AMORPHOUS_ESTIMATE_TEXT.noteRadiator);
 
     setBankName(agency.bankName || '');
     setBankBranch(agency.bankBranch || '');
@@ -337,6 +347,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         estimateCcTemplate,
         billCcTemplate,
         forwardingSubject,
+
+        // Amorphous / Wound Core fixed-rate estimate report text
+        amorphousClauseText,
+        amorphousNoteLtCoil,
+        amorphousNoteRadiator,
 
         // Bank details
         bankName,
@@ -841,6 +856,51 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 p-4 border border-slate-200 rounded-lg space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2">
+              <h4 className="text-xs font-bold uppercase tracking-widest text-slate-800 flex items-center">
+                <FileText className="w-4 h-4 mr-1.5 text-blue-600" /> Amorphous / Wound Core Fixed-Rate Estimate Text
+              </h4>
+              <span className="text-[10px] text-slate-500 font-medium">Printed on Fixed-Rate Estimation Reports (Schedule-B)</span>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
+                Tender Clause Paragraph
+              </label>
+              <textarea
+                value={amorphousClauseText}
+                onChange={e => setAmorphousClauseText(e.target.value)}
+                rows={6}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white leading-relaxed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
+                Note - LT Coil Damage
+              </label>
+              <textarea
+                value={amorphousNoteLtCoil}
+                onChange={e => setAmorphousNoteLtCoil(e.target.value)}
+                rows={2}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white leading-relaxed"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
+                Note - Radiator / Conservator Tank Replacement
+              </label>
+              <textarea
+                value={amorphousNoteRadiator}
+                onChange={e => setAmorphousNoteRadiator(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white leading-relaxed"
+              />
             </div>
           </div>
         </div>

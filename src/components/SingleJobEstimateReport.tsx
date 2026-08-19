@@ -3,7 +3,7 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
-import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100 } from '../lib/ugvclSchedule2020';
+import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
 const SECTION_LABELS: Record<EstimateSection, string> = {
@@ -11,6 +11,28 @@ const SECTION_LABELS: Record<EstimateSection, string> = {
   internal: 'Internal Estimation',
   labour: 'Labour Charge',
 };
+
+// Same classification convention as getAtPercentageForCore / getEstimateMasterForCore
+// in AgencyContext.tsx - kept consistent so a job classifies identically everywhere.
+type CoreClass = 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE';
+function classifyCoreType(coreType: string): CoreClass {
+  const type = (coreType || 'CRGO').trim().toUpperCase();
+  if (type === 'OH' || type.includes('OVERHAUL')) return 'OH';
+  if (type.includes('AMORPHOUS') || type.includes('AM')) return 'AMORPHOUS';
+  if (type.includes('WOUND') || type.includes('WC')) return 'WOUND_CORE';
+  return 'CRGO';
+}
+
+// Schedule-B has exactly one Aluminium/Copper x capacity combination, except 63 KVA
+// Aluminium which has two variants (1d-1 default, 1d-2 for Vijay/Vijai make only).
+function findScheduleBEntry(kvaNum: number, isCopper: boolean, make: string): ScheduleBItem | undefined {
+  const wantedWinding: 'Aluminium' | 'Copper' = isCopper ? 'Copper' : 'Aluminium';
+  const candidates = SCHEDULE_B.filter(e => e.kva === kvaNum && e.winding === wantedWinding);
+  if (candidates.length <= 1) return candidates[0];
+  const makeLower = (make || '').toLowerCase();
+  const isVijay = makeLower.includes('vijay') || makeLower.includes('vijai');
+  return candidates.find(e => Boolean(e.makeNote) === isVijay) || candidates[0];
+}
 
 // --- Print-layout constants, all in mm, measured against real printed/rendered output ---
 // Adjust these here (not the pagination logic below) if a real print still clips
@@ -145,6 +167,72 @@ export function buildSingleJobEstimateData(
   const windingSuffix = isCopper ? 'Copper' : 'Aluminium SE';
 
   const rateErrors: string[] = [];
+  const coreClass = classifyCoreType(coreType);
+
+  // Amorphous / CRGO Wound Core: FIXED RATE, not itemised. No physical/internal/labour
+  // breakdown - external inspection is oil accounting only (no charge) and there is no
+  // internal inspection for these core types, so none of the 29 CRGO items apply.
+  if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+    const entry = findScheduleBEntry(kvaNum, isCopper, job.make);
+    const fixedItems: SingleEstimateLineItem[] = [];
+    const fixedRateErrors: string[] = [];
+
+    if (!entry) {
+      fixedRateErrors.push(`No fixed-rate entry found for ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} winding in UGVCL Schedule-B.`);
+      fixedItems.push({ sr: 1, desc: 'Repairing Charge - Fixed Rate (Internal & External)', unit: 'NOS', qty: '-', numQty: 0, rate: null, amt: 0 });
+      fixedItems.push({ sr: 2, desc: 'Labour Charge', unit: 'NOS', qty: '-', numQty: 0, rate: null, amt: 0 });
+    } else {
+      // basis 'coil': a standard three-phase distribution transformer has 3 limbs, so
+      // 3 coils. There's no coil-count field on the job (internalData.totCoil is a coil
+      // WEIGHT in kg, used elsewhere as weight x rate-per-kg - not a count, and using it
+      // as one here would bill e.g. a 47kg coil as 47 units). If a real coil-count field
+      // is ever added to the data model, replace this constant with it.
+      const COIL_COUNT_THREE_PHASE = 3;
+      const qty = entry.basis === 'coil' ? COIL_COUNT_THREE_PHASE : 1;
+      const mainAmt = entry.fixedRate * qty;
+      fixedItems.push({
+        sr: 1,
+        itemCode: entry.sr,
+        desc: 'Repairing Charge - Fixed Rate (Internal & External)',
+        unit: 'NOS',
+        qty: String(qty),
+        numQty: qty,
+        rate: entry.fixedRate,
+        amt: mainAmt
+      });
+      const labourRate = entry.labourPerTransformer ?? 0;
+      fixedItems.push({
+        sr: 2,
+        itemCode: entry.sr,
+        desc: 'Labour Charge',
+        unit: 'NOS',
+        qty: '1',
+        numQty: 1,
+        rate: labourRate,
+        amt: labourRate
+      });
+    }
+
+    const fixedBaseTotal = fixedItems.reduce((acc, i) => acc + i.amt, 0);
+    const fixedPercentageAmount = Number((fixedBaseTotal * (atPercentage / 100)).toFixed(2));
+    const fixedAmountWithPercentage = Number((fixedBaseTotal + fixedPercentageAmount).toFixed(2));
+
+    return {
+      job,
+      externalData,
+      internalData,
+      physicalItems: fixedItems,
+      internalItems: [],
+      labourItems: [],
+      baseTotal: fixedBaseTotal,
+      atPercentage,
+      percentageAmount: fixedPercentageAmount,
+      amountWithPercentage: fixedAmountWithPercentage,
+      lessAmount: 0,
+      finalAmount: fixedAmountWithPercentage, // no "Less" row for fixed-rate estimates
+      rateErrors: fixedRateErrors
+    };
+  }
 
   const scheduleRate = (sr: string): number | undefined => {
     const entry = SCHEDULE_A.find(i => i.sr === sr);
@@ -582,6 +670,208 @@ export default function SingleJobEstimateReport({
 
   const pages = layoutEstimatePages(allRows, contentMm);
   const totalPages = pages.length;
+
+  const coreClass = classifyCoreType(job.coreType || 'CRGO');
+
+  // Amorphous / CRGO Wound Core: fixed-rate document, entirely different printed
+  // format from the itemised CRGO/OH report below - separate render path.
+  if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+    const isAmorphous = coreClass === 'AMORPHOUS';
+    const titleText = isAmorphous
+      ? 'ESTIMATION REPORT OF AMORPHOUS TRANSFORMER'
+      : 'ESTIMATION REPORT OF CRGO WOUND CORE TRANSFORMER';
+    const subHeadingText = isAmorphous
+      ? 'ESTIMATE FOR REPAIRING OF AMORPHOUS DISTRIBUTION TRANSFORMERS'
+      : 'ESTIMATE FOR REPAIRING OF CRGO WOUND CORE DISTRIBUTION TRANSFORMERS';
+    const clauseText = agency?.amorphousClauseText || AMORPHOUS_ESTIMATE_TEXT.clause;
+    const noteLtCoil = agency?.amorphousNoteLtCoil || AMORPHOUS_ESTIMATE_TEXT.noteLtCoil;
+    const noteRadiator = agency?.amorphousNoteRadiator || AMORPHOUS_ESTIMATE_TEXT.noteRadiator;
+
+    return (
+      <>
+        {pages.map((rows, pageIdx) => {
+          const isFirst = pageIdx === 0;
+          const isLast = pageIdx === totalPages - 1;
+
+          return (
+            <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
+              <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
+                <div>
+                  <div className="text-center mb-2 pb-1 border-b-2 border-black">
+                    <h2 className="text-sm font-black uppercase tracking-wider">{titleText}</h2>
+                  </div>
+
+                  {isFirst && (
+                    <div className="grid grid-cols-2 text-[10px] border border-black p-2 mb-2 leading-relaxed bg-white">
+                      <div className="space-y-0.5 border-r border-black pr-2">
+                        <div className="flex">
+                          <span className="font-bold w-24">Job No.:</span>
+                          <span className="font-mono font-bold">{job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Manufacturer:</span>
+                          <span className="font-bold uppercase truncate">{job.make || '-'}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Serial No.:</span>
+                          <span className="font-mono">{job.serialNo || '-'}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">KVA/KV:</span>
+                          <span className="font-bold">{job.capacityKva}/11</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Oil Capacity:</span>
+                          <span className="font-mono">{Number(oilCap).toFixed(2)}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Oil Shortage:</span>
+                          <span className="font-mono">{Number(oilShort).toFixed(2)}</span>
+                        </div>
+                        <div className="flex text-[9px] pt-0.5">
+                          <span className="font-bold w-24">Order No.:</span>
+                          <span className="font-mono truncate">{orderNo}, Dt.: {orderDate}</span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-0.5 pl-2">
+                        <div className="flex">
+                          <span className="font-bold w-24">Date:</span>
+                          <span className="font-mono">{dateFormatted}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Division:</span>
+                          <span className="font-bold uppercase">{job.division || 'SABARMATI'}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Mr. No.:</span>
+                          <span className="font-mono font-bold">{job.mrNo}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Mr. Date:</span>
+                          <span className="font-mono">{mrDateFormatted}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Service Type:</span>
+                          <span className="font-bold">{job.repairType || 'OGP'}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Winding Type:</span>
+                          <span className="font-bold">{windingTypeStr}</span>
+                        </div>
+                        <div className="flex">
+                          <span className="font-bold w-24">Voltage Class:</span>
+                          <span className="font-bold">{voltageRating}</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {isFirst && (
+                    <div className="text-center mb-2">
+                      <p className="text-xs font-bold uppercase">{subHeadingText}</p>
+                      <p className="text-xs font-bold uppercase mt-0.5">FIXED RATE (Internal &amp; External)</p>
+                    </div>
+                  )}
+
+                  {isFirst && (
+                    <p className="text-[9px] text-justify leading-relaxed mb-2">{clauseText}</p>
+                  )}
+
+                  <table className="w-full border-collapse border border-black text-[8.5px]">
+                    <thead>
+                      <tr className="bg-slate-100 print:bg-transparent font-bold border-b border-black text-center">
+                        <th className="border border-black p-1 w-8">Sr. No.</th>
+                        <th className="border border-black p-1 text-left min-w-[200px]">Item Description</th>
+                        <th className="border border-black p-1 w-12">Unit</th>
+                        <th className="border border-black p-1 w-14">Quantity</th>
+                        <th className="border border-black p-1 text-right w-16">Unit Rate</th>
+                        <th className="border border-black p-1 text-right w-20">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map((item) => (
+                        <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-4">
+                          <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
+                          <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
+                          <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
+                          <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
+                          <td className="border-r border-black p-0.5 text-right font-mono">{item.rate === null ? '' : formatCurrency(item.rate)}</td>
+                          <td className="border-r border-black p-0.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+
+                  {isFirst && (
+                    <div className="mt-2 text-[8px] leading-relaxed space-y-1">
+                      <p>{noteLtCoil}</p>
+                      <p>{noteRadiator}</p>
+                    </div>
+                  )}
+
+                  {isLast && estimate.rateErrors.length > 0 && (
+                    <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-[9px]">
+                      <p className="font-black uppercase tracking-wide mb-1">⚠ Estimate incomplete - rate not found</p>
+                      <ul className="list-disc list-inside space-y-0.5 font-normal">
+                        {estimate.rateErrors.map((msg, i) => <li key={i}>{msg}</li>)}
+                      </ul>
+                      <p className="mt-1 font-bold">Total withheld until a rate is confirmed.</p>
+                    </div>
+                  )}
+                  {isLast && estimate.rateErrors.length === 0 && (
+                    <div className="flex justify-end mt-1 text-[9.5px]">
+                      <table className="border-collapse border border-black w-64 text-right">
+                        <tbody>
+                          <tr className="border-b border-black">
+                            <td className="p-1 font-bold border-r border-black">Total Amount:</td>
+                            <td className="p-1 font-mono font-bold w-24">{formatCurrency(estimate.baseTotal)}</td>
+                          </tr>
+                          <tr className="border-b border-black">
+                            <td className="p-1 font-bold border-r border-black">
+                              Percentage ({estimate.atPercentage > 0 ? `+${estimate.atPercentage.toFixed(1)}%` : `${estimate.atPercentage.toFixed(1)}%`}):
+                            </td>
+                            <td className="p-1 font-mono font-medium">{formatCurrency(estimate.percentageAmount)}</td>
+                          </tr>
+                          <tr className="bg-slate-100 print:bg-transparent font-black text-[10.5px]">
+                            <td className="p-1.5 border-r border-black">Final Amount:</td>
+                            <td className="p-1.5 font-mono">{formatCurrency(estimate.finalAmount)}</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {!isLast && (
+                    <p className="text-right text-xs italic mt-2">Continued on page {pageIdx + 2}…</p>
+                  )}
+                </div>
+
+                {isLast && estimate.rateErrors.length === 0 && (
+                  <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
+                    <div className="text-left">
+                      <div className="h-10"></div>
+                      <p className="font-bold">For, {agency?.discomName || 'DISCOM'}</p>
+                    </div>
+                    <div className="text-right">
+                      <div className="h-10"></div>
+                      <p className="font-bold">For, {agency?.name || 'CONTRACTOR'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {agency?.showPageNumbers !== false && (
+                <footer className="a4-page-footer">
+                  Page {pageIdx + 1} of {totalPages}
+                </footer>
+              )}
+            </PrintableA4Page>
+          );
+        })}
+      </>
+    );
+  }
 
   return (
     <>

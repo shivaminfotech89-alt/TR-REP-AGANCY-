@@ -82,6 +82,13 @@ export interface Agency {
   forwardingToText?: string;
   forwardingSubject?: string;
   forwardingCcText?: string;
+
+  // Amorphous / CRGO Wound Core fixed-rate estimate report text (Schedule-B tender
+  // clause + notes). Defaults live in ugvclSchedule2020.ts; overridden per-agency here
+  // since another DISCOM's tender wording may differ.
+  amorphousClauseText?: string;
+  amorphousNoteLtCoil?: string;
+  amorphousNoteRadiator?: string;
   estimateMaster?: EstimateItem[];
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
