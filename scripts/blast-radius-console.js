@@ -1,0 +1,191 @@
+// READ-ONLY blast-radius report: which already-submitted estimates were priced off
+// capacity defaults instead of real inspection data, and where that flipped the
+// Clause 4.0 circle-limit verdict.
+//
+// HOW TO RUN
+//   1. Start the dev server (npm run dev) and log in to the app in the browser.
+//   2. Select the agency you want to audit (it audits the ACTIVE agency).
+//   3. Open DevTools console, paste this whole file, press Enter.
+//
+// Reads only - no set/update/delete/batch anywhere.
+//
+// THE PRE-FIX FIGURE IS COMPUTED EXPLICITLY, NOT BY RE-RUNNING THE OLD CODE PATH.
+// computeLegacyEstimate() below restates, as literal constants, the quantities
+// buildSingleJobEstimateData used to produce when externalData and internalData were
+// both undefined. Each constant is annotated with the line it mirrors, so the two can
+// be diffed by eye. Nothing here depends on tricking current code into a branch it
+// now blocks.
+
+(async () => {
+  const { db, auth } = await import('/src/lib/firebase.ts');
+  const { collection, query, where, getDocs } = await import('firebase/firestore');
+  const { buildSingleJobEstimateData, classifyCoreType } = await import('/src/components/SingleJobEstimateReport.tsx');
+  const { getCircleLimitsEstimateMaster, getEstimateMasterForCore, getAtPercentageForCore } = await import('/src/lib/AgencyContext.tsx');
+  const { getCircleLimitForJob } = await import('/src/lib/estimateData.ts');
+  const { bandForKva, SCHEDULE_A } = await import('/src/lib/ugvclSchedule2020.ts');
+
+  const uid = auth.currentUser?.uid;
+  if (!uid) { console.error('Not signed in - log in to the app first.'); return; }
+  const agencyId = localStorage.getItem('activeAgencyId');
+  if (!agencyId) { console.error('No active agency selected.'); return; }
+  const atMasterId = localStorage.getItem(`activeAtMasterId_${agencyId}`) || localStorage.getItem('activeAtMasterId');
+
+  const snap = async (col, ...clauses) =>
+    (await getDocs(query(collection(db, col), ...clauses))).docs.map(d => ({ id: d.id, ...d.data() }));
+
+  const [agencies, atMasters, jobs, allInspections] = await Promise.all([
+    snap('agencies', where('ownerId', '==', uid)),
+    snap('atMasters', where('ownerId', '==', uid)),
+    snap('jobs', where('ownerId', '==', uid), where('agencyId', '==', agencyId)),
+    snap('inspections', where('ownerId', '==', uid)),
+  ]);
+
+  const agency = agencies.find(a => a.id === agencyId) || null;
+  const atMaster = atMasters.find(a => a.id === atMasterId) || null;
+  const circleLimits = getCircleLimitsEstimateMaster(agency);
+
+  const jobIds = new Set(jobs.map(j => j.id));
+  const extMap = {}, intMap = {};
+  allInspections.filter(i => i.jobId && jobIds.has(i.jobId)).forEach(i => {
+    const t = (i.type || '').toLowerCase();
+    if (t === 'external') extMap[i.jobId] = i.data || i;
+    if (t === 'internal') intMap[i.jobId] = i.data || i;
+  });
+
+  // --- The pre-fix estimate, stated explicitly ------------------------------------
+  // Mirrors buildSingleJobEstimateData (SingleJobEstimateReport.tsx) evaluated with
+  // externalData === undefined and internalData === undefined. With internalData
+  // absent, winding fell back to 'Aluminium', so the Aluminium rate variants are the
+  // only ones the old path could reach.
+  function computeLegacyEstimate(job) {
+    const kva = String(job.capacityKva || '25').trim();
+    const kvaNum = Number(kva) || 0;
+    const band = bandForKva(kvaNum);
+    const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
+    const masterList = getEstimateMasterForCore(agency, coreType);
+    const atPercentage = getAtPercentageForCore(atMaster, coreType);
+    // internalData?.condition was undefined, so only the job's own fields decided this
+    const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+
+    const scheduleRate = sr => SCHEDULE_A.find(i => i.sr === sr)?.rates[band];
+    const resolveRate = (masterCode, scheduleValue) => {
+      const found = masterList.find(m => m.itemCode?.toLowerCase() === masterCode.toLowerCase());
+      const masterVal = found?.rates?.[kva];
+      if (masterVal !== undefined && masterVal !== null && !isNaN(Number(masterVal)) && Number(masterVal) > 0) {
+        return Number(masterVal);
+      }
+      return (scheduleValue !== undefined && scheduleValue > 0) ? scheduleValue : null;
+    };
+
+    // Per-capacity coil defaults - the constants at the heart of this bug
+    const hvCoilWeight = isScrap ? 0
+      : (kvaNum === 63 ? 47.00 : kvaNum === 25 ? 15.54 : kvaNum === 100 ? 55.00 : 14.00);
+    const reInsWeight = isScrap ? 0
+      : (kvaNum === 63 ? 24.30 : kvaNum === 25 ? 15.54 : kvaNum === 100 ? 35.00 : 12.00);
+
+    // [master code, Schedule-A sr, quantity] - quantity is what the absent-record
+    // path produced. 'Y/N' items are quantity 1 or 0.
+    const lines = [
+      // PHYSICAL
+      ['16',  '16',  1],                          // Name Plating - undefined !== 'N'/'0'/'-' so applied
+      ['2b',  '2b',  1],                          // Spray painting - applied
+      ['4',   '18b', 0],                          // Conservator Tank - Number(undefined)||0
+      ['21',  '20',  0],                          // Radiator Replacement - Number(undefined)||0
+      ['1c',  '1c',  7],                          // Rod Gasket - hardcoded 7
+      ['1e',  '1e',  1],                          // M/S Bolt Nuts - applied
+      ['1b',  '1b',  kvaNum >= 63 ? 3 : 1],       // Top Cover Gasket - capacity default
+      ['5',   '5',   1],                          // Oil Guage Glass - applied
+      ['6',   '6',   1],                          // Breather - applied
+      ['8',   '8-A', isScrap ? 0 : 3],            // HV Bushing - hardcoded 3
+      ['9A',  '9A',  isScrap ? 0 : 2],            // HV Metal Parts - hardcoded 2
+      ['9B',  '9B',  0],                          // HV Connectors - default 0
+      ['10',  '10',  isScrap ? 0 : 1],            // LV Bushing - hardcoded 1
+      ['11A', '11A', isScrap ? 0 : 4],            // LV Metal Parts - hardcoded 4
+      ['11B', '11B', 0],                          // LV Connectors - default 0
+      ['17',  '17',  0],                          // Sealed to Bolted - sealType undefined => not bolted
+      // INTERNAL
+      ['3',   '3',   1],                          // Inside Painting - applied
+      ['1d',  '1d',  isScrap ? 0 : 1],            // Insulating Material
+      ['15',  '15',  isScrap ? 0 : 6],            // Washer Ring - hardcoded 6
+      ['12A', '12A-b1', hvCoilWeight],            // HV Coil - Aluminium S.E. variant
+      ['13A', '13A-b', 0],                        // LV Coil - totWtLv absent => 0
+      ['14',  '14-ii', reInsWeight],              // Re-insulation LV Coil - Aluminium
+      // LABOUR
+      ['1a',  '1a',  1],                          // Labour Charge - always applies
+      ['2a',  '2a',  1],                          // Cleaning dirty tank - applied
+      ['1f',  '1f',  isScrap ? 0 : 1],            // Drying of active parts
+      ['19',  undefined, isScrap ? 1 : 0],        // Scrap - agency master only, no Schedule-A
+      ['20',  '19',  isScrap ? 0 : 1],            // Testing Charge
+      ['12C', '12C-b', isScrap ? 0 : hvCoilWeight], // Labour HV Coil - reuses hvCoilWeight
+      ['13C', '13C-b', 0],                        // Labour LV Coil - lvCoilWeight 0
+    ];
+
+    let baseTotal = 0;
+    for (const [code, sr, qty] of lines) {
+      if (!qty) continue;
+      const rate = resolveRate(code, sr === undefined ? undefined : scheduleRate(sr));
+      baseTotal += qty * (rate ?? 0);   // a null rate contributed 0, same as before
+    }
+    const percentageAmount = Number((baseTotal * (atPercentage / 100)).toFixed(2));
+    return Number((baseTotal + percentageAmount).toFixed(2));   // lessAmount was always 0
+  }
+
+  const rows = [], skipped = [];
+  for (const job of jobs) {
+    const ext = extMap[job.id];
+    const int = intMap[job.id];
+    if (!ext && !int) continue;                       // only jobs that DO have an inspection
+
+    const coreClass = classifyCoreType(job.coreType || 'CRGO');
+    if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+      skipped.push({ job: job.jobNo, core: job.coreType, why: 'fixed-rate by capacity - never used inspection data' });
+      continue;
+    }
+
+    const real = buildSingleJobEstimateData(job, agency, atMaster, ext, int);
+    const submittedAmt = computeLegacyEstimate(job);
+    const correctAmt = real.finalAmount;
+
+    const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
+    const { limit, hasLimit, ratingLabel } = getCircleLimitForJob(job.capacityKva, ratingKey, circleLimits);
+    const verdictBefore = !hasLimit ? 'no limit' : (submittedAmt > limit ? 'EXCEEDS' : 'within');
+    const verdictNow = !hasLimit ? 'no limit' : (correctAmt > limit ? 'EXCEEDS' : 'within');
+
+    const difference = Number((correctAmt - submittedAmt).toFixed(2));
+    if (difference === 0 && verdictBefore === verdictNow) continue;
+
+    rows.push({
+      job: job.jobNo, mr: job.mrNo, kva: job.capacityKva, core: job.coreType || 'CRGO',
+      hasExt: !!ext, hasInt: !!int,
+      submittedAmt, correctAmt, difference,
+      limit, ratingLabel,
+      verdictBefore, verdictNow,
+      verdictFlipped: verdictBefore !== verdictNow,
+      estimateSentDate: job.estimateSentDate || '',
+      estimateAmountOnJob: job.estimateAmount ?? '',   // what was actually saved/sent
+      blockedNow: real.rateErrors.length ? real.rateErrors.join(' | ') : '',
+    });
+  }
+
+  rows.sort((a, b) => Math.abs(b.difference) - Math.abs(a.difference));
+
+  console.log(`\n=== BLAST RADIUS - agency ${agency?.name || agencyId} ===`);
+  console.log(`${jobs.length} jobs, ${rows.length} differ from what the pre-fix screen produced.`);
+  console.table(rows);
+
+  const flipped = rows.filter(r => r.verdictFlipped);
+  console.log(`\n--- CIRCLE-LIMIT VERDICT CHANGED: ${flipped.length} job(s) ---`);
+  if (flipped.length) console.table(flipped);
+
+  const submitted = rows.filter(r => r.estimateSentDate);
+  console.log(`\n--- ALREADY SUBMITTED (estimateSentDate set) AND WRONG: ${submitted.length} job(s) ---`);
+  if (submitted.length) console.table(submitted);
+
+  if (skipped.length) {
+    console.log(`\n--- SKIPPED (unaffected by this bug): ${skipped.length} ---`);
+    console.table(skipped);
+  }
+
+  window.__blastRadius = { rows, flipped, submitted, skipped };
+  console.log('\nFull results: window.__blastRadius');
+})();

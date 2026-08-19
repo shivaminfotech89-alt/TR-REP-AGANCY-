@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { PrintableA4Page } from './LetterheadHeader';
+import { classifyCoreType } from './SingleJobEstimateReport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
+import { getJobFullEstimate, checkJobCircleLimit } from '../lib/estimateCalc';
 
 export interface InternalData {
   windingType: string;
@@ -33,7 +35,7 @@ export interface InternalData {
 }
 
 export default function InternalInspection() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]); // Internal-type only
   const [externalInspections, setExternalInspections] = useState<any[]>([]);
@@ -226,6 +228,10 @@ export default function InternalInspection() {
     if (!selectedMrNo) return [];
     return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
   }, [jobs, selectedMrNo]);
+
+  // Agency's configured "Circle Authority Estimate Approval Limit" master, for the
+  // live Clause 4.0 indicator below - resolved once per agency, not per job.
+  const circleLimitsData = useMemo(() => getCircleLimitsEstimateMaster(activeAgency), [activeAgency]);
 
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
@@ -474,6 +480,9 @@ export default function InternalInspection() {
           },
           updatedAt: now,
           ownerId: auth.currentUser.uid,
+          // Stamped for future agency-scoped queries. Existing records predate this
+          // field, so nothing may filter on it until they're backfilled.
+          agencyId: activeAgency?.id,
         };
         
         if (!jobData.inspectionId) {
@@ -594,6 +603,66 @@ export default function InternalInspection() {
       {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
     </select>
   );
+
+  // Live Clause 4.0 Circle Estimate Power Limit indicator - CRGO jobs only (Amorphous
+  // / Wound Core are fixed-rate by capacity, so nothing the operator enters here can
+  // move the amount; OH cannot realistically approach the limit). Computed from the
+  // CURRENT UNSAVED form values, so it reflects what's on the bench right now, not
+  // whatever was last saved.
+  const renderCircleLimitIndicator = (job: any) => {
+    if (classifyCoreType(job.coreType || 'CRGO') !== 'CRGO') return null;
+
+    const internalDataLive = formsData[job.id];
+    if (!internalDataLive) return null;
+
+    const externalDataSaved = externalInspections.find(i => i.jobId === job.id)?.data;
+
+    const est = getJobFullEstimate(job, externalDataSaved, internalDataLive, activeAgency, activeAtMaster);
+    const check = checkJobCircleLimit(job, externalDataSaved, internalDataLive, activeAgency, activeAtMaster, circleLimitsData);
+
+    // Never show a figure that rests on missing data. Each case says what is actually
+    // missing - "Limit not configured" must mean the limit, nothing else.
+    const blockedMessage = !externalDataSaved
+      ? 'External inspection missing - cannot estimate'
+      : !check.hasLimit
+        ? 'Limit not configured'
+        : est.rateErrors.length > 0
+          ? 'Rate not configured - cannot estimate'
+          : null;
+    if (blockedMessage) {
+      return <span className="block text-[9px] font-semibold text-slate-400 italic">{blockedMessage}</span>;
+    }
+
+    const finalRs = Math.round(check.finalAmt).toLocaleString('en-IN');
+    const limitRs = Math.round(check.limit).toLocaleString('en-IN');
+    const diffRs = Math.round(Math.abs(check.diff)).toLocaleString('en-IN');
+    const isRed = check.exceeds;
+    const isAmber = !isRed && check.diffPct >= -10;
+    const colorClasses = isRed
+      ? 'bg-red-50 border-red-300 text-red-800'
+      : isAmber
+        ? 'bg-amber-50 border-amber-300 text-amber-800'
+        : 'bg-green-50 border-green-300 text-green-800';
+
+    // The rating/voltage class defaults to "3 Star & other" inside the lookup when
+    // unset on the job - surface that rather than let it pass as a real value.
+    const ratingWasAssumed = !job.starRating && !job.ratingLevel;
+
+    return (
+      <div className={`px-1.5 py-1 rounded border text-[9px] font-bold leading-tight text-left whitespace-normal ${colorClasses}`}>
+        <div>Rs {finalRs} / limit Rs {limitRs}</div>
+        <div>{isRed ? `EXCEEDS by Rs ${diffRs}` : isAmber ? 'approaching limit' : 'within limit'}</div>
+        <div className="text-[8px] font-normal opacity-70">
+          {check.ratingLabel}{ratingWasAssumed ? ' (assumed - voltage class not set on job)' : ''}
+        </div>
+        {isRed && (
+          <div className="mt-1 text-[8px] font-bold text-red-900">
+            Exceeds 25% approval limit - repair needs SE approval, or mark as Scrap.
+          </div>
+        )}
+      </div>
+    );
+  };
 
   if (!activeAgency) {
     return (
@@ -1172,6 +1241,9 @@ export default function InternalInspection() {
                       <th className="p-2 bg-rose-50/80 text-[10px] font-bold text-rose-950 uppercase tracking-wider min-w-[95px] text-center" rowSpan={2}>
                         CONDITION
                       </th>
+                      <th className="p-2 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[180px] text-center" rowSpan={2} title="Live estimate cost vs Clause 4.0 Circle Estimate Power Limit - CRGO jobs only">
+                        Est. vs Circle Limit
+                      </th>
                     </tr>
 
                     {/* Sub-Headers for HV and LV Coils */}
@@ -1310,6 +1382,9 @@ export default function InternalInspection() {
                             <option value="Repairable">Repairable</option>
                             <option value="Scrap">Scrap</option>
                           </select>
+                        </td>
+                        <td className="p-1.5 text-center align-top">
+                          {renderCircleLimitIndicator(job)}
                         </td>
                       </tr>
                     )})}

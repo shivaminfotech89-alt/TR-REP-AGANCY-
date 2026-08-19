@@ -500,6 +500,9 @@ export default function ExternalInspection() {
           },
           updatedAt: now,
           ownerId: auth.currentUser.uid,
+          // Stamped for future agency-scoped queries. Existing records predate this
+          // field, so nothing may filter on it until they're backfilled.
+          agencyId: activeAgency?.id,
         };
         
         if (!jobData.inspectionId) {

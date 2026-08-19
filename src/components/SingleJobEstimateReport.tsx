@@ -14,8 +14,8 @@ const SECTION_LABELS: Record<EstimateSection, string> = {
 
 // Same classification convention as getAtPercentageForCore / getEstimateMasterForCore
 // in AgencyContext.tsx - kept consistent so a job classifies identically everywhere.
-type CoreClass = 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE';
-function classifyCoreType(coreType: string): CoreClass {
+export type CoreClass = 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE';
+export function classifyCoreType(coreType: string): CoreClass {
   const type = (coreType || 'CRGO').trim().toUpperCase();
   if (type === 'OH' || type.includes('OVERHAUL')) return 'OH';
   if (type.includes('AMORPHOUS') || type.includes('AM')) return 'AMORPHOUS';
@@ -234,6 +234,22 @@ export function buildSingleJobEstimateData(
     };
   }
 
+  // Itemised (CRGO / OH) estimates derive nearly every quantity from the inspection
+  // records. With a record entirely absent, each optional-chained read below falls
+  // through to its per-capacity default and the estimate comes out looking valid -
+  // which is how estimates were silently priced off defaults instead of real
+  // inspections. Treat a wholly missing record as blocking, exactly like a missing
+  // rate: the per-field defaults stay legitimate only INSIDE a real inspection.
+  const hasExternalData = !!externalData && Object.keys(externalData).length > 0;
+  const hasInternalData = !!internalData && Object.keys(internalData).length > 0;
+  const jobLabel = job.jobNo || job.id || 'This job';
+  if (!hasExternalData) {
+    rateErrors.push(`${jobLabel}: no external inspection data - quantities cannot be derived.`);
+  }
+  if (!hasInternalData) {
+    rateErrors.push(`${jobLabel}: no internal inspection data - quantities cannot be derived.`);
+  }
+
   const scheduleRate = (sr: string): number | undefined => {
     const entry = SCHEDULE_A.find(i => i.sr === sr);
     return entry?.rates[band];
@@ -423,7 +439,10 @@ export function buildSingleJobEstimateData(
     hvCoilWeight = Number(internalData.totWt);
   } else if (internalData?.wtOfCoil && internalData?.totCoil) {
     hvCoilWeight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
-  } else if (!isScrap) {
+  } else if (!isScrap && hasInternalData) {
+    // Per-capacity default for a coil weight missing from an otherwise real
+    // inspection. Deliberately NOT applied when the whole record is absent - that
+    // case is blocked above rather than given a plausible-looking number.
     hvCoilWeight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
   }
   const hvCoilApplies = !isScrap && hvCoilWeight > 0;
@@ -484,8 +503,10 @@ export function buildSingleJobEstimateData(
   // 22. Re-insulation LV Coil(Aluminium) - Schedule-A '14-i'/'14-ii', no S.E. split
   let reInsWeight = 0;
   // If LV coils are OK or RI (not replaced as new), calculate re-insulation weight
-  if (!isScrap && (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG')) {
+  if (!isScrap && hasInternalData && (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG')) {
     if (lvCoilWeight === 0) {
+      // Same rule as the HV coil default above: a per-capacity stand-in for a field
+      // missing from a real inspection, never a substitute for the whole record.
       reInsWeight = Number(kva) === 63 ? 24.30 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 35.00 : 12.00));
     }
   }

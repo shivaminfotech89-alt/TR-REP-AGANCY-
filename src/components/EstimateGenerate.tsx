@@ -10,10 +10,11 @@ import {
   FileCheck2, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { defaultEstimateData, EstimateItem, getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
+import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
+import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure } from '../lib/estimateCalc';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
-import SingleJobEstimateReport, { buildSingleJobEstimateData } from './SingleJobEstimateReport';
+import SingleJobEstimateReport from './SingleJobEstimateReport';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { paginateRows } from '../lib/pagination';
@@ -480,10 +481,14 @@ export default function EstimateGenerate() {
           where('ownerId', '==', auth.currentUser.uid), 
           where('agencyId', '==', activeAgency.id)
         );
+        // Inspection records carry no agencyId (neither save path has ever written
+        // one), so filtering on it here matched nothing and this screen silently
+        // priced every estimate off capacity-based defaults instead of the real
+        // inspection. Scope by owner in the query, then by agency in memory via the
+        // job the record belongs to - the same way InternalInspection does it.
         const inspQ = query(
           collection(db, 'inspections'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id)
+          where('ownerId', '==', auth.currentUser.uid)
         );
 
         const [jobsSnapshot, inspSnapshot] = await Promise.all([
@@ -492,7 +497,10 @@ export default function EstimateGenerate() {
         ]);
 
         const fetchedJobs = jobsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        const fetchedInspections = inspSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        const agencyJobIds = new Set(fetchedJobs.map(j => j.id));
+        const fetchedInspections = inspSnapshot.docs
+          .map(d => ({ id: d.id, ...d.data() } as any))
+          .filter(i => i.jobId && agencyJobIds.has(i.jobId));
 
         setJobs(fetchedJobs);
         setInspections(fetchedInspections);
@@ -688,10 +696,13 @@ export default function EstimateGenerate() {
   const today = new Date();
   const dateString = today.toLocaleDateString('en-GB'); // dd/mm/yyyy
 
+  // Thin wrappers over the pure calculators in lib/estimateCalc.ts, supplying this
+  // screen's own state (inspection maps, agency, AT master) so every existing call
+  // site below can keep calling these with just a job.
   const getJobFullEstimate = (job: any) => {
     const ext = externalInspMap[job.id];
     const int = internalInspMap[job.id];
-    return buildSingleJobEstimateData(job, activeAgency, activeAtMaster, ext, int);
+    return getJobFullEstimatePure(job, ext, int, activeAgency, activeAtMaster);
   };
 
   const calculateJobTotal = (job: any) => {
@@ -701,24 +712,10 @@ export default function EstimateGenerate() {
 
   // Helper to evaluate a job against Clause 4.0 Circle Estimate Power Limit
   const checkJobCircleLimit = (job: any) => {
-    const est = getJobFullEstimate(job);
-    const finalAmt = est.finalAmount;
+    const ext = externalInspMap[job.id];
+    const int = internalInspMap[job.id];
     const circleMaster = getCircleLimitsEstimateMaster(activeAgency);
-    const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
-    const limitInfo = getCircleLimitForJob(job.capacityKva, ratingKey, circleMaster);
-    const exceeds = limitInfo.hasLimit && finalAmt > limitInfo.limit;
-    const diff = finalAmt - limitInfo.limit;
-    const diffPct = limitInfo.limit > 0 ? ((diff / limitInfo.limit) * 100) : 0;
-    return {
-      finalAmt,
-      limit: limitInfo.limit,
-      ratingLabel: limitInfo.ratingLabel,
-      ratingCode: limitInfo.ratingCode,
-      hasLimit: limitInfo.hasLimit,
-      exceeds,
-      diff,
-      diffPct
-    };
+    return checkJobCircleLimitPure(job, ext, int, activeAgency, activeAtMaster, circleMaster);
   };
 
   const mrHasExceededCircleLimit = (mr: string) => {
