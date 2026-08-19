@@ -102,21 +102,56 @@ export default function InternalInspection() {
       const existingInsp = internalInsps.find(i => i.jobId === j.id);
       
       if (existingInsp && existingInsp.data) {
+        const damR = existingInsp.data.damR || '';
+        const damY = existingInsp.data.damY || '';
+        const damB = existingInsp.data.damB || '';
+        const wtOfCoil = existingInsp.data.wtOfCoil || '';
+        const lvCoilR = existingInsp.data.lvCoilR || 'OK';
+        const lvCoilY = existingInsp.data.lvCoilY || 'OK';
+        const lvCoilB = existingInsp.data.lvCoilB || 'OK';
+        const wtOfCoilLv = existingInsp.data.wtOfCoilLv || '';
+
+        // totCoil/totWt/totWtLv are now read-only in the UI, so a legacy record
+        // whose stored value was manually overwritten before that would otherwise
+        // be frozen wrong with no way to fix it - recompute from the same inputs
+        // used everywhere else instead of trusting what's stored.
+        const r = parseInt(damR || '0', 10);
+        const y = parseInt(damY || '0', 10);
+        const b = parseInt(damB || '0', 10);
+        const recomputedTotCoil = ((!isNaN(r) ? r : 0) + (!isNaN(y) ? y : 0) + (!isNaN(b) ? b : 0)) + '';
+        const recomputedTotWt = ((Number(recomputedTotCoil) || 0) * (Number(wtOfCoil) || 0)).toFixed(2);
+
+        let badCount = 0;
+        if (lvCoilR !== 'OK') badCount++;
+        if (lvCoilY !== 'OK') badCount++;
+        if (lvCoilB !== 'OK') badCount++;
+        const recomputedTotWtLv = (badCount * (Number(wtOfCoilLv) || 0)).toFixed(2);
+
+        if (existingInsp.data.totCoil !== undefined && Number(existingInsp.data.totCoil) !== Number(recomputedTotCoil)) {
+          console.log(`Internal inspection totCoil mismatch for job ${j.jobNo}: stored=${existingInsp.data.totCoil}, recomputed=${recomputedTotCoil}`);
+        }
+        if (existingInsp.data.totWt !== undefined && Number(existingInsp.data.totWt) !== Number(recomputedTotWt)) {
+          console.log(`Internal inspection totWt mismatch for job ${j.jobNo}: stored=${existingInsp.data.totWt}, recomputed=${recomputedTotWt}`);
+        }
+        if (existingInsp.data.totWtLv !== undefined && Number(existingInsp.data.totWtLv) !== Number(recomputedTotWtLv)) {
+          console.log(`Internal inspection totWtLv mismatch for job ${j.jobNo}: stored=${existingInsp.data.totWtLv}, recomputed=${recomputedTotWtLv}`);
+        }
+
         initialForms[j.id] = {
           windingType: existingInsp.data.windingType || 'AL',
           condition: existingInsp.data.condition || 'Repairable',
           hvCoilLimb: existingInsp.data.hvCoilLimb || '4',
-          damR: existingInsp.data.damR || '',
-          damY: existingInsp.data.damY || '',
-          damB: existingInsp.data.damB || '',
-          totCoil: existingInsp.data.totCoil || '',
-          wtOfCoil: existingInsp.data.wtOfCoil || '',
-          totWt: existingInsp.data.totWt || '',
-          lvCoilR: existingInsp.data.lvCoilR || 'OK',
-          lvCoilY: existingInsp.data.lvCoilY || 'OK',
-          lvCoilB: existingInsp.data.lvCoilB || 'OK',
-          wtOfCoilLv: existingInsp.data.wtOfCoilLv || '',
-          totWtLv: existingInsp.data.totWtLv || '',
+          damR,
+          damY,
+          damB,
+          totCoil: recomputedTotCoil,
+          wtOfCoil,
+          totWt: recomputedTotWt,
+          lvCoilR,
+          lvCoilY,
+          lvCoilB,
+          wtOfCoilLv,
+          totWtLv: recomputedTotWtLv,
           wasring: existingInsp.data.wasring || '6',
           inPnt: existingInsp.data.inPnt || '-',
           tstTrn: existingInsp.data.tstTrn || 'Y',
@@ -295,6 +330,36 @@ export default function InternalInspection() {
       .map(job => job.jobNo);
     if (notExternallyDone.length > 0) {
       alert(`⚠️ External inspection is not complete for: ${notExternallyDone.join(', ')}.\n\nInternal inspection cannot be saved until every job in this MR has been externally inspected.`);
+      return;
+    }
+
+    // Damaged HV coil counts (damR/damY/damB) cannot exceed the job's HV coil limb
+    // count - there is no such thing as more damaged coils on a phase than the
+    // number of coils it has. The inputs already reject an over-limit entry as it's
+    // typed, but a legacy record saved before that limit existed could still carry
+    // one through unchanged - catch that here too.
+    const limbRangeErrors: string[] = [];
+    for (const job of mrJobs) {
+      if (job.status === 'Dispatched' || job.isClosed === true) continue;
+      const jobData = formsData[job.id];
+      if (!jobData) continue;
+      const limbRaw = jobData.hvCoilLimb;
+      const limbMax = limbRaw !== undefined && limbRaw.trim() !== '' && !isNaN(Number(limbRaw)) ? Number(limbRaw) : undefined;
+      if (limbMax === undefined) continue;
+
+      const checks: Array<[string, string | undefined]> = [
+        ['Damaged HV Coil R', jobData.damR],
+        ['Damaged HV Coil Y', jobData.damY],
+        ['Damaged HV Coil B', jobData.damB],
+      ];
+      for (const [label, value] of checks) {
+        if (value !== undefined && value.trim() !== '' && Number(value) > limbMax) {
+          limbRangeErrors.push(`${job.jobNo}: ${label} cannot exceed ${limbMax}.`);
+        }
+      }
+    }
+    if (limbRangeErrors.length > 0) {
+      alert(`⚠️ Value out of range:\n\n${limbRangeErrors.join('\n')}`);
       return;
     }
 
@@ -490,14 +555,33 @@ export default function InternalInspection() {
     />
   );
 
-  const renderIntegerField = (jobId: string, field: keyof InternalData, widthClass = 'w-12') => (
+  const renderIntegerField = (jobId: string, field: keyof InternalData, widthClass = 'w-12', max?: number) => (
     <input
       type="number"
       value={formsData[jobId]?.[field] || ''}
-      onChange={(e) => handleChange(jobId, field, e.target.value)}
+      onChange={(e) => {
+        const raw = e.target.value;
+        // Reject rather than clamp: a clamped value looks entered, but this one
+        // wasn't - the operator typed something out of range and should see that
+        // rejection, not a silently substituted number.
+        if (max !== undefined && raw !== '' && Number(raw) > max) return;
+        handleChange(jobId, field, raw);
+      }}
       className={`px-1.5 py-1 text-[10px] font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
       step="1"
       min="0"
+      max={max}
+    />
+  );
+
+  const renderReadOnlyField = (jobId: string, field: keyof InternalData, widthClass = 'w-16') => (
+    <input
+      type="text"
+      value={formsData[jobId]?.[field] ?? ''}
+      readOnly
+      disabled
+      tabIndex={-1}
+      className={`px-1.5 py-1 text-[10px] font-mono border border-slate-200 rounded bg-slate-100 text-slate-500 text-center cursor-not-allowed ${widthClass}`}
     />
   );
 
@@ -1118,6 +1202,8 @@ export default function InternalInspection() {
                   <tbody className="divide-y divide-slate-100">
                     {mrJobs.map((job, index) => {
                       const isScrap = formsData[job.id]?.condition === 'Scrap';
+                      const limbRaw = formsData[job.id]?.hvCoilLimb;
+                      const hvLimbMax = limbRaw !== undefined && limbRaw.trim() !== '' && !isNaN(Number(limbRaw)) ? Number(limbRaw) : undefined;
                       return (
                       <tr key={job.id} className={`hover:bg-slate-50/80 transition-colors group ${isScrap ? 'bg-red-50/30' : ''}`}>
                         <td className="p-2 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
@@ -1159,23 +1245,23 @@ export default function InternalInspection() {
                         
                         {/* HV Damaged Coil Inputs with Group Border */}
                         <td className="p-1 border-l-2 border-r border-blue-400 bg-blue-50/20 text-center">
-                          {renderIntegerField(job.id, 'damR', 'w-10')}
+                          {renderIntegerField(job.id, 'damR', 'w-10', hvLimbMax)}
                         </td>
                         <td className="p-1 border-r border-blue-400 bg-blue-50/20 text-center">
-                          {renderIntegerField(job.id, 'damY', 'w-10')}
+                          {renderIntegerField(job.id, 'damY', 'w-10', hvLimbMax)}
                         </td>
                         <td className="p-1 border-r-2 border-blue-400 bg-blue-50/20 text-center">
-                          {renderIntegerField(job.id, 'damB', 'w-10')}
+                          {renderIntegerField(job.id, 'damB', 'w-10', hvLimbMax)}
                         </td>
-                        
+
                         <td className="p-1 border-r border-slate-200 text-center font-bold">
-                          {renderInputField(job.id, 'totCoil', 'number', 'w-14')}
+                          {renderReadOnlyField(job.id, 'totCoil', 'w-14')}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center">
                           {renderInputField(job.id, 'wtOfCoil', 'number', 'w-16')}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center font-bold text-blue-900">
-                          {renderInputField(job.id, 'totWt', 'number', 'w-16')}
+                          {renderReadOnlyField(job.id, 'totWt', 'w-16')}
                         </td>
                         
                         {/* LV Damaged Coil Selectors with Group Border */}
@@ -1193,7 +1279,7 @@ export default function InternalInspection() {
                           {renderInputField(job.id, 'wtOfCoilLv', 'number', 'w-16')}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center font-bold text-indigo-900">
-                          {renderInputField(job.id, 'totWtLv', 'number', 'w-16')}
+                          {renderReadOnlyField(job.id, 'totWtLv', 'w-16')}
                         </td>
                         
                         <td className="p-1 border-r border-slate-200 text-center">
