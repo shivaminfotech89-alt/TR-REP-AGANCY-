@@ -77,6 +77,7 @@ export default function TestingReport() {
   const [tab, setTab] = useState<'Pending' | 'Completed'>('Pending');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
   const [jobNoFilter, setJobNoFilter] = useState<string>('');
+  const [mrNoFilter, setMrNoFilter] = useState<string>('All');
   
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -126,19 +127,47 @@ export default function TestingReport() {
     return groups;
   }, [jobs]);
 
-  const filteredJobs = useMemo(() => {
+  // Jobs that are actually eligible to show up in the current tab, before the
+  // division/job-no/MR-no text filters narrow that further. This is also the set
+  // the MR dropdown is built from, so its options always reflect what's really
+  // available in this tab regardless of what's typed into the other filters.
+  const tabEligibleJobs = useMemo(() => {
     return jobs.filter(j => {
       const jobsForMr = mrGroups[j.mrNo] || [j];
       if (!isMrReadyForTesting(jobsForMr, inspections)) return false;
 
       if (tab === 'Pending' && j.status !== 'Internal Done') return false;
       if (tab === 'Completed' && (j.status === 'Received' || j.status === 'External Done' || j.status === 'Internal Done')) return false;
+      return true;
+    });
+  }, [jobs, mrGroups, inspections, tab]);
 
+  const mrOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tabEligibleJobs.forEach(j => {
+      counts[j.mrNo] = (counts[j.mrNo] || 0) + 1;
+    });
+    return Object.keys(counts)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(mrNo => ({ mrNo, count: counts[mrNo] }));
+  }, [tabEligibleJobs]);
+
+  // If the tab change leaves the selected MR with no testable jobs, fall back to
+  // "All MRs" rather than silently showing an empty list with no explanation.
+  useEffect(() => {
+    if (mrNoFilter !== 'All' && !mrOptions.some(o => o.mrNo === mrNoFilter)) {
+      setMrNoFilter('All');
+    }
+  }, [tab, mrOptions, mrNoFilter]);
+
+  const filteredJobs = useMemo(() => {
+    return tabEligibleJobs.filter(j => {
       if (divisionFilter !== 'All' && (j.division || 'Unknown') !== divisionFilter) return false;
       if (jobNoFilter && !j.jobNo.toLowerCase().includes(jobNoFilter.toLowerCase())) return false;
+      if (mrNoFilter !== 'All' && j.mrNo !== mrNoFilter) return false;
       return true;
     }).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
-  }, [jobs, mrGroups, inspections, tab, divisionFilter, jobNoFilter]);
+  }, [tabEligibleJobs, divisionFilter, jobNoFilter, mrNoFilter]);
 
   const handleToggleJob = (id: string) => {
     const newSet = new Set(selectedJobIds);
@@ -582,6 +611,16 @@ export default function TestingReport() {
                   className="pl-9 pr-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 w-full bg-white"
                 />
               </div>
+              <select
+                value={mrNoFilter}
+                onChange={(e) => setMrNoFilter(e.target.value)}
+                className="px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+              >
+                <option value="All">All MRs</option>
+                {mrOptions.map(({ mrNo, count }) => (
+                  <option key={mrNo} value={mrNo}>{mrNo} ({count} job{count > 1 ? 's' : ''})</option>
+                ))}
+              </select>
               <select
                 value={divisionFilter}
                 onChange={(e) => setDivisionFilter(e.target.value)}
