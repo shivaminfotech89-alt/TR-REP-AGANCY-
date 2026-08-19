@@ -8,6 +8,23 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
 
+// Statuses that mean internal inspection is finished or no longer applicable for a job.
+const INTERNAL_INSPECTION_DONE_STATUSES = new Set([
+  'Internal Done', 'Scrap', 'Ready for Testing', 'Testing Completed', 'Dispatched'
+]);
+
+// A job counts as internally inspected if it has an inspection record, or its status
+// already reflects that inspection is done/moot, or it's closed.
+function isJobInternallyDone(job: any, inspections: any[]): boolean {
+  return inspections.some(i => i.jobId === job.id) || INTERNAL_INSPECTION_DONE_STATUSES.has(job.status) || job.isClosed === true;
+}
+
+// An MR is complete only when EVERY job in it is done - shared by the Pending/Completed
+// filter and the row badge so they can never disagree.
+function isMrInternalComplete(jobsForMr: any[], inspections: any[]): boolean {
+  return jobsForMr.every(j => isJobInternallyDone(j, inspections));
+}
+
 export interface InternalData {
   windingType: string;
   hvCoilLimb: string;
@@ -413,11 +430,11 @@ export default function InternalInspection() {
   
   const uniqueMrNos = Object.keys(mrGroups).filter(mr => {
     const jobsForMr = mrGroups[mr];
-    if (statusFilter === 'Pending') {
-      return jobsForMr.some(j => !inspections.some(i => i.jobId === j.id) && (j.status === 'External Done' || j.status === 'Received' || !j.status));
-    } else {
-      return jobsForMr.some(j => inspections.some(i => i.jobId === j.id));
+    const isComplete = isMrInternalComplete(jobsForMr, inspections);
+    if (statusFilter === 'Completed') {
+      return isComplete;
     }
+    return !isComplete && jobsForMr.some(j => !inspections.some(i => i.jobId === j.id) && (j.status === 'External Done' || j.status === 'Received' || !j.status));
   }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 
   const filteredMrNos = uniqueMrNos.filter(mr => {
@@ -779,7 +796,8 @@ export default function InternalInspection() {
                     // Check external and internal inspection dates
                     const extInspDate = sampleJob?.externalInspectionDate || jobsForMr.find(j => j.externalInspectionDate)?.externalInspectionDate;
                     const intInspDate = sampleJob?.internalInspectionDate || jobsForMr.find(j => j.internalInspectionDate)?.internalInspectionDate;
-                    const isDone = jobsForMr.every(j => j.status === 'Internal Done' || j.status === 'Scrap' || j.status === 'Ready for Testing' || j.status === 'Testing Completed' || j.status === 'Dispatched');
+                    const isDone = isMrInternalComplete(jobsForMr, inspections);
+                    const inspectedCount = jobsForMr.filter(j => isJobInternallyDone(j, inspections)).length;
 
                     return (
                     <tr key={mr} className="hover:bg-slate-50 transition-colors">
@@ -829,6 +847,9 @@ export default function InternalInspection() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-green-50 text-green-700 border border-green-200">
                               <CheckCircle2 className="w-3 h-3 text-green-600" /> Completed
                             </span>
+                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              {inspectedCount} of {jobsForMr.length} inspected
+                            </span>
                             {intInspDate && (
                               <span className="text-[10px] text-slate-500 font-mono mt-0.5">
                                 Date: {formatDDMMYYYY(intInspDate)}
@@ -836,9 +857,14 @@ export default function InternalInspection() {
                             )}
                           </div>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
-                            Pending
-                          </span>
+                          <div className="inline-flex flex-col items-center">
+                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              Pending
+                            </span>
+                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              {inspectedCount} of {jobsForMr.length} inspected
+                            </span>
+                          </div>
                         )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-right">
