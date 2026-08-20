@@ -825,7 +825,23 @@ export default function BillingSystem() {
     return divisionOilStatement.divisionNetOilOnInspectionDate;
   }, [divisionOilStatement]);
 
+  // A charge that could not be resolved must never leave the building as a document.
+  // The named error already blocked the Send Bill WRITE, but printing and exporting
+  // were ungated - so an invoice went out showing 0.00 for an unresolvable scrap line
+  // instead of refusing to generate. Every path that produces a document is gated.
+  const blockIfUnresolvedCharges = (action: string) => {
+    if (scrapChargeErrors.length === 0) return false;
+    alert(
+      `⚠️ Cannot ${action}: a charge on this bill could not be resolved.\n\n` +
+      `${scrapChargeErrors.join('\n\n')}\n\n` +
+      `A bill must not show a zero line for a charge that has no rate. ` +
+      `Add the missing item to the estimate master, then try again.`
+    );
+    return true;
+  };
+
   const handlePrint = () => {
+    if (blockIfUnresolvedCharges('print this bill')) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-billing-container', `Tax Invoice & Letter Documents - MR ${selectedMrNo}`, `Bill_Package_MR_${selectedMrNo}.pdf`);
     } else {
@@ -835,6 +851,7 @@ export default function BillingSystem() {
 
   const handleExportExcel = () => {
     if (!selectedMrNo || selectedJobsData.length === 0) return;
+    if (blockIfUnresolvedCharges('export this bill')) return;
 
     const wsData: any[][] = [];
     wsData.push([`TAX INVOICE / REPAIR BILL - MR NO: ${selectedMrNo}`]);

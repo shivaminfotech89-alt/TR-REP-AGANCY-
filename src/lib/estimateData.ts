@@ -223,6 +223,39 @@ export const RATING_LEVEL_OPTIONS = [
   { value: '22 KV', label: '22 KV (Voltage Class)' }
 ];
 
+/**
+ * Returns `saved` with any standard item whose itemCode it lacks appended from
+ * `defaults`. Purely ADDITIVE: every saved item keeps its position, name, unit and
+ * rates untouched, and nothing saved is ever removed or overwritten.
+ *
+ * A saved master persisted before an item existed shadows the defaults permanently -
+ * getEstimateMasterForCore returns the saved array whenever it is non-empty - so that
+ * item can never resolve, at any rate, no matter what the defaults say. That is how
+ * the scrap charge (Amorphous/Wound Core code "0") stayed unresolvable: there was no
+ * row for it in the saved array and therefore none on the Estimate Master screen.
+ *
+ * Deliberately narrower than EstimateMaster.tsx's normalize* helpers, which also
+ * rewrite names/units/rates and can replace a whole saved array when a legacy-shape
+ * heuristic fires. That behaviour is acceptable on an editing screen the user is
+ * looking at; in a pricing path it would silently swap entered rates for defaults -
+ * the exact class of silent fallback this codebase has been removing.
+ */
+export function withMissingDefaults(
+  saved: EstimateItem[] | undefined | null,
+  defaults: EstimateItem[]
+): EstimateItem[] {
+  if (!saved || saved.length === 0) return defaults;
+  const present = new Set(
+    saved.map(i => (i.itemCode || '').trim().toLowerCase()).filter(Boolean)
+  );
+  const missing = defaults.filter(d => {
+    const code = (d.itemCode || '').trim().toLowerCase();
+    return code && !present.has(code);
+  });
+  if (missing.length === 0) return saved;
+  return [...saved, ...missing.map(d => JSON.parse(JSON.stringify(d)) as EstimateItem)];
+}
+
 export function getCircleLimitForJob(
   capacityKva: string | number,
   ratingOrLevel: string | undefined,

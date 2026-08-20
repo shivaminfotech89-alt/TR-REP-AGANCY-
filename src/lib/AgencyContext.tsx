@@ -7,7 +7,8 @@ import {
   defaultWoundCoreEstimateData, 
   defaultOverhaulingEstimateData, 
   defaultCircleLimitsEstimateData,
-  EstimateItem 
+  withMissingDefaults,
+  EstimateItem
 } from './estimateData';
 
 export interface GlobalDefaultEstimateMaster {
@@ -205,20 +206,20 @@ export function getEstimateMasterForCore(
 
   if (type === 'OH' || type.includes('OVERHAUL')) {
     if (agency?.estimateMasterOverhauling && agency.estimateMasterOverhauling.length > 0) {
-      return normalizeUnits(agency.estimateMasterOverhauling);
+      return withMissingDefaults(normalizeUnits(agency.estimateMasterOverhauling), defaultOverhaulingEstimateData);
     }
     if (globalDef?.estimateMasterOverhauling && globalDef.estimateMasterOverhauling.length > 0) {
-      return normalizeUnits(globalDef.estimateMasterOverhauling);
+      return withMissingDefaults(normalizeUnits(globalDef.estimateMasterOverhauling), defaultOverhaulingEstimateData);
     }
     return defaultOverhaulingEstimateData;
   }
 
   if (type.includes('AMORPHOUS') || type.includes('AM')) {
     if (agency?.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0) {
-      return normalizeUnits(agency.estimateMasterAmorphous);
+      return withMissingDefaults(normalizeUnits(agency.estimateMasterAmorphous), defaultAmorphousEstimateData);
     }
     if (globalDef?.estimateMasterAmorphous && globalDef.estimateMasterAmorphous.length > 0) {
-      return normalizeUnits(globalDef.estimateMasterAmorphous);
+      return withMissingDefaults(normalizeUnits(globalDef.estimateMasterAmorphous), defaultAmorphousEstimateData);
     }
     return defaultAmorphousEstimateData;
   }
@@ -230,32 +231,32 @@ export function getEstimateMasterForCore(
     });
 
     if (agency?.estimateMasterWoundCore && agency.estimateMasterWoundCore.length > 0 && !isLegacy(agency.estimateMasterWoundCore)) {
-      return normalizeUnits(agency.estimateMasterWoundCore);
+      return withMissingDefaults(normalizeUnits(agency.estimateMasterWoundCore), defaultWoundCoreEstimateData);
     }
     if (globalDef?.estimateMasterWoundCore && globalDef.estimateMasterWoundCore.length > 0 && !isLegacy(globalDef.estimateMasterWoundCore)) {
-      return normalizeUnits(globalDef.estimateMasterWoundCore);
+      return withMissingDefaults(normalizeUnits(globalDef.estimateMasterWoundCore), defaultWoundCoreEstimateData);
     }
     if (agency?.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0 && !isLegacy(agency.estimateMasterAmorphous)) {
-      return normalizeUnits(agency.estimateMasterAmorphous);
+      return withMissingDefaults(normalizeUnits(agency.estimateMasterAmorphous), defaultWoundCoreEstimateData);
     }
     if (globalDef?.estimateMasterAmorphous && globalDef.estimateMasterAmorphous.length > 0 && !isLegacy(globalDef.estimateMasterAmorphous)) {
-      return normalizeUnits(globalDef.estimateMasterAmorphous);
+      return withMissingDefaults(normalizeUnits(globalDef.estimateMasterAmorphous), defaultWoundCoreEstimateData);
     }
     return defaultWoundCoreEstimateData;
   }
 
   // CRGO
   if (agency?.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
-    return agency.estimateMasterCRGO;
+    return withMissingDefaults(agency.estimateMasterCRGO, defaultEstimateData);
   }
   if (globalDef?.estimateMasterCRGO && globalDef.estimateMasterCRGO.length > 0) {
-    return globalDef.estimateMasterCRGO;
+    return withMissingDefaults(globalDef.estimateMasterCRGO, defaultEstimateData);
   }
   if (agency?.estimateMaster && agency.estimateMaster.length > 0) {
-    return agency.estimateMaster;
+    return withMissingDefaults(agency.estimateMaster, defaultEstimateData);
   }
   if (globalDef?.estimateMaster && globalDef.estimateMaster.length > 0) {
-    return globalDef.estimateMaster;
+    return withMissingDefaults(globalDef.estimateMaster, defaultEstimateData);
   }
   return defaultEstimateData;
 }

@@ -203,6 +203,31 @@ the visibility it provides.
 
 ---
 
+### D2. Wound Core falls back to the Amorphous master — all items, not just scrap
+
+`getEstimateMasterForCore` (`AgencyContext.tsx`, WOUND_CORE branch) resolves in this
+order: the agency's `estimateMasterWoundCore`, the global default's, then **the
+agency's `estimateMasterAmorphous`**, then the global default's Amorphous, and only
+then `defaultWoundCoreEstimateData`. It also skips any array a legacy-shape heuristic
+rejects (`isLegacy` — names containing "dismental", "washer ring", "hv metal",
+"lv metal", i.e. a CRGO array mis-stored as Wound Core).
+
+**Consequence:** an agency with no saved Wound Core array — or one the heuristic
+rejects — is priced **entirely from the Amorphous master, for every item**, not just
+the scrap charge. Editing an Amorphous rate silently changes Wound Core pricing.
+
+This appears deliberate: `defaultWoundCoreEstimateData` is a deep copy of
+`defaultAmorphousEstimateData`, and `EstimateMaster.tsx` offers an explicit "sync Wound
+Core with Amorphous" action, so the two are intended to mirror. It is recorded here
+because it is invisible at the call site: nothing in a bill or estimate indicates that
+a Wound Core job was priced from an array the user edited under a different heading.
+
+**Not changed.** Pre-existing and reviewed. If the two core types ever need to diverge
+in rate, the agency must save a Wound Core array first — otherwise the divergence will
+be silently ignored.
+
+---
+
 ## FIXED
 
 ### F1. Estimates priced off capacity defaults, not inspection data
@@ -384,6 +409,41 @@ or Overhauling master changed. Pricing already resolves per job via
 - Blank inspection records marked jobs complete (MR 85558).
 - Saved `0` / blank values silently reloaded as `'3'` / `'4'` on HV/LV counts, and as
   the standard-table value for oil capacity.
+
+
+### F10. Unresolvable charge printed as 0.00; saved master shadowed the defaults
+
+Two defects, cause and symptom, found on the printed invoice **BILL/85558**: AMSBT-1
+(Amorphous) and MWSBT-1 (Wound Core) each showed **Est. Amount 0.00** while MSBT-9
+(CRGO) correctly showed 520.00. The invoice totalled Rs 613.60 and went to the
+Executive Engineer; the correct total was about Rs 1,600.
+
+**Symptom — the block existed but was not on the document paths.** The named
+block-on-missing rule was wired only into `handleConfirmSendBill` (the Firestore
+write). `scrapChargeErrors` rendered a red banner in the editor, but `handlePrint` and
+`handleExportExcel` were ungated, so the invoice printed a zero line for a charge that
+had no rate rather than refusing to generate.
+**Fixed:** `blockIfUnresolvedCharges(action)` now gates print, export and send — all
+three paths that produce a document — alerting with the per-job, per-code named error.
+
+**Cause — a partial saved master permanently shadowed the defaults.**
+`getEstimateMasterForCore` returned the agency's saved array as-is whenever it was
+non-empty. A master persisted before an item existed therefore hid that item forever:
+no row on the Estimate Master screen to type a rate into, and no way for the code to
+resolve at any rate. Amorphous/Wound Core code `"0"` (the Rs 500 scrap charge) was
+absent from the saved arrays and so was unresolvable by construction.
+**Fixed:** `withMissingDefaults(saved, defaults)` in `estimateData.ts`, applied to all
+twelve return paths of `getEstimateMasterForCore`. Purely additive — saved items keep
+their position, name, unit and rates; only codes absent from the saved array are
+appended. This fixes every core type at once and removes the dependency on someone
+having opened the Estimate Master screen and pressed Save.
+
+*Note:* `EstimateMaster.tsx`'s `normalizeAmorphousOrWoundCoreData` was **not** reused
+here, despite doing a similar merge. It also rewrites saved names, units and rates, and
+its `isLegacyCrgo` / `isOldPlaceholder` heuristics can replace an entire saved array
+with defaults. Acceptable on an editing screen; in a pricing path it would silently
+swap entered rates for defaults — the same silent-fallback class as F1 and F2.
+Importing it into `AgencyContext` would also have been a circular import.
 
 ---
 
