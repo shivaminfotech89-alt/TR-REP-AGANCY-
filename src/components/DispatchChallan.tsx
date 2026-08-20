@@ -44,6 +44,7 @@ export default function DispatchChallan() {
   const [searchQuery, setSearchQuery] = useState('');
   const [jobCategoryFilter, setJobCategoryFilter] = useState<'All' | 'Repairable' | 'Scrap'>('All');
   const [selectedDivision, setSelectedDivision] = useState('All');
+  const [mrFilter, setMrFilter] = useState('All');
   
   // Delivered Jobs (History) Filters
   const [historySearchQuery, setHistorySearchQuery] = useState('');
@@ -124,7 +125,10 @@ export default function DispatchChallan() {
     return Array.from(set).sort();
   }, [activeAtMaster, activeAgency, pendingJobs]);
 
-  const filteredPendingJobs = useMemo(() => {
+  // Everything the pending list matches EXCEPT the MR dropdown. The MR options are
+  // built from this, so an MR with nothing left in it after the other filters never
+  // appears as a choice.
+  const pendingJobsBeforeMr = useMemo(() => {
     let result = pendingJobs;
     if (jobCategoryFilter === 'Repairable') {
       result = result.filter(j => j.status === 'Tested - Ready for Dispatch' && j.condition !== 'Scrap');
@@ -136,7 +140,7 @@ export default function DispatchChallan() {
     }
     if (searchQuery.trim()) {
       const lowerQ = searchQuery.toLowerCase().trim();
-      result = result.filter(j => 
+      result = result.filter(j =>
         (j.jobNo || '').toLowerCase().includes(lowerQ) ||
         (j.mrNo || '').toLowerCase().includes(lowerQ) ||
         (j.division || '').toLowerCase().includes(lowerQ) ||
@@ -148,6 +152,29 @@ export default function DispatchChallan() {
     return result;
   }, [pendingJobs, jobCategoryFilter, searchQuery, selectedDivision]);
 
+  const pendingMrOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    pendingJobsBeforeMr.forEach(j => {
+      if (j.mrNo) counts[j.mrNo] = (counts[j.mrNo] || 0) + 1;
+    });
+    return Object.keys(counts)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(mrNo => ({ mrNo, count: counts[mrNo] }));
+  }, [pendingJobsBeforeMr]);
+
+  // If the other filters leave the selected MR with nothing, fall back to "All MRs"
+  // rather than showing an empty list with no explanation.
+  useEffect(() => {
+    if (mrFilter !== 'All' && !pendingMrOptions.some(o => o.mrNo === mrFilter)) {
+      setMrFilter('All');
+    }
+  }, [pendingMrOptions, mrFilter]);
+
+  const filteredPendingJobs = useMemo(() => {
+    if (mrFilter === 'All') return pendingJobsBeforeMr;
+    return pendingJobsBeforeMr.filter(j => j.mrNo === mrFilter);
+  }, [pendingJobsBeforeMr, mrFilter]);
+
   // Derived dispatched jobs list
   const allDispatchedJobs = useMemo(() => {
     return allJobs.filter(j => j.status === 'Dispatched' && j.challanNo);
@@ -158,10 +185,39 @@ export default function DispatchChallan() {
     return ['All', ...Array.from(divs)].sort();
   }, [allDispatchedJobs]);
 
-  const historyAvailableMrs = useMemo(() => {
-    const mrs = new Set(allDispatchedJobs.map(j => j.mrNo).filter(Boolean));
-    return ['All', ...Array.from(mrs)].sort();
-  }, [allDispatchedJobs]);
+  // Dispatched-tab MR options, same shape as the pending tab's: built from the jobs
+  // that pass the OTHER dispatched filters, numerically-aware ascending, with counts.
+  const historyJobsBeforeMr = useMemo(() => {
+    return allDispatchedJobs.filter(j => {
+      if (historyDivisionFilter !== 'All' && j.division !== historyDivisionFilter) return false;
+      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      if (historyCategoryFilter === 'Repairable' && isScrap) return false;
+      if (historyCategoryFilter === 'Scrap' && !isScrap) return false;
+      if (historySearchQuery.trim()) {
+        const q = historySearchQuery.toLowerCase().trim();
+        const hit = [j.jobNo, j.mrNo, j.challanNo, j.vehicleNo, j.make, j.serialNo, j.division, j.capacityKva]
+          .some(v => (v || '').toString().toLowerCase().includes(q));
+        if (!hit) return false;
+      }
+      return true;
+    });
+  }, [allDispatchedJobs, historyDivisionFilter, historyCategoryFilter, historySearchQuery]);
+
+  const historyMrOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    historyJobsBeforeMr.forEach(j => {
+      if (j.mrNo) counts[j.mrNo] = (counts[j.mrNo] || 0) + 1;
+    });
+    return Object.keys(counts)
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(mrNo => ({ mrNo, count: counts[mrNo] }));
+  }, [historyJobsBeforeMr]);
+
+  useEffect(() => {
+    if (historyMrFilter !== 'All' && !historyMrOptions.some(o => o.mrNo === historyMrFilter)) {
+      setHistoryMrFilter('All');
+    }
+  }, [historyMrOptions, historyMrFilter]);
 
   // Filtered dispatched jobs
   const filteredDispatchedJobs = useMemo(() => {
@@ -551,7 +607,7 @@ export default function DispatchChallan() {
               }`}
             >
               <Truck className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Pending Dispatch</span>
+              <span className="truncate">Pending</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ${activeTab === 'pending' ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-300'}`}>
                 {pendingJobs.length}
               </span>
@@ -567,7 +623,7 @@ export default function DispatchChallan() {
               }`}
             >
               <History className="w-3.5 h-3.5 shrink-0" />
-              <span className="truncate">Delivered Archive</span>
+              <span className="truncate">Dispatched</span>
               <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ${activeTab === 'history' ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-300'}`}>
                 {allDispatchedJobs.length}
               </span>
@@ -857,7 +913,19 @@ export default function DispatchChallan() {
                   )}
                 </div>
 
-                <button 
+                <select
+                  value={mrFilter}
+                  onChange={(e) => setMrFilter(e.target.value)}
+                  className="px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:border-blue-500 bg-white shrink-0 max-w-[170px]"
+                  title="Filter by MR Number"
+                >
+                  <option value="All">All MRs</option>
+                  {pendingMrOptions.map(({ mrNo, count }) => (
+                    <option key={mrNo} value={mrNo}>{mrNo} ({count} job{count > 1 ? 's' : ''})</option>
+                  ))}
+                </select>
+
+                <button
                   type="button"
                   onClick={handleSelectAllFiltered}
                   className="px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold transition-colors whitespace-nowrap shrink-0"
@@ -867,101 +935,77 @@ export default function DispatchChallan() {
               </div>
             </div>
 
-            {/* TRANSFORMER CARDS GRID */}
-            <div className="p-2.5 sm:p-4">
+            {/* PENDING JOB ROWS - flat list, one line per job (not grouped by MR) */}
+            <div className="p-0">
               {filteredPendingJobs.length === 0 ? (
-                <div className="text-center py-10 px-4 text-slate-400 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
+                <div className="m-2.5 sm:m-4 text-center py-10 px-4 text-slate-400 border-2 border-dashed border-slate-200 rounded-xl bg-slate-50/50">
                   <PackageCheck className="w-10 h-10 mx-auto text-slate-300 mb-2" />
                   <p className="font-bold text-slate-700 text-xs sm:text-sm">No Ready Transformers Found</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    {pendingJobs.length === 0 
-                      ? 'No transformers currently in "Tested - Ready for Dispatch" or "Scrap" status.' 
-                      : 'Try adjusting your division filter or search query.'}
+                    {pendingJobs.length === 0
+                      ? 'No transformers currently in "Tested - Ready for Dispatch" or "Scrap" status.'
+                      : 'Try adjusting your division, MR or search filters.'}
                   </p>
                 </div>
               ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                  {filteredPendingJobs.map(job => {
-                    const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
-                    const isSelected = selectedJobIds.has(job.id);
-                    const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
+                <div className="overflow-x-auto w-full">
+                  <table className="w-full text-left text-xs border-collapse min-w-[720px]">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
+                        <th className="p-2 text-center w-10">
+                          <span className="sr-only">Select</span>
+                        </th>
+                        <th className="p-2">Job No</th>
+                        <th className="p-2">MR No</th>
+                        <th className="p-2">Make</th>
+                        <th className="p-2">Serial No</th>
+                        <th className="p-2 text-center">KVA</th>
+                        <th className="p-2">Division</th>
+                        <th className="p-2 text-center">Type</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredPendingJobs.map(job => {
+                        const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                        const isSelected = selectedJobIds.has(job.id);
 
-                    return (
-                      <div 
-                        key={job.id} 
-                        onClick={() => handleToggleJob(job.id)}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer flex flex-col justify-between select-none ${
-                          isSelected 
-                            ? (isScrap 
-                                ? 'border-rose-500 bg-rose-50/80 shadow-xs ring-2 ring-rose-400' 
-                                : 'border-blue-500 bg-blue-50/80 shadow-xs ring-2 ring-blue-400') 
-                            : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/60 active:scale-[0.99]'
-                        }`}
-                      >
-                        <div>
-                          {/* TOP CARD BAR: CHECKBOX & JOB NO & STATUS BADGE */}
-                          <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className={`w-4 h-4 rounded flex items-center justify-center transition-colors shrink-0 ${
+                        return (
+                          <tr
+                            key={job.id}
+                            onClick={() => handleToggleJob(job.id)}
+                            className={`cursor-pointer select-none transition-colors whitespace-nowrap ${
+                              isSelected
+                                ? (isScrap ? 'bg-rose-100/80' : 'bg-blue-50')
+                                : (isScrap ? 'bg-amber-50/60 hover:bg-amber-100/60' : 'hover:bg-slate-50')
+                            }`}
+                          >
+                            <td className="p-2 text-center">
+                              <div className={`w-4 h-4 mx-auto rounded flex items-center justify-center transition-colors ${
                                 isSelected ? (isScrap ? 'bg-rose-600 text-white' : 'bg-blue-600 text-white') : 'border border-slate-300 bg-white'
                               }`}>
                                 {isSelected && <CheckCircle2 className="w-3.5 h-3.5" />}
                               </div>
-                              <span className="font-mono font-bold text-xs text-slate-900 truncate">
-                                {job.jobNo}
+                            </td>
+                            <td className="p-2 font-mono font-bold text-slate-900">{job.jobNo}</td>
+                            <td className="p-2 font-mono text-slate-700">{job.mrNo || '-'}</td>
+                            <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
+                            <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
+                            <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
+                            <td className="p-2 uppercase font-semibold text-slate-700 truncate max-w-[130px]">{job.division || '-'}</td>
+                            <td className="p-2 text-center">
+                              <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                isScrap
+                                  ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                  : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                              }`}>
+                                {isScrap ? 'Scrap' : 'Repairable'}
                               </span>
-                            </div>
-
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider shrink-0 ${
-                              isScrap 
-                                ? 'bg-rose-100 text-rose-800 border border-rose-200' 
-                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                            }`}>
-                              {isScrap ? 'SCRAP' : 'TESTED OK'}
-                            </span>
-                          </div>
-
-                          {/* CAPACITY & MAKE */}
-                          <div className="flex items-center justify-between text-xs font-bold text-slate-800 mb-1">
-                            <span className="bg-slate-100 px-1.5 py-0.5 rounded font-mono text-[11px] text-slate-900 border border-slate-200">
-                              {job.capacityKva} KVA
-                            </span>
-                            <span className="text-slate-600 truncate text-[11px]">
-                              {job.make || 'Make: N/A'}
-                            </span>
-                          </div>
-
-                          {/* MR & SERIAL DETAILS */}
-                          <div className="text-[10px] text-slate-500 space-y-0.5 pt-1 border-t border-slate-100 font-mono">
-                            <div className="flex justify-between">
-                              <span>MR No:</span>
-                              <span className="font-bold text-slate-700">{job.mrNo || '-'}</span>
-                            </div>
-                            <div className="flex justify-between">
-                              <span>MR Date:</span>
-                              <span className="text-slate-600">{mrDateStr}</span>
-                            </div>
-                            {job.serialNo && (
-                              <div className="flex justify-between">
-                                <span>S/N:</span>
-                                <span className="text-slate-700 truncate">{job.serialNo}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* DIVISION BADGE FOOTER */}
-                        <div className="mt-2 pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[10px] uppercase font-bold text-slate-400">
-                          <span className="text-blue-700 bg-blue-50 px-1.5 py-0.2 rounded border border-blue-200/60 truncate max-w-[120px]">
-                            {job.division || 'NO DIV'}
-                          </span>
-                          <span className="text-slate-500 font-mono lowercase shrink-0">
-                            {job.repairType || 'ogp'}
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>
@@ -1184,15 +1228,12 @@ export default function DispatchChallan() {
                   onChange={(e) => setHistoryMrFilter(e.target.value)}
                   className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:bg-white focus:border-purple-500"
                 >
-                  <option value="All">All MR Numbers ({historyAvailableMrs.length > 1 ? historyAvailableMrs.length - 1 : 0})</option>
-                  {historyAvailableMrs.filter(m => m !== 'All').map(mr => {
-                    const count = allDispatchedJobs.filter(j => j.mrNo === mr).length;
-                    return (
-                      <option key={mr} value={mr}>
-                        MR: {mr} ({count} jobs)
-                      </option>
-                    );
-                  })}
+                  <option value="All">All MRs</option>
+                  {historyMrOptions.map(({ mrNo, count }) => (
+                    <option key={mrNo} value={mrNo}>
+                      {mrNo} ({count} job{count > 1 ? 's' : ''})
+                    </option>
+                  ))}
                 </select>
               </div>
 
@@ -1392,57 +1433,45 @@ export default function DispatchChallan() {
             /* 2. DETAILED JOB TABLE VIEW (WITH HORIZONTAL SCROLL FOR MOBILE) */
             <div className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs overflow-hidden w-full">
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs border-collapse min-w-[700px]">
+                <table className="w-full text-left text-xs border-collapse min-w-[900px]">
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
-                      <th className="p-2.5 text-center w-10">Sr.</th>
-                      <th className="p-2.5">Job No</th>
-                      <th className="p-2.5">MR No & Receive Date</th>
-                      <th className="p-2.5">Division</th>
-                      <th className="p-2.5 text-center">Capacity</th>
-                      <th className="p-2.5">Make / Serial</th>
-                      <th className="p-2.5">Challan Details</th>
-                      <th className="p-2.5">Vehicle</th>
-                      <th className="p-2.5 text-center">Condition</th>
-                      <th className="p-2.5 text-right">Action</th>
+                      <th className="p-2">Job No</th>
+                      <th className="p-2">MR No</th>
+                      <th className="p-2">Make</th>
+                      <th className="p-2">Serial No</th>
+                      <th className="p-2 text-center">KVA</th>
+                      <th className="p-2">Division</th>
+                      <th className="p-2 text-center">Type</th>
+                      <th className="p-2">Challan No</th>
+                      <th className="p-2">Dispatch Date</th>
+                      <th className="p-2 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {filteredDispatchedJobs.map((job, idx) => {
+                    {filteredDispatchedJobs.map((job) => {
                       const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
-                      const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
-                      
+
                       return (
-                        <tr key={job.id} className="hover:bg-slate-50 transition-colors">
-                          <td className="p-2.5 text-center font-bold text-slate-400">{idx + 1}</td>
-                          <td className="p-2.5 font-mono font-bold text-slate-900">{job.jobNo}</td>
-                          <td className="p-2.5">
-                            <div className="font-mono font-bold text-slate-800">{job.mrNo || '-'}</div>
-                            <div className="text-[10px] text-slate-500">Rec: ({mrDateStr})</div>
+                        <tr key={job.id} className={`transition-colors whitespace-nowrap ${isScrap ? 'bg-amber-50/60 hover:bg-amber-100/60' : 'hover:bg-slate-50'}`}>
+                          <td className="p-2 font-mono font-bold text-slate-900">{job.jobNo}</td>
+                          <td className="p-2 font-mono text-slate-700">{job.mrNo || '-'}</td>
+                          <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
+                          <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
+                          <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
+                          <td className="p-2 uppercase font-semibold text-slate-700 truncate max-w-[130px]">{job.division || '-'}</td>
+                          <td className="p-2 text-center">
+                            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              isScrap
+                                ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            }`}>
+                              {isScrap ? 'Scrap' : 'Repairable'}
+                            </span>
                           </td>
-                          <td className="p-2.5 font-bold uppercase text-slate-700">{job.division || '-'}</td>
-                          <td className="p-2.5 text-center font-bold font-mono text-slate-900">{job.capacityKva} KVA</td>
-                          <td className="p-2.5">
-                            <div className="font-medium text-slate-800">{job.make || '-'}</div>
-                            <div className="text-[10px] font-mono text-slate-500">S/N: {job.serialNo || '-'}</div>
-                          </td>
-                          <td className="p-2.5">
-                            <div className="font-mono font-bold text-purple-700">{job.challanNo || '-'}</div>
-                            <div className="text-[10px] text-slate-500">{formatDDMMYYYY(job.challanDate)}</div>
-                          </td>
-                          <td className="p-2.5 font-mono uppercase text-slate-700">{job.vehicleNo || '-'}</td>
-                          <td className="p-2.5 text-center">
-                            {isScrap ? (
-                              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-200">
-                                Scrap
-                              </span>
-                            ) : (
-                              <span className="inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
-                                OK
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-2.5 text-right">
+                          <td className="p-2 font-mono font-bold text-purple-700">{job.challanNo || '-'}</td>
+                          <td className="p-2 font-mono text-slate-600">{formatDDMMYYYY(job.challanDate)}</td>
+                          <td className="p-2 text-right">
                             <button
                               type="button"
                               onClick={() => {
