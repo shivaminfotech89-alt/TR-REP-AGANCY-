@@ -45,6 +45,8 @@ export default function DispatchChallan() {
   const [jobCategoryFilter, setJobCategoryFilter] = useState<'All' | 'Repairable' | 'Scrap'>('All');
   const [selectedDivision, setSelectedDivision] = useState('All');
   const [mrFilter, setMrFilter] = useState('All');
+  // Pending list is ordered by test date, most recently tested first by default.
+  const [testDateSortDir, setTestDateSortDir] = useState<'desc' | 'asc'>('desc');
   
   // Delivered Jobs (History) Filters
   const [historySearchQuery, setHistorySearchQuery] = useState('');
@@ -171,9 +173,24 @@ export default function DispatchChallan() {
   }, [pendingMrOptions, mrFilter]);
 
   const filteredPendingJobs = useMemo(() => {
-    if (mrFilter === 'All') return pendingJobsBeforeMr;
-    return pendingJobsBeforeMr.filter(j => j.mrNo === mrFilter);
-  }, [pendingJobsBeforeMr, mrFilter]);
+    const base = mrFilter === 'All'
+      ? pendingJobsBeforeMr
+      : pendingJobsBeforeMr.filter(j => j.mrNo === mrFilter);
+
+    // Sorted on a COPY - pendingJobsBeforeMr feeds the counts above the table and
+    // must not be reordered. testingDate is an ISO yyyy-mm-dd string, so a plain
+    // string compare sorts it correctly without Date parsing. Jobs with no test date
+    // (scrap returns, which are never tested) always sort LAST, in both directions -
+    // a missing date must never read as the newest.
+    return [...base].sort((a, b) => {
+      const aDate = a.testingDate || '';
+      const bDate = b.testingDate || '';
+      if (!aDate && !bDate) return 0;
+      if (!aDate) return 1;
+      if (!bDate) return -1;
+      return testDateSortDir === 'desc' ? bDate.localeCompare(aDate) : aDate.localeCompare(bDate);
+    });
+  }, [pendingJobsBeforeMr, mrFilter, testDateSortDir]);
 
   // Derived dispatched jobs list
   const allDispatchedJobs = useMemo(() => {
@@ -949,7 +966,7 @@ export default function DispatchChallan() {
                 </div>
               ) : (
                 <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs border-collapse min-w-[720px]">
+                  <table className="w-full text-left text-xs border-collapse min-w-[820px]">
                     <thead>
                       <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
                         <th className="p-2 text-center w-10">
@@ -961,6 +978,17 @@ export default function DispatchChallan() {
                         <th className="p-2">Serial No</th>
                         <th className="p-2 text-center">KVA</th>
                         <th className="p-2">Division</th>
+                        <th className="p-2">
+                          <button
+                            type="button"
+                            onClick={() => setTestDateSortDir(d => (d === 'desc' ? 'asc' : 'desc'))}
+                            className="inline-flex items-center gap-1 uppercase tracking-wider text-[10px] font-bold text-slate-700 hover:text-slate-900 transition-colors"
+                            title={testDateSortDir === 'desc' ? 'Sorted newest first - click for oldest first' : 'Sorted oldest first - click for newest first'}
+                          >
+                            <span>Test Date</span>
+                            <span className="text-[9px] leading-none">{testDateSortDir === 'desc' ? '▼' : '▲'}</span>
+                          </button>
+                        </th>
                         <th className="p-2 text-center">Type</th>
                       </tr>
                     </thead>
@@ -992,6 +1020,8 @@ export default function DispatchChallan() {
                             <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
                             <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
                             <td className="p-2 uppercase font-semibold text-slate-700 truncate max-w-[130px]">{job.division || '-'}</td>
+                            {/* Scrap jobs are never tested, so a dash here is correct, not missing data */}
+                            <td className="p-2 font-mono text-slate-600">{formatDDMMYYYY(job.testingDate)}</td>
                             <td className="p-2 text-center">
                               <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
                                 isScrap
