@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { resolveScrapCharge, getScrapItemCodeForCore } from '../lib/estimateCalc';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, 
@@ -135,6 +136,8 @@ export default function BillingSystem() {
     totalCount: number;
     deliveredCount: number;
     pendingCount: number;
+    /** Captured at open time so the wording can't shift if the filter changes later. */
+    billType: 'repairable' | 'scrap';
   } | null>(null);
 
   const masterData = activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData;
@@ -256,12 +259,18 @@ export default function BillingSystem() {
       j.paymentStatus === 'Paid'
     );
 
-    // If delivered/billed jobs exist, use them. Otherwise fallback to all matching jobs in this MR
-    const targetList = deliveredOrBilled.length > 0 
-      ? deliveredOrBilled 
-      : (matchingTypeJobs.length > 0 ? matchingTypeJobs : mrJobs);
+    // If delivered/billed jobs exist, use them, otherwise every job of this type in
+    // the MR. Never fall back to `mrJobs` - that mixed scrap and repairable into one
+    // bill whenever the selected type had no jobs. A bill is one type or the other.
+    const targetList = deliveredOrBilled.length > 0
+      ? deliveredOrBilled
+      : matchingTypeJobs;
 
-    return [...targetList].sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
+    // Belt and braces: a mixed set must be impossible even if something above changes.
+    const wantScrap = billTypeFilter === 'scrap';
+    const singleType = targetList.filter(j => ((j.status === 'Scrap' || j.condition === 'Scrap') === wantScrap));
+
+    return [...singleType].sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
   }, [jobs, selectedMrNo, billTypeFilter]);
 
   // Selected MR pending jobs count
@@ -361,6 +370,7 @@ export default function BillingSystem() {
         totalCount: targetJobs.length,
         deliveredCount: 0,
         pendingCount: pendJobs.length,
+        billType: billTypeFilter,
       });
       return;
     }
@@ -372,6 +382,7 @@ export default function BillingSystem() {
         totalCount: targetJobs.length,
         deliveredCount: delJobs.length,
         pendingCount: pendJobs.length,
+        billType: billTypeFilter,
       });
     } else {
       handleSelectMr(mr);
@@ -380,18 +391,34 @@ export default function BillingSystem() {
 
   // Calculate job estimate / bill amount
   const calculateJobTotal = (job: any) => {
-    let jobTotal = 0;
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
 
+    // A scrap transformer is ONE flat charge, resolved by the mapped scrap item code
+    // for its core type (shared helper - see lib/estimateCalc.ts). It never walks the
+    // repair item list. The old itemName substring matching ('scrap'/'dismental') plus
+    // itemCode '1a' priced CRGO scrap off Labour Charge (Rs 2,061 at 25 KVA) instead.
+    // An unresolvable rate contributes nothing and is reported - never a hardcoded 500.
+    if (isScrapJob) {
+      const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData);
+      if (scrapCharge.rate === null) return 0;
+      return scrapCharge.rate * (1 + atPct / 100);
+    }
+
+    // Repairable path. The scrap item is identified by its mapped code only - no
+    // itemName substring matching - and excluded here so a repair bill can never
+    // pick up the scrap charge.
+    const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
+    let jobTotal = 0;
     jobMasterData.forEach(item => {
+      if (scrapItemCode && (item.itemCode || '').trim() === scrapItemCode) return;
       const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
       const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
       let qty = 0;
-      const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
 
-      if (isScrapItem === isScrapJob && rate > 0) {
+      if (rate > 0) {
         if (item.unit === 'Y') qty = 1;
         else if (item.unit === 'QTY') {
           qty = 1;
@@ -407,9 +434,26 @@ export default function BillingSystem() {
       jobTotal += (qty * rate);
     });
 
-    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
     return jobTotal * (1 + atPct / 100);
   };
+
+  // Named, blocking errors for any selected scrap job whose flat charge cannot be
+  // resolved from the master. Non-empty means the scrap bill must not be sent.
+  const scrapChargeErrors = useMemo(() => {
+    const seen = new Set<string>();
+    const errors: string[] = [];
+    selectedJobsData.forEach(job => {
+      const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+      if (!isScrapJob) return;
+      const master = getEstimateMasterForCore(activeAgency, job.coreType);
+      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
+      if (error && !seen.has(error)) {
+        seen.add(error);
+        errors.push(error);
+      }
+    });
+    return errors;
+  }, [selectedJobsData, activeAgency]);
 
   // Billing Financial Calculations
   const cgstRate = typeof activeAgency?.cgstPercent === 'number' ? activeAgency.cgstPercent : 9;
@@ -849,11 +893,20 @@ export default function BillingSystem() {
   };
 
   // Helper to compute bill summary for any MR
-  const calculateMrBillSummary = (mr: string) => {
+  // Jobs in an MR that belong to the CURRENT bill type. A bill is repairable-only or
+  // scrap-only, never both: scrap returns on the scrap committee's timeline, so the
+  // two are independent documents with their own bill numbers and dates.
+  const jobsForBillType = (mr: string) => {
     const groupJobs = mrGroups[mr] || [];
-    const deliveredJobs = groupJobs.filter(j => j.status === 'Dispatched' && j.status !== 'Scrap' && j.condition !== 'Scrap');
-    const targetJobs = deliveredJobs.length > 0 ? deliveredJobs : groupJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
-    
+    const wantScrap = billTypeFilter === 'scrap';
+    const typeJobs = groupJobs.filter(j => ((j.status === 'Scrap' || j.condition === 'Scrap') === wantScrap));
+    const deliveredJobs = typeJobs.filter(j => j.status === 'Dispatched');
+    return deliveredJobs.length > 0 ? deliveredJobs : typeJobs;
+  };
+
+  const calculateMrBillSummary = (mr: string) => {
+    const targetJobs = jobsForBillType(mr);
+
     let mrSubTotal = 0;
     targetJobs.forEach(job => {
       mrSubTotal += calculateJobTotal(job);
@@ -875,7 +928,9 @@ export default function BillingSystem() {
   // Open Send Bill Modal
   const handleOpenSendBillModal = (mr: string) => {
     setSendTargetMr(mr);
-    const groupJobs = mrGroups[mr] || [];
+    // Defaults come from jobs of the CURRENT bill type only, so the repair bill and
+    // the scrap bill for one MR keep their own numbers and dates.
+    const groupJobs = jobsForBillType(mr);
     const sample = groupJobs[0] || {};
     const defaultBillNum = sample.billNo || (activeAgency?.agencyCode ? `${activeAgency.agencyCode}/${new Date().getFullYear()}/${mr}` : `BILL/${mr}`);
     const defaultRef = sample.billRefNo || `UGVCL/BILL-SUB/${mr}`;
@@ -893,9 +948,24 @@ export default function BillingSystem() {
       alert('Please fill Bill No, Dispatch Reference No and Sent Date');
       return;
     }
+
+    // Never send a scrap bill whose flat charge could not be resolved from the master.
+    const unresolvedScrap: string[] = [];
+    jobsForBillType(sendTargetMr).forEach(job => {
+      if (!(job.status === 'Scrap' || job.condition === 'Scrap')) return;
+      const master = getEstimateMasterForCore(activeAgency, job.coreType);
+      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
+      if (error && !unresolvedScrap.includes(error)) unresolvedScrap.push(error);
+    });
+    if (unresolvedScrap.length > 0) {
+      alert(`⚠️ Scrap charge not configured - this bill cannot be sent.\n\n${unresolvedScrap.join('\n\n')}`);
+      return;
+    }
     setSubmittingSendBill(true);
     try {
-      const groupJobs = mrGroups[sendTargetMr] || [];
+      // Stamp bill data only on jobs of the current bill type. Writing to every job in
+      // the MR conflated the repair bill and the scrap bill into one set of numbers.
+      const groupJobs = jobsForBillType(sendTargetMr);
       const batch = writeBatch(db);
       const { grandTotal } = calculateMrBillSummary(sendTargetMr);
 
@@ -1365,7 +1435,7 @@ export default function BillingSystem() {
                       billTypeFilter === 'scrap' ? 'bg-white text-red-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
-                    Scrap Committee
+                    Scrap Delivered
                   </button>
                 </div>
               </div>
@@ -1934,7 +2004,9 @@ export default function BillingSystem() {
                 <div className="bg-amber-500 p-4 text-white flex justify-between items-center">
                   <div className="flex items-center gap-2">
                     <AlertTriangle className="w-6 h-6" />
-                    <h3 className="font-bold text-base md:text-lg">Delivery Pending Alert: MR {pendingAlertModal.mrNo}</h3>
+                    <h3 className="font-bold text-base md:text-lg">
+                      {pendingAlertModal.billType === 'scrap' ? 'Scrap Return Pending' : 'Delivery Pending Alert'}: MR {pendingAlertModal.mrNo}
+                    </h3>
                   </div>
                   <button onClick={() => setPendingAlertModal(null)} className="text-amber-100 hover:text-white p-1 rounded">
                     <X className="w-5 h-5" />
@@ -1942,28 +2014,50 @@ export default function BillingSystem() {
                 </div>
 
                 <div className="p-6 space-y-4">
-                  <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
-                    <p className="font-bold text-amber-950 text-base mb-1">
-                      ⚠️ {pendingAlertModal.pendingCount} Transformer(s) Pending Delivery for MR {pendingAlertModal.mrNo}
-                    </p>
-                    <p className="text-amber-800 leading-relaxed text-xs md:text-sm">
-                      Out of total <strong>{pendingAlertModal.totalCount}</strong> repairable transformer(s) under MR <strong>{pendingAlertModal.mrNo}</strong>, only <strong>{pendingAlertModal.deliveredCount}</strong> transformer(s) have been delivered/dispatched, while <strong>{pendingAlertModal.pendingCount}</strong> transformer(s) are still pending delivery.
-                    </p>
-                  </div>
+                  {pendingAlertModal.billType === 'scrap' ? (
+                    <>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
+                        <p className="font-bold text-amber-950 text-base mb-1">
+                          ⚠️ {pendingAlertModal.pendingCount} of {pendingAlertModal.totalCount} scrap transformers have not yet been returned to the division.
+                        </p>
+                        <p className="text-amber-800 leading-relaxed text-xs md:text-sm">
+                          Confirm the scrap committee has completed its visit before sending this bill.
+                        </p>
+                      </div>
 
-                  <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-                    <p className="font-bold text-slate-700">Official MR-Wise Billing Rule:</p>
-                    <p>
-                      Agencies prepare bills <strong>ONE TIME MR-wise</strong> after all repairable transformers in the MR are delivered. Generating a bill now will only include the {pendingAlertModal.deliveredCount} delivered transformer(s).
-                    </p>
-                  </div>
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+                        <p className="font-bold text-slate-700">Scrap billing is separate:</p>
+                        <p>
+                          Scrap transformers return to the division only after the scrap committee has visited, on a different timeline from repaired units. This is a separate bill from the repair bill for MR <strong>{pendingAlertModal.mrNo}</strong>, with its own bill number and date. You may proceed.
+                        </p>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
+                        <p className="font-bold text-amber-950 text-base mb-1">
+                          ⚠️ {pendingAlertModal.pendingCount} Transformer(s) Pending Delivery for MR {pendingAlertModal.mrNo}
+                        </p>
+                        <p className="text-amber-800 leading-relaxed text-xs md:text-sm">
+                          Out of total <strong>{pendingAlertModal.totalCount}</strong> repairable transformer(s) under MR <strong>{pendingAlertModal.mrNo}</strong>, only <strong>{pendingAlertModal.deliveredCount}</strong> transformer(s) have been delivered/dispatched, while <strong>{pendingAlertModal.pendingCount}</strong> transformer(s) are still pending delivery.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+                        <p className="font-bold text-slate-700">Official MR-Wise Billing Rule:</p>
+                        <p>
+                          Agencies prepare bills <strong>ONE TIME MR-wise</strong> after all repairable transformers in the MR are delivered. Generating a bill now will only include the {pendingAlertModal.deliveredCount} delivered transformer(s).
+                        </p>
+                      </div>
+                    </>
+                  )}
 
                   <div className="flex flex-col sm:flex-row justify-end gap-2 pt-2 border-t border-slate-100">
                     <button
                       onClick={() => setPendingAlertModal(null)}
                       className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors border border-slate-300"
                     >
-                      Wait for Remaining Deliveries
+                      {pendingAlertModal.billType === 'scrap' ? 'Wait for Scrap Committee' : 'Wait for Remaining Deliveries'}
                     </button>
                     <button
                       onClick={() => {
@@ -1992,7 +2086,7 @@ export default function BillingSystem() {
               <div className="flex items-center gap-2">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">MR BILL GENERATOR</p>
                 <span className="px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 text-blue-300 rounded uppercase border border-blue-500/30">
-                  {billTypeFilter === 'scrap' ? 'Scrap Committee Bill' : 'Repairable Bill'}
+                  {billTypeFilter === 'scrap' ? 'Scrap Delivered Bill' : 'Repairable Bill'}
                 </span>
                 {selectedJobsData.some(j => j.paymentStatus === 'Paid') ? (
                   <span className="px-2 py-0.5 text-[10px] font-bold bg-emerald-500/30 text-emerald-300 rounded uppercase border border-emerald-500/40 flex items-center gap-1">
@@ -2103,17 +2197,47 @@ export default function BillingSystem() {
             </div>
           )}
 
+          {/* Scrap charge could not be resolved from the master - blocking, and named
+              so the user knows exactly which code to add for which core type. The
+              amount is never defaulted to a hardcoded 500. */}
+          {scrapChargeErrors.length > 0 && (
+            <div className="bg-rose-50 border-l-4 border-rose-600 p-4 rounded-lg text-rose-900 flex items-start gap-3 print:hidden shadow-sm">
+              <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-bold text-rose-950">
+                  Scrap charge not configured - this bill cannot be sent
+                </p>
+                <ul className="mt-1 space-y-1 text-xs text-rose-800 list-disc list-inside">
+                  {scrapChargeErrors.map((msg, i) => <li key={i}>{msg}</li>)}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Pending Delivery Warning Banner inside Editor */}
           {selectedMrPendingCount > 0 && (
             <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-lg text-amber-900 flex items-start gap-3 print:hidden shadow-sm">
               <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm">
-                <p className="font-bold text-amber-950">
-                  ⚠️ Partial Bill Notice: {selectedMrPendingCount} Transformer(s) Pending Delivery
-                </p>
-                <p className="mt-0.5 text-amber-800 text-xs">
-                  MR <strong>{selectedMrNo}</strong> has <strong>{selectedMrPendingCount}</strong> transformer(s) still pending delivery. This bill is generated for the <strong>{selectedJobsData.length}</strong> delivered transformer(s).
-                </p>
+                {billTypeFilter === 'scrap' ? (
+                  <>
+                    <p className="font-bold text-amber-950">
+                      ⚠️ {selectedMrPendingCount} of {selectedMrPendingCount + selectedJobsData.length} scrap transformers have not yet been returned to the division.
+                    </p>
+                    <p className="mt-0.5 text-amber-800 text-xs">
+                      Confirm the scrap committee has completed its visit before sending this bill.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-bold text-amber-950">
+                      ⚠️ Partial Bill Notice: {selectedMrPendingCount} Transformer(s) Pending Delivery
+                    </p>
+                    <p className="mt-0.5 text-amber-800 text-xs">
+                      MR <strong>{selectedMrNo}</strong> has <strong>{selectedMrPendingCount}</strong> transformer(s) still pending delivery. This bill is generated for the <strong>{selectedJobsData.length}</strong> delivered transformer(s).
+                    </p>
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -2446,7 +2570,9 @@ export default function BillingSystem() {
 
                   {/* Sub-header instruction */}
                   <div className="p-1 border-b border-black font-semibold text-center text-[9px]">
-                    The following Transformer duly repaired with standard parts and tested o. k. with oil upto level mark.
+                    {billTypeFilter === 'scrap'
+                      ? 'The following Transformer(s) declared as scrap by E.E. (TR), inspected & dismantled and returned to the division.'
+                      : 'The following Transformer duly repaired with standard parts and tested o. k. with oil upto level mark.'}
                   </div>
 
                   {/* Itemized Table */}

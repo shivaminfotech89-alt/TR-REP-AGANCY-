@@ -4,6 +4,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
 import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
+import { resolveScrapCharge } from '../lib/estimateCalc';
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
 const SECTION_LABELS: Record<EstimateSection, string> = {
@@ -551,11 +552,17 @@ export function buildSingleJobEstimateData(
   labourItems.push({ sr: srCounter++, itemCode: '1f', desc: 'Drying of active parts', unit: 'JOB', qty: dryQtyStr, numQty: dryApplies ? 1 : 0, rate: dryRate, amt: dryAmt });
 
   // 26. Scrap - not part of UGVCL Schedule-A at all; agency's own estimate master only.
+  // Resolved through the shared helper so the estimate and the bill always price a
+  // scrap transformer from the same item code (CRGO '22', Amorphous/Wound Core '0').
+  // The old code '19' is retired - no master defines it anywhere.
   const scrapQtyStr = isScrap ? 'Y' : 'N';
-  const scrapRate = resolveRate('19', undefined);
-  recordErrorIfApplies(isScrap, scrapRate, 'Scrap');
+  const scrapCharge = resolveScrapCharge(coreType, kva, masterList);
+  const scrapRate = scrapCharge.rate;
+  if (isScrap && scrapCharge.error) {
+    rateErrors.push(scrapCharge.error);
+  }
   const scrapAmt = isScrap ? (scrapRate ?? 0) : 0;
-  labourItems.push({ sr: srCounter++, itemCode: '19', desc: 'Scrap', unit: '0', qty: scrapQtyStr, numQty: isScrap ? 1 : 0, rate: scrapRate, amt: scrapAmt });
+  labourItems.push({ sr: srCounter++, itemCode: scrapCharge.code ?? '-', desc: 'Scrap', unit: '0', qty: scrapQtyStr, numQty: isScrap ? 1 : 0, rate: scrapRate, amt: scrapAmt });
 
   // 27. Testing Charge (Schedule-A sr '19' "Testing of transformer" - app's own code '20' doesn't match)
   const testApplies = !(internalData?.tstTrn === 'N' || internalData?.tstTrn === '0' || isScrap);

@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
+import { resolveScrapCharge, getScrapItemCodeForCore } from '../lib/estimateCalc';
 
 export default function Reports() {
   const { activeAgency } = useAgency();
@@ -113,15 +114,27 @@ export default function Reports() {
       const kva = String(job.capacityKva);
       const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
       const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+
+      // A scrap transformer is one flat charge, resolved by the mapped scrap item
+      // code for its core type via the shared helper (lib/estimateCalc.ts) - the same
+      // resolution the estimate and the bill use, so these three can't drift apart.
+      // An unresolvable rate reports 0 rather than a guessed figure.
+      if (isScrapJob) {
+        const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData);
+        return Math.round(scrapCharge.rate ?? 0);
+      }
+
+      // Repairable: the scrap item is excluded by mapped code, never by itemName.
+      const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
       let jobTotal = 0;
 
       jobMasterData.forEach(item => {
+        if (scrapItemCode && (item.itemCode || '').trim() === scrapItemCode) return;
         const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
         const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
         let qty = 0;
-        const isScrapItem = item.itemName.toLowerCase().includes('scrap') || item.itemName.toLowerCase().includes('dismental') || item.itemCode === '1a' || item.itemCode === '19';
 
-        if (isScrapItem === isScrapJob && rate > 0) {
+        if (rate > 0) {
           if (item.unit === 'Y') qty = 1;
           else if (item.unit === 'QTY') {
             qty = 1;

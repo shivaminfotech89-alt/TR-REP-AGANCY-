@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
-import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure } from '../lib/estimateCalc';
+import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore } from '../lib/estimateCalc';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import SingleJobEstimateReport from './SingleJobEstimateReport';
@@ -163,11 +163,16 @@ export function calculateJobItemDetails(
   }
 
   // Standard CRGO Stacked Core - Evaluated with exact inspection data & Y/N matching
-  const isScrapItem = itemName.includes('scrap') || itemCodeLower === '19';
   const isDismantling = itemCodeLower === '1a' || itemName.includes('dismentaling') || itemName.includes('dismantl');
 
+  // A scrap transformer bills exactly one flat line, resolved by the mapped scrap
+  // item code for its core type (shared helper - see lib/estimateCalc.ts). The old
+  // matching also caught '1a'/'dismantl', which in the CRGO schedule is Labour
+  // Charge at Rs 2,061 - not the scrap charge - and code '19', which no master
+  // defines. Both are retired.
   if (isScrapJob) {
-    if (isDismantling || isScrapItem || itemCodeLower === '0') {
+    const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
+    if (scrapItemCode && itemCode === scrapItemCode) {
       return { qty: 1, qtyDisplay: '1', rate, amt: rate };
     }
     return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
