@@ -208,26 +208,52 @@ export default function BillingSystem() {
     }
   }, [params.mrNo, searchParams, jobs.length]);
 
+  // Jobs in an MR that belong to the CURRENT bill type. A bill is repairable-only or
+  // scrap-only, never both: scrap returns on the scrap committee's timeline, so the
+  // two are independent documents with their own bill numbers and dates.
+  //
+  // Defined here, above the memos that use it, because those run during render.
+  const jobsForBillType = (mr: string) => {
+    const groupJobs = mrGroups[mr] || [];
+    const wantScrap = billTypeFilter === 'scrap';
+    // Scrap is billable only once actually returned to the division on a challan -
+    // same rule as selectedJobsData, so the summary, the document and the write all
+    // agree on which jobs the bill covers.
+    const typeJobs = wantScrap
+      ? groupJobs.filter(j => (j.status === 'Scrap' || j.condition === 'Scrap') && j.status === 'Dispatched' && Boolean(j.challanNo))
+      : groupJobs.filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'));
+    const deliveredJobs = typeJobs.filter(j => j.status === 'Dispatched');
+    return deliveredJobs.length > 0 ? deliveredJobs : typeJobs;
+  };
+
+  // Whether THIS bill type's bill has been sent for an MR. Computed over the jobs of
+  // the current type only - never the whole MR. Sending the repair bill stamps only
+  // repairable jobs, so measuring across every job made the MR look "sent" and
+  // removed it from the generator entirely, leaving the scrap bill unraisable.
+  const isBillSentForType = (mr: string) =>
+    jobsForBillType(mr).some(j => j.billSentDate || j.billStatus === 'Sent' || (j.billNo && j.billNo !== ''));
+
   // Unsent bills count for stage tab
   const unsentBillCount = useMemo(() => {
-    return Object.keys(mrGroups).filter(mr => {
-      const groupJobs = mrGroups[mr] || [];
-      const isSent = groupJobs.some(j => j.billSentDate || j.billStatus === 'Sent' || (j.billNo && j.billNo !== ''));
-      return !isSent;
-    }).length;
-  }, [mrGroups]);
+    return Object.keys(mrGroups).filter(mr => !isBillSentForType(mr)).length;
+  }, [mrGroups, billTypeFilter]);
 
   // Filter MRs matching search & division (STAGE 1: Bill Generator - Unsent Only)
   const filteredMrNos = useMemo(() => {
     return Object.keys(mrGroups).filter(mr => {
       const groupJobs = mrGroups[mr] || [];
-      // Remove from Bill Generator if already sent (advances to Stage 2: Sent Bills)
-      const isSent = groupJobs.some(j => j.billSentDate || j.billStatus === 'Sent' || (j.billNo && j.billNo !== ''));
-      if (isSent) return false;
+      // Remove from Bill Generator only if THIS TYPE's bill is already sent (it
+      // advances to Stage 2). Scoped to the current bill type so the repair bill's
+      // sent state has no effect on the scrap bill's visibility, and vice versa.
+      if (isBillSentForType(mr)) return false;
 
       const matchesSearch = !searchQuery || mr.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesDivision = selectedDivision === 'All' || groupJobs.some(j => j.division === selectedDivision);
 
+      // Deliberately the BROAD scrap test, not the delivered-only one: an MR whose
+      // scrap is not yet returned still appears, showing "0 of N", so pending scrap
+      // stays visible. The bill itself contains only delivered scrap, and the
+      // nothing-to-bill modal handles the empty case.
       const hasMatchingType = groupJobs.some(j => {
         const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
         return billTypeFilter === 'scrap' ? isScrap : !isScrap;
@@ -897,21 +923,6 @@ export default function BillingSystem() {
   };
 
   // Helper to compute bill summary for any MR
-  // Jobs in an MR that belong to the CURRENT bill type. A bill is repairable-only or
-  // scrap-only, never both: scrap returns on the scrap committee's timeline, so the
-  // two are independent documents with their own bill numbers and dates.
-  const jobsForBillType = (mr: string) => {
-    const groupJobs = mrGroups[mr] || [];
-    const wantScrap = billTypeFilter === 'scrap';
-    // Scrap is billable only once actually returned to the division on a challan -
-    // same rule as selectedJobsData, so the summary, the document and the write all
-    // agree on which jobs the bill covers.
-    const typeJobs = wantScrap
-      ? groupJobs.filter(j => (j.status === 'Scrap' || j.condition === 'Scrap') && j.status === 'Dispatched' && Boolean(j.challanNo))
-      : groupJobs.filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'));
-    const deliveredJobs = typeJobs.filter(j => j.status === 'Dispatched');
-    return deliveredJobs.length > 0 ? deliveredJobs : typeJobs;
-  };
 
   const calculateMrBillSummary = (mr: string) => {
     const targetJobs = jobsForBillType(mr);

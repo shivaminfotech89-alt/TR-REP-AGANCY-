@@ -184,6 +184,25 @@ decision, since it is a bill-calculation change.
 
 ---
 
+## DELIBERATE — reviewed and kept, not defects
+
+### D1. The Scrap Delivered MR *list* uses the broad scrap test
+
+`filteredMrNos` (`BillingSystem.tsx`) shows an MR if any job matches the bill type at
+*any* stage, and the row's "Delivered Jobs" cell counts from that same broad set — so
+an MR whose scrap has not yet been returned still appears, showing "0 of N". This is
+**not** the delivered-only rule the bill itself applies.
+
+Intentional. Hiding those MRs would make pending scrap invisible exactly when someone
+needs to know it is outstanding. The safeguards sit elsewhere: the *bill* contains only
+delivered scrap (`selectedJobsData` and `jobsForBillType` both require
+`condition/status Scrap` + `status Dispatched` + `challanNo`), and an MR with nothing
+returned opens the "no scrap transformers have been returned yet" modal with the
+Proceed button suppressed. Do not "tighten" this to delivered-only without replacing
+the visibility it provides.
+
+---
+
 ## FIXED
 
 ### F1. Estimates priced off capacity defaults, not inspection data
