@@ -16,15 +16,24 @@
 // be diffed by eye. Nothing here depends on tricking current code into a branch it
 // now blocks.
 
+// Firebase comes from the app's already-initialised instance via the dev-only
+// handles in src/lib/firebase.ts - the console cannot resolve bare specifiers like
+// 'firebase/firestore'. The app's own modules below load fine by /src/ path, since
+// Vite serves those transformed.
 (async () => {
-  const { db, auth } = await import('/src/lib/firebase.ts');
-  const { collection, query, where, getDocs } = await import('firebase/firestore');
+  const db = window.__db, auth = window.__auth, fs = window.__fs;
+  if (!db || !fs) {
+    console.error('window.__db / window.__fs missing. Run against the dev server (npm run dev) with the app loaded in this tab.');
+    return;
+  }
+  const { collection, query, where, getDocs } = fs;
+
   const { buildSingleJobEstimateData, classifyCoreType } = await import('/src/components/SingleJobEstimateReport.tsx');
   const { getCircleLimitsEstimateMaster, getEstimateMasterForCore, getAtPercentageForCore } = await import('/src/lib/AgencyContext.tsx');
   const { getCircleLimitForJob } = await import('/src/lib/estimateData.ts');
   const { bandForKva, SCHEDULE_A } = await import('/src/lib/ugvclSchedule2020.ts');
 
-  const uid = auth.currentUser?.uid;
+  const uid = auth?.currentUser?.uid;
   if (!uid) { console.error('Not signed in - log in to the app first.'); return; }
   const agencyId = localStorage.getItem('activeAgencyId');
   if (!agencyId) { console.error('No active agency selected.'); return; }

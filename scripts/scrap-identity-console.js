@@ -5,12 +5,21 @@
 //   2. DevTools console, paste this whole file, Enter.
 //
 // Reads only - no set/update/delete/batch anywhere. Nothing is modified.
+//
+// Uses the app's already-initialised Firebase instance via the dev-only handles
+// set in src/lib/firebase.ts (window.__db / __auth / __fs). The console cannot
+// resolve bare specifiers like 'firebase/firestore' - those exist only through
+// Vite's build step - so nothing is imported here.
 
 (async () => {
-  const { db, auth } = await import('/src/lib/firebase.ts');
-  const { collection, query, where, getDocs } = await import('firebase/firestore');
+  const db = window.__db, auth = window.__auth, fs = window.__fs;
+  if (!db || !fs) {
+    console.error('window.__db / window.__fs missing. Run against the dev server (npm run dev) with the app loaded in this tab.');
+    return;
+  }
+  const { collection, query, where, getDocs } = fs;
 
-  const uid = auth.currentUser?.uid;
+  const uid = auth?.currentUser?.uid;
   if (!uid) { console.error('Not signed in - log in to the app first.'); return; }
   const agencyId = localStorage.getItem('activeAgencyId');
   if (!agencyId) { console.error('No active agency selected.'); return; }

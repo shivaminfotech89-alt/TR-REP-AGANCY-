@@ -184,6 +184,15 @@ export default function NewJob() {
   const [pastJobs, setPastJobs] = useState<any[]>([]);
   const [pastJobsLoading, setPastJobsLoading] = useState(false);
   const [showPastPickerRowIndex, setShowPastPickerRowIndex] = useState<number | null>(null);
+  // More than one past job matched the value typed - the operator must choose which
+  // physical transformer this is. Never auto-applied: job numbers are not uniquely
+  // allocated, so "the newest match" is a guess, not an answer.
+  const [ambiguousMatch, setAmbiguousMatch] = useState<{
+    index: number;
+    field: 'jobNo' | 'serialNo';
+    value: string;
+    candidates: any[];
+  } | null>(null);
   const [pastSearchTerm, setPastSearchTerm] = useState('');
 
   // Receipt Print Modal State
@@ -252,29 +261,38 @@ export default function NewJob() {
     });
   }, [activeAgency, activeAtMaster, commonData.division, commonData.repairType, transformers]);
 
-  // Load past jobs across ALL saved ATs & historical records in user profile
+  // Past jobs for the GP lookup: across all AT masters of the CURRENT AGENCY.
+  //
+  // Deliberately agency-scoped. Previously this queried on ownerId alone, so a job
+  // number duplicated in a different agency could be matched and its make, serial,
+  // kVA and prevDeliveryDate applied to this row - assessing a guarantee claim
+  // against a transformer belonging to another agency entirely. Job numbers are not
+  // unique across agencies and are not uniquely allocated within one either, so this
+  // list may still contain more than one candidate for a number; the caller must not
+  // assume the first match is the right one.
   useEffect(() => {
-    if (auth.currentUser) {
+    if (auth.currentUser && activeAgency) {
       const loadPastJobs = async () => {
         setPastJobsLoading(true);
         try {
           const q = query(
             collection(db, 'jobs'),
-            where('ownerId', '==', auth.currentUser!.uid)
+            where('ownerId', '==', auth.currentUser!.uid),
+            where('agencyId', '==', activeAgency.id)
           );
           const snap = await getDocs(q);
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           list.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
           setPastJobs(list);
         } catch (err) {
-          console.error('Error loading past jobs across all ATs for GP lookup:', err);
+          console.error('Error loading past jobs for GP lookup:', err);
         } finally {
           setPastJobsLoading(false);
         }
       };
       loadPastJobs();
     }
-  }, [auth.currentUser]);
+  }, [auth.currentUser, activeAgency?.id]);
 
   const handleCommonChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -405,22 +423,30 @@ export default function NewJob() {
     setTimeout(() => setAutoFillNotice(null), 3000);
   };
 
+  /** Every past job matching this value, newest first. Callers must handle >1. */
+  const findGpCandidates = (lookupField: 'serialNo' | 'jobNo', queryVal: string) => {
+    const trimmed = queryVal.trim().toLowerCase();
+    if (!trimmed) return [];
+    return pastJobs.filter(j => {
+      const val = lookupField === 'serialNo' ? j.serialNo : j.jobNo;
+      return val && String(val).toLowerCase() === trimmed;
+    });
+  };
+
   const handleGpAutoLookup = async (index: number, lookupField: 'serialNo' | 'jobNo', queryVal: string) => {
     if (commonData.repairType !== 'GP' || !queryVal.trim() || !auth.currentUser) return;
     
-    const trimmed = queryVal.trim().toLowerCase();
-    
-    // Check in-memory list first
-    const match = pastJobs.find(j => {
-      if (lookupField === 'serialNo') {
-        return j.serialNo && j.serialNo.toLowerCase() === trimmed;
-      } else {
-        return j.jobNo && j.jobNo.toLowerCase() === trimmed;
-      }
-    });
+    // ALL matches, not the first. A job number can legitimately repeat (the same
+    // transformer returning as GP) and can also collide (two different units sharing
+    // a number), and only the operator can tell those apart.
+    const matches = findGpCandidates(lookupField, queryVal);
 
-    if (match) {
-      applyPastJobToRow(index, match);
+    if (matches.length === 1) {
+      applyPastJobToRow(index, matches[0]);
+      return;
+    }
+    if (matches.length > 1) {
+      setAmbiguousMatch({ index, field: lookupField, value: queryVal.trim(), candidates: matches });
       return;
     }
 
@@ -428,14 +454,19 @@ export default function NewJob() {
       const q = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
+        where('agencyId', '==', activeAgency?.id || ''),
         where(lookupField, '==', queryVal.trim().toUpperCase())
       );
-      
+
       const snapshot = await getDocs(q);
       if (!snapshot.empty) {
-        const jobsList = snapshot.docs.map(d => d.data() as any).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-        const latestJob = jobsList[0];
-        applyPastJobToRow(index, latestJob);
+        const jobsList = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any)).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+        if (jobsList.length === 1) {
+          applyPastJobToRow(index, jobsList[0]);
+        } else {
+          // Same rule as above - never silently take jobsList[0].
+          setAmbiguousMatch({ index, field: lookupField, value: queryVal.trim(), candidates: jobsList });
+        }
       } else {
         // If not found in database records:
         if (lookupField === 'jobNo') {
@@ -1368,10 +1399,14 @@ export default function NewJob() {
                       onChange={(e) => {
                         const val = e.target.value;
                         handleTransformerChange(index, 'jobNo', val);
-                        if (commonData.repairType === 'GP' && val.trim()) {
-                          const exactMatch = pastJobs.find(j => j.jobNo && j.jobNo.toUpperCase() === val.trim().toUpperCase());
-                          if (exactMatch && !t.autoFilledFrom) {
-                            applyPastJobToRow(index, exactMatch);
+                        if (commonData.repairType === 'GP' && val.trim() && !t.autoFilledFrom) {
+                          // Auto-apply only when the match is unambiguous. More than
+                          // one candidate means the operator picks - see STEP 2.
+                          const candidates = findGpCandidates('jobNo', val);
+                          if (candidates.length === 1) {
+                            applyPastJobToRow(index, candidates[0]);
+                          } else if (candidates.length > 1) {
+                            setAmbiguousMatch({ index, field: 'jobNo', value: val.trim(), candidates });
                           }
                         }
                       }}
@@ -1675,6 +1710,75 @@ export default function NewJob() {
         </div>
 
       </form>
+
+      {/* ========================================================================= */}
+      {/* AMBIGUOUS GP MATCH - OPERATOR MUST CHOOSE THE TRANSFORMER */}
+      {/* ========================================================================= */}
+      {ambiguousMatch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
+            <div className="p-4 bg-amber-600 text-white flex items-center justify-between shrink-0">
+              <div className="min-w-0">
+                <h3 className="font-bold text-sm sm:text-base flex items-center gap-2">
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span className="truncate">
+                    {ambiguousMatch.candidates.length} transformers share {ambiguousMatch.field === 'jobNo' ? 'Job No' : 'Serial No'} “{ambiguousMatch.value}”
+                  </span>
+                </h3>
+                <p className="text-[11px] text-amber-100 mt-0.5">
+                  Nothing has been filled in. Choose the transformer this GP repair is for - the guarantee period is calculated from its delivery date.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAmbiguousMatch(null)}
+                className="text-amber-100 hover:text-white p-1 rounded shrink-0"
+                title="Cancel - fill this row manually"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto p-3 sm:p-4 space-y-2">
+              {ambiguousMatch.candidates.map((pj: any) => {
+                const delDate = pj.deliveryDate || pj.challanDate || pj.dateOfIssue || '';
+                return (
+                  <button
+                    key={pj.id || `${pj.mrNo}-${pj.serialNo}`}
+                    type="button"
+                    onClick={() => {
+                      applyPastJobToRow(ambiguousMatch.index, pj);
+                      setAmbiguousMatch(null);
+                    }}
+                    className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50/60 transition-colors"
+                  >
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-mono font-bold text-slate-900 text-sm">{pj.jobNo}</span>
+                      <span className="text-[11px] font-bold text-slate-500 uppercase">MR {pj.mrNo || '-'}</span>
+                    </div>
+                    <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 text-[11px]">
+                      <div><span className="text-slate-500">Make: </span><span className="font-semibold text-slate-800">{pj.make || '-'}</span></div>
+                      <div><span className="text-slate-500">Serial: </span><span className="font-mono font-semibold text-slate-800">{pj.serialNo || '-'}</span></div>
+                      <div><span className="text-slate-500">Capacity: </span><span className="font-mono font-semibold text-slate-800">{pj.capacityKva} KVA</span></div>
+                      <div><span className="text-slate-500">Delivered: </span><span className="font-mono font-semibold text-slate-800">{delDate ? formatDDMMYYYY(delDate) : '-'}</span></div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="p-3 border-t border-slate-200 bg-slate-50 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setAmbiguousMatch(null)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg border border-slate-300"
+              >
+                None of these - fill manually
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ========================================================================= */}
       {/* PAST TRANSFORMER QUICK-PICKER MODAL FOR GP AUTO-FILL */}
