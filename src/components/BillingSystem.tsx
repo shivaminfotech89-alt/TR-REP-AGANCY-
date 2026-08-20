@@ -243,10 +243,14 @@ export default function BillingSystem() {
     const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
     if (mrJobs.length === 0) return [];
 
-    // Filter by type (repairable vs scrap)
+    // Filter by type (repairable vs scrap). "Scrap Delivered" means exactly that: a
+    // scrap unit only enters the scrap bill once it has physically gone back to the
+    // division on a challan. Scrap at any earlier stage is not billable yet - the
+    // pending ones are counted separately and surfaced as the scrap-committee warning.
     const matchingTypeJobs = mrJobs.filter(j => {
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
-      return billTypeFilter === 'scrap' ? isScrap : !isScrap;
+      if (billTypeFilter !== 'scrap') return !isScrap;
+      return isScrap && j.status === 'Dispatched' && Boolean(j.challanNo);
     });
 
     // Check delivered / dispatched / billed / sent / paid jobs
@@ -899,7 +903,12 @@ export default function BillingSystem() {
   const jobsForBillType = (mr: string) => {
     const groupJobs = mrGroups[mr] || [];
     const wantScrap = billTypeFilter === 'scrap';
-    const typeJobs = groupJobs.filter(j => ((j.status === 'Scrap' || j.condition === 'Scrap') === wantScrap));
+    // Scrap is billable only once actually returned to the division on a challan -
+    // same rule as selectedJobsData, so the summary, the document and the write all
+    // agree on which jobs the bill covers.
+    const typeJobs = wantScrap
+      ? groupJobs.filter(j => (j.status === 'Scrap' || j.condition === 'Scrap') && j.status === 'Dispatched' && Boolean(j.challanNo))
+      : groupJobs.filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'));
     const deliveredJobs = typeJobs.filter(j => j.status === 'Dispatched');
     return deliveredJobs.length > 0 ? deliveredJobs : typeJobs;
   };
@@ -2016,21 +2025,36 @@ export default function BillingSystem() {
                 <div className="p-6 space-y-4">
                   {pendingAlertModal.billType === 'scrap' ? (
                     <>
-                      <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
-                        <p className="font-bold text-amber-950 text-base mb-1">
-                          ⚠️ {pendingAlertModal.pendingCount} of {pendingAlertModal.totalCount} scrap transformers have not yet been returned to the division.
-                        </p>
-                        <p className="text-amber-800 leading-relaxed text-xs md:text-sm">
-                          Confirm the scrap committee has completed its visit before sending this bill.
-                        </p>
-                      </div>
+                      {pendingAlertModal.deliveredCount === 0 ? (
+                        /* Nothing returned yet means nothing to bill - warn-don't-block
+                           applies when SOME are delivered, not when none are. */
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-slate-700 text-sm">
+                          <p className="font-bold text-slate-900 text-base mb-1">
+                            No scrap transformers have been returned yet
+                          </p>
+                          <p className="leading-relaxed text-xs md:text-sm">
+                            None of the <strong>{pendingAlertModal.totalCount}</strong> scrap transformer(s) under MR <strong>{pendingAlertModal.mrNo}</strong> have been returned to the division on a delivery challan, so there is nothing to bill. Raise this bill once the scrap committee has visited and the units have been returned.
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-amber-900 text-sm">
+                            <p className="font-bold text-amber-950 text-base mb-1">
+                              ⚠️ {pendingAlertModal.pendingCount} of {pendingAlertModal.totalCount} scrap transformers have not yet been returned to the division.
+                            </p>
+                            <p className="text-amber-800 leading-relaxed text-xs md:text-sm">
+                              Confirm the scrap committee has completed its visit before sending this bill.
+                            </p>
+                          </div>
 
-                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
-                        <p className="font-bold text-slate-700">Scrap billing is separate:</p>
-                        <p>
-                          Scrap transformers return to the division only after the scrap committee has visited, on a different timeline from repaired units. This is a separate bill from the repair bill for MR <strong>{pendingAlertModal.mrNo}</strong>, with its own bill number and date. You may proceed.
-                        </p>
-                      </div>
+                          <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600 space-y-1">
+                            <p className="font-bold text-slate-700">Scrap billing is separate:</p>
+                            <p>
+                              Scrap transformers return to the division only after the scrap committee has visited, on a different timeline from repaired units. This is a separate bill from the repair bill for MR <strong>{pendingAlertModal.mrNo}</strong>, with its own bill number and date. You may proceed with the <strong>{pendingAlertModal.deliveredCount}</strong> returned transformer(s).
+                            </p>
+                          </div>
+                        </>
+                      )}
                     </>
                   ) : (
                     <>
@@ -2057,18 +2081,25 @@ export default function BillingSystem() {
                       onClick={() => setPendingAlertModal(null)}
                       className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-slate-100 text-slate-700 hover:bg-slate-200 rounded-lg transition-colors border border-slate-300"
                     >
-                      {pendingAlertModal.billType === 'scrap' ? 'Wait for Scrap Committee' : 'Wait for Remaining Deliveries'}
+                      {pendingAlertModal.billType === 'scrap' && pendingAlertModal.deliveredCount === 0
+                        ? 'Close'
+                        : pendingAlertModal.billType === 'scrap' ? 'Wait for Scrap Committee' : 'Wait for Remaining Deliveries'}
                     </button>
-                    <button
-                      onClick={() => {
-                        const targetMr = pendingAlertModal.mrNo;
-                        setPendingAlertModal(null);
-                        handleSelectMr(targetMr);
-                      }}
-                      className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow"
-                    >
-                      Proceed with Partial Bill ({pendingAlertModal.deliveredCount} Jobs)
-                    </button>
+                    {/* Scrap with nothing returned has nothing billable, so no Proceed is
+                        offered. A repairable bill still covers its undelivered jobs, so
+                        its Proceed stays exactly as before. */}
+                    {!(pendingAlertModal.billType === 'scrap' && pendingAlertModal.deliveredCount === 0) && (
+                      <button
+                        onClick={() => {
+                          const targetMr = pendingAlertModal.mrNo;
+                          setPendingAlertModal(null);
+                          handleSelectMr(targetMr);
+                        }}
+                        className="px-4 py-2.5 text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors shadow"
+                      >
+                        Proceed with Partial Bill ({pendingAlertModal.deliveredCount} Jobs)
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>

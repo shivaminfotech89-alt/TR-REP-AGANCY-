@@ -186,6 +186,70 @@
     console.table(skipped);
   }
 
-  window.__blastRadius = { rows, flipped, submitted, skipped };
+  // ---------------------------------------------------------------------------
+  // SECTION 4 - GUARANTEE (GP) CLOCK
+  // ---------------------------------------------------------------------------
+  // Dashboard measured the 18-month guarantee window from `j.dispatchDate`, which
+  // nothing has ever written, so it fell through to `j.updatedAt` - the last time
+  // the record was touched for ANY reason (bill sent, payment marked, re-inspection).
+  //
+  // The bias runs one way only: updatedAt moves forward, never back, so the window
+  // was only ever EXTENDED. The resulting error is GP work done free that could
+  // legitimately have been charged - not valid claims wrongly rejected.
+  //
+  // The true dispatch stamp survives on every job (deliveryDate / challanDate), so
+  // the correct verdict is recoverable. Read-only: nothing below writes.
+  const GP_MONTHS = 18;
+  const GP_WINDOW_MS = GP_MONTHS * 30.4375 * 24 * 60 * 60 * 1000;
+  const NOW = Date.now();
+
+  const ms = v => {
+    if (!v) return null;
+    const t = new Date(v).getTime();
+    return isNaN(t) ? null : t;
+  };
+
+  const gpRows = [];
+  jobs.filter(j => j.status === 'Dispatched').forEach(job => {
+    const trueStamp = job.deliveryDate || job.challanDate;
+    const trueTime = ms(trueStamp);
+    // Exactly what Dashboard did before the fix
+    const buggyTime = ms(job.dispatchDate) ?? ms(job.updatedAt) ?? NOW;
+    if (trueTime === null) return;   // no recoverable dispatch stamp - report separately
+
+    const inGuaranteeBefore = (NOW - buggyTime) <= GP_WINDOW_MS;
+    const inGuaranteeNow = (NOW - trueTime) <= GP_WINDOW_MS;
+    if (inGuaranteeBefore === inGuaranteeNow) return;
+
+    gpRows.push({
+      job: job.jobNo,
+      mr: job.mrNo,
+      kva: job.capacityKva,
+      trueDispatch: trueStamp,
+      measuredFrom: job.updatedAt || '(none)',
+      daysSinceTrueDispatch: Math.floor((NOW - trueTime) / 86400000),
+      daysSinceUpdatedAt: Math.floor((NOW - buggyTime) / 86400000),
+      windowExtendedByDays: Math.floor((buggyTime - trueTime) / 86400000),
+      verdictBefore: inGuaranteeBefore ? 'IN guarantee' : 'expired',
+      verdictNow: inGuaranteeNow ? 'IN guarantee' : 'expired',
+      repairType: job.repairType || '',
+    });
+  });
+
+  gpRows.sort((a, b) => b.windowExtendedByDays - a.windowExtendedByDays);
+
+  const noStamp = jobs.filter(j => j.status === 'Dispatched' && !j.deliveryDate && !j.challanDate);
+
+  console.log(`\n=== GP CLOCK: ${gpRows.length} dispatched job(s) whose in-guarantee verdict changes ===`);
+  console.log('Bias is one-way: updatedAt only moves forward, so windows were only ever');
+  console.log('extended. The error is GP work done free that could have been charged,');
+  console.log('not valid claims rejected.');
+  if (gpRows.length) console.table(gpRows);
+  if (noStamp.length) {
+    console.log(`\n-- Dispatched with NO deliveryDate or challanDate (verdict unrecoverable): ${noStamp.length} --`);
+    console.table(noStamp.map(j => ({ job: j.jobNo, mr: j.mrNo, status: j.status, updatedAt: j.updatedAt || '' })));
+  }
+
+  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp };
   console.log('\nFull results: window.__blastRadius');
 })();

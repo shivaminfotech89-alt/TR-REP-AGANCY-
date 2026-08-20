@@ -289,8 +289,13 @@ export default function Dashboard() {
 
     filteredJobs.forEach(j => {
       if (j.status === 'Dispatched') {
-        const dispatchTime = j.dispatchDate 
-          ? new Date(j.dispatchDate).getTime() 
+        // Nothing ever writes `dispatchDate` - the dispatch batch writes deliveryDate
+        // and challanDate. Reading the unwritten field fell through to `updatedAt`,
+        // so any later edit to a dispatched job restarted its 18-month guarantee
+        // clock. Read the fields that are actually written.
+        const dispatchStamp = j.deliveryDate || j.challanDate;
+        const dispatchTime = dispatchStamp
+          ? new Date(dispatchStamp).getTime()
           : (j.updatedAt ? new Date(j.updatedAt).getTime() : now);
         if (now - dispatchTime <= eighteenMonthsMs) {
           activeGuaranteeCount++;

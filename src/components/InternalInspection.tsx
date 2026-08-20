@@ -500,6 +500,31 @@ export default function InternalInspection() {
         if (job.status === 'External Done' || job.status === 'Received' || job.status === 'Internal Done' || job.status === 'Scrap') {
           jobUpdates.status = jobData.condition === 'Scrap' ? 'Scrap' : 'Internal Done';
         }
+
+        // `condition` records what the unit WAS, not where it is.
+        //
+        // This field exists because scrap identity used to live only in `status`, and
+        // dispatch overwrites status with 'Dispatched' - erasing the fact that a unit
+        // was scrap, leaving no way to tell it from a repaired one. Identity must not
+        // live in a field that moves. It is written here, at the moment the
+        // scrap/repairable decision is declared, and nothing else in the app writes it.
+        //
+        // Permitted transitions are deliberately ASYMMETRIC:
+        //   unset       -> Scrap / Repairable   allowed (first determination)
+        //   Repairable  -> Scrap                allowed (discovered late)
+        //   Scrap       -> Repairable           NEVER
+        //   anything    -> empty / cleared      NEVER
+        // Scrap is a terminal determination made with the unit open on the bench: it
+        // can be discovered late, but it cannot be undiscovered. A later inspection
+        // may find damage that condemns a unit previously called repairable; nothing
+        // can un-condemn one that was already opened and found to be scrap.
+        const declaredScrap = jobData.condition === 'Scrap';
+        if (!job.condition) {
+          jobUpdates.condition = declaredScrap ? 'Scrap' : 'Repairable';
+        } else if (job.condition !== 'Scrap' && declaredScrap) {
+          jobUpdates.condition = 'Scrap';
+        }
+
         batch.update(jobRef, jobUpdates);
       }
 
