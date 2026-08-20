@@ -259,6 +259,76 @@
     console.table(noStamp.map(j => ({ job: j.jobNo, mr: j.mrNo, status: j.status, updatedAt: j.updatedAt || '' })));
   }
 
-  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp };
+  // ---------------------------------------------------------------------------
+  // SECTION 5 - SCRAP ESTIMATE EXPOSURE
+  // ---------------------------------------------------------------------------
+  // Scrap transformers were estimated as full repairs (AUDIT.md F7): CRGO appended the
+  // Rs 500 scrap line to a repair estimate, and Amorphous/Wound Core returned the full
+  // Schedule-B repair rate with no scrap charge at all. No scrap job was ever BILLED
+  // (F3), but an estimate is a separate document with its own estimateSentDate - and a
+  // sent estimate is an approval sought from the SE against a wrong figure.
+  //
+  // `sentAmount` is job.estimateAmount, the figure actually written when the estimate
+  // was sent - authoritative for what went out. `correctAmount` is what
+  // buildSingleJobEstimateData produces now that scrap short-circuits.
+  const scrapJobs = jobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+
+  const scrapRows = scrapJobs.map(job => {
+    const est = buildSingleJobEstimateData(job, agency, atMaster, extMap[job.id], intMap[job.id]);
+    const correct = est.rateErrors.length ? null : est.finalAmount;
+    const sent = typeof job.estimateAmount === 'number' ? job.estimateAmount : null;
+    return {
+      job: job.jobNo,
+      mr: job.mrNo,
+      kva: job.capacityKva,
+      core: job.coreType || 'CRGO',
+      estimateSentDate: job.estimateSentDate || '(not sent)',
+      estimateRefNo: job.estimateRefNo || '',
+      sentAmount: sent ?? '(none stored)',
+      correctAmount: correct ?? `blocked: ${est.rateErrors.join(' | ')}`,
+      overstatedBy: (sent !== null && correct !== null) ? Number((sent - correct).toFixed(2)) : '',
+      wasSent: Boolean(job.estimateSentDate),
+    };
+  });
+
+  hdr(`SCRAP ESTIMATE EXPOSURE - ${scrapRows.length} scrap job(s)`);
+  console.table(scrapRows);
+  const sentScrap = scrapRows.filter(r => r.wasSent);
+  console.log(`${sentScrap.length} of ${scrapRows.length} scrap estimates were SENT (estimateSentDate set).`);
+  if (sentScrap.length) {
+    const totalOver = sentScrap.reduce((a, r) => a + (Number(r.overstatedBy) || 0), 0);
+    console.log(`Total overstated across sent scrap estimates: ${totalOver.toFixed(2)}`);
+  }
+
+  // MR-level totals - a forwarding letter is addressed per MR to the Superintending
+  // Engineer, so the letter's TOTAL is what was actually put in front of them.
+  const affectedMrs = [...new Set(scrapRows.map(r => r.mr))].filter(Boolean);
+  const mrRows = affectedMrs.map(mr => {
+    const mrJobs = jobs.filter(j => j.mrNo === mr);
+    let sentTot = 0, correctTot = 0, blocked = 0;
+    mrJobs.forEach(j => {
+      const e = buildSingleJobEstimateData(j, agency, atMaster, extMap[j.id], intMap[j.id]);
+      if (e.rateErrors.length) blocked++; else correctTot += e.finalAmount;
+      if (typeof j.estimateAmount === 'number') sentTot += j.estimateAmount;
+    });
+    return {
+      mr,
+      jobsInMr: mrJobs.length,
+      scrapJobsInMr: mrJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length,
+      letterTotalSent: Number(sentTot.toFixed(2)),
+      letterTotalCorrect: Number(correctTot.toFixed(2)),
+      overstatedBy: Number((sentTot - correctTot).toFixed(2)),
+      jobsBlocked: blocked,
+      anyEstimateSent: mrJobs.some(j => j.estimateSentDate),
+      estimateRefNo: mrJobs.find(j => j.estimateRefNo)?.estimateRefNo || '',
+    };
+  });
+  hdr(`FORWARDING LETTER TOTALS - MRs containing scrap (${mrRows.length})`);
+  console.table(mrRows);
+  console.log('A letter whose anyEstimateSent is true went to the Superintending Engineer');
+  console.log('with letterTotalSent on it. Where overstatedBy is material, that letter');
+  console.log('needs withdrawing and reissuing at letterTotalCorrect.');
+
+  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows };
   console.log('\nFull results: window.__blastRadius');
 })();

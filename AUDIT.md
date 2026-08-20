@@ -302,7 +302,78 @@ charged, not valid claims wrongly rejected. The true stamp survives on every job
 **Fixed:** now reads `deliveryDate || challanDate`, `updatedAt` retained as last resort.
 **Quantified by:** section 4 of `scripts/blast-radius-console.js`.
 
-### F7. Earlier fixes (same class: identity or state in a field that moves)
+### F7. Scrap transformers estimated as full repairs
+
+`isScrap` was computed correctly in `buildSingleJobEstimateData` but never used as
+control flow — only as a scattered per-item modifier, and computed too late to affect
+one of the two paths.
+
+- **CRGO** — `isScrap` zeroed *some* itemised lines (bushings, metal parts, coils,
+  re-insulation, drying, testing, washer ring, insulating material) but left ~13 others
+  charging, including the unconditional Labour Charge `'1a'` at Rs 2,061. The Rs 500
+  scrap line was then **appended** to that repair estimate as item 26. KLL-6 (MR 1563)
+  printed **6,540.20** against a correct 500 + AT.
+- **Amorphous / Wound Core** — the fixed-rate branch returned *before* the scrap line
+  was ever reached and never consulted `isScrap` at all, so a scrap unit billed the
+  full Schedule-B **repair** rate with no scrap charge whatsoever. AMKLL-9 (MR 1563)
+  printed **17,970.00** against a correct 500 + AT.
+
+**Exposure — an estimate is a separate document from a bill.** No scrap job was ever
+billed (F3), but estimates carry their own `estimateSentDate`, and a sent estimate is
+an approval sought from the Superintending Engineer against a wrong figure.
+
+**The MR 1563 forwarding letter, addressed to the Superintending Engineer:**
+
+| Job | On the letter | Correct | Overstated by |
+|---|---|---|---|
+| KLL-6 (CRGO) | 6,801.81 | ~520.00 | ~6,281.81 |
+| AMKLL-9 (Amorphous) | 16,532.40 | ~460.00 | ~16,072.40 |
+| **Letter TOTAL** | **40,586.33** | — | **~22,354 from these two alone** |
+
+**If that letter was sent, it must be withdrawn and reissued.**
+
+The two correct figures differ because the AT percentage is per core type: CRGO **+4%**
+(500 × 1.04 = 520.00) and Amorphous **−8%** (500 × 0.92 = 460.00). The same −8% explains
+the letter's own numbers — 17,970 × 0.92 = 16,532.40 for AMKLL-9, and 6,540.20 × 1.04 =
+6,801.81 for KLL-6, i.e. the estimate document's base total with AT applied. Confirms
+the letter and the estimate sheet are the same computation, not two different errors.
+
+**Quantified by:** section 5 of `scripts/blast-radius-console.js` — per scrap job it
+reports `estimateSentDate`, `estimateRefNo`, the `sentAmount` actually stored when the
+estimate went out, the `correctAmount` now produced, and the difference; then MR-level
+forwarding-letter totals (`letterTotalSent` vs `letterTotalCorrect`) so every letter
+needing withdrawal is identified, not just MR 1563.
+
+**Fixed:** a scrap job of any core type now short-circuits at the top of
+`buildSingleJobEstimateData` into exactly one line — the mapped flat charge (CRGO
+`'22'`, Amorphous/Wound Core `'0'`) — then AT, then total. No physical, internal or
+labour items, no Schedule-B rate. Blocks with the named error if the code is missing.
+All now-unreachable per-item `isScrap` guards and the appended item-26 scrap line were
+removed, so nothing implies scrap is still handled on the itemised path.
+
+### F8. Mixed-MR scrap bills unreachable, and prefilled from the repair bill
+
+Three separate causes in `BillingSystem.tsx`, all from treating an MR as one billable
+unit after the two bills became independent documents:
+
+1. **`handleSelectMr` forced the tab.** It set `billTypeFilter = 'repairable'` whenever
+   an MR had any repairable job, so selecting a mixed MR silently moved the user off
+   Scrap Delivered — the scrap bill could not be opened at all. Now a *default*: it
+   only switches when the current tab has no jobs for that MR.
+2. **`isSent` measured the whole MR.** `filteredMrNos` and `unsentBillCount` treated an
+   MR as sent if *any* job carried bill data. Since sending the repair bill stamps only
+   repairable jobs, the MR then vanished from the generator entirely, leaving the scrap
+   bill unraisable. Now computed per bill type via `isBillSentForType`.
+3. **Prefill crossed bill types.** `savedJobWithBill` / `savedJobWithDate` searched all
+   MR jobs, so a mixed MR's scrap bill prefilled with the repair bill's number and
+   date. Now scoped to the current type; approval no./date stay MR-wide (AT-level).
+
+Also removed: `masterData`, which read the CRGO master only and fed nothing but a
+`subTotal` dependency — so the total failed to recompute when the Amorphous, Wound Core
+or Overhauling master changed. Pricing already resolves per job via
+`getEstimateMasterForCore`; the dependency is now `activeAgency` + `activeAtMaster`.
+
+### F9. Earlier fixes (same class: identity or state in a field that moves)
 
 - `inspectionStage.ts` referenced status strings no code ever sets
   (`'Ready for Testing'`, `'Testing Completed'`) instead of the real

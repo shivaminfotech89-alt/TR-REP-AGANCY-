@@ -170,6 +170,56 @@ export function buildSingleJobEstimateData(
   const rateErrors: string[] = [];
   const coreClass = classifyCoreType(coreType);
 
+  // SCRAP SHORT-CIRCUIT - must come before the core-type branch.
+  //
+  // A transformer declared scrap is inspected and dismantled; it receives none of the
+  // repair work. Its estimate is exactly ONE line - the flat inspection & dismantling
+  // charge for its core type - plus AT. No physical items, no internal items, no
+  // labour, and no Schedule-B fixed rate.
+  //
+  // This has to short-circuit rather than modify. Previously `isScrap` only zeroed
+  // SOME itemised lines, so a scrap CRGO job still billed name plating, spray
+  // painting, rod gaskets, the unconditional Rs 2,061 labour charge and more, with
+  // the Rs 500 scrap line merely APPENDED to a repair estimate. Worse, the
+  // Amorphous/Wound Core branch below returns before the scrap line is ever reached,
+  // so a scrap Amorphous unit billed the full Schedule-B repair rate and no scrap
+  // charge at all.
+  if (isScrap) {
+    const scrapCharge = resolveScrapCharge(coreType, kva, masterList);
+    if (scrapCharge.error) rateErrors.push(scrapCharge.error);
+
+    const scrapAmt = scrapCharge.rate ?? 0;
+    const scrapItems: SingleEstimateLineItem[] = [{
+      sr: 1,
+      itemCode: scrapCharge.code ?? '-',
+      desc: 'Inspection & Dismantling Charges - Transformer Declared Scrap by E.E. (TR)',
+      unit: 'NOS',
+      qty: '1',
+      numQty: 1,
+      rate: scrapCharge.rate,
+      amt: scrapAmt
+    }];
+
+    const scrapPercentageAmount = Number((scrapAmt * (atPercentage / 100)).toFixed(2));
+    const scrapWithPercentage = Number((scrapAmt + scrapPercentageAmount).toFixed(2));
+
+    return {
+      job,
+      externalData,
+      internalData,
+      physicalItems: scrapItems,
+      internalItems: [],
+      labourItems: [],
+      baseTotal: scrapAmt,
+      atPercentage,
+      percentageAmount: scrapPercentageAmount,
+      amountWithPercentage: scrapWithPercentage,
+      lessAmount: 0,
+      finalAmount: scrapWithPercentage, // no "Less" row on a scrap estimate
+      rateErrors
+    };
+  }
+
   // Amorphous / CRGO Wound Core: FIXED RATE, not itemised. No physical/internal/labour
   // breakdown - external inspection is oil accounting only (no charge) and there is no
   // internal inspection for these core types, so none of the 29 CRGO items apply.
@@ -358,14 +408,14 @@ export function buildSingleJobEstimateData(
   // field, so 11kV is assumed here - matching the 11kV assumption made everywhere else
   // in this app (job metadata, the KV column). A 22kV job would need sr '8-B' (Rs 265);
   // that needs a voltage field on the job to select it, which is a separate change.
-  const hvbQty = externalData?.hvSideHvb !== undefined && externalData?.hvSideHvb !== '' ? Number(externalData.hvSideHvb) : (isScrap ? 0 : 3);
+  const hvbQty = externalData?.hvSideHvb !== undefined && externalData?.hvSideHvb !== '' ? Number(externalData.hvSideHvb) : 3;
   const hvbApplies = hvbQty > 0;
   const hvbRate = resolveRate('8', scheduleRate('8-A'));
   recordErrorIfApplies(hvbApplies, hvbRate, 'HV Bushing');
   physicalItems.push({ sr: srCounter++, itemCode: '8', desc: 'HV Bushing', unit: 'NO', qty: hvbQty.toString(), numQty: hvbQty, rate: hvbRate, amt: hvbApplies ? hvbQty * (hvbRate ?? 0) : 0 });
 
   // 11. HV Metal Parts
-  const hvmQty = externalData?.hvSideHvm !== undefined && externalData?.hvSideHvm !== '' ? Number(externalData.hvSideHvm) : (isScrap ? 0 : 2);
+  const hvmQty = externalData?.hvSideHvm !== undefined && externalData?.hvSideHvm !== '' ? Number(externalData.hvSideHvm) : 2;
   const hvmApplies = hvmQty > 0;
   const hvmRate = resolveRate('9A', scheduleRate('9A'));
   recordErrorIfApplies(hvmApplies, hvmRate, 'HV Metal Parts');
@@ -379,14 +429,14 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '9B', desc: 'HV Connectors', unit: 'NO', qty: hvcQty.toString(), numQty: hvcQty, rate: hvcRate, amt: hvcApplies ? hvcQty * (hvcRate ?? 0) : 0 });
 
   // 13. LV Bushing
-  const lvbQty = externalData?.lvSideLvb !== undefined && externalData?.lvSideLvb !== '' ? Number(externalData.lvSideLvb) : (isScrap ? 0 : 1);
+  const lvbQty = externalData?.lvSideLvb !== undefined && externalData?.lvSideLvb !== '' ? Number(externalData.lvSideLvb) : 1;
   const lvbApplies = lvbQty > 0;
   const lvbRate = resolveRate('10', scheduleRate('10'));
   recordErrorIfApplies(lvbApplies, lvbRate, 'LV Bushing');
   physicalItems.push({ sr: srCounter++, itemCode: '10', desc: 'LV Bushing', unit: 'NO', qty: lvbQty.toString(), numQty: lvbQty, rate: lvbRate, amt: lvbApplies ? lvbQty * (lvbRate ?? 0) : 0 });
 
   // 14. LV Metal Parts
-  const lvmQty = externalData?.lvSideLvm !== undefined && externalData?.lvSideLvm !== '' ? Number(externalData.lvSideLvm) : (isScrap ? 0 : 4);
+  const lvmQty = externalData?.lvSideLvm !== undefined && externalData?.lvSideLvm !== '' ? Number(externalData.lvSideLvm) : 4;
   const lvmApplies = lvmQty > 0;
   const lvmRate = resolveRate('11A', scheduleRate('11A'));
   recordErrorIfApplies(lvmApplies, lvmRate, 'LV Metal Parts');
@@ -420,7 +470,7 @@ export function buildSingleJobEstimateData(
   internalItems.push({ sr: srCounter++, itemCode: '3', desc: 'Inside Painting', unit: 'NO', qty: ipQtyStr, numQty: ipApplies ? 1 : 0, rate: ipRate, amt: ipAmt });
 
   // 18. Insulating Material
-  const insApplies = !(internalData?.insula === 'N' || internalData?.insula === '0' || isScrap);
+  const insApplies = !(internalData?.insula === 'N' || internalData?.insula === '0');
   const insQtyStr = insApplies ? 'Y' : 'N';
   const insRate = resolveRate('1d', scheduleRate('1d'));
   recordErrorIfApplies(insApplies, insRate, 'Insulating Material');
@@ -428,7 +478,7 @@ export function buildSingleJobEstimateData(
   internalItems.push({ sr: srCounter++, itemCode: '1d', desc: 'Insulating Material', unit: 'JOB', qty: insQtyStr, numQty: insApplies ? 1 : 0, rate: insRate, amt: insAmt });
 
   // 19. Washer Ring
-  const wrQty = internalData?.wasring !== undefined && internalData?.wasring !== '' ? Number(internalData.wasring) : (isScrap ? 0 : 6);
+  const wrQty = internalData?.wasring !== undefined && internalData?.wasring !== '' ? Number(internalData.wasring) : 6;
   const wrApplies = wrQty > 0;
   const wrRate = resolveRate('15', scheduleRate('15'));
   recordErrorIfApplies(wrApplies, wrRate, 'Washer Ring');
@@ -440,13 +490,13 @@ export function buildSingleJobEstimateData(
     hvCoilWeight = Number(internalData.totWt);
   } else if (internalData?.wtOfCoil && internalData?.totCoil) {
     hvCoilWeight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
-  } else if (!isScrap && hasInternalData) {
+  } else if (hasInternalData) {
     // Per-capacity default for a coil weight missing from an otherwise real
     // inspection. Deliberately NOT applied when the whole record is absent - that
     // case is blocked above rather than given a plausible-looking number.
     hvCoilWeight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
   }
-  const hvCoilApplies = !isScrap && hvCoilWeight > 0;
+  const hvCoilApplies = hvCoilWeight > 0;
   // S.E.-variant status is UNCONFIRMED against the tender for either winding. The
   // Aluminium value below (Schedule-A '12A-b1', "with S.E.") matches the rate this
   // app already used before this change, on estimates already issued to and accepted
@@ -478,7 +528,7 @@ export function buildSingleJobEstimateData(
   if (internalData?.totWtLv && Number(internalData.totWtLv) > 0) {
     lvCoilWeight = Number(internalData.totWtLv);
   }
-  const lvCoilApplies = !isScrap && lvCoilWeight > 0;
+  const lvCoilApplies = lvCoilWeight > 0;
   // Same S.E. caveat as HV Coil above. Aluminium (Schedule-A '13A-b', "without S.E.")
   // matches the rate already used before this change; Copper is blocked, not guessed.
   const lvCoilScheduleValue = isCopper ? undefined : scheduleRate('13A-b');
@@ -504,14 +554,14 @@ export function buildSingleJobEstimateData(
   // 22. Re-insulation LV Coil(Aluminium) - Schedule-A '14-i'/'14-ii', no S.E. split
   let reInsWeight = 0;
   // If LV coils are OK or RI (not replaced as new), calculate re-insulation weight
-  if (!isScrap && hasInternalData && (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG')) {
+  if (hasInternalData && (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG')) {
     if (lvCoilWeight === 0) {
       // Same rule as the HV coil default above: a per-capacity stand-in for a field
       // missing from a real inspection, never a substitute for the whole record.
       reInsWeight = Number(kva) === 63 ? 24.30 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 35.00 : 12.00));
     }
   }
-  const reInsApplies = !isScrap && reInsWeight > 0;
+  const reInsApplies = reInsWeight > 0;
   const reInsRate = resolveRate('14', scheduleRate(isCopper ? '14-i' : '14-ii'));
   recordErrorIfApplies(reInsApplies, reInsRate, 'Re-insulation LV Coil');
   const reInsAmt = reInsApplies ? reInsWeight * (reInsRate ?? 0) : 0;
@@ -544,28 +594,19 @@ export function buildSingleJobEstimateData(
   labourItems.push({ sr: srCounter++, itemCode: '2a', desc: 'Cleaning dirty tank', unit: 'NO', qty: cdtQtyStr, numQty: cdtApplies ? 1 : 0, rate: cdtRate, amt: cdtAmt });
 
   // 25. Drying of active parts
-  const dryApplies = !(internalData?.dc === 'N' || internalData?.dc === '0' || externalData?.dryActPart === 'N' || isScrap);
+  const dryApplies = !(internalData?.dc === 'N' || internalData?.dc === '0' || externalData?.dryActPart === 'N');
   const dryQtyStr = dryApplies ? 'Y' : 'N';
   const dryRate = resolveRate('1f', scheduleRate('1f'));
   recordErrorIfApplies(dryApplies, dryRate, 'Drying of active parts');
   const dryAmt = dryApplies ? (dryRate ?? 0) : 0;
   labourItems.push({ sr: srCounter++, itemCode: '1f', desc: 'Drying of active parts', unit: 'JOB', qty: dryQtyStr, numQty: dryApplies ? 1 : 0, rate: dryRate, amt: dryAmt });
 
-  // 26. Scrap - not part of UGVCL Schedule-A at all; agency's own estimate master only.
-  // Resolved through the shared helper so the estimate and the bill always price a
-  // scrap transformer from the same item code (CRGO '22', Amorphous/Wound Core '0').
-  // The old code '19' is retired - no master defines it anywhere.
-  const scrapQtyStr = isScrap ? 'Y' : 'N';
-  const scrapCharge = resolveScrapCharge(coreType, kva, masterList);
-  const scrapRate = scrapCharge.rate;
-  if (isScrap && scrapCharge.error) {
-    rateErrors.push(scrapCharge.error);
-  }
-  const scrapAmt = isScrap ? (scrapRate ?? 0) : 0;
-  labourItems.push({ sr: srCounter++, itemCode: scrapCharge.code ?? '-', desc: 'Scrap', unit: '0', qty: scrapQtyStr, numQty: isScrap ? 1 : 0, rate: scrapRate, amt: scrapAmt });
+  // (The Scrap line that used to sit here is gone. A scrap transformer never reaches
+  // this path - it short-circuits at the top of the function into a single flat
+  // charge. Appending a scrap line to a repair estimate was the bug, not the fix.)
 
   // 27. Testing Charge (Schedule-A sr '19' "Testing of transformer" - app's own code '20' doesn't match)
-  const testApplies = !(internalData?.tstTrn === 'N' || internalData?.tstTrn === '0' || isScrap);
+  const testApplies = !(internalData?.tstTrn === 'N' || internalData?.tstTrn === '0');
   const testQtyStr = testApplies ? 'Y' : 'N';
   const testRate = resolveRate('20', scheduleRate('19'));
   recordErrorIfApplies(testApplies, testRate, 'Testing Charge');
@@ -573,7 +614,7 @@ export function buildSingleJobEstimateData(
   labourItems.push({ sr: srCounter++, itemCode: '20', desc: 'Testing Charge', unit: 'NO', qty: testQtyStr, numQty: testApplies ? 1 : 0, rate: testRate, amt: testAmt });
 
   // 28. Labour HV Coil(Aluminium) - Schedule-A '12C-a'/'12C-b', no S.E. split
-  const lbrHvWeight = isScrap ? 0 : hvCoilWeight;
+  const lbrHvWeight = hvCoilWeight;
   const lbrHvApplies = lbrHvWeight > 0;
   const lbrHvRate = resolveRate('12C', scheduleRate(isCopper ? '12C-a' : '12C-b'));
   recordErrorIfApplies(lbrHvApplies, lbrHvRate, 'Labour HV Coil');
@@ -590,7 +631,7 @@ export function buildSingleJobEstimateData(
   });
 
   // 29. Labour LV Coil(Aluminium) - Schedule-A '13C-a'/'13C-b', no S.E. split
-  const lbrLvWeight = isScrap ? 0 : lvCoilWeight;
+  const lbrLvWeight = lvCoilWeight;
   const lbrLvApplies = lbrLvWeight > 0;
   const lbrLvRate = resolveRate('13C', scheduleRate(isCopper ? '13C-a' : '13C-b'));
   recordErrorIfApplies(lbrLvApplies, lbrLvRate, 'Labour LV Coil');

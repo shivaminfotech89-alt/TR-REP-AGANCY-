@@ -10,7 +10,6 @@ import {
   IndianRupee, Clock, CheckSquare, Eye, CreditCard, Banknote, Filter, ChevronDown, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { defaultEstimateData } from '../lib/estimateData';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
@@ -140,7 +139,12 @@ export default function BillingSystem() {
     billType: 'repairable' | 'scrap';
   } | null>(null);
 
-  const masterData = activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData;
+  // NOTE: there is deliberately no single "masterData" here. This screen prices jobs
+  // of mixed core types, and the correct master is per job - calculateJobTotal already
+  // resolves it via getEstimateMasterForCore(activeAgency, job.coreType). A CRGO-only
+  // `activeAgency.estimateMaster` used to sit here; it never fed pricing, only a
+  // useMemo dependency, where it silently failed to invalidate when the Amorphous,
+  // Wound Core or Overhauling master changed.
 
   useEffect(() => {
     async function fetchData() {
@@ -355,18 +359,35 @@ export default function BillingSystem() {
     const mrJobs = jobs.filter(j => j.mrNo === mr);
     const scrapCount = mrJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
     const repairableCount = mrJobs.length - scrapCount;
-    if (scrapCount > 0 && repairableCount === 0) {
-      setBillTypeFilter('scrap');
-    } else if (repairableCount > 0) {
-      setBillTypeFilter('repairable');
+
+    // A DEFAULT, not an override. This used to force 'repairable' whenever an MR had
+    // any repairable job, which on a mixed MR silently moved the user off the Scrap
+    // Delivered tab and made the scrap bill unreachable. Only switch when the tab the
+    // user is actually on has nothing to show for this MR.
+    const currentTabHasJobs = billTypeFilter === 'scrap' ? scrapCount > 0 : repairableCount > 0;
+    if (!currentTabHasJobs) {
+      if (scrapCount > 0 && repairableCount === 0) {
+        setBillTypeFilter('scrap');
+      } else if (repairableCount > 0) {
+        setBillTypeFilter('repairable');
+      }
     }
 
     const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
     const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || activeAgency?.atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052';
     
-    // Check if bill details were already recorded on jobs in this MR
-    const savedJobWithBill = mrJobs.find(j => j.billNo);
-    const savedJobWithDate = mrJobs.find(j => j.billSentDate || j.billDate);
+    // Check if bill details were already recorded for THIS BILL TYPE's jobs. Searching
+    // every job in the MR prefilled a mixed MR's scrap bill with the repair bill's
+    // number and date - the two are independent documents with their own.
+    // Approval no./date are AT-level, not per bill type, so they stay MR-wide.
+    const wantScrapNow = billTypeFilter === 'scrap';
+    const typeJobsForPrefill = mrJobs.filter(j =>
+      ((j.status === 'Scrap' || j.condition === 'Scrap') === wantScrapNow)
+    );
+    const prefillSource = typeJobsForPrefill.length > 0 ? typeJobsForPrefill : mrJobs;
+
+    const savedJobWithBill = prefillSource.find(j => j.billNo);
+    const savedJobWithDate = prefillSource.find(j => j.billSentDate || j.billDate);
     const savedJobWithAppr = mrJobs.find(j => j.apprNo || j.orderNo);
     const savedJobWithApprDate = mrJobs.find(j => j.apprDate || j.orderDate);
 
@@ -491,7 +512,9 @@ export default function BillingSystem() {
 
   const subTotal = useMemo(() => {
     return selectedJobsData.reduce((acc, job) => acc + calculateJobTotal(job), 0);
-  }, [selectedJobsData, masterData]);
+    // activeAgency/activeAtMaster cover every master calculateJobTotal reads - all
+    // core types, not just CRGO - plus the AT percentage.
+  }, [selectedJobsData, activeAgency, activeAtMaster]);
 
   const cgst = useMemo(() => subTotal * (cgstRate / 100), [subTotal, cgstRate]);
   const sgst = useMemo(() => subTotal * (sgstRate / 100), [subTotal, sgstRate]);
