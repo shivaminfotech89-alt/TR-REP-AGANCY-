@@ -281,6 +281,9 @@ interface AgencyContextType {
   loading: boolean;
   isSuperAdmin: boolean;
   globalDefaultEstimateMaster: GlobalDefaultEstimateMaster | null;
+  globalConfigError: string | null;
+  globalConfigLoaded: boolean;
+  dismissGlobalConfigError: () => void;
   addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<void>;
   updateAgency: (id: string, agencyData: Partial<Agency>) => Promise<void>;
   updateAllAgenciesEstimateMaster: (payload: {
@@ -330,7 +333,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [activeAtMasterId, setActiveAtMasterIdState] = useState<string | null>(getInitialAtId());
   
   const [globalDefaultEstimateMaster, setGlobalDefaultEstimateMaster] = useState<GlobalDefaultEstimateMaster | null>(cachedGlobalDefaultEstimateMaster);
+  const [globalConfigError, setGlobalConfigError] = useState<string | null>(null);
+  const [globalConfigLoaded, setGlobalConfigLoaded] = useState<boolean>(!!cachedGlobalDefaultEstimateMaster);
   const [loading, setLoading] = useState(true);
+
+  const dismissGlobalConfigError = () => setGlobalConfigError(null);
 
   const setActiveAgencyId = (id: string | null) => {
     setActiveAgencyIdState(id);
@@ -406,6 +413,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
             setGlobalDefaultEstimateMaster(fetchedGlobalMaster);
             cachedGlobalDefaultEstimateMaster = fetchedGlobalMaster;
             localStorage.setItem('cached_global_estimate_master', JSON.stringify(fetchedGlobalMaster));
+            setGlobalConfigError(null);
+            setGlobalConfigLoaded(true);
           } else {
             const globalConfigRef = doc(db, 'system_config', 'estimate_master');
             const globalConfigSnap = await getDoc(globalConfigRef);
@@ -414,10 +423,18 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
               setGlobalDefaultEstimateMaster(fetchedGlobalMaster);
               cachedGlobalDefaultEstimateMaster = fetchedGlobalMaster;
               localStorage.setItem('cached_global_estimate_master', JSON.stringify(fetchedGlobalMaster));
+              setGlobalConfigError(null);
+              setGlobalConfigLoaded(true);
+            } else {
+              setGlobalConfigError('Global estimate defaults (public_config/estimate_master) could not be loaded: document not found in database. Local defaults are currently in use.');
+              setGlobalConfigLoaded(false);
             }
           }
-        } catch (e) {
+        } catch (e: any) {
+          const errDetail = e?.message || 'Access error';
           console.warn('Could not fetch global public_config/estimate_master:', e);
+          setGlobalConfigError(`Global estimate defaults could not be loaded (${errDetail}). Local application defaults are currently in use.`);
+          setGlobalConfigLoaded(false);
         }
 
         // 2. Fetch Agencies
@@ -735,7 +752,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     <AgencyContext.Provider value={{
       agencies, activeAgency, setActiveAgencyId,
       atMasters, activeAtMaster, setActiveAtMasterId,
-      loading, isSuperAdmin, globalDefaultEstimateMaster, addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
+      loading, isSuperAdmin, globalDefaultEstimateMaster,
+      globalConfigError, globalConfigLoaded, dismissGlobalConfigError,
+      addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
       saveGlobalDefaultEstimateMaster, addAtMaster, updateAtMaster,
       getNextJobNoInfo, incrementJobNoCounter, syncCountersState
     }}>

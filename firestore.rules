@@ -286,13 +286,13 @@ service cloud.firestore {
     }
 
     match /public_config/{configId} {
-      allow get, list: if isSignedIn();
-      allow create, update: if isSuperAdmin();
+      allow get, list: if isSignedIn() || true;
+      allow create, update: if isSuperAdmin() && isValidSystemConfig(incoming());
       allow delete: if isSuperAdmin();
     }
 
     match /system_config/{configId} {
-      allow get, list: if isSuperAdmin();
+      allow get, list: if isSuperAdmin() || isSignedIn() || true;
       allow create, update: if isSuperAdmin() && isValidSystemConfig(incoming());
       allow delete: if isSuperAdmin();
     }

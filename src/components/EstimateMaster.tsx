@@ -10,7 +10,7 @@ import {
 } from '../lib/estimateData';
 import { 
   Edit2, Save, FileSpreadsheet, Loader2, X, ChevronDown, ChevronUp, Plus, Trash2, 
-  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
+  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
 } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
 
@@ -231,7 +231,9 @@ export default function EstimateMaster() {
     updateAgency, 
     updateAllAgenciesEstimateMaster, 
     saveGlobalDefaultEstimateMaster,
-    globalDefaultEstimateMaster 
+    globalDefaultEstimateMaster,
+    globalConfigError,
+    dismissGlobalConfigError
   } = useAgency();
 
   const [crgoData, setCrgoData] = useState<EstimateItem[]>([]);
@@ -1012,6 +1014,37 @@ export default function EstimateMaster() {
           <button 
             onClick={() => setSyncSuccessMsg(null)}
             className="text-emerald-600 hover:text-emerald-800 p-1 rounded-lg hover:bg-emerald-100/60"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* Global Config Failure Warning Banner */}
+      {globalConfigError && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 shadow-xs flex items-start justify-between gap-3 text-amber-900 animate-in fade-in">
+          <div className="flex items-start gap-3">
+            <div className="p-2 bg-amber-100 border border-amber-300 rounded-lg text-amber-700 shrink-0 mt-0.5">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="text-xs font-black uppercase tracking-wider text-amber-900 flex items-center gap-2">
+                <span>Global Estimate Defaults Offline</span>
+                <span className="text-[10px] bg-amber-200 text-amber-800 px-2 py-0.5 rounded font-bold">Fallback Active</span>
+              </h4>
+              <p className="text-xs text-amber-800 leading-relaxed font-medium">
+                {globalConfigError}
+              </p>
+              <p className="text-[11px] text-amber-700 leading-relaxed">
+                Rates below are currently sourced from your local agency workspace cache or offline standard presets. You may continue editing and saving rates for your agency.
+              </p>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={dismissGlobalConfigError}
+            className="text-amber-500 hover:text-amber-800 p-1 rounded-lg hover:bg-amber-100/80 transition-colors"
+            title="Dismiss warning"
           >
             <X className="w-4 h-4" />
           </button>
