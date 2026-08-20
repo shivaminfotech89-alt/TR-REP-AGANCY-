@@ -53,11 +53,124 @@ Four collision paths:
    on every new AT master. Needs a decision about *where counters live*, not a lock.
 
 Not a defect: a GP warranty repair deliberately reuses the original job number
-(`NewJob.tsx:890-891, 940`). Same physical unit, second visit. Distinguished from a
-true collision by serial number.
+(`NewJob.tsx:890-891, 940`). Same physical unit, second visit. **The test is the
+transformer, not the repair type: `serialNo` AND `make` AND `capacityKva` must all
+match.** All three collisions found fail that test.
 
 **Diagnostic:** `scripts/duplicate-jobno-console.js` — separates legitimate GP repeats
 from true collisions and shows which record the GP lookup would return for each.
+
+**Partly mitigated:** duplicate job numbers are now blocked at save
+(`NewJob.tsx`, `confirmSaveJob`), checked across the whole agency and every AT master
+under it, allowing reuse only on the same-transformer + GP test above. Also catches the
+same number twice within one intake, which nothing previously prevented. This stops new
+duplicates; it does not renumber existing ones (see C1) and does not fix the allocator.
+
+#### Making counters agency-wide — scoping (STEP 4)
+
+*Where they live now.* `lastJobNumbers` is a `Record<string, number>` keyed
+`"{division}_{CORETYPE}"`, stored on **both** `atMasters/{id}` and `agencies/{id}`.
+`getNextJobNoInfo` (`AgencyContext.tsx:693-705`) prefers the AT master's map, falling
+back to the agency's only when no AT master is active. Prefixes resolve the other way —
+`activeAtMaster.prefixes` **falling back to** `activeAgency.prefixes` — so two AT
+masters routinely share a prefix while holding separate counters. That mismatch is the
+structural collision.
+
+*Code change — small.* Point every counter read and write at the agency document
+unconditionally, dropping the AT-master branch in:
+1. `getNextJobNoInfo` (`AgencyContext.tsx:663-708`)
+2. `incrementJobNoCounter` (`AgencyContext.tsx:710-737`)
+3. the `runTransaction` block in `NewJob.tsx:858-974`, which picks `masterDocRef`
+   between `atMasters/{id}` and `agencies/{id}`
+
+plus `syncCountersState`. The key shape is unchanged, so nothing downstream is affected.
+
+*Migration — the real work.* Two options:
+
+- **`max()` across AT masters** — for each key, take the highest value across all AT
+  masters of the agency and the agency's own. Simple, but inherits whatever drift the
+  counters already carry.
+- **Derive from actual jobs — RECOMMENDED.** For every `{division}_{coreType}`, scan
+  the agency's jobs, parse the numeric suffix of `jobNo`, take the max. Self-correcting
+  regardless of counter state, and it reuses the same parse already in
+  `NewJob.tsx:895-903`. One-off script, dry-run first, same pattern as the F5 backfill.
+
+*Preconditions.*
+
+1. **Existing duplicates must be resolved first** — agency-wide counters stop new
+   collisions but do not renumber the three in C1.
+2. **`atMasters.lastJobNumbers` must be retired, not left in place** — if both stay
+   writable, any code path still reading the stale AT copy silently reintroduces the
+   split. Delete the field after migration, or freeze it and remove all reads.
+3. **BLOCKING QUESTION — confirm the numbering intent against the tender paperwork.**
+   If job numbers are *meant* to restart per AT master (which the current design
+   implies), agency-wide counters are the wrong fix; the right one is making the
+   **prefix** AT-specific, so `MSBT-1` under AT 26-27 is distinguishable from `MSBT-1`
+   under the previous AT. This is a documentation question that changes which fix is
+   correct. *Awaiting review of a previous tender's paperwork — do not implement until
+   answered.*
+
+*Reach of the fix.* Agency-wide counters close **path 4 only**. Paths 1-3 remain,
+because the number is still chosen client-side before the transaction opens and the
+transaction only reconciles. Closing those requires moving allocation **inside** the
+transaction — read the counter, assign `counter + 1`, write the job and the counter in
+one atomic operation. Larger change to `NewJob`'s save path; the save-time guard now
+catches the resulting duplicate either way, so it can be sequenced after the questions
+above are settled.
+
+### C1. Existing job-number collisions needing manual renumbering
+
+Confirmed by `scripts/duplicate-jobno-console.js`: 37 jobs scanned, 3 duplicated
+numbers, **0 legitimate GP repeats, 3 true collisions**. Each fails the
+same-transformer test (serial + make + capacity), so each is an ambiguous reference to
+a physical unit. These predate the save-time guard and are **not** fixed by it — they
+need a human decision to renumber.
+
+Doc IDs are recorded because the job number is currently the only handle on these
+records, and renumbering removes it.
+
+**⚠️ Read the KEEP / RENUMBER column before touching anything. `MSBT-12` contains a
+legitimate pair AND a collision — renumbering the wrong record would destroy a valid
+guarantee history.**
+
+#### `MSBT-12` — 3 records, only ONE is the collision
+
+| Doc ID | MR | Serial | Make | kVA | AT | Verdict |
+|---|---|---|---|---|---|---|
+| `drIm8L5uHbX2OVRdbVeP` | 9344 | `12` | `121` | 100 | none | **KEEP** — original OGP |
+| `ScUE3NkHxAKW6T9C9623` | 1 | `12` | `121` | 100 | none, GP | **KEEP** — GP return of the *same* unit (serial, make and capacity all match the record above). This is the legitimate reuse, not a defect. |
+| `BxVxraTszbqkpZprmhwp` | 85558 | `312132135` | `DVDVDFV` | 25 | 26-27 | **RENUMBER** — different physical transformer |
+
+#### `MSBT-1` — 2 records, both different units
+
+| Doc ID | MR | Serial | Make | kVA | AT | Verdict |
+|---|---|---|---|---|---|---|
+| `tKP7KMh4S45h875tWUPE` | 9344 | `xc` | `sdsd` | 100 | none | one of the two must be renumbered |
+| `IP4acepDCgDZMoPGM0RM` | 2555 | `HJ` | `63` | 63 | 26-27 | one of the two must be renumbered — **also in F5 group 4, see below** |
+
+#### `101` — 2 records, both different units (agency DRISHIV)
+
+| Doc ID | MR | Serial | Make | kVA | AT | Verdict |
+|---|---|---|---|---|---|---|
+| `dXMZ8WALx0QpOK6oAM79` | 9344 | `WNP` | `WNP` | 200 | none | one of the two must be renumbered |
+| `P9q3SxKkehJVEbGxCmSe` | 34 | `SS` | `SS` | 63 | none | one of the two must be renumbered |
+
+Both MEGHA collisions (`MSBT-12`, `MSBT-1`) are a pre-AT job versus one created under
+AT 26-27 — empirical confirmation of O2 path 4. The `101` pair is *not*: both records
+are pre-AT within one agency, so it came from one of paths 1-3, which agency-wide
+counters would **not** have prevented.
+
+**GP exposure, confirmed:** for `MSBT-12` the lookup returned the 25 kVA `DVDVDFV`
+unit, not the 100 kVA transformer. Mitigated by O1's fixes (agency scoping + operator
+disambiguation), but the underlying ambiguity remains until renumbering.
+
+**Cross-reference — `IP4acepDCgDZMoPGM0RM` has two open issues:**
+1. This entry — shares job number `MSBT-1` with a different transformer.
+2. F5 group 4 — its Internal inspection record exists but its `condition` is blank, so
+   the scrap backfill could not restore its identity and deliberately skipped it.
+
+Resolve both together: whoever identifies which physical transformer this record is
+can settle the renumbering and the Repairable/Scrap determination in one pass.
 
 ### O3. Per-job `billAmount` applies AT twice
 
@@ -143,8 +256,18 @@ declared. Transitions are asymmetric by design — `unset → Scrap|Repairable` 
 is a terminal determination made with the unit open: discoverable late, not
 undiscoverable.
 
-**Backfill:** `scripts/backfill-condition.js` (dry-run by default). 26 jobs writable,
-6 held for manual review (internal record with an empty `condition`), 0 unrecoverable.
+**Backfill: COMPLETE.** `scripts/backfill-condition.js` — **26/26 committed**,
+`condition` written and no other field modified. 6 jobs held for manual review
+(internal record present but its `condition` is empty), 0 unrecoverable, 0 stage
+anomalies. The 6 remain without a `condition` field and will get one when their
+internal inspection is next saved, or by decision from the group-4 detail dump.
+
+Six units were recovered as scrap: AMKLL-9, KLL-6 (MR 1563), AMSBT-1, MSBT-9,
+MWSBT-1 (MR 85558), MSBT-5 (MR 12). None had been billed (see F3).
+
+**Group 4 overlaps with C1:** `MSBT-1` doc `IP4acepDCgDZMoPGM0RM` (MR 2555, AT 26-27)
+is both a manual-review record here *and* one half of a job-number collision. See C1 —
+identifying the physical transformer settles both at once.
 
 ### F6. Guarantee clock measured from `updatedAt`
 

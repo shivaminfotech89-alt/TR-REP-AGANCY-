@@ -795,6 +795,80 @@ export default function NewJob() {
          return;
       }
 
+      // ---------------------------------------------------------------------
+      // DUPLICATE JOB NUMBER GUARD
+      // ---------------------------------------------------------------------
+      // A job number identifies one physical transformer. It may legitimately repeat
+      // in exactly one case: the SAME unit returning under a new MR as a GP repair
+      // after failing within the guarantee period. The test is the TRANSFORMER, not
+      // the repair type - serialNo, make and capacityKva must all match.
+      //
+      // Checked across the whole agency and every AT master under it, because job
+      // numbers are not uniquely allocated: counters live per AT master while
+      // prefixes are shared per division, so a new AT master reissues numbers that
+      // already exist (AUDIT.md O2, path 4). Without this, a duplicate silently makes
+      // every later reference to that number ambiguous - including the GP lookup,
+      // which would then price a guarantee claim against the wrong unit's history.
+      const normKey = (v: any) => String(v ?? '').trim().toUpperCase();
+      const isSameTransformer = (a: any, b: any) =>
+        normKey(a.serialNo) === normKey(b.serialNo) &&
+        normKey(a.make) === normKey(b.make) &&
+        Number(a.capacityKva) === Number(b.capacityKva);
+
+      const agencyJobsSnap = await getDocs(query(
+        collection(db, 'jobs'),
+        where('ownerId', '==', auth.currentUser.uid),
+        where('agencyId', '==', activeAgency.id)
+      ));
+      const existingByJobNo: Record<string, any[]> = {};
+      agencyJobsSnap.docs.forEach(d => {
+        const data = d.data() as any;
+        const key = normKey(data.jobNo);
+        if (key) (existingByJobNo[key] ||= []).push(data);
+      });
+
+      const describe = (j: any) =>
+        `MR ${j.mrNo || '-'} - Serial ${j.serialNo || '-'}, ${j.capacityKva || '-'} KVA, Make ${j.make || '-'}`;
+
+      const seenInBatch: Record<string, number> = {};
+      for (let i = 0; i < transformers.length; i++) {
+        const t = transformers[i];
+        const key = normKey(t.jobNo);
+        if (!key) continue;
+
+        // Same number twice inside this one intake.
+        if (seenInBatch[key] !== undefined) {
+          const err = `Duplicate Job Number "${t.jobNo.trim()}" appears twice in this intake (Transformer #${seenInBatch[key] + 1} and #${i + 1}). A job number identifies one physical transformer.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          setLoading(false);
+          return;
+        }
+        seenInBatch[key] = i;
+
+        const clashes = existingByJobNo[key] || [];
+        if (clashes.length === 0) continue;
+
+        const isGp = commonData.repairType === 'GP';
+        const sameUnit = clashes.find(c => isSameTransformer(c, t));
+        if (isGp && sameUnit) continue;   // same transformer returning under guarantee
+
+        const others = clashes.map(describe).join('\n  ');
+        const err = isGp
+          ? `Job Number "${t.jobNo.trim()}" already exists in this agency, but for a DIFFERENT transformer.\n\n` +
+            `Existing record${clashes.length > 1 ? 's' : ''}:\n  ${others}\n\n` +
+            `This intake - Serial ${t.serialNo || '-'}, ${t.capacityKva || '-'} KVA, Make ${t.make || '-'}.\n\n` +
+            `A GP repair may only reuse a job number when it is the same physical transformer - serial number, make and capacity must all match.`
+          : `Job Number "${t.jobNo.trim()}" is already used in this agency and cannot be reused for a new OGP intake.\n\n` +
+            `Existing record${clashes.length > 1 ? 's' : ''}:\n  ${others}\n\n` +
+            `This intake - Serial ${t.serialNo || '-'}, ${t.capacityKva || '-'} KVA, Make ${t.make || '-'}.\n\n` +
+            `A job number identifies one physical transformer. Use the next free number, or book this as a GP repair if it is the same unit returning under guarantee.`;
+        setErrorMsg(err);
+        setModalAlertMessage(err);
+        setLoading(false);
+        return;
+      }
+
       // Check Allotment limits ONLY for OGP (Out of Guarantee) jobs!
       // GP repairs (guarantee rework from current or previous AT) are exempt and do not deduct fresh quota!
       if (activeAtMaster && activeAgency && commonData.repairType === 'OGP') {
