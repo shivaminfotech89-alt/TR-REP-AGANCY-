@@ -491,6 +491,11 @@ inside the inspection record's `data`. Scrap identity therefore lived solely in
 moment it went on a challan. Confirmed: AMSBT-1, MSBT-9, MWSBT-1 (MR 85558) flipped to
 "OK" after dispatch; **0 of 32 jobs registered as scrap anywhere in the database**.
 
+**⚠️ F12 DEPENDS ON THIS ENTRY.** The GP suggestion filter excludes scrap candidates via
+`condition === 'Scrap'`, which exists on job documents only because of the fix and
+backfill below. Reverting this, or adding a job-creation path that does not set
+`condition`, silently degrades that filter to a no-op. See F12.
+
 **Fixed:** `InternalInspection` now writes `condition` to the job when the decision is
 declared. Transitions are asymmetric by design — `unset → Scrap|Repairable` and
 `Repairable → Scrap` allowed; `Scrap → Repairable` and clearing never permitted. Scrap
@@ -617,6 +622,17 @@ or Overhauling master changed. Pricing already resolves per job via
 - Blank inspection records marked jobs complete (MR 85558).
 - Saved `0` / blank values silently reloaded as `'3'` / `'4'` on HV/LV counts, and as
   the standard-table value for oil capacity.
+- **Stage-order gating enforced** — Received → External → Internal → Testing →
+  Dispatched. Internal inspection cannot be skipped: the Inspect/Edit button is
+  disabled until External is complete, and the save paths in `InternalInspection` and
+  `TestingReport` guard the write as well as the UI. The Scrap rule was corrected at the
+  same time (Scrap no longer auto-counts as externally done).
+
+  **⚠️ NOW LOAD-BEARING OUTSIDE INSPECTION.** F12 relies on this: it assumes any
+  dispatched job has passed through the path that sets `condition`. Relaxing the
+  ordering — allowing dispatch without internal inspection, for any reason — lets jobs
+  reach the GP suggestion list with `condition` unset, where they read as non-scrap by
+  default. See F12.
 
 
 ### F10. Unresolvable charge printed as 0.00; saved master shadowed the defaults
@@ -696,6 +712,51 @@ has no call sites (see A2), and the save transaction's counter work is gated on
 `repairType !== 'GP'`, so `hasCounterChange` stays false and the master document is not
 written on a GP save. No numbers have been burned.
 
+### F12. GP suggestions listed undelivered and scrapped transformers
+
+`suggestGpJobs` filtered only on the job-number substring, so every job in the
+agency-scoped `pastJobs` was offered as a GP candidate regardless of its state. A unit
+still in repair, testing or awaiting dispatch has not been delivered and cannot return
+under guarantee; a scrapped unit was returned to the division rather than repaired, so
+there is no repair to guarantee. Linking to either applies the wrong transformer's make,
+serial, kVA and `prevDeliveryDate` to a warranty row — see O1 for why
+`prevDeliveryDate` in particular matters.
+
+**Fixed:** two filters ahead of the existing substring match — `status === 'Dispatched'`
+and not scrap. Ordering, field set, the limit of 8 and the matching rule are unchanged.
+
+**⚠️ DEPENDENCY — F12, F5 and the stage-order gating (F9) are only correct in
+combination. Do not treat any of the three as independently removable.**
+
+`status === 'Dispatched'` does **not** exclude scrap on its own. A scrapped transformer
+*is* dispatched — that is how it returns to the division — so it carries
+`status: 'Dispatched'` and survives the status filter. It is identifiable **only** by
+`condition === 'Scrap'`.
+
+And `condition` was never written to any job document until F5 (see F5: scrap identity
+lived solely in `status`, which dispatch overwrote). **Before F5's backfill, this filter
+would have silently excluded nothing** — every scrap job would have read as an ordinary
+delivered repair and been offered as a GP candidate.
+
+Concretely: the six jobs F5 restored — AMKLL-9, KLL-6 (MR 1563), AMSBT-1, MSBT-9,
+MWSBT-1 (MR 85558), MSBT-5 (MR 12) — are all `status: 'Dispatched'` with a challan.
+Every one would appear in the GP suggestion list under a status-only filter.
+
+Consequences to preserve:
+- Removing the `condition === 'Scrap'` test because "the status test already covers
+  it" reinstates the bug. It does not cover it.
+- Reverting F5, or any future path that writes a job without setting `condition`,
+  silently degrades this filter back to no-op for those jobs.
+- Any new job created outside `InternalInspection`'s save path will lack `condition`
+  and be treated here as non-scrap by default.
+- **Relaxing the stage-order gating (F9) breaks this filter.** What guarantees a
+  dispatched job has a `condition` at all is that internal inspection cannot be
+  skipped — that is the only path that sets it. `NewJob` deliberately creates jobs
+  without `condition`, since the scrap decision has not been made at intake. So the
+  filter's correctness rests on stage ordering, not on anything visible in
+  `suggestGpJobs` itself. Allow dispatch without internal inspection and those jobs
+  arrive here indistinguishable from repaired ones.
+
 ---
 
 ## Recurring theme
@@ -709,3 +770,16 @@ Every entry above is one of two shapes:
 
 New code should fail loudly on missing inputs, and should never key identity to a
 field that changes as the unit moves through its lifecycle.
+
+**Several of today's fixes are only correct in combination, and the couplings are not
+visible from any one call site.** F12's scrap exclusion works only because F5 restored
+`condition` to job documents, and only because the stage-order gating (F9) guarantees
+every dispatched job passed through the one path that sets it. Reading `suggestGpJobs`
+alone shows none of that — the filter looks self-contained and each half looks
+individually redundant.
+
+This is the failure mode to watch for during cleanup: a check that appears superfluous
+in isolation is often the visible half of an invariant maintained somewhere else.
+Before removing one, find what establishes the data it depends on. Where a coupling
+exists, note it **on both sides** — a one-way note is only found by whoever happens to
+read the right entry, which is never the person about to break it.

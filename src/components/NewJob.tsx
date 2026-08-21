@@ -496,11 +496,22 @@ export default function NewJob() {
   };
 
   /** Partial, case-insensitive, anywhere-in-string matches for the type-ahead list.
-   *  pastJobs is already agency-scoped and sorted newest first. */
+   *  pastJobs is already agency-scoped and sorted newest first.
+   *
+   *  Only DELIVERED, REPAIRED transformers are GP candidates:
+   *  - `status === 'Dispatched'` — a unit still in repair, testing or awaiting dispatch
+   *    has not been delivered, so it cannot yet return under guarantee.
+   *  - not scrap — a scrapped transformer was returned to the division rather than
+   *    repaired, so there is no repair to guarantee. Note the scrap test is needed on
+   *    top of the status test, not instead of it: scrap units ARE dispatched back, so
+   *    they carry status 'Dispatched' and would otherwise still be listed. They are
+   *    identifiable by `condition === 'Scrap'`. */
   const suggestGpJobs = (queryVal: string, limit = 8) => {
     const q = queryVal.trim().toLowerCase();
     if (!q) return [];
     return pastJobs
+      .filter(j => j.status === 'Dispatched')
+      .filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'))
       .filter(j => (j.jobNo || '').toLowerCase().includes(q))
       .slice(0, limit);
   };
