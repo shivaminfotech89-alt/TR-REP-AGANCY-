@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
+import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { resolveScrapCharge, getScrapItemCodeForCore } from '../lib/estimateCalc';
 
 export default function Reports() {
@@ -41,6 +42,7 @@ export default function Reports() {
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [divisionFilter, setDivisionFilter] = useState('All');
+  const [gpFilter, setGpFilter] = useState<GpFilter>('All');
   const [stageFilter, setStageFilter] = useState('All');
 
   // Lifecycle Date Manager Modal State
@@ -348,6 +350,7 @@ export default function Reports() {
 
       // Division filter
       if (divisionFilter !== 'All' && j.division !== divisionFilter) return false;
+      if (!matchesGpFilter(j, gpFilter)) return false;
 
       // Stage filter
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
@@ -366,7 +369,7 @@ export default function Reports() {
 
       return true;
     });
-  }, [jobs, searchQuery, divisionFilter, stageFilter, activeTab]);
+  }, [jobs, searchQuery, divisionFilter, stageFilter, activeTab, gpFilter]);
 
   // Open Lifecycle Date Modal for a job
   const handleOpenDateModal = (job: any) => {
@@ -689,6 +692,17 @@ export default function Reports() {
             <div className="flex items-center gap-1.5">
               <span className="text-xs font-bold text-slate-500 uppercase">Division:</span>
               <select
+                value={gpFilter}
+                onChange={(e) => setGpFilter(e.target.value as GpFilter)}
+                className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                title="Filter by repair type - GP repairs are done under guarantee at no cost"
+              >
+                {GP_FILTER_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+
+              <select
                 value={divisionFilter}
                 onChange={(e) => setDivisionFilter(e.target.value)}
                 className="py-1.5 px-3 text-xs border border-slate-300 rounded bg-white text-slate-800 font-medium"
@@ -754,7 +768,12 @@ export default function Reports() {
                   return (
                     <tr key={job.id} className="hover:bg-slate-50 transition-colors">
                       <td className="px-3 py-3 text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="px-3 py-3 font-mono font-bold text-slate-900">{job.jobNo}</td>
+                      <td className="px-3 py-3 font-mono font-bold">
+                        <span className="flex items-center gap-1.5">
+                          <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
+                          {matchesGpFilter(job, 'GP') && <GpChip />}
+                        </span>
+                      </td>
                       <td className="px-3 py-3">
                         <div className="font-mono font-bold text-slate-800">{job.mrNo || 'N/A'}</div>
                         <div className="text-[10px] text-slate-500">{cycle.receiveDate}</div>

@@ -6,6 +6,7 @@ import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/fir
 import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles, Scale, Cpu, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
+import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { RATING_LEVEL_OPTIONS } from '../lib/estimateData';
@@ -86,6 +87,7 @@ export default function ExternalInspection() {
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
+  const [gpFilter, setGpFilter] = useState<GpFilter>('All');
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
   
   const [statusFilter, setStatusFilter] = useState<'Pending' | 'Completed'>('Pending');
@@ -559,6 +561,7 @@ export default function ExternalInspection() {
   const mrGroups: Record<string, any[]> = {};
   jobs.forEach(j => {
     if (divisionFilter !== 'All' && j.division !== divisionFilter) return;
+    if (!matchesGpFilter(j, gpFilter)) return;
     if (!mrGroups[j.mrNo]) mrGroups[j.mrNo] = [];
     mrGroups[j.mrNo].push(j);
   });
@@ -935,6 +938,17 @@ export default function ExternalInspection() {
             <h2 className="text-sm font-bold text-slate-700 print:text-black uppercase tracking-widest">Select MR to Inspect</h2>
             <div className="flex flex-wrap items-center space-x-4 w-full md:w-auto gap-y-2">
               <select
+                value={gpFilter}
+                onChange={(e) => setGpFilter(e.target.value as GpFilter)}
+                className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                title="Filter by repair type - GP repairs are done under guarantee at no cost"
+              >
+                {GP_FILTER_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+
+              <select
                 value={divisionFilter}
                 onChange={(e) => setDivisionFilter(e.target.value)}
                 className="px-3 py-1.5 text-xs border border-slate-300 rounded bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1284,14 +1298,10 @@ export default function ExternalInspection() {
                         <td className="p-2 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
                           {index + 1}
                         </td>
-                        <td className="p-2 text-xs font-mono font-bold text-slate-900 sticky left-8 bg-white group-hover:bg-slate-50 border-r border-slate-200 min-w-[100px] z-10">
+                        <td className="p-2 text-xs font-mono font-bold sticky left-8 bg-white group-hover:bg-slate-50 border-r border-slate-200 min-w-[100px] z-10">
                           <div className="flex items-center gap-1.5">
-                            <span>{job.jobNo}</span>
-                            {job.repairType === 'GP' && (
-                              <span className="text-[9px] px-1 py-0.2 bg-amber-100 text-amber-800 rounded font-bold border border-amber-300">
-                                GP
-                              </span>
-                            )}
+                            <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
+                            {matchesGpFilter(job, 'GP') && <GpChip />}
                           </div>
                         </td>
                         <td className="p-2 text-xs font-mono font-medium text-slate-700 min-w-[90px] border-r border-slate-200">

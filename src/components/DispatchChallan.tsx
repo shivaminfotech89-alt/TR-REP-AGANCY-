@@ -29,6 +29,7 @@ import {
 import * as XLSX from 'xlsx';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
+import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
@@ -45,6 +46,7 @@ export default function DispatchChallan() {
   const [jobCategoryFilter, setJobCategoryFilter] = useState<'All' | 'Repairable' | 'Scrap'>('All');
   const [selectedDivision, setSelectedDivision] = useState('All');
   const [mrFilter, setMrFilter] = useState('All');
+  const [gpFilter, setGpFilter] = useState<GpFilter>('All');
   // Pending list is ordered by test date, most recently tested first by default.
   const [testDateSortDir, setTestDateSortDir] = useState<'desc' | 'asc'>('desc');
   
@@ -52,6 +54,7 @@ export default function DispatchChallan() {
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [historyDivisionFilter, setHistoryDivisionFilter] = useState('All');
   const [historyMrFilter, setHistoryMrFilter] = useState('All');
+  const [historyGpFilter, setHistoryGpFilter] = useState<GpFilter>('All');
   const [historyCategoryFilter, setHistoryCategoryFilter] = useState<'All' | 'Repairable' | 'Scrap'>('All');
   const [historyViewMode, setHistoryViewMode] = useState<'cards' | 'table'>('cards');
   
@@ -140,6 +143,9 @@ export default function DispatchChallan() {
     if (selectedDivision !== 'All') {
       result = result.filter(j => (j.division || '').trim().toLowerCase() === selectedDivision.trim().toLowerCase());
     }
+    if (gpFilter !== 'All') {
+      result = result.filter(j => matchesGpFilter(j, gpFilter));
+    }
     if (searchQuery.trim()) {
       const lowerQ = searchQuery.toLowerCase().trim();
       result = result.filter(j =>
@@ -152,7 +158,7 @@ export default function DispatchChallan() {
       );
     }
     return result;
-  }, [pendingJobs, jobCategoryFilter, searchQuery, selectedDivision]);
+  }, [pendingJobs, jobCategoryFilter, searchQuery, selectedDivision, gpFilter]);
 
   const pendingMrOptions = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -210,6 +216,7 @@ export default function DispatchChallan() {
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       if (historyCategoryFilter === 'Repairable' && isScrap) return false;
       if (historyCategoryFilter === 'Scrap' && !isScrap) return false;
+      if (!matchesGpFilter(j, historyGpFilter)) return false;
       if (historySearchQuery.trim()) {
         const q = historySearchQuery.toLowerCase().trim();
         const hit = [j.jobNo, j.mrNo, j.challanNo, j.vehicleNo, j.make, j.serialNo, j.division, j.capacityKva]
@@ -218,7 +225,7 @@ export default function DispatchChallan() {
       }
       return true;
     });
-  }, [allDispatchedJobs, historyDivisionFilter, historyCategoryFilter, historySearchQuery]);
+  }, [allDispatchedJobs, historyDivisionFilter, historyCategoryFilter, historySearchQuery, historyGpFilter]);
 
   const historyMrOptions = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -251,7 +258,8 @@ export default function DispatchChallan() {
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       if (historyCategoryFilter === 'Repairable' && isScrap) return false;
       if (historyCategoryFilter === 'Scrap' && !isScrap) return false;
-      
+      if (!matchesGpFilter(j, historyGpFilter)) return false;
+
       // Search query
       if (historySearchQuery.trim()) {
         const q = historySearchQuery.toLowerCase().trim();
@@ -269,7 +277,7 @@ export default function DispatchChallan() {
       }
       return true;
     }).sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
-  }, [allDispatchedJobs, historyDivisionFilter, historyMrFilter, historyCategoryFilter, historySearchQuery]);
+  }, [allDispatchedJobs, historyDivisionFilter, historyMrFilter, historyCategoryFilter, historySearchQuery, historyGpFilter]);
 
   // Group filtered jobs into challan groups
   const filteredChallanHistory = useMemo(() => {
@@ -931,6 +939,17 @@ export default function DispatchChallan() {
                 </div>
 
                 <select
+                  value={gpFilter}
+                  onChange={(e) => setGpFilter(e.target.value as GpFilter)}
+                  className="px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:border-blue-500 bg-white shrink-0"
+                  title="Filter by repair type - GP repairs are done under guarantee at no cost"
+                >
+                  {GP_FILTER_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+
+                <select
                   value={mrFilter}
                   onChange={(e) => setMrFilter(e.target.value)}
                   className="px-2.5 py-2 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:border-blue-500 bg-white shrink-0 max-w-[170px]"
@@ -1014,7 +1033,12 @@ export default function DispatchChallan() {
                                 {isSelected && <CheckCircle2 className="w-3.5 h-3.5" />}
                               </div>
                             </td>
-                            <td className="p-2 font-mono font-bold text-slate-900">{job.jobNo}</td>
+                            <td className="p-2 font-mono font-bold">
+                              <span className="flex items-center gap-1.5">
+                                <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
+                                {matchesGpFilter(job, 'GP') && <GpChip />}
+                              </span>
+                            </td>
                             <td className="p-2 font-mono text-slate-700">{job.mrNo || '-'}</td>
                             <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
                             <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
@@ -1254,6 +1278,17 @@ export default function DispatchChallan() {
                   MR Number
                 </label>
                 <select
+                  value={historyGpFilter}
+                  onChange={(e) => setHistoryGpFilter(e.target.value as GpFilter)}
+                  className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:bg-white focus:border-purple-500"
+                  title="Filter by repair type - GP repairs are done under guarantee at no cost"
+                >
+                  {GP_FILTER_OPTIONS.map(o => (
+                    <option key={o.value} value={o.value}>{o.label}</option>
+                  ))}
+                </select>
+
+                <select
                   value={historyMrFilter}
                   onChange={(e) => setHistoryMrFilter(e.target.value)}
                   className="w-full px-2.5 py-2 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium outline-none focus:bg-white focus:border-purple-500"
@@ -1484,7 +1519,12 @@ export default function DispatchChallan() {
 
                       return (
                         <tr key={job.id} className={`transition-colors whitespace-nowrap ${isScrap ? 'bg-amber-50/60 hover:bg-amber-100/60' : 'hover:bg-slate-50'}`}>
-                          <td className="p-2 font-mono font-bold text-slate-900">{job.jobNo}</td>
+                          <td className="p-2 font-mono font-bold">
+                              <span className="flex items-center gap-1.5">
+                                <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
+                                {matchesGpFilter(job, 'GP') && <GpChip />}
+                              </span>
+                            </td>
                           <td className="p-2 font-mono text-slate-700">{job.mrNo || '-'}</td>
                           <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
                           <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>

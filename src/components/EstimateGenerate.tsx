@@ -11,7 +11,8 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
-import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore } from '../lib/estimateCalc';
+import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
+import { GP_TEXT_CLASS } from '../lib/jobDisplay';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import SingleJobEstimateReport from './SingleJobEstimateReport';
@@ -553,9 +554,25 @@ export default function EstimateGenerate() {
     return Array.from(set).sort();
   }, [jobs]);
 
+  // A GP repair within the guarantee period is free of cost - the agency redoes the
+  // work at its own expense. GP jobs therefore produce NO estimate: excluded from job
+  // selection, from the forwarding letter's table and from its TOTAL.
+  //
+  // Keyed on repairType/isGp, NOT gpSource: gpSource only exists on jobs saved since it
+  // was added, so keying off it would leave every pre-existing GP job billable.
   const selectedJobsData = useMemo(() => {
     if (!selectedMrNo) return [];
-    return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
+    return jobs
+      .filter(j => j.mrNo === selectedMrNo)
+      .filter(j => !isGpJob(j))
+      .sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
+  }, [jobs, selectedMrNo]);
+
+  /** GP jobs in the selected MR - excluded from the estimate, but counted so the
+   *  operator can see the numbers reconcile rather than silently not adding up (1e). */
+  const selectedMrGpJobs = useMemo(() => {
+    if (!selectedMrNo) return [];
+    return jobs.filter(j => j.mrNo === selectedMrNo && isGpJob(j));
   }, [jobs, selectedMrNo]);
   
   // Unsent MRs count (Stage 1)
@@ -723,9 +740,11 @@ export default function EstimateGenerate() {
     return checkJobCircleLimitPure(job, ext, int, activeAgency, activeAtMaster, circleMaster);
   };
 
+  /** Jobs of an MR that actually get estimated - GP carries no charge (see isGpJob). */
+  const estimableJobs = (mr: string) => (mrGroups[mr] || []).filter(j => !isGpJob(j));
+
   const mrHasExceededCircleLimit = (mr: string) => {
-    const mrJobs = mrGroups[mr] || [];
-    return mrJobs.some(j => checkJobCircleLimit(j).exceeds);
+    return estimableJobs(mr).some(j => checkJobCircleLimit(j).exceeds);
   };
 
   const handleUpdateJobRating = async (jobId: string, newRating: string) => {
@@ -750,10 +769,12 @@ export default function EstimateGenerate() {
       .filter(item => item.check.exceeds);
   }, [selectedJobsData, activeAgency, activeAtMaster, externalInspMap, internalInspMap]);
 
+  // GP jobs are excluded from the TOTAL as well as from the table - they must not
+  // appear as a zero line, and must not be dropped from a table while still counting
+  // toward the sum.
   const calculateMrEstimateTotal = (mr: string) => {
-    const mrJobs = mrGroups[mr] || [];
     let total = 0;
-    mrJobs.forEach(job => {
+    estimableJobs(mr).forEach(job => {
       total += getJobFullEstimate(job).finalAmount;
     });
     return Math.round(total);
@@ -1111,7 +1132,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                         <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
                         <td className="p-1 border-r border-black">11</td>
                         <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
-                        <td className="p-1 border-r border-black">OGP</td>
+                        <td className="p-1 border-r border-black">{job.repairType || 'OGP'}</td>
                         <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
                         <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
                           {isScrapJob ? (
@@ -1353,8 +1374,10 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       filteredMrNos.map(mr => {
                         const groupJobs = mrGroups[mr] || [];
                         const divName = groupJobs[0]?.division || '-';
-                        const scrapCount = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
-                        const repairableCount = groupJobs.length - scrapCount;
+                        const gpCount = groupJobs.filter(j => isGpJob(j)).length;
+                        const chargeableJobs = groupJobs.filter(j => !isGpJob(j));
+                        const scrapCount = chargeableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+                        const repairableCount = chargeableJobs.length - scrapCount;
                         const estTotal = calculateMrEstimateTotal(mr);
                         const isSent = groupJobs.some(j => j.estimateSentDate || j.estimateStatus === 'Sent' || j.estimateRefNo);
                         const isApproved = groupJobs.some(j => !!j.approvalNo || j.estimateApprovalStatus === 'Approved');
@@ -1381,6 +1404,14 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                             <td className="px-4 py-3 text-slate-600">
                               <span className="font-semibold">{groupJobs.length} Jobs</span>
                               <span className="text-xs text-slate-400 block">({repairableCount} Rep, {scrapCount} Scrap)</span>
+                              {gpCount > 0 && (
+                                <span
+                                  className={`text-xs font-semibold block ${GP_TEXT_CLASS}`}
+                                  title="GP repairs are done under guarantee at no cost and are excluded from the estimate and its total"
+                                >
+                                  {gpCount} of {groupJobs.length} jobs are GP - not billable
+                                </span>
+                              )}
                             </td>
                             <td className="px-4 py-3 font-mono font-bold text-slate-900">
                               <div>₹{estTotal.toLocaleString('en-IN')}</div>
@@ -1977,7 +2008,7 @@ Circle Office : SABARMATI`}
                                 <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
                                 <td className="p-1 border-r border-black">11</td>
                                 <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
-                                <td className="p-1 border-r border-black">OGP</td>
+                                <td className="p-1 border-r border-black">{job.repairType || 'OGP'}</td>
                                 <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
                                 <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
                                   {isScrapJob ? (

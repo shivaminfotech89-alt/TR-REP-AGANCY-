@@ -7,6 +7,7 @@ import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/fir
 import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
+import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { PrintableA4Page } from './LetterheadHeader';
 import { isMrReadyForTesting, isJobExternallyDone, isJobInternallyDone } from '../lib/inspectionStage';
@@ -78,6 +79,7 @@ export default function TestingReport() {
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
   const [jobNoFilter, setJobNoFilter] = useState<string>('');
   const [mrNoFilter, setMrNoFilter] = useState<string>('All');
+  const [gpFilter, setGpFilter] = useState<GpFilter>('All');
   
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   const [isFormOpen, setIsFormOpen] = useState(false);
@@ -165,9 +167,10 @@ export default function TestingReport() {
       if (divisionFilter !== 'All' && (j.division || 'Unknown') !== divisionFilter) return false;
       if (jobNoFilter && !j.jobNo.toLowerCase().includes(jobNoFilter.toLowerCase())) return false;
       if (mrNoFilter !== 'All' && j.mrNo !== mrNoFilter) return false;
+      if (!matchesGpFilter(j, gpFilter)) return false;
       return true;
     }).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
-  }, [tabEligibleJobs, divisionFilter, jobNoFilter, mrNoFilter]);
+  }, [tabEligibleJobs, divisionFilter, jobNoFilter, mrNoFilter, gpFilter]);
 
   const handleToggleJob = (id: string) => {
     const newSet = new Set(selectedJobIds);
@@ -622,6 +625,16 @@ export default function TestingReport() {
                 ))}
               </select>
               <select
+                value={gpFilter}
+                onChange={(e) => setGpFilter(e.target.value as GpFilter)}
+                className="px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                title="Filter by repair type - GP repairs are done under guarantee at no cost"
+              >
+                {GP_FILTER_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <select
                 value={divisionFilter}
                 onChange={(e) => setDivisionFilter(e.target.value)}
                 className="px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
@@ -706,7 +719,10 @@ export default function TestingReport() {
                       {idx + 1}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <div className="font-mono font-bold text-slate-900 text-sm">{job.jobNo}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`font-mono font-bold text-sm ${matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}`}>{job.jobNo}</span>
+                        {matchesGpFilter(job, 'GP') && <GpChip />}
+                      </div>
                       {job.serialNo ? (
                         <div className="text-[11px] font-mono text-slate-500">
                           S.No: <span className="font-semibold text-slate-700">{job.serialNo}</span>
@@ -864,7 +880,10 @@ export default function TestingReport() {
                   <div className="flex flex-wrap items-center justify-between mb-4 border-b border-slate-100 pb-3 gap-2">
                     <div>
                       <div className="flex items-center gap-3">
-                        <h3 className="font-mono font-bold text-slate-900 text-lg">{job.jobNo}</h3>
+                        <h3 className={`font-mono font-bold text-lg flex items-center gap-2 ${matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}`}>
+                          {job.jobNo}
+                          {matchesGpFilter(job, 'GP') && <GpChip />}
+                        </h3>
                         {job.serialNo && (
                           <span className="text-xs font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
                             S.No: {job.serialNo}

@@ -8,6 +8,20 @@ export function getJobFullEstimate(job: any, externalData: any, internalData: an
   return buildSingleJobEstimateData(job, agency, atMaster, externalData, internalData);
 }
 
+/**
+ * A GP (guarantee) repair carries NO charge: the agency redoes the work at its own
+ * expense within the guarantee period. GP jobs are excluded from every money path -
+ * estimates, forwarding letters, and bills of both types. Oil accounting is NOT
+ * affected: oil is consumed regardless of who pays for the repair.
+ *
+ * Keyed on `repairType` / `isGp`, which exist on EVERY job. Deliberately NOT on
+ * `gpSource`, which was added later and therefore exists only on jobs saved since -
+ * keying off it would leave the entire pre-existing GP population billable.
+ */
+export function isGpJob(job: any): boolean {
+  return job?.repairType === 'GP' || job?.isGp === true;
+}
+
 // ---------------------------------------------------------------------------
 // SCRAP FLAT CHARGE - single source of truth
 // ---------------------------------------------------------------------------

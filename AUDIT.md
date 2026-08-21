@@ -68,6 +68,33 @@ cannot drift. Where the operation is spread through UI event handlers and cannot
 reasonably be centralised (F11), the enumeration is the substitute, and it belongs in
 the commit that adds the guard.
 
+### The inverse failure: one filter, two concerns sharing a data source
+
+The same shape runs the other way. Excluding a job class from one concern silently
+excludes it from **every** concern reading the same variable — including ones the change
+was explicitly told not to touch.
+
+**Near-miss, caught by re-reading rather than by a test.** The GP billing exclusion
+(F14) was specified with "oil accounting UNCHANGED — oil is consumed regardless of who
+pays for the repair." The first pass added `!isGpJob(j)` to `selectedJobsData`, which
+looked exactly right. But `jobOilDetails` mapped that same variable, so GP transformers
+vanished from the oil account sheet too — the one thing the instruction had ruled out.
+Nothing failed; the sheet simply had fewer rows and smaller totals.
+
+Fixed by splitting the source: `selectedJobsWithGp` for oil, `selectedJobsData` for
+money, each commented with which concern it serves and the oil memo carrying an explicit
+"do not switch this to selectedJobsData".
+
+**Working rule.** Before narrowing a shared variable, list every consumer of it and
+decide the answer for each. A variable read by more than one concern is not a filter
+point — it is a data source, and narrowing it changes every reader at once. If two
+concerns need different subsets, they need different variables, named for the concern
+rather than for the filter.
+
+**Note what did not catch this**: not the type checker, not lint, not the reviewer who
+wrote the constraint into the instruction. Only re-reading the consumers. That is the
+argument for the enumeration habit above being a written step rather than a mental one.
+
 ---
 
 ## OPEN
@@ -756,6 +783,62 @@ Consequences to preserve:
   filter's correctness rests on stage ordering, not on anything visible in
   `suggestGpJobs` itself. Allow dispatch without internal inspection and those jobs
   arrive here indistinguishable from repaired ones.
+
+### F13. Every printed estimate asserted "OGP" regardless of the job's real type
+
+The TYPE column in both of `EstimateGenerate.tsx`'s job-row tables — the forwarding
+letter and the matrix view — was a literal `<td className="...">OGP</td>`. Not a
+fallback, not a defaulted read: a hardcoded string at two sites. Nothing on that column
+ever consulted `repairType`.
+
+**Fixed:** both now render `{job.repairType || 'OGP'}`, matching what
+`SingleJobEstimateReport` already did at its own two sites.
+
+**Why this matters beyond the wrong label — it is why MSBT-12 went unnoticed.** MSBT-12
+(MR 1) was a GP job estimated, billed and paid for guarantee work (C3). The one document
+that would have shown a reviewer it was a guarantee repair — the estimate sent to UGVCL
+— stated the opposite. The paperwork actively asserted the wrong thing rather than
+merely omitting it, so no amount of care in reading it would have caught the error.
+
+**⚠️ EVIDENTIARY CONSEQUENCE — printed estimates cannot be used to determine repair
+type.** Every estimate produced before this fix shows "OGP" in the TYPE column whether
+the job was OGP or GP. When reconstructing whether a historical job was a guarantee
+repair, the printed estimate is not evidence: use `repairType` / `isGp` on the job
+document. This applies to any estimate already issued to or held by UGVCL.
+
+### F14. GP jobs were estimated and billed like ordinary repairs
+
+A GP repair within the guarantee period is **free of cost** — the agency redoes the work
+at its own expense. Nothing in `EstimateGenerate.tsx`, `BillingSystem.tsx` or
+`estimateCalc.ts` filtered on `repairType`: the word did not appear in those files at
+all except as a display label. A GP job was therefore fully itemised, included in the
+forwarding letter and its TOTAL, billed, taxed and totalled.
+
+**Realised:** MSBT-12 (MR 1) — estimated, billed `BILL/1`, and **paid Rs 6,680** for
+guarantee work. See C3 for the refund, and F13 for why the paperwork concealed it.
+
+**Fixed:** one shared `isGpJob(job)` in `lib/estimateCalc.ts`, keyed on
+`repairType === 'GP' || isGp === true` — deliberately **not** on `gpSource`, which
+postdates the existing GP population and would have left every pre-existing GP job
+billable. Applied at:
+
+- **Estimate** — `selectedJobsData` (no estimate sheet, no letter line), plus a new
+  `estimableJobs(mr)` behind `calculateMrEstimateTotal` and `mrHasExceededCircleLimit`,
+  so GP is out of the TOTAL and the circle-limit check as well as the table.
+- **Billing** — `selectedJobsData`, `jobsForBillType`, `selectedMrPendingCount`,
+  `handleGenerateClick`, `filteredMrNos`'s `hasMatchingType`, and `handleSelectMr`'s
+  auto-select counts. An MR of only GP jobs no longer appears in the generator at all.
+
+**Would it have stopped MSBT-12? Yes, at three independent points:** no estimate could
+be produced or totalled; MR 1 would not have appeared in the Bill Generator, so `BILL/1`
+could not have been raised; and `handleRecordPayment` writes to `jobsForBillType(mr)`,
+which would have been empty, so the payment stamp had nothing to write to. The failure
+would also have been *visible* — the MR row reading "3 of 3 jobs are GP - not billable"
+rather than silently skipping.
+
+**Oil accounting deliberately unaffected** — see the near-miss recorded under the second
+pattern note. GP transformers still appear on the oil sheet with capacity, received and
+shortage.
 
 ---
 

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { resolveScrapCharge, getScrapItemCodeForCore } from '../lib/estimateCalc';
+import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
+import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, 
@@ -223,9 +224,11 @@ export default function BillingSystem() {
     // Scrap is billable only once actually returned to the division on a challan -
     // same rule as selectedJobsData, so the summary, the document and the write all
     // agree on which jobs the bill covers.
+    // GP is excluded from both bill types before anything else - see isGpJob.
+    const billable = groupJobs.filter(j => !isGpJob(j));
     const typeJobs = wantScrap
-      ? groupJobs.filter(j => (j.status === 'Scrap' || j.condition === 'Scrap') && j.status === 'Dispatched' && Boolean(j.challanNo))
-      : groupJobs.filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'));
+      ? billable.filter(j => (j.status === 'Scrap' || j.condition === 'Scrap') && j.status === 'Dispatched' && Boolean(j.challanNo))
+      : billable.filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'));
     const deliveredJobs = typeJobs.filter(j => j.status === 'Dispatched');
     return deliveredJobs.length > 0 ? deliveredJobs : typeJobs;
   };
@@ -259,6 +262,7 @@ export default function BillingSystem() {
       // stays visible. The bill itself contains only delivered scrap, and the
       // nothing-to-bill modal handles the empty case.
       const hasMatchingType = groupJobs.some(j => {
+        if (isGpJob(j)) return false;
         const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
         return billTypeFilter === 'scrap' ? isScrap : !isScrap;
       });
@@ -268,7 +272,11 @@ export default function BillingSystem() {
   }, [mrGroups, searchQuery, selectedDivision, billTypeFilter]);
 
   // Selected jobs for the active bill (Resilient matching)
-  const selectedJobsData = useMemo(() => {
+  // Two sets, deliberately distinct:
+  //   selectedJobsWithGp - drives the OIL ACCOUNT sheet. Includes GP jobs: oil is
+  //                        consumed regardless of who pays for the repair.
+  //   selectedJobsData   - drives every MONEY path. GP excluded, no charge.
+  const selectedJobsWithGp = useMemo(() => {
     if (!selectedMrNo) return [];
     const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
     if (mrJobs.length === 0) return [];
@@ -307,11 +315,25 @@ export default function BillingSystem() {
     return [...singleType].sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
   }, [jobs, selectedMrNo, billTypeFilter]);
 
+  // GP repairs are done under guarantee at no cost - never billed, in either bill type.
+  // Keyed on repairType/isGp so pre-existing GP jobs are covered too (isGpJob).
+  const selectedJobsData = useMemo(
+    () => selectedJobsWithGp.filter(j => !isGpJob(j)),
+    [selectedJobsWithGp]
+  );
+
+  /** GP jobs in this MR - excluded from the bill, counted so the numbers reconcile. */
+  const selectedMrGpJobs = useMemo(
+    () => selectedJobsWithGp.filter(j => isGpJob(j)),
+    [selectedJobsWithGp]
+  );
+
   // Selected MR pending jobs count
   const selectedMrPendingCount = useMemo(() => {
     if (!selectedMrNo) return 0;
     const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
     const targetJobs = mrJobs.filter(j => {
+      if (isGpJob(j)) return false;
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     });
@@ -357,8 +379,9 @@ export default function BillingSystem() {
     setSelectedMrNo(mr);
     setCustomOilUptoDate('');
     const mrJobs = jobs.filter(j => j.mrNo === mr);
-    const scrapCount = mrJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
-    const repairableCount = mrJobs.length - scrapCount;
+    const billableJobs = mrJobs.filter(j => !isGpJob(j));
+    const scrapCount = billableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+    const repairableCount = billableJobs.length - scrapCount;
 
     // A DEFAULT, not an override. This used to force 'repairable' whenever an MR had
     // any repairable job, which on a mixed MR silently moved the user off the Scrap
@@ -408,6 +431,7 @@ export default function BillingSystem() {
   const handleGenerateClick = (mr: string) => {
     const allMrJobs = jobs.filter(j => j.mrNo === mr);
     const targetJobs = allMrJobs.filter(j => {
+      if (isGpJob(j)) return false;
       const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     });
@@ -521,8 +545,11 @@ export default function BillingSystem() {
   const grandTotal = useMemo(() => subTotal + cgst + sgst, [subTotal, cgst, sgst]);
 
   // Oil Data Calculations for Oil Account Document (Page 4)
+  // OIL ACCOUNTING - deliberately uses the GP-INCLUSIVE set. A GP transformer still
+  // consumes oil and its shortage must still be accounted for; only the money paths
+  // exclude it. Do not switch this to selectedJobsData.
   const jobOilDetails = useMemo(() => {
-    return selectedJobsData.map(job => {
+    return selectedJobsWithGp.map(job => {
       const insp = inspections.find(i => 
         (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
         (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
@@ -562,7 +589,7 @@ export default function BillingSystem() {
         netShortage
       };
     });
-  }, [selectedJobsData, inspections]);
+  }, [selectedJobsWithGp, inspections]);
 
   const totalOilCapacity = useMemo(() => jobOilDetails.reduce((a, b) => a + b.oilCap, 0), [jobOilDetails]);
   const totalOilReceived = useMemo(() => jobOilDetails.reduce((a, b) => a + b.oilRecd, 0), [jobOilDetails]);
@@ -1551,10 +1578,15 @@ export default function BillingSystem() {
                       ) : (
                         filteredMrNos.map(mr => {
                           const groupJobs = mrGroups[mr] || [];
-                          const scrapJobs = groupJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
-                          const repairableJobs = groupJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
+                          // GP jobs carry no charge and are excluded from every count
+                          // below - but the count is SHOWN so the operator can see the
+                          // numbers reconcile rather than silently not adding up.
+                          const gpJobs = groupJobs.filter(j => isGpJob(j));
+                          const billableJobs = groupJobs.filter(j => !isGpJob(j));
+                          const scrapJobs = billableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+                          const repairableJobs = billableJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
 
-                          const matchingJobs = groupJobs.filter(j => {
+                          const matchingJobs = billableJobs.filter(j => {
                             const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
                             return billTypeFilter === 'scrap' ? isScrap : !isScrap;
                           });
@@ -1562,7 +1594,7 @@ export default function BillingSystem() {
                           const pendingJobs = matchingJobs.filter(j => j.status !== 'Dispatched');
 
                           const deliveredScrap = scrapJobs.filter(j => j.status === 'Dispatched');
-                          const allGroupDelivered = groupJobs.every(j => j.status === 'Dispatched');
+                          const allGroupDelivered = billableJobs.every(j => j.status === 'Dispatched');
 
                           const divName = groupJobs[0]?.division || '-';
                           const challans = Array.from(new Set(deliveredJobs.map(j => j.challanNo).filter(Boolean))).join(', ');
@@ -1583,6 +1615,14 @@ export default function BillingSystem() {
                                 {scrapJobs.length > 0 && billTypeFilter === 'repairable' && (
                                   <div className="text-[11px] text-rose-700 font-semibold mt-0.5">
                                     ({deliveredScrap.length} of {scrapJobs.length} Scrap Returned - No Repair Bill)
+                                  </div>
+                                )}
+                                {gpJobs.length > 0 && (
+                                  <div
+                                    className={`text-[11px] font-semibold mt-0.5 ${GP_TEXT_CLASS}`}
+                                    title="GP repairs are done under guarantee at no cost and are excluded from every bill"
+                                  >
+                                    {gpJobs.length} of {groupJobs.length} jobs are GP - not billable
                                   </div>
                                 )}
                                 {/* Detailed stage breakdown, collapsed by default - the
@@ -1645,7 +1685,10 @@ export default function BillingSystem() {
 
                                             return (
                                               <div key={j.id} className="flex items-center gap-1.5 text-[11px] min-w-0">
-                                                <span className="font-mono font-bold text-slate-800 shrink-0">{j.jobNo}:</span>
+                                                <span className={`font-mono font-bold shrink-0 flex items-center gap-1 ${isGpJob(j) ? GP_TEXT_CLASS : 'text-slate-800'}`}>
+                                                  {j.jobNo}:
+                                                  {isGpJob(j) && <GpChip />}
+                                                </span>
                                                 <span
                                                   className={`px-1.5 py-0.2 rounded text-[10px] font-semibold border truncate ${badgeClass}`}
                                                   title={badgeText}
