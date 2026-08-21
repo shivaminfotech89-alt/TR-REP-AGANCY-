@@ -315,6 +315,14 @@ export default function NewJob() {
     const { name, value } = e.target;
     setCommonData(prev => ({ ...prev, [name]: value }));
 
+    // A GP row's job number is the ORIGINAL number from the previous repair. Nothing
+    // may regenerate or re-prefix it - not a division change, not a core-type change,
+    // not the Auto Job Nos button. It is set ONLY by the operator typing it, by picking
+    // a suggestion, or by the disambiguation chooser.
+    if (commonData.repairType === 'GP' && (name === 'division' || name === 'repairType')) {
+      return;
+    }
+
     if (name === 'division' && activeAgency) {
       const oldDivision = commonData.division;
       
@@ -357,10 +365,17 @@ export default function NewJob() {
         return { ...t, jobNo: `${info.prefix}-${info.nextNum + idx}` };
       }));
     } else {
-      // For GP: Keep existing original job numbers or clear for past link / manual original job no entry
+      // Switching OGP -> GP CLEARS any auto-generated number. Only a genuine prior
+      // link survives. Previously this fell through to `t.jobNo`, leaving the OGP
+      // sequential number sitting in "Original Job No" - so saving would book a GP job
+      // against a number matching no prior repair, and the duplicate guard would then
+      // record it as legacy with a fabricated original number.
       setTransformers(prev => prev.map(t => ({
         ...t,
-        jobNo: t.prevJobNo || t.autoFilledFrom || t.jobNo || '',
+        jobNo: t.prevJobNo || t.autoFilledFrom || '',
+        gpSource: undefined,
+        gpPriorJobId: null,
+        gpLookupMissFor: undefined,
       })));
     }
   };
@@ -592,8 +607,11 @@ export default function NewJob() {
       }
     }
     
-    // Auto-update jobNo if coreType changes
-    if (field === 'coreType' && activeAgency) {
+    // Auto-update jobNo if coreType changes.
+    // NEVER for GP: core type is part of counterKey, so this recomputed the number and
+    // wiped an original job number the operator had typed. A GP job reuses its number
+    // from the previous repair and never draws a new one.
+    if (field === 'coreType' && activeAgency && commonData.repairType !== 'GP') {
       const newCoreType = value;
       const info = getNextJobNoInfo(commonData.division, newCoreType, commonData.repairType);
       
@@ -699,6 +717,12 @@ export default function NewJob() {
   const handleAutoFillEmptyJobNos = () => {
     if (!activeAgency) {
       setErrorMsg("Please configure and select an agency in Settings first.");
+      return;
+    }
+    if (commonData.repairType === 'GP') {
+      const err = 'Job numbers cannot be auto-generated for GP repairs. A GP job reuses the original number from its previous repair - type it, or pick the past job from the suggestions.';
+      setErrorMsg(err);
+      setModalAlertMessage(err);
       return;
     }
     
@@ -1295,15 +1319,20 @@ export default function NewJob() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
-            <button
-              type="button"
-              onClick={handleAutoFillEmptyJobNos}
-              className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
-              title="Auto-calculate next available job numbers"
-            >
-              <Zap className="w-3.5 h-3.5 text-amber-400" />
-              <span>Auto Job Nos</span>
-            </button>
+            {/* Hidden for GP - a GP job reuses its original number and never draws a
+                new one. handleAutoFillEmptyJobNos also refuses, in case it is reached
+                another way. */}
+            {commonData.repairType !== 'GP' && (
+              <button
+                type="button"
+                onClick={handleAutoFillEmptyJobNos}
+                className="flex items-center gap-1.5 px-3 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-bold transition-all cursor-pointer"
+                title="Auto-calculate next available job numbers"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-400" />
+                <span>Auto Job Nos</span>
+              </button>
+            )}
             
             <button
               type="button"
