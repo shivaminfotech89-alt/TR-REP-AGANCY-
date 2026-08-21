@@ -51,6 +51,14 @@ interface TransformerEntry {
   prevJobNo?: string;
   prevDeliveryDate?: string;
   gpReason?: string;
+  /** 'linked' = matched an existing job; 'legacy' = no record found, date typed from
+   *  the paper job card. Set only once a lookup has actually run. */
+  gpSource?: 'linked' | 'legacy';
+  /** Firestore doc id of the matched prior job. null/undefined for legacy. */
+  gpPriorJobId?: string | null;
+  /** The job number a lookup ran for and found nothing. Drives the legacy panel, so
+   *  it appears only after a miss - never as a permanent section on the form. */
+  gpLookupMissFor?: string;
 }
 
 const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', '500'];
@@ -187,6 +195,8 @@ export default function NewJob() {
   // More than one past job matched the value typed - the operator must choose which
   // physical transformer this is. Never auto-applied: job numbers are not uniquely
   // allocated, so "the newest match" is a guess, not an answer.
+  /** Row index whose GP job-number suggestion list is open, or null. */
+  const [jobNoSuggestFor, setJobNoSuggestFor] = useState<number | null>(null);
   const [ambiguousMatch, setAmbiguousMatch] = useState<{
     index: number;
     field: 'jobNo' | 'serialNo';
@@ -244,8 +254,15 @@ export default function NewJob() {
 
   // Fill any blank / placeholder job numbers once agency & division context are ready.
   // Only touches rows the user (or GP auto-fill) hasn't already set a real job number on.
+  //
+  // NEVER runs for GP. A GP repair REUSES the original job number from the previous
+  // repair - it does not draw a new one from the counter, and the number may carry a
+  // completely different prefix from a previous AT. Auto-numbering GP rows made the
+  // field impossible to use: clearing it to type the original number immediately
+  // refilled it with the next sequential number.
   useEffect(() => {
     if (!activeAgency || !commonData.division) return;
+    if (commonData.repairType === 'GP') return;
 
     setTransformers(prev => {
       let changed = false;
@@ -355,7 +372,11 @@ export default function NewJob() {
       if (foundAt) matchedAtNo = foundAt.atNumber || foundAt.name;
     }
 
-    const prevDelDate = pastJob.deliveryDate || pastJob.challanDate || pastJob.dateOfIssue || '';
+    // deliveryDate then challanDate ONLY - both written by the dispatch batch. NOT
+    // dateOfIssue, which is when the unit was RECEIVED for the previous repair, not
+    // when it went back; measuring a guarantee window from it is wrong. And never
+    // updatedAt - that was the GP clock bug (AUDIT.md F6).
+    const prevDelDate = pastJob.deliveryDate || pastJob.challanDate || '';
     const originalJobNo = pastJob.jobNo || '';
 
     setTransformers(prev => {
@@ -376,7 +397,10 @@ export default function NewJob() {
         prevJobNo: pastJob.jobNo || '',
         prevAtNo: matchedAtNo,
         prevDeliveryDate: prevDelDate,
-        gpReason: targetRow.gpReason || pastJob.gpReason || 'GP Warranty'
+        gpReason: targetRow.gpReason || pastJob.gpReason || 'GP Warranty',
+        gpSource: 'linked',
+        gpPriorJobId: pastJob.id ?? null,
+        gpLookupMissFor: undefined
       };
       return updated;
     });
@@ -394,7 +418,10 @@ export default function NewJob() {
         autoFilledFrom: undefined,
         prevJobNo: '',
         prevAtNo: '',
-        prevDeliveryDate: ''
+        prevDeliveryDate: '',
+        gpSource: undefined,
+        gpPriorJobId: null,
+        gpLookupMissFor: undefined
       };
       return updated;
     });
@@ -415,12 +442,52 @@ export default function NewJob() {
         prevJobNo: '',
         prevDeliveryDate: '',
         gpReason: '',
-        autoFilledFrom: undefined
+        autoFilledFrom: undefined,
+        gpSource: undefined,
+        gpPriorJobId: null,
+        gpLookupMissFor: undefined
       };
       return updated;
     });
     setAutoFillNotice(`Cleared transformer row #${index + 1}.`);
     setTimeout(() => setAutoFillNotice(null), 3000);
+  };
+
+  /** Whole months between two dates, calendar-accurate (not days/30). Frozen at save
+   *  as gpVerifiedMonths so reopening the job later cannot change what was true at
+   *  intake. */
+  const elapsedMonthsBetween = (fromStr: string, toStr: string): number | null => {
+    if (!fromStr) return null;
+    const from = new Date(fromStr);
+    const to = toStr ? new Date(toStr) : new Date();
+    if (isNaN(from.getTime()) || isNaN(to.getTime())) return null;
+    let months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
+    if (to.getDate() < from.getDate()) months -= 1;
+    return months;
+  };
+
+  /** CASE B: no record found for this job number - switch the row to legacy entry. */
+  const markRowLegacy = (index: number, jobNo: string) => {
+    setTransformers(prev => {
+      const updated = [...prev];
+      updated[index] = {
+        ...updated[index],
+        gpSource: 'legacy',
+        gpPriorJobId: null,
+        gpLookupMissFor: jobNo,
+      };
+      return updated;
+    });
+  };
+
+  /** Partial, case-insensitive, anywhere-in-string matches for the type-ahead list.
+   *  pastJobs is already agency-scoped and sorted newest first. */
+  const suggestGpJobs = (queryVal: string, limit = 8) => {
+    const q = queryVal.trim().toLowerCase();
+    if (!q) return [];
+    return pastJobs
+      .filter(j => (j.jobNo || '').toLowerCase().includes(q))
+      .slice(0, limit);
   };
 
   /** Every past job matching this value, newest first. Callers must handle >1. */
@@ -467,12 +534,11 @@ export default function NewJob() {
           // Same rule as above - never silently take jobsList[0].
           setAmbiguousMatch({ index, field: lookupField, value: queryVal.trim(), candidates: jobsList });
         }
-      } else {
-        // If not found in database records:
-        if (lookupField === 'jobNo') {
-          setAutoFillNotice(`ℹ️ Job #${queryVal.trim()} not found in database. Please enter the Last Date of Repaired below to verify the ${gpValidationMonths}-month Guarantee Period.`);
-          setTimeout(() => setAutoFillNotice(null), 6000);
-        }
+      } else if (lookupField === 'jobNo') {
+        // CASE B - nothing in the database for this job number. The transformer was
+        // repaired under an earlier AT, before this system. Mark the row legacy so the
+        // manual date field appears - and ONLY now, never before a lookup has run.
+        markRowLegacy(index, queryVal.trim());
       }
     } catch (err) {
       console.error(`Error fetching GP job details by ${lookupField}:`, err);
@@ -481,10 +547,13 @@ export default function NewJob() {
 
   const handleJobNoBlur = async (index: number, jobNo: string) => {
     if (commonData.repairType !== 'GP' || !jobNo.trim()) return;
-    // Only auto-suggest if row is not already linked
-    if (!transformers[index]?.autoFilledFrom && !transformers[index]?.prevJobNo) {
-      await handleGpAutoLookup(index, 'jobNo', jobNo);
-    }
+    const row = transformers[index];
+    // Look up unless this row is already linked to THIS number. Previously any linked
+    // row was skipped outright, so editing the Job No never refreshed the auto-fill.
+    const linkedToThis = (row?.prevJobNo || '').trim().toUpperCase() === jobNo.trim().toUpperCase()
+      && Boolean(row?.prevDeliveryDate);
+    if (linkedToThis) return;
+    await handleGpAutoLookup(index, 'jobNo', jobNo);
   };
 
   const handleSerialNoBlur = async (index: number, serialNo: string) => {
@@ -498,6 +567,30 @@ export default function NewJob() {
   const handleTransformerChange = (index: number, field: keyof TransformerEntry, value: string) => {
     const newTransformers = [...transformers];
     newTransformers[index][field] = value;
+
+    // Changing the Job No on a GP row that is linked to a DIFFERENT number drops the
+    // linkage, so the row cannot keep one transformer's make/serial/kVA/delivery date
+    // under another's job number. Clearing it also re-arms the lookup, which
+    // handleJobNoBlur otherwise skips for an already-linked row.
+    if (field === 'jobNo' && commonData.repairType === 'GP') {
+      const row = newTransformers[index];
+      const linkedTo = (row.prevJobNo || row.autoFilledFrom || '').trim().toUpperCase();
+      if (linkedTo && linkedTo !== value.trim().toUpperCase()) {
+        newTransformers[index] = {
+          ...row,
+          autoFilledFrom: undefined,
+          prevJobNo: '',
+          prevAtNo: '',
+          prevDeliveryDate: '',
+          gpSource: undefined,
+          gpPriorJobId: null,
+          gpLookupMissFor: undefined,
+        };
+      } else if (row.gpSource === 'legacy' && (row.gpLookupMissFor || '').trim().toUpperCase() !== value.trim().toUpperCase()) {
+        // A miss recorded against a different number must not keep showing.
+        newTransformers[index] = { ...row, gpSource: undefined, gpLookupMissFor: undefined };
+      }
+    }
     
     // Auto-update jobNo if coreType changes
     if (field === 'coreType' && activeAgency) {
@@ -694,7 +787,29 @@ export default function NewJob() {
           return;
         }
         if (!t.prevDeliveryDate || !t.prevDeliveryDate.trim()) {
-          const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${gpValidationMonths}-Month Guarantee Period before saving.`;
+          // Safety net: the manual date field only appears once a lookup has run and
+          // missed. If the operator typed a Job No and saved without ever blurring the
+          // field, no lookup ran, so there was no panel to enter a date into and no
+          // visible reason why. Run the lookup now and open the right path.
+          if (!t.gpSource) {
+            const candidates = findGpCandidates('jobNo', t.jobNo);
+            if (candidates.length === 1) {
+              applyPastJobToRow(i, candidates[0]);
+              const err = `Job #${t.jobNo} matched an earlier record - its details have been filled in for Transformer #${i + 1}. Please review and save again.`;
+              setErrorMsg(err);
+              setModalAlertMessage(err);
+              return;
+            }
+            if (candidates.length > 1) {
+              setAmbiguousMatch({ index: i, field: 'jobNo', value: t.jobNo.trim(), candidates });
+              const err = `More than one earlier job matches #${t.jobNo}. Choose which transformer Transformer #${i + 1} is, then save again.`;
+              setErrorMsg(err);
+              setModalAlertMessage(err);
+              return;
+            }
+            markRowLegacy(i, t.jobNo.trim());
+          }
+          const err = `No earlier job found for #${t.jobNo} (Transformer #${i + 1}). If this transformer was repaired under an earlier AT, enter the delivery date written on the job card in the "Last Repaired / Delivered Date" field now shown on that row.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
           return;
@@ -1045,6 +1160,22 @@ export default function NewJob() {
               prevJobNo: t.prevJobNo || (commonData.repairType === 'GP' ? t.jobNo : ''),
               gpReason: t.gpReason || '',
               autoFilledFrom: t.autoFilledFrom || '',
+
+              // GP provenance. Kept distinguishable because it matters commercially:
+              // 'legacy' marks a job accepted on an operator's reading of a paper job
+              // card rather than on system data. If a guarantee claim is ever disputed,
+              // that distinction is the first thing anyone asks for.
+              gpSource: commonData.repairType === 'GP' ? (t.gpSource || 'legacy') : null,
+              gpPriorJobId: commonData.repairType === 'GP' ? (t.gpPriorJobId ?? null) : null,
+              // Epoch ms - fetched from the prior job in Case A, typed in Case B.
+              gpDeliveredDate: commonData.repairType === 'GP' && t.prevDeliveryDate
+                ? (isNaN(new Date(t.prevDeliveryDate).getTime()) ? null : new Date(t.prevDeliveryDate).getTime())
+                : null,
+              // FROZEN at intake. Deliberately stored rather than recomputed, so
+              // reopening the job later cannot change what was true when it was booked.
+              gpVerifiedMonths: commonData.repairType === 'GP'
+                ? elapsedMonthsBetween(t.prevDeliveryDate || '', commonData.dateOfIssue)
+                : null,
 
               createdAt: now,
               updatedAt: now,
@@ -1465,42 +1596,99 @@ export default function NewJob() {
                         </span>
                       )}
                     </label>
-                    <input
-                      required
-                      type="text"
-                      list={commonData.repairType === 'GP' ? `past-job-suggestions-${index}` : undefined}
-                      value={t.jobNo}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        handleTransformerChange(index, 'jobNo', val);
-                        if (commonData.repairType === 'GP' && val.trim() && !t.autoFilledFrom) {
-                          // Auto-apply only when the match is unambiguous. More than
-                          // one candidate means the operator picks - see STEP 2.
-                          const candidates = findGpCandidates('jobNo', val);
-                          if (candidates.length === 1) {
-                            applyPastJobToRow(index, candidates[0]);
-                          } else if (candidates.length > 1) {
-                            setAmbiguousMatch({ index, field: 'jobNo', value: val.trim(), candidates });
+                    <div className="relative">
+                      <input
+                        required
+                        type="text"
+                        autoComplete="off"
+                        value={t.jobNo}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          handleTransformerChange(index, 'jobNo', val);
+                          // GP: NEVER auto-apply while typing. Do not reinstate this as
+                          // a "convenience" - it was removed deliberately.
+                          //
+                          // The old onChange auto-applied on an exact single match and
+                          // popped the disambiguation modal on multiple, both mid-
+                          // keystroke. Two problems. First it fights the operator: a
+                          // partial number can exactly equal a shorter real job number
+                          // on the way to a longer one, so passing through "MSBT-1" en
+                          // route to "MSBT-12" silently overwrote make, serial, kVA and
+                          // prevDeliveryDate with the wrong transformer's - and
+                          // prevDeliveryDate is what the guarantee window is measured
+                          // from. Second, a modal opening on a keystroke is an
+                          // interruption the operator did not ask for.
+                          //
+                          // Selection is explicit: pick from the suggestion list, or get
+                          // the manual date panel when nothing matches. The blur lookup
+                          // and the save-time safety net cover typing a full number and
+                          // moving on without clicking.
+                          //
+                          // Any prefix is accepted - a unit repaired under an earlier AT
+                          // may carry a completely different one.
+                          if (commonData.repairType === 'GP') {
+                            setJobNoSuggestFor(val.trim() ? index : null);
                           }
+                        }}
+                        onFocus={() => {
+                          if (commonData.repairType === 'GP' && t.jobNo.trim()) setJobNoSuggestFor(index);
+                        }}
+                        onBlur={() => {
+                          // Delay so a click on a suggestion registers before the list closes.
+                          setTimeout(() => setJobNoSuggestFor(cur => (cur === index ? null : cur)), 150);
+                          handleJobNoBlur(index, t.jobNo);
+                        }}
+                        className={`w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border rounded-lg focus:ring-1 bg-white ${
+                          commonData.repairType === 'GP'
+                            ? 'border-amber-300 focus:ring-amber-500 focus:border-amber-500 text-amber-950'
+                            : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
+                        }`}
+                        placeholder={commonData.repairType === 'GP' ? 'Type original Job No (any prefix)' : 'e.g. 21 IS-48'}
+                      />
+
+                      {/* GP SUGGESTION DROPDOWN - partial, case-insensitive, anywhere in
+                          the string; agency-scoped pastJobs, most recent first. */}
+                      {commonData.repairType === 'GP' && jobNoSuggestFor === index && t.jobNo.trim() && (() => {
+                        const matches = suggestGpJobs(t.jobNo);
+                        if (matches.length === 0) {
+                          return (
+                            <div className="absolute z-30 mt-1 w-full bg-white border border-amber-300 rounded-lg shadow-lg p-2.5 text-[11px] text-amber-900">
+                              No matching job — enter the delivery date below to verify the guarantee period.
+                            </div>
+                          );
                         }
-                      }}
-                      onBlur={() => handleJobNoBlur(index, t.jobNo)}
-                      className={`w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border rounded-lg focus:ring-1 bg-white ${
-                        commonData.repairType === 'GP'
-                          ? 'border-amber-300 focus:ring-amber-500 focus:border-amber-500 text-amber-950'
-                          : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
-                      }`}
-                      placeholder={commonData.repairType === 'GP' ? 'Select or Type Orig Job #' : 'e.g. 21 IS-48'}
-                    />
-                    {commonData.repairType === 'GP' && (
-                      <datalist id={`past-job-suggestions-${index}`}>
-                        {pastJobs.slice(0, 100).map(pj => (
-                          <option key={pj.id || pj.jobNo} value={pj.jobNo}>
-                            Job #{pj.jobNo} — {pj.capacityKva} KVA {pj.make} (S/N: {pj.serialNo})
-                          </option>
-                        ))}
-                      </datalist>
-                    )}
+                        return (
+                          <div className="absolute z-30 mt-1 w-full bg-white border border-slate-300 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                            {matches.map(pj => {
+                              const d = pj.deliveryDate || pj.challanDate || '';
+                              return (
+                                <button
+                                  key={pj.id || `${pj.jobNo}-${pj.serialNo}`}
+                                  type="button"
+                                  onMouseDown={(ev) => ev.preventDefault()}
+                                  onClick={() => {
+                                    applyPastJobToRow(index, pj);
+                                    setJobNoSuggestFor(null);
+                                  }}
+                                  className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 border-b border-slate-100 last:border-b-0"
+                                >
+                                  <div className="flex items-baseline justify-between gap-2">
+                                    <span className="font-mono font-bold text-slate-900 text-xs">{pj.jobNo}</span>
+                                    <span className="text-[10px] font-bold text-slate-500">MR {pj.mrNo || '-'}</span>
+                                  </div>
+                                  <div className="text-[10px] text-slate-600 flex flex-wrap gap-x-2">
+                                    <span>{pj.make || '-'}</span>
+                                    <span className="font-mono">S/N {pj.serialNo || '-'}</span>
+                                    <span className="font-mono">{pj.capacityKva} KVA</span>
+                                    <span className="font-mono">Del {d ? formatDDMMYYYY(d) : '-'}</span>
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })()}
+                    </div>
                   </div>
 
                   {/* CAPACITY (KVA) WITH ALL QUICK PRESET PILLS */}
@@ -1589,7 +1777,15 @@ export default function NewJob() {
 
                 {/* ROW GP SECTION: AUTO-VERIFIED IF SELECTED/SAVED, OR MANUAL DATE INPUT IF UNSAVED */}
                 {commonData.repairType === 'GP' && (() => {
-                  const isLinkedFromSaved = Boolean(t.autoFilledFrom || (t.prevJobNo && t.prevDeliveryDate));
+                  const isLinkedFromSaved = t.gpSource === 'linked' || Boolean(t.autoFilledFrom || (t.prevJobNo && t.prevDeliveryDate));
+                  // CASE B panel appears ONLY once we know there is nothing to match:
+                  // either a lookup ran and missed (gpSource 'legacy'), or the typed
+                  // number matches no past job. Derived, not stored, so it disappears
+                  // again if the operator keeps typing toward a number that does match.
+                  // It is never a permanent section on the form.
+                  const noSuggestions = Boolean(t.jobNo.trim()) && suggestGpJobs(t.jobNo, 1).length === 0;
+                  const isLegacyEntry = !isLinkedFromSaved && (t.gpSource === 'legacy' || noSuggestions);
+                  const monthsElapsed = elapsedMonthsBetween(t.prevDeliveryDate || '', commonData.dateOfIssue);
                   const rowGpCalc = t.prevDeliveryDate
                     ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths)
                     : null;
@@ -1612,8 +1808,8 @@ export default function NewJob() {
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="font-bold">
                                 {rowGpCalc?.isWithinWarranty
-                                  ? `✓ Auto-Verified: Within ${gpValidationMonths}-Month GP Warranty`
-                                  : `⚠️ Auto-Verified: Exceeded ${gpValidationMonths}-Month GP Period`}
+                                  ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months.`
+                                  : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months, so this must be booked as OGP, not GP.`}
                               </span>
                               <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono font-bold rounded border border-black/10">
                                 Job #{t.prevJobNo || t.jobNo}
@@ -1666,13 +1862,14 @@ export default function NewJob() {
                     );
                   }
 
-                  // 2. UNSAVED JOB / MANUAL ENTRY: LAST REPAIRED DATE ONLY TO VERIFY GUARANTEE PERIOD
+                  // 2. CASE B - legacy job, no record found. Manual date entry.
+                  if (!isLegacyEntry) return null;
                   return (
                     <div className="mt-3 pt-3 border-t border-amber-200/80 bg-amber-50/70 p-3 rounded-lg space-y-2.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[11px] font-bold text-amber-950 flex items-center gap-1.5">
                           <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                          <span>Verify Guarantee Period ({gpValidationMonths} Mos) — Enter Last Repaired Date</span>
+                          <span>No earlier job found for {t.gpLookupMissFor || t.jobNo} — enter the delivery date from the job card</span>
                         </span>
                         <div className="flex items-center gap-1.5">
                           <button
@@ -1690,7 +1887,7 @@ export default function NewJob() {
                         {/* LAST DATE OF REPAIRED */}
                         <div>
                           <label className="block text-[10px] font-bold uppercase text-amber-950 mb-0.5">
-                            Last Date of Repaired <span className="text-red-500">*</span>
+                            Last Repaired / Delivered Date <span className="text-red-500">*</span>
                           </label>
                           <input
                             type="date"
@@ -1707,7 +1904,7 @@ export default function NewJob() {
                         <div className="px-3 py-2 bg-amber-100/90 border border-amber-300 rounded-lg text-xs text-amber-950 flex items-center gap-2">
                           <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
                           <span>
-                            <strong>Action Required:</strong> Enter the Last Date of Repaired above to verify whether this transformer is within the {gpValidationMonths}-month Guarantee Period.
+                            No earlier job found for <strong className="font-mono">{t.gpLookupMissFor || t.jobNo}</strong>. If this transformer was repaired under an earlier AT, enter the delivery date written on the job card. Make, serial and kVA must be entered manually - there is no record to copy.
                           </span>
                         </div>
                       ) : rowGpCalc && rowGpCalc.isValidDate ? (
@@ -1724,8 +1921,8 @@ export default function NewJob() {
                             )}
                             <span>
                               {rowGpCalc.isWithinWarranty
-                                ? `🟢 Within ${gpValidationMonths}-Month GP Warranty (${rowGpCalc.remainingMonthsText}) — Valid to Save`
-                                : `🔴 GP Period Exceeded (${rowGpCalc.elapsedMonthsText} elapsed) — Cannot Save as GP`}
+                                ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months.`
+                                : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months, so this must be booked as OGP, not GP.`}
                             </span>
                           </div>
                           <div className="text-[11px] font-mono opacity-90">

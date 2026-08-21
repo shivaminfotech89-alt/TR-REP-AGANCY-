@@ -42,6 +42,8 @@
   const snap = async (col, ...clauses) =>
     (await getDocs(query(collection(db, col), ...clauses))).docs.map(d => ({ id: d.id, ...d.data() }));
 
+  const hdr = t => console.log(`\n${'='.repeat(78)}\n${t}\n${'='.repeat(78)}`);
+
   const [agencies, atMasters, jobs, allInspections] = await Promise.all([
     snap('agencies', where('ownerId', '==', uid)),
     snap('atMasters', where('ownerId', '==', uid)),
@@ -329,6 +331,82 @@
   console.log('with letterTotalSent on it. Where overstatedBy is material, that letter');
   console.log('needs withdrawing and reissuing at letterTotalCorrect.');
 
-  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows };
+  // ---------------------------------------------------------------------------
+  // SECTION 6 - GP JOBS CHARGED
+  // ---------------------------------------------------------------------------
+  // A GP job is a repair under guarantee: the agency does the work free. Nothing in
+  // EstimateGenerate, BillingSystem or estimateCalc filters on repairType, so a GP job
+  // is priced exactly like a normal repair. Any GP job with an estimate or bill raised
+  // against it is a charge for work already covered by guarantee.
+  const gpJobs = jobs.filter(j => j.repairType === 'GP' || j.isGp === true);
+
+  const gpCharged = gpJobs.map(job => {
+    const est = buildSingleJobEstimateData(job, agency, atMaster, extMap[job.id], intMap[job.id]);
+
+    // Was the bill this GP job sat on a MIXED bill? A bill covering non-GP jobs too
+    // cannot simply be withdrawn - it must be reissued without the GP lines. Matched
+    // by billNo where present, otherwise by MR + bill type, which is how
+    // handleConfirmSendBill groups the jobs it stamps.
+    const isScrapJob = j => j.status === 'Scrap' || j.condition === 'Scrap';
+    const sameBill = job.billNo
+      ? jobs.filter(j => j.billNo === job.billNo)
+      : jobs.filter(j => j.mrNo === job.mrNo && isScrapJob(j) === isScrapJob(job));
+    const nonGpOnSameBill = sameBill.filter(j => !(j.repairType === 'GP' || j.isGp === true));
+
+    const raised = Boolean(job.estimateSentDate || job.billNo || job.billSentDate || job.estimateAmount || job.billAmount);
+    const collected = job.paymentStatus === 'Paid' || Boolean(job.paymentRefNo);
+
+    return {
+      job: job.jobNo,
+      mr: job.mrNo,
+      kva: job.capacityKva,
+      core: job.coreType || 'CRGO',
+      status: job.status,
+      prevJobNo: job.prevJobNo || '',
+      prevDeliveryDate: job.prevDeliveryDate || job.lastRepairedDate || '',
+      // Estimate
+      estimateSentDate: job.estimateSentDate || '',
+      estimateAmount: job.estimateAmount ?? '',
+      wouldEstimateAt: est.rateErrors.length ? `blocked: ${est.rateErrors.length} err` : est.finalAmount,
+      // Bill
+      billNo: job.billNo || '',
+      billSentDate: job.billSentDate || '',
+      billAmount: job.billAmount ?? '',
+      // MR-level grand total stored alongside the per-job figure. This is the
+      // reconciliation field: paidAmount defaults from the same number.
+      billTotalMrAmount: job.billTotalMrAmount ?? '',
+      jobsOnThisBill: sameBill.length,
+      // Settlement - a raised charge can be withdrawn; a collected one is a refund.
+      paymentStatus: job.paymentStatus || '(unset)',
+      paymentDate: job.paymentDate || '',
+      paymentRefNo: job.paymentRefNo || '',
+      paidAmount: job.paidAmount ?? '',
+      paymentDeductions: job.paymentDeductions ?? '',
+      paymentMode: job.paymentMode || '',
+      // Remedy
+      billIsMixed: nonGpOnSameBill.length > 0,
+      nonGpJobsOnSameBill: nonGpOnSameBill.map(j => j.jobNo).join(', '),
+      REMEDY: !raised ? 'none - never charged'
+        : collected ? (nonGpOnSameBill.length > 0 ? 'REFUND + REISSUE mixed bill' : 'REFUND')
+        : (nonGpOnSameBill.length > 0 ? 'REISSUE mixed bill without GP lines' : 'WITHDRAW'),
+      CHARGED: raised,
+      COLLECTED: collected,
+    };
+  });
+
+  hdr(`GP JOBS CHARGED - ${gpJobs.length} GP job(s) in this agency`);
+  if (gpCharged.length) console.table(gpCharged); else console.log('(no GP jobs)');
+  const charged = gpCharged.filter(r => r.CHARGED);
+  const collectedRows = gpCharged.filter(r => r.COLLECTED);
+  const mixed = charged.filter(r => r.billIsMixed);
+  console.log(`\n${charged.length} of ${gpJobs.length} GP job(s) have an estimate or bill raised against them.`);
+  console.log(`${collectedRows.length} of those were COLLECTED (paymentStatus Paid or a payment ref present) - refund, not withdrawal.`);
+  console.log(`${mixed.length} sat on a MIXED bill alongside non-GP jobs - reissue without the GP lines, do not withdraw wholesale.`);
+  if (charged.length) {
+    console.log('\nEach is a charge for work covered by guarantee. Job numbers:');
+    charged.forEach(r => console.log(`  ${r.job} (MR ${r.mr}) - ${r.REMEDY}${r.billIsMixed ? ` [with: ${r.nonGpJobsOnSameBill}]` : ''}`));
+  }
+
+  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows, gpCharged };
   console.log('\nFull results: window.__blastRadius');
 })();

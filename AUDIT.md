@@ -8,6 +8,34 @@ explicitly stated. Run them against the dev server with the app loaded and signe
 
 ---
 
+## Pattern: stored side-records diverge from the printed document
+
+Three instances found in one day (O3, O4, and the `estimateAmount` case below). The
+shape is always the same: **the document is rendered by one function, and a "what we
+charged" field is recomputed alongside it by different code.** Nothing reconciles the
+two, so they drift — silently, and in whichever direction the second computation
+happens to be wrong.
+
+| Field | Rendered by | Stored by | Direction |
+|---|---|---|---|
+| `billAmount` (O3) | `subTotal`/`grandTotal`, single AT | `handleConfirmSendBill`, AT applied twice | **over**states |
+| `estimateAmount` (O4) | `getJobFullEstimate(...).finalAmount` | `handleSaveEstimateDates`, from `baseTotal` | **under**states |
+
+Neither has reached a customer-facing document — the printed output is correct in both
+cases — but anything reconciling from the stored field reads wrong.
+
+The one field that does NOT drift is `paidAmount` — because it is **entered by hand
+from the bank credit** rather than computed. It records what was received, so it is
+authoritative by construction. That is what makes MSBT-12 decisive: reality was written
+down next to the calculation, and they disagree (O3).
+
+**Rule for any future field recording "what we charged": write it from the same
+function that renders the document.** Do not recompute it alongside. If a stored figure
+and a printed figure can be derived independently, they will eventually disagree, and
+the disagreement will be found by an auditor rather than by us.
+
+---
+
 ## OPEN
 
 ### O1. GP lookup can match the wrong transformer — highest severity
@@ -177,10 +205,133 @@ can settle the renumbering and the Repairable/Scrap determination in one pass.
 `BillingSystem.calculateJobTotal` already returns an AT-inclusive figure, then
 `handleConfirmSendBill` multiplies by `(1 + atPct/100)` again before GST.
 
+**OBSERVED, not theoretical.** MSBT-12 (MR 1, see C3) stored `billAmount` **6,413**
+while the operator recorded **6,680** actually received against `UTR/2026/1`. Because
+`paidAmount` is entered by hand from the bank credit, that is a case where reality was
+recorded alongside the computed figure — and the two disagree. This is direct evidence
+of the divergence, not an inferred risk.
+
 **Exposure:** the *printed* bill is correct (it uses `subTotal`/`grandTotal`, single
-AT); only the `billAmount` stored on each job document is inflated. Anything reading
+AT); only the `billAmount` stored on each job document is wrong. Anything reading
 that field for reporting or reconciliation reads high. Not yet fixed — pending a
 decision, since it is a bill-calculation change.
+
+---
+
+### O4. Stored `estimateAmount` is built from `baseTotal` — understates the document
+
+`EstimateGenerate.handleSaveEstimateDates` writes
+`estimateAmount = Math.round(calculateJobTotal(job) * (1 + atPct/100))`, and
+`calculateJobTotal` returns **`est.baseTotal`**, not `finalAmount`. So the stored figure
+is the base total with AT applied, missing everything between base and final.
+
+The printed documents — the forwarding letter (`calculateMrEstimateTotal`) and the
+single-job estimate sheet — both render `getJobFullEstimate(job).finalAmount`. They are
+correct. Only the stored side-record is wrong.
+
+**Observed:** MSBT-12 (MR 1) stored `estimateAmount` **5,661** against a document figure
+of **24,301.47**.
+
+**Exposure:** anything reconciling estimates from the stored field reads low — Reports'
+fallback, dashboard rollups, any future reconciliation. Nothing customer-facing.
+Same class as O3 but the opposite direction and a different cause: O3 applies AT twice
+and overstates; this one starts from the wrong total and understates. See the pattern
+note at the top of this file.
+
+**Not yet fixed.** The correct fix is to write the stored field from the same function
+that renders the document, rather than recomputing it.
+
+### C2. MSBT-12 (MR 1) — submitted estimate routed the approval to the wrong authority
+
+The only estimate actually submitted among the 26 mispriced jobs.
+`estimateSentDate` **2026-08-15**.
+
+| | Amount |
+|---|---|
+| Sent to UGVCL | **24,301.47** |
+| Correct | **25,243.05** |
+| Circle limit (SE approval power) | **24,609** |
+
+It is also the only job in the set that flips *toward* EXCEEDS — the other 19 verdict
+changes all went EXCEEDS → within.
+
+**This is not simply a wrong number.** UGVCL received an estimate presented as **within**
+the Superintending Engineer's financial sanction power for a job that in fact
+**exceeds** it. The figure determined which authority the approval was routed to, so
+the approval was sought from the wrong office.
+
+**Remedy: reissue.** The estimate must be reissued at 25,243.05 and routed for the
+higher sanction the correct figure requires. Withdrawal alone is not sufficient —
+the original routing decision was made on the wrong basis.
+
+### C3. MSBT-12 (MR 1) — GP job charged AND collected. Remedy: REFUND
+
+**A repair under guarantee was billed and the money was taken.** A GP job carries no
+charge: the agency repairs it free, which is what the guarantee means. Nothing in
+`EstimateGenerate`, `BillingSystem` or `estimateCalc` filters on `repairType`, so a GP
+job is priced exactly like a normal repair.
+
+| | |
+|---|---|
+| Job | **MSBT-12**, MR 1, 100 kVA CRGO |
+| Estimate sent | 2026-08-15 |
+| Bill | **BILL/1**, 2026-08-15, `billAmount` **6,413** |
+| Payment | **Paid** 2026-08-15, `UTR/2026/1`, `paidAmount` **6,680**, NEFT/RTGS |
+| Bill composition | Not mixed — no non-GP jobs on the same bill |
+| **Remedy** | **REFUND 6,680** — money was collected, so withdrawal is not available. Single-job bill, so no reissue is required. |
+
+**Refund amount: 6,680.** `paidAmount` is entered **manually by the operator from the
+actual bank credit** — it records what was received, not what the code calculated. It
+is therefore authoritative, and the only figure here derived from reality rather than
+from a formula. `billAmount` 6,413 is a computed side-record and is not the basis for
+the refund.
+
+**⚠️ SAME JOB AS C2.** MSBT-12 (MR 1) carries **two** independent defects:
+1. **C2** — its estimate was submitted at 24,301.47 when the correct figure is
+   25,243.05, routing the approval below the SE's 24,609 limit when it exceeds it.
+2. **This entry** — it is a GP job and should never have been estimated or billed at
+   all.
+
+These compound: the wrong-authority routing is moot once the job is recognised as GP,
+because a GP job produces no estimate to route. Resolve as one action with the division
+office, not two.
+
+**Confirmed clean:** the other two GP jobs, **MSBT-6** and **MSBT-112**, carry no
+estimate and no bill — `estimateSentDate`, `billNo`, `billSentDate`, `estimateAmount`
+and `billAmount` all unset. MSBT-12 is the only GP job ever charged.
+
+**Fix pending:** exclude `repairType === 'GP'` / `isGp` from estimate generation, the
+forwarding letter table and TOTAL, and from all billing paths. Oil accounting is
+deliberately unaffected — oil is consumed regardless of who pays for the repair.
+
+### A2. `incrementJobNoCounter` is dead code that looks like the allocator
+
+`AgencyContext.tsx:710` defines `incrementJobNoCounter(counterKey, count)` and the
+context exposes it. **It has zero call sites anywhere in the app.**
+
+It is not merely unused — it is *misleading*. It wraps a `runTransaction` that reads
+`lastJobNumbers`, adds `count`, and writes it back, which is exactly what a correct
+allocator would look like. Anyone reading it would reasonably conclude that job numbers
+are transactionally allocated. They are not: the number is chosen client-side before
+any transaction opens, and the real code only reconciles the counter afterwards (O2).
+This function's existence is part of why the allocator was previously believed fixed.
+
+**Cleanup, deliberately not done in the change that found it** — deleting it would have
+mixed an unrelated removal into a GP intake fix. Do it as its own change.
+
+When removing it, check first whether the agency-wide counter work (O2) wants to *use*
+it rather than delete it: it is close to the shape that work needs, and may be better
+repurposed than removed.
+
+### A1. MSBT-112 — blocked pending external inspection (action, not a defect)
+
+Now blocks with *"no external inspection data - quantities cannot be derived"*. This is
+the F2 rule working as designed: the job has no External inspection record, so its
+quantities cannot be derived and the estimate refuses rather than falling back to
+capacity defaults.
+
+**Action needed:** enter MSBT-112's external inspection. It will then estimate normally.
+No code change required.
 
 ---
 
@@ -249,7 +400,19 @@ of the measured 10.00 kg (`totCoil` 4 × `wtOfCoil` 2.5).
 stamped on new inspection saves, but **nothing filters on it until existing records are
 backfilled**.
 
-**Quantified by:** `scripts/blast-radius-console.js`.
+**MEASURED.** `scripts/blast-radius-console.js` sections 1-3, 32 jobs in the agency:
+
+- **26 of 32 jobs mispriced — every one overstated.** Capacity defaults are higher than
+  the measured quantities in every observed case. Worst seen: MSBT-6 at **21,028
+  submitted vs 8,612 correct**.
+- **19 jobs flipped circle-limit verdict, all EXCEEDS → within.** Transformers were
+  being flagged as needing Superintending Engineer approval purely because the estimate
+  was built from capacity defaults. Those escalations were unnecessary.
+- **1 estimate actually submitted** — MSBT-12 (MR 1), and it flips the *other* way,
+  within → EXCEEDS. See **C2**: it routed the approval to the wrong authority and needs
+  reissuing.
+
+The 25 unsubmitted jobs need no external remedy — they simply reprice correctly now.
 
 ### F2. Absent inspection data produced silent, plausible numbers
 
@@ -325,7 +488,12 @@ charged, not valid claims wrongly rejected. The true stamp survives on every job
 (`deliveryDate` / `challanDate`), so correct verdicts are recoverable.
 
 **Fixed:** now reads `deliveryDate || challanDate`, `updatedAt` retained as last resort.
-**Quantified by:** section 4 of `scripts/blast-radius-console.js`.
+
+**MEASURED — confirmed non-issue.** Section 4 of `scripts/blast-radius-console.js`
+reports **0 in-guarantee verdicts changed**. Every dispatched job lands on the same
+side of the 18-month window under both the buggy and the corrected measurement, so no
+GP claim was ever accepted or rejected on the wrong basis. The exposure was real in
+principle but never materialised in this data.
 
 ### F7. Scrap transformers estimated as full repairs
 
@@ -362,6 +530,12 @@ The two correct figures differ because the AT percentage is per core type: CRGO 
 the letter's own numbers — 17,970 × 0.92 = 16,532.40 for AMKLL-9, and 6,540.20 × 1.04 =
 6,801.81 for KLL-6, i.e. the estimate document's base total with AT applied. Confirms
 the letter and the estimate sheet are the same computation, not two different errors.
+
+**MEASURED — exposure real but NEVER MATERIALISED.** Section 5 reports **0 of 6 scrap
+estimates sent**. All three forwarding letters covering scrap MRs show
+`letterTotalSent` 0 and `anyEstimateSent` false, **including MR 1563**. The 40,586.33
+letter shown above was generated on screen but never issued. Nothing to withdraw and
+nothing to reissue; the ~22,300 overstatement never left the building.
 
 **Quantified by:** section 5 of `scripts/blast-radius-console.js` — per scrap job it
 reports `estimateSentDate`, `estimateRefNo`, the `sentAmount` actually stored when the
