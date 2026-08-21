@@ -985,7 +985,7 @@ export default function DispatchChallan() {
                 </div>
               ) : (
                 <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs border-collapse min-w-[820px]">
+                  <table className="w-full text-left text-xs border-collapse min-w-[1000px]">
                     <thead>
                       <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
                         <th className="p-2 text-center w-10">
@@ -996,6 +996,8 @@ export default function DispatchChallan() {
                         <th className="p-2">Make</th>
                         <th className="p-2">Serial No</th>
                         <th className="p-2 text-center">KVA</th>
+                        <th className="p-2">Core Type</th>
+                        <th className="p-2 text-center">GP/OGP</th>
                         <th className="p-2">Division</th>
                         <th className="p-2">
                           <button
@@ -1008,7 +1010,7 @@ export default function DispatchChallan() {
                             <span className="text-[9px] leading-none">{testDateSortDir === 'desc' ? '▼' : '▲'}</span>
                           </button>
                         </th>
-                        <th className="p-2 text-center">Type</th>
+                        <th className="p-2 text-center">Condition</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -1043,6 +1045,12 @@ export default function DispatchChallan() {
                             <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
                             <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
                             <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
+                            <td className="p-2 font-semibold text-slate-700 truncate max-w-[110px]" title={job.coreType || 'CRGO'}>{job.coreType || 'CRGO'}</td>
+                            <td className="p-2 text-center">
+                              {matchesGpFilter(job, 'GP')
+                                ? <GpChip />
+                                : <span className="text-[10px] font-bold text-slate-500">OGP</span>}
+                            </td>
                             <td className="p-2 uppercase font-semibold text-slate-700 truncate max-w-[130px]">{job.division || '-'}</td>
                             {/* Scrap jobs are never tested, so a dash here is correct, not missing data */}
                             <td className="p-2 font-mono text-slate-600">{formatDDMMYYYY(job.testingDate)}</td>
@@ -1479,7 +1487,7 @@ export default function DispatchChallan() {
                                 </span>
                               </div>
                               <div className="text-[11px] font-bold text-slate-700 truncate">
-                                {job.capacityKva} KVA {job.make ? `• ${job.make}` : ''}
+                                {job.capacityKva} KVA ({job.coreType || 'CRGO'}) {job.make ? `• ${job.make}` : ''}
                               </div>
                               <div className="text-[10px] text-slate-500 font-mono mt-1 pt-1 border-t border-slate-200/60 flex flex-col gap-0.2">
                                 <div className="truncate">MR: <strong className="text-slate-700">{job.mrNo || '-'}</strong> ({mrDateStr})</div>
@@ -1498,7 +1506,7 @@ export default function DispatchChallan() {
             /* 2. DETAILED JOB TABLE VIEW (WITH HORIZONTAL SCROLL FOR MOBILE) */
             <div className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs overflow-hidden w-full">
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs border-collapse min-w-[900px]">
+                <table className="w-full text-left text-xs border-collapse min-w-[1080px]">
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
                       <th className="p-2">Job No</th>
@@ -1506,8 +1514,10 @@ export default function DispatchChallan() {
                       <th className="p-2">Make</th>
                       <th className="p-2">Serial No</th>
                       <th className="p-2 text-center">KVA</th>
+                      <th className="p-2">Core Type</th>
+                      <th className="p-2 text-center">GP/OGP</th>
                       <th className="p-2">Division</th>
-                      <th className="p-2 text-center">Type</th>
+                      <th className="p-2 text-center">Condition</th>
                       <th className="p-2">Challan No</th>
                       <th className="p-2">Dispatch Date</th>
                       <th className="p-2 text-right">Action</th>
@@ -1529,6 +1539,12 @@ export default function DispatchChallan() {
                           <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
                           <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
                           <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
+                          <td className="p-2 font-semibold text-slate-700 truncate max-w-[110px]" title={job.coreType || 'CRGO'}>{job.coreType || 'CRGO'}</td>
+                          <td className="p-2 text-center">
+                            {matchesGpFilter(job, 'GP')
+                              ? <GpChip />
+                              : <span className="text-[10px] font-bold text-slate-500">OGP</span>}
+                          </td>
                           <td className="p-2 uppercase font-semibold text-slate-700 truncate max-w-[130px]">{job.division || '-'}</td>
                           <td className="p-2 text-center">
                             <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
@@ -1662,7 +1678,9 @@ export default function DispatchChallan() {
                                   {job.mrNo || '-'} <span className="text-slate-600">({mrDateStr})</span>
                                 </td>
                                 <td className="border border-slate-800 p-1">{job.make || '-'}</td>
-                                <td className="border border-slate-800 p-1 text-center font-bold font-mono">{job.capacityKva}</td>
+                                <td className="border border-slate-800 p-1 text-center font-bold font-mono whitespace-nowrap">
+                                  {job.capacityKva} <span className="font-sans font-semibold text-[10px]">({job.coreType || 'CRGO'})</span>
+                                </td>
                                 <td className="border border-slate-800 p-1 font-mono">{job.serialNo || '-'}</td>
                                 <td className="border border-slate-800 p-1 text-center text-[11px] font-semibold">
                                   {isScrap ? 'Scrap - Returned' : 'Tested OK'}

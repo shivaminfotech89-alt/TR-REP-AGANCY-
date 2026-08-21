@@ -210,6 +210,8 @@ export default function NewJob() {
   const [savedJobsForReceipt, setSavedJobsForReceipt] = useState<any[] | null>(null);
   const [modalAlertMessage, setModalAlertMessage] = useState<string | null>(null);
   const [showSaveConfirmModal, setShowSaveConfirmModal] = useState<boolean>(false);
+  /** Repair type the operator asked to switch to, held while confirming the reset. */
+  const [pendingTypeSwitch, setPendingTypeSwitch] = useState<'OGP' | 'GP' | null>(null);
 
   const [commonData, setCommonData] = useState({
     mrNo: '',
@@ -354,30 +356,80 @@ export default function NewJob() {
     }
   };
 
+  /** A fresh, empty transformer row. */
+  const blankTransformerRow = (): TransformerEntry => ({
+    jobNo: '',
+    capacityKva: '63',
+    make: '',
+    serialNo: '',
+    coreType: 'CRGO',
+    starRating: '3 Star & other',
+    ratingLevel: '3 Star & other',
+    prevAtNo: '',
+    prevJobNo: '',
+    prevDeliveryDate: '',
+    gpReason: '',
+    autoFilledFrom: undefined,
+    gpSource: undefined,
+    gpPriorJobId: null,
+    gpLookupMissFor: undefined,
+  });
+
+  /**
+   * Has the operator entered anything worth warning about losing?
+   *
+   * `jobNo` is deliberately EXCLUDED for OGP: it is auto-generated, not typed, so an
+   * untouched OGP form always has one. Counting it would fire the confirmation on
+   * every single switch - and a dialog that always appears is a dialog operators learn
+   * to dismiss unread, which costs more than it protects. For GP the field IS typed by
+   * the operator, so there it counts.
+   */
+  const intakeHasData = () => {
+    if (commonData.mrNo.trim()) return true;
+    return transformers.some(t =>
+      (t.make || '').trim() !== '' ||
+      (t.serialNo || '').trim() !== '' ||
+      (t.prevDeliveryDate || '').trim() !== '' ||
+      (t.gpReason || '').trim() !== '' ||
+      (commonData.repairType === 'GP' && (t.jobNo || '').trim() !== '')
+    );
+  };
+
+  /**
+   * Switching repair type RESETS the entire intake. Nothing is carried across.
+   *
+   * The division issues SEPARATE MR numbers for GP work: an OGP MR number and a GP MR
+   * number are different documents from the division. Carrying one across the switch
+   * saved jobs against an MR that was never issued for them. Previously the switch
+   * changed only `repairType` and the job numbers, so MR No, MR date, division, make,
+   * serial, capacity, core type, gpReason - and, switching GP -> OGP, the whole GP
+   * provenance set (prevJobNo, prevAtNo, prevDeliveryDate, autoFilledFrom, gpSource,
+   * gpPriorJobId) - all survived onto jobs of the other type.
+   */
+  const performRepairTypeSwitch = (type: 'OGP' | 'GP') => {
+    setCommonData({
+      mrNo: '',
+      dateOfIssue: new Date().toISOString().split('T')[0],
+      type: 'Distribution',
+      repairType: type,
+      division: availableDivisions[0] || 'SABARMATI',
+    });
+    setTransformers([blankTransformerRow()]);
+    setJobNoSuggestFor(null);
+    setAmbiguousMatch(null);
+    setShowPastPickerRowIndex(null);
+    setErrorMsg('');
+    setAutoFillNotice(null);
+    setPendingTypeSwitch(null);
+  };
+
   const handleRepairTypeSelect = (type: 'OGP' | 'GP') => {
     if (commonData.repairType === type) return;
-    setCommonData(prev => ({ ...prev, repairType: type }));
-    
-    if (type === 'OGP') {
-      // Regenerate sequential job numbers for fresh OGP repairs
-      setTransformers(prev => prev.map((t, idx) => {
-        const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
-        return { ...t, jobNo: `${info.prefix}-${info.nextNum + idx}` };
-      }));
-    } else {
-      // Switching OGP -> GP CLEARS any auto-generated number. Only a genuine prior
-      // link survives. Previously this fell through to `t.jobNo`, leaving the OGP
-      // sequential number sitting in "Original Job No" - so saving would book a GP job
-      // against a number matching no prior repair, and the duplicate guard would then
-      // record it as legacy with a fabricated original number.
-      setTransformers(prev => prev.map(t => ({
-        ...t,
-        jobNo: t.prevJobNo || t.autoFilledFrom || '',
-        gpSource: undefined,
-        gpPriorJobId: null,
-        gpLookupMissFor: undefined,
-      })));
+    if (intakeHasData()) {
+      setPendingTypeSwitch(type);   // confirm before discarding
+      return;
     }
+    performRepairTypeSwitch(type);
   };
 
   const applyPastJobToRow = (index: number, pastJob: any) => {
@@ -2399,6 +2451,47 @@ export default function NewJob() {
       )}
 
       {/* Save Confirmation Modal */}
+      {/* CONFIRM DISCARD ON REPAIR-TYPE SWITCH */}
+      {pendingTypeSwitch && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+            <div className="p-4 bg-amber-600 text-white flex items-center gap-2">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <h3 className="font-bold text-sm sm:text-base">
+                Switch to {pendingTypeSwitch === 'GP' ? 'GP (Warranty)' : 'OGP'}?
+              </h3>
+            </div>
+            <div className="p-5 space-y-3 text-sm text-slate-700">
+              <p className="font-semibold text-slate-900">
+                Switching to {pendingTypeSwitch} will clear this intake.
+              </p>
+              <p className="text-xs leading-relaxed">
+                {pendingTypeSwitch === 'GP'
+                  ? 'GP jobs are issued under a separate MR number from the division. The MR number, date, division and all transformer rows entered here belong to the OGP intake and cannot carry over.'
+                  : 'OGP jobs are issued under a separate MR number from the division. The MR number, date, division and all transformer rows entered here belong to the GP intake and cannot carry over.'}
+              </p>
+              <p className="text-xs font-semibold text-slate-800">Continue?</p>
+            </div>
+            <div className="p-3 border-t border-slate-200 bg-slate-50 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setPendingTypeSwitch(null)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-white text-slate-700 hover:bg-slate-100 rounded-lg border border-slate-300"
+              >
+                Keep Current Intake
+              </button>
+              <button
+                type="button"
+                onClick={() => performRepairTypeSwitch(pendingTypeSwitch)}
+                className="px-4 py-2 text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white rounded-lg shadow"
+              >
+                Clear &amp; Switch to {pendingTypeSwitch}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSaveConfirmModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">

@@ -1136,6 +1136,54 @@ export default function BillingSystem() {
       alert('Please fill Payment Reference / UTR No and Payment Date');
       return;
     }
+
+    // A deduction is a PORTION WITHHELD from a payment - it can never equal or exceed
+    // the payment itself. Nothing checked this, and MSBT-12 was recorded with
+    // paidAmount, billTotalMrAmount and paymentDeductions all equal to 6,680 (AUDIT O5):
+    // read literally, nothing was received. The two fields sit adjacent and identically
+    // styled, with "Amount Received" pre-filled, so entering the same figure twice is an
+    // easy slip.
+    const paidNum = Number(paidAmount) || 0;
+    const dedNum = Number(paymentDeductions) || 0;
+
+    if (dedNum < 0 || paidNum < 0) {
+      alert('⚠️ Amount Received and TDS / Deduction cannot be negative.');
+      return;
+    }
+
+    if (paidNum > 0 && dedNum >= paidNum) {
+      alert(
+        `TDS / Deduction cannot be equal to or greater than the amount received.\n\n` +
+        `Amount Received: Rs ${paidNum.toLocaleString('en-IN')}\n` +
+        `TDS / Deduction: Rs ${dedNum.toLocaleString('en-IN')}\n\n` +
+        `A deduction is the portion withheld from the payment, not the payment itself. ` +
+        `If nothing was withheld, enter 0.`
+      );
+      return;
+    }
+
+    // WARN, don't block: a deduction that is a plausible TDS RATE of the gross is far
+    // more likely than an arbitrary large figure. Suggesting the likely intent catches
+    // a wrong figure that is still individually "valid", which the check above cannot.
+    if (dedNum > 0 && paidNum > 0) {
+      const grossGuess = paidNum + dedNum;   // if paidAmount is net of the deduction
+      const ratePct = (dedNum / grossGuess) * 100;
+      const COMMON_TDS = [1, 2, 5, 10];
+      const looksLikeRate = COMMON_TDS.some(r => Math.abs(ratePct - r) < 0.15);
+      if (!looksLikeRate && ratePct > 12) {
+        const suggestions = COMMON_TDS
+          .map(r => `${r}% = Rs ${Math.round(grossGuess * r / 100).toLocaleString('en-IN')}`)
+          .join('\n  ');
+        const proceed = window.confirm(
+          `Rs ${dedNum.toLocaleString('en-IN')} is ${ratePct.toFixed(1)}% of the gross ` +
+          `(Rs ${grossGuess.toLocaleString('en-IN')}) - unusually high for a TDS deduction.\n\n` +
+          `At the usual rates that would be:\n  ${suggestions}\n\n` +
+          `Check the figure against the payment advice. Record Rs ${dedNum.toLocaleString('en-IN')} anyway?`
+        );
+        if (!proceed) return;
+      }
+    }
+
     setSubmittingPaid(true);
     try {
       const groupJobs = mrGroups[paidTargetMr] || [];

@@ -407,6 +407,91 @@
     charged.forEach(r => console.log(`  ${r.job} (MR ${r.mr}) - ${r.REMEDY}${r.billIsMixed ? ` [with: ${r.nonGpJobsOnSameBill}]` : ''}`));
   }
 
-  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows, gpCharged };
+  // ---------------------------------------------------------------------------
+  // SECTION 7 - FALSE PROVENANCE ON OGP JOBS
+  // ---------------------------------------------------------------------------
+  // Switching GP -> OGP used to carry the GP provenance set onto the OGP job (F15).
+  // On an OGP intake there is no legitimate path that sets these, so any OGP job
+  // carrying them was saved through that leak - the provenance is false.
+  const PROV = ['gpSource', 'gpPriorJobId', 'gpDeliveredDate', 'gpVerifiedMonths',
+                'prevJobNo', 'prevAtNo', 'prevDeliveryDate', 'autoFilledFrom'];
+  const hasVal = v => v !== undefined && v !== null && String(v).trim() !== '';
+
+  const falseProv = jobs
+    .filter(j => !(j.repairType === 'GP' || j.isGp === true))
+    .map(j => ({ j, set: PROV.filter(f => hasVal(j[f])) }))
+    .filter(x => x.set.length > 0)
+    .map(({ j, set }) => ({
+      job: j.jobNo, mr: j.mrNo, repairType: j.repairType || '(unset)',
+      status: j.status, createdAt: j.createdAt || '',
+      fieldsSet: set.join(', '),
+      gpSource: j.gpSource ?? '', prevJobNo: j.prevJobNo ?? '',
+      prevDeliveryDate: j.prevDeliveryDate ?? '', prevAtNo: j.prevAtNo ?? '',
+    }));
+
+  hdr(`FALSE PROVENANCE - OGP jobs carrying GP fields (${falseProv.length})`);
+  if (falseProv.length) {
+    console.table(falseProv);
+    console.log('These were saved through the GP -> OGP switch before F15.');
+    console.log('Before clearing: check whether each is genuinely OGP with stray fields,');
+    console.log('or a GP job mis-saved as OGP. Only someone who knows the transformer can');
+    console.log('tell those apart - the first needs the fields cleared, the second needs');
+    console.log('its repairType corrected and removing from every money document.');
+  } else {
+    console.log('(none - no OGP job carries GP provenance fields)');
+  }
+
+  // ---------------------------------------------------------------------------
+  // SECTION 8 - JOBS WITH repairType UNSET
+  // ---------------------------------------------------------------------------
+  // The fallback for an unset repairType differs by file: TestingReport prints
+  // `|| 'GP'`, EstimateGenerate and SingleJobEstimateReport print `|| 'OGP'`. Such a
+  // job therefore reads GP on the testing report and OGP on the estimate. Since GP now
+  // decides whether a job is billable at all, the divergence matters - but only if any
+  // job actually has the field unset.
+  //
+  // For each, the recoverable evidence for what it REALLY is:
+  //   isGp            - the companion boolean NewJob writes alongside repairType
+  //   prevJobNo /     - GP provenance. Present => it was booked against a prior repair,
+  //   prevDeliveryDate  which only a GP intake does.
+  //   mrSiblings      - other jobs on the same MR. An MR is issued for one type, so
+  //                     siblings' repairType is strong evidence for the whole MR.
+  const unsetType = jobs.filter(j => {
+    const v = j.repairType;
+    return v === undefined || v === null || String(v).trim() === '';
+  });
+
+  hdr(`repairType UNSET - ${unsetType.length} job(s)`);
+  if (unsetType.length === 0) {
+    console.log('(none - the GP/OGP fallback divergence is not reachable in this data)');
+    console.log("Standardising on || 'OGP' is therefore defensive, not corrective.");
+  } else {
+    console.table(unsetType.map(j => {
+      const siblings = jobs.filter(x => x.mrNo === j.mrNo && x.id !== j.id);
+      const sibTypes = [...new Set(siblings.map(x => x.repairType).filter(Boolean))];
+      return {
+        job: j.jobNo, mr: j.mrNo, status: j.status,
+        createdAt: j.createdAt || '',
+        isGp: j.isGp ?? '(unset)',
+        prevJobNo: j.prevJobNo || '',
+        prevDeliveryDate: j.prevDeliveryDate || '',
+        gpSource: j.gpSource || '',
+        mrSiblings: siblings.length,
+        siblingTypes: sibTypes.join(', ') || '(none)',
+        // Evidence-based reading - NOT authoritative, a human confirms
+        likelyType: (j.isGp === true || j.prevJobNo || j.prevDeliveryDate) ? 'GP (has GP provenance)'
+          : sibTypes.length === 1 ? `${sibTypes[0]} (all MR siblings)`
+          : sibTypes.length > 1 ? 'AMBIGUOUS - MR has mixed types'
+          : 'no evidence - check the MR paperwork',
+        showsAsOnTestingReport: 'GP',
+        showsAsOnEstimate: 'OGP',
+      };
+    }));
+    console.log('');
+    console.log('likelyType is EVIDENCE, not a determination. Confirm against the MR');
+    console.log('paperwork before setting repairType - the field decides billability (F14).');
+  }
+
+  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows, gpCharged, falseProv, unsetType };
   console.log('\nFull results: window.__blastRadius');
 })();

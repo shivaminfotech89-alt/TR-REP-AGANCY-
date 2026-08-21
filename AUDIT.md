@@ -97,6 +97,67 @@ argument for the enumeration habit above being a written step rather than a ment
 
 ---
 
+## Terminology hazard: "Type" means four different things
+
+A column headed **Type** appears on five screens and means something different on
+almost every one. This matters when reading an old screenshot, or when an operator says
+"the Type column" in a bug report — neither is unambiguous.
+
+| Where | "Type" column shows | Field |
+|---|---|---|
+| Estimate forwarding letter (`EstimateGenerate`) | **core type** — CRGO / Amorphous / Wound Core / OH | `coreType` |
+| Printed testing report (`TestingReport`) | **repair type** — GP / OGP | `repairType` |
+| Delivery challan tables (`DispatchChallan`) | **condition** — Repairable / Scrap | `status` / `condition` |
+| Oil statement (`BillingSystem`) | **transaction type** — not a job attribute at all | oil transaction |
+| Inspection screens | core type — but correctly labelled **"Type / Core"** | `coreType` |
+
+**Partly resolved.** The DispatchChallan tables were renamed **"Condition"** when the
+Core Type and GP/OGP columns were added — the name now matches the underlying field and
+the vocabulary used in `InternalInspection` (`condition: 'Repairable' | 'Scrap'`) and
+throughout this audit. The inspection screens were already explicit with "Type / Core".
+
+**DELIBERATELY DEFERRED — not an outstanding tidy-up.** The estimate letter and the
+printed testing report both say plain "Type" for two different things, and both keep
+that heading.
+
+These documents are already with UGVCL in their current form. Changing a printed column
+heading mid-tender creates a discrepancy between what the division holds on file and
+what it receives next — a reviewer comparing two estimates from the same agency would
+see the schedule apparently change shape between them. That cost is real and immediate;
+the ambiguity is a readability cost borne internally by people who can be told. Renaming
+is a decision for a tender boundary, not a code cleanup, and should be taken with the
+division rather than unilaterally.
+
+Record this as settled. Anyone finding the inconsistent headings later should not
+"fix" them without that conversation.
+
+**Related inconsistency, not yet fixed.** The fallback when `repairType` is unset differs
+by file: `TestingReport` prints `{job.repairType || 'GP'}` while `EstimateGenerate` and
+`SingleJobEstimateReport` print `|| 'OGP'`. A job with no `repairType` therefore appears
+as **GP on the testing report and OGP on the estimate**. Given GP now determines whether
+a job is billable at all (F14), a default that varies by document is worth settling —
+`OGP` is the safer default, since it fails toward "chargeable, review it" rather than
+silently marking a job free of cost.
+
+**Is it reachable?** Section 8 of `scripts/blast-radius-console.js` counts jobs with
+`repairType` unset, null or empty. For each it also gathers the evidence for what the
+job really is — the companion `isGp` boolean, GP provenance (`prevJobNo`,
+`prevDeliveryDate`, `gpSource`, which only a GP intake sets), and the `repairType` of
+its MR siblings, since an MR is issued for one type. Reported as `likelyType`, explicitly
+labelled evidence rather than a determination: the field decides billability, so a human
+confirms it against the MR paperwork before anything is written.
+
+**MEASURED: 0 jobs have `repairType` unset.** The divergence was never reachable in this
+data — no job has ever displayed as GP on one document and OGP on another.
+
+**Fixed anyway, DEFENSIVELY not correctively.** `TestingReport`'s two `|| 'GP'`
+fallbacks are now `|| 'OGP'`, matching `EstimateGenerate` and `SingleJobEstimateReport`.
+Nothing displayed differently before or after; the change removes a trap rather than
+repairing damage. The printed-report site carries a comment saying so, so it is not
+later "corrected" back on the assumption that GP was the intended default.
+
+---
+
 ## OPEN
 
 ### O1. GP lookup can match the wrong transformer — highest severity
@@ -302,6 +363,68 @@ note at the top of this file.
 **Not yet fixed.** The correct fix is to write the stored field from the same function
 that renders the document, rather than recomputing it.
 
+### O5. `paymentDeductions` accepts the full payment as a "deduction" — unvalidated
+
+**Not the same class as O3/O4.** Those are code computing a stored figure wrongly. This
+field is **not** defaulted from `paidAmount` or from any computed source: it initialises
+to `'0'` (`handleOpenPaidModal`), is typed by hand into an input labelled "TDS /
+Deduction Amount (₹)", and is written as `Number(paymentDeductions) || 0`. The value is
+operator-entered.
+
+**But it is accepted without any check**, and MSBT-12 shows why that matters:
+`paidAmount` **6,680**, `billTotalMrAmount` **6,680**, `paymentDeductions` **6,680** —
+all three identical. A deduction is a portion *withheld* from a payment; it cannot equal
+the whole payment. Taken literally the net realised is **zero**, which contradicts the
+bank credit against `UTR/2026/1` that we know was received. So the deduction figure is
+wrong data, not a wrong calculation.
+
+**How it likely happened:** "Amount Received" arrives pre-filled with the MR grand total
+(6,680) while "TDS / Deduction" sits directly beneath it, empty, styled identically. The
+same figure entered twice is an easy slip, and nothing pushes back.
+
+**Consequences beyond the one record:**
+- Payment reporting is understated. `totalDeductions` sums the field across paid bills
+  and the Excel export writes it as "TDS / Deductions (INR)", so a full-amount deduction
+  reports the collection as entirely withheld.
+- The Payments list shows "TDS/Ded: ₹6,680" beside a ₹6,680 receipt, which reads as a
+  reconciled zero.
+
+**Does it change the C3 refund?** No. The refund is **6,680**, the amount actually
+received per the bank credit. If the deduction were genuine, nothing would have been
+received and there would be nothing to refund — which is itself proof the field is wrong.
+
+**Fixed — two checks in `handleConfirmPaid`, deliberately of different strengths:**
+
+1. **BLOCK** when `deductions >= paidAmount` (or either is negative). Names both figures
+   in the message and states that a deduction is the portion withheld, not the payment
+   itself. This is impossible data, so it is refused outright.
+2. **WARN, do not block**, when the deduction is an implausible *share* of the gross.
+   The blocking rule only catches the impossible case; a figure that is merely **wrong**
+   — 6,680 where 2% TDS on 6,680 is ~134 — is individually "valid" and would pass. The
+   warning computes the implied rate against `paidAmount + deductions`, and if it is not
+   within 0.15pp of a usual TDS rate (1/2/5/10%) and exceeds 12%, it shows what each
+   usual rate *would* be and asks for confirmation. Suggesting the likely intent is more
+   useful than only refusing the impossible one, and the operator can still proceed —
+   an unusual deduction is not necessarily an error.
+
+**⚠️ MSBT-12's stored value is wrong data and still needs correcting — REPORT ONLY, not
+changed.** The guard prevents recurrence; it does not repair the existing record.
+
+**What the correct value should be — cannot be determined from the system.** The three
+possibilities, in order of likelihood:
+
+- **`0`** — nothing was withheld, and the figure was the payment amount typed twice into
+  the adjacent field. Most likely, given all three stored figures are identical.
+- **A genuine TDS amount** — at the usual rates on a 6,680 gross that is ~67 (1%),
+  ~134 (2%), ~334 (5%) or ~668 (10%).
+- Something else entirely, if the division applied a specific retention.
+
+**Only the bank credit against `UTR/2026/1` settles it.** If the credit was 6,680 the
+deduction was 0; if it was less, the difference is the true deduction and `paidAmount`
+is also wrong. Check the payment advice before changing anything — and note this
+interacts with the C3 refund figure: if the credit turns out to be less than 6,680, the
+refund is the credited amount, not 6,680.
+
 ### C2. MSBT-12 (MR 1) — submitted estimate routed the approval to the wrong authority
 
 The only estimate actually submitted among the 26 mispriced jobs.
@@ -461,19 +584,22 @@ of the measured 10.00 kg (`totCoil` 4 × `wtOfCoil` 2.5).
 stamped on new inspection saves, but **nothing filters on it until existing records are
 backfilled**.
 
-**MEASURED.** `scripts/blast-radius-console.js` sections 1-3, 32 jobs in the agency:
+**MEASURED.** `scripts/blast-radius-console.js` sections 1-3. Latest full run, **36 jobs**
+in the agency (up from 32 at first measurement as intake continued):
 
-- **26 of 32 jobs mispriced — every one overstated.** Capacity defaults are higher than
+- **29 of 36 jobs mispriced — every one overstated.** Capacity defaults are higher than
   the measured quantities in every observed case. Worst seen: MSBT-6 at **21,028
   submitted vs 8,612 correct**.
-- **19 jobs flipped circle-limit verdict, all EXCEEDS → within.** Transformers were
+- **20 jobs flipped circle-limit verdict, all but one EXCEEDS → within.** Transformers were
   being flagged as needing Superintending Engineer approval purely because the estimate
   was built from capacity defaults. Those escalations were unnecessary.
 - **1 estimate actually submitted** — MSBT-12 (MR 1), and it flips the *other* way,
   within → EXCEEDS. See **C2**: it routed the approval to the wrong authority and needs
   reissuing.
 
-The 25 unsubmitted jobs need no external remedy — they simply reprice correctly now.
+The unsubmitted jobs need no external remedy — they simply reprice correctly now. The
+proportion is stable as the dataset grows (26/32 then 29/36, ~81% either way), which is
+consistent with the cause being structural rather than particular to a few records.
 
 ### F2. Absent inspection data produced silent, plausible numbers
 
@@ -839,6 +965,54 @@ rather than silently skipping.
 **Oil accounting deliberately unaffected** — see the near-miss recorded under the second
 pattern note. GP transformers still appear on the oil sheet with capacity, received and
 shortage.
+
+### F15. Switching GP → OGP carried GP provenance onto the OGP job
+
+`handleRepairTypeSelect` changed only `repairType` and the job numbers. Everything else
+survived the switch in both directions — and switching **GP → OGP** carried the entire
+GP provenance set onto jobs that are not guarantee repairs:
+
+`gpSource` (as `'linked'`), `gpPriorJobId`, `prevJobNo`, `prevAtNo`, `prevDeliveryDate`,
+`autoFilledFrom`.
+
+**Exposure — false provenance.** An ordinary OGP repair could be saved looking like a
+guarantee job: linked to a prior repair it has no relationship to, with a delivery date
+the guarantee window would be measured from. `gpSource: 'linked'` exists precisely to
+record *"this was matched against system data"*, so a wrong value there is worse than a
+missing one — it asserts a verification that never happened. Anything reading provenance
+later (a disputed claim, a reconciliation) would be misled.
+
+Also carried, and wrong for a different reason: **`mrNo`**. The division issues separate
+MR numbers for GP and OGP work — they are different documents — so jobs could be saved
+against an MR never issued for them. Plus `dateOfIssue`, `division`, `make`, `serialNo`,
+`capacityKva`, `coreType`, `starRating` and `gpReason`.
+
+**Fixed:** switching repair type in either direction now resets the entire intake —
+`commonData` replaced wholesale and `transformers` reduced to one blank row via
+`blankTransformerRow()`, which sets every provenance field explicitly rather than
+leaving it undefined by omission. Stale UI state (suggestion list, disambiguation
+chooser, past-job picker, notices) is cleared too. A confirmation appears first if
+anything has been entered.
+
+The confirmation's dirty-check deliberately ignores `jobNo` for OGP, since it is
+auto-generated rather than typed — counting it would fire the dialog on every switch,
+and a dialog that always appears is one operators learn to dismiss unread.
+
+**MEASURED: 0 affected jobs.** Section 7 of `scripts/blast-radius-console.js` reports no
+OGP job carrying any GP provenance field. **The leak was closed before it produced bad
+data** — confirmed non-issue, no remediation needed.
+
+The check is worth keeping in the script: any future path that writes a job without
+clearing provenance would show up there.
+
+**Original action, now discharged.** Any OGP job saved through
+this path would have retained the fields above. An OGP job with `gpSource`, `prevJobNo` or
+`prevDeliveryDate` set did not acquire them legitimately: on an OGP intake there is no
+path that sets them except this leak. Section 7 of `scripts/blast-radius-console.js`
+lists them. The fields should be cleared on any job found, but **check first whether the
+job was mis-typed rather than mis-provenanced** — a genuine GP job saved as OGP is a
+different problem from an OGP job with stray fields, and only someone who knows the
+transformer can tell them apart.
 
 ---
 

@@ -512,8 +512,17 @@ export default function TestingReport() {
                                 <div className="text-[7.5px] font-mono font-bold leading-tight">{job.mrNo || '-'}</div>
                                 <div className="text-[6.5px] font-mono text-slate-600 leading-tight">Dt: {mrDateStr}</div>
                               </td>
-                              <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
-                              <td className="border border-black p-0.5 font-bold uppercase">{job.repairType || 'GP'}</td>
+                              <td className="border border-black p-0.5 font-bold whitespace-nowrap">
+                                {job.capacityKva} <span className="font-normal text-[7px]">({job.coreType || 'CRGO'})</span>
+                              </td>
+                              {/* Defaults to OGP, matching EstimateGenerate and
+                                  SingleJobEstimateReport. This used to default to 'GP',
+                                  so a job with repairType unset read GP here and OGP on
+                                  the estimate. Since GP decides billability, the default
+                                  must fail toward "chargeable, review it" rather than
+                                  "free of cost, never billed". No job currently has the
+                                  field unset - this is defensive, not corrective. */}
+                              <td className="border border-black p-0.5 font-bold uppercase">{job.repairType || 'OGP'}</td>
                               <td className="border border-black p-0.5 text-[7px] text-center font-mono leading-tight">
                                 <div>E: {extDateStr}</div>
                                 <div>I: {intDateStr}</div>
@@ -744,12 +753,12 @@ export default function TestingReport() {
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold font-mono rounded border border-blue-100">
-                        {job.capacityKva} KVA
+                        {job.capacityKva} KVA ({job.coreType || 'CRGO'})
                       </span>
                     </td>
                     <td className="px-3 py-3 text-xs text-slate-600">
                       <div className="font-medium text-slate-900">{job.make || '-'}</div>
-                      <div className="text-[11px] text-slate-500 font-semibold">{job.repairType || 'GP'}</div>
+                      <div className="text-[11px] text-slate-500 font-semibold">{job.repairType || 'OGP'}</div>
                     </td>
                     <td className="px-3 py-3 text-center whitespace-nowrap">
                       {job.externalInspectionDate ? (
@@ -910,7 +919,7 @@ export default function TestingReport() {
                         </span>
                       )}
                       <span className="px-2.5 py-1 bg-slate-900 text-white text-xs font-bold font-mono rounded-lg">
-                        {job.capacityKva} KVA
+                        {job.capacityKva} KVA ({job.coreType || 'CRGO'})
                       </span>
                       <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
                         {job.make}
