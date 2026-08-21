@@ -6,7 +6,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { PrintableA4Page } from './LetterheadHeader';
@@ -144,13 +144,25 @@ export default function TestingReport() {
     });
   }, [jobs, mrGroups, inspections, tab]);
 
+
+  /** MR date for sorting: MR NUMBERS ARE NOT CHRONOLOGICAL, so number is the tiebreak
+   *  only. Undated MRs sink via byDateDesc. */
+  const mrSortDate = (mr: string): string => {
+    const g = mrGroups[mr] || [];
+    for (const j of g) {
+      const d = j.dateOfIssue || j.mrDate || '';
+      if (d) return d;
+    }
+    return '';
+  };
+
   const mrOptions = useMemo(() => {
     const counts: Record<string, number> = {};
     tabEligibleJobs.forEach(j => {
       counts[j.mrNo] = (counts[j.mrNo] || 0) + 1;
     });
     return Object.keys(counts)
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .sort(byDateDesc(mr => mrSortDate(mr), byNumericDesc(mr => mr)))
       .map(mrNo => ({ mrNo, count: counts[mrNo] }));
   }, [tabEligibleJobs]);
 
@@ -339,7 +351,7 @@ export default function TestingReport() {
 
     const wsData: any[][] = [];
     wsData.push(['TESTING REPORT - ' + (activeAgency?.name || 'IDEAL ENGINEERING CO.')]);
-    wsData.push(['Export Date: ' + new Date().toLocaleDateString()]);
+    wsData.push(['Export Date: ' + formatDDMMYYYY(new Date())]);
     wsData.push([]);
 
     wsData.push([
@@ -393,19 +405,13 @@ export default function TestingReport() {
     XLSX.writeFile(wb, `Testing_Reports_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return '';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' }).replace(/\//g, '.');
-  };
-
   if (loading && jobs.length === 0) {
     return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-600" /></div>;
   }
 
   if (isPrintOpen) {
     const selectedJobs = Array.from<string>(selectedJobIds).map(id => jobs.find(j => j.id === id)!).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
-    const printDate = selectedJobs[0]?.testingDate ? formatDate(selectedJobs[0].testingDate) : formatDate(new Date().toISOString());
+    const printDate = formatDDMMYYYY(selectedJobs[0]?.testingDate || new Date());
 
     // Chunk jobs for clean landscape A4 pagination (8 jobs per page)
     const CHUNK_SIZE = 8;

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { formatDDMMYYYY } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useAgency, Agency } from '../lib/AgencyContext';
@@ -453,7 +454,7 @@ export default function AdminPanel() {
                         ₹{planAmt} <span className="text-[10px] font-normal text-slate-400">/ yr</span>
                       </td>
                       <td className="p-3 text-slate-600 font-medium">
-                        {new Date(expiryMs).toLocaleDateString()}
+                        {formatDDMMYYYY(expiryMs)}
                       </td>
                       <td className="p-3 text-right">
                         <div className="flex items-center justify-end gap-1.5">
@@ -547,7 +548,7 @@ export default function AdminPanel() {
                         <span className="text-red-600 font-bold">Suspended</span>
                       )}
                     </td>
-                    <td className="p-3 text-slate-500">{new Date(ur.updatedAt).toLocaleDateString()}</td>
+                    <td className="p-3 text-slate-500">{formatDDMMYYYY(ur.updatedAt)}</td>
                     <td className="p-3 text-right">
                       <button
                         onClick={() => handleToggleUserStatus(ur)}
@@ -627,7 +628,7 @@ export default function AdminPanel() {
                     </td>
                     <td className="p-3 font-bold">{t.priority}</td>
                     <td className="p-3 font-bold">{t.status}</td>
-                    <td className="p-3 text-slate-500">{new Date(t.createdAt).toLocaleDateString()}</td>
+                    <td className="p-3 text-slate-500">{formatDDMMYYYY(t.createdAt)}</td>
                     <td className="p-3 text-right">
                       <button
                         onClick={() => {

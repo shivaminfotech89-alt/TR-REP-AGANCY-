@@ -131,6 +131,26 @@ division rather than unilaterally.
 Record this as settled. Anyone finding the inconsistent headings later should not
 "fix" them without that conversation.
 
+#### Why the date-format change went the other way — a deliberate divergence
+
+The printed testing report's date separator **was** changed (`dd.mm.yyyy` → `dd-mm-yyyy`,
+F16), even though it too is a document already issued to UGVCL. That is not
+inconsistent with the deferral above; the two cases differ in kind:
+
+- **A column heading is a label**, read once to understand what the column contains. A
+  reviewer who sees "Type" on one estimate and "Core Type" on the next learns nothing
+  false — they simply read the new label. The cost of changing it is a visible
+  discrepancy between documents on file; the benefit is small.
+- **A date separator is part of a value.** One document in an envelope using `.` while
+  every other uses `-` invites a reader to wonder whether the difference *means*
+  something — whether it denotes a different kind of date, or a different source. An
+  unexplained formatting difference inside a set of documents submitted together is
+  worse than a difference from previously issued copies of one of them.
+
+**The general rule:** consistency across documents in the same envelope outranks
+consistency with earlier copies of a single document. Labels can differ between
+submissions; values should not differ between documents in one submission.
+
 **Related inconsistency, not yet fixed.** The fallback when `repairType` is unset differs
 by file: `TestingReport` prints `{job.repairType || 'GP'}` while `EstimateGenerate` and
 `SingleJobEstimateReport` print `|| 'OGP'`. A job with no `repairType` therefore appears
@@ -424,6 +444,31 @@ deduction was 0; if it was less, the difference is the true deduction and `paidA
 is also wrong. Check the payment advice before changing anything — and note this
 interacts with the C3 refund figure: if the credit turns out to be less than 6,680, the
 refund is the credited amount, not 6,680.
+
+### O6. A missing oil-transaction date printed the bill date instead — FIXED
+
+`BillingSystem.tsx:2935`, in the printed oil statement:
+
+```
+{tx.date ? new Date(tx.date).toLocaleDateString() : billDate}
+```
+
+A transaction with no date rendered **the bill's own date** — a value with no
+relationship to the transaction, on a financial document, indistinguishable from a real
+one. A reader has no way to tell a genuine same-day transaction from a fabricated
+substitute.
+
+**Same class as the capacity defaults (F1/F2) and the `updatedAt` dispatch date (F6):
+missing data made to look like real data.** The pattern is that the fallback is
+*plausible*, which is exactly what makes it dangerous — an obviously wrong value would
+have been caught.
+
+**Fixed** as part of the date centralisation: the cell now renders `formatDDMMYYYY(tx.date)`,
+which returns `-`. Kept as an OPEN entry rather than moved to FIXED because **the
+historical exposure has not been measured** — any oil statement already printed while a
+transaction lacked a date carries the bill date in its place, and nothing in the document
+marks it. If oil statements have been issued, that is worth checking before they are
+relied on for reconciliation.
 
 ### C2. MSBT-12 (MR 1) — submitted estimate routed the approval to the wrong authority
 
@@ -1013,6 +1058,114 @@ lists them. The fields should be cleared on any job found, but **check first whe
 job was mis-typed rather than mis-provenanced** — a genuine GP job saved as OGP is a
 different problem from an OGP job with stray fields, and only someone who knows the
 transformer can tell them apart.
+
+### F16. Four date formatters, three of them wrong — one locale-dependent
+
+Date display was implemented four separate ways across ~90 call sites:
+
+| Implementation | Sites | Produced |
+|---|---|---|
+| `formatDDMMYYYY` (`lib/utils.ts`) | ~75 | `dd-mm-yyyy` — correct |
+| `formatDate` local to `TestingReport` | 1 | `dd.mm.yyyy` — **dot separated** |
+| bare `toLocaleDateString()` | 12 | **whatever the browser locale says** |
+| `toLocaleDateString('en-GB')` | 2 | `dd/mm/yyyy` — slashes |
+
+**The bare `toLocaleDateString()` sites are the serious ones.** With no locale argument
+the output follows the operator's machine: `03/08/2026` on an `en-IN` browser,
+`08/03/2026` on `en-US` — the same stored value, rendered as two different dates, with
+nothing on screen indicating which reading applies. Affected sites included **licence
+expiry** (AdminPanel) and **AT validity period** (AtSettings), where reading the month as
+the day is materially wrong.
+
+Missing-value behaviour diverged too: `-` (shared), `''` (TestingReport — an empty cell
+reading as "no data"), `Invalid Date`, or a throw on null.
+
+**This is the "rule applied once" pattern**: one rule, four implementations, three
+already drifted before anyone looked.
+
+**Fixed:** every site now calls `formatDDMMYYYY`. Local implementations deleted; zero
+`toLocaleDateString` calls remain anywhere. Storage is untouched — Firestore keeps ISO
+`yyyy-mm-dd`, which sorts correctly as a string — and `<input type="date">` fields
+(25 of them) were never involved, since they bind raw ISO state and never passed through
+a formatter.
+
+**Also tightened:** `formatDDMMYYYY` previously returned the raw input unchanged when the
+value could not be parsed, to avoid printing "Invalid Date". Tracing showed that branch
+is reachable *only* for genuine garbage — `dd-mm-yyyy` and `yyyy-mm-dd` are caught by
+regex, and anything `Date` can parse (including readable forms like `15 Aug 2026`)
+succeeds — so the raw return could only ever surface unusable data looking like a date.
+It now returns `-`, giving the function one contract: **a value that cannot be rendered
+as a date renders as `-`**.
+
+### F17. Four comparators that looked correct and scattered undated rows
+
+Four "newest first" sorts shared this shape — Sent Bills and Paid Bills
+(`BillingSystem`), Sent Estimates and Approvals (`EstimateGenerate`):
+
+```js
+if (a.billSentDate && b.billSentDate) {
+  return b.billSentDate.localeCompare(a.billSentDate);   // correct, when both have one
+}
+return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });   // whenever EITHER is missing
+```
+
+The guard requires **both** dates. When only one side has one, it falls through and the
+pair is compared by **MR number** — an unrelated key. So an undated row does not sink to
+the bottom; it lands wherever its MR number happens to place it, **scattered through a
+list the operator is reading as chronological**. An operator scanning for the most recent
+bill can have an undated row sitting above it.
+
+Worse, the comparator is **not transitive**: a dated row and an undated row compare by MR
+number while two dated rows compare by date, so the resulting order can depend on the
+input sequence. Two renders of the same data can differ.
+
+**This is the pattern-note shape again** — the code agrees with itself in the case
+someone tested (both dates present) and disagrees wherever the data is incomplete. It is
+not a cosmetic sorting bug.
+
+**Fixed:** one shared `byDateDesc(getDate, tieBreak?)` in `lib/utils.ts`. Undated rows
+sink **by construction, in either direction** — the missing-key comparison happens before
+the direction is applied, so flipping to ascending cannot float them to the top. The
+per-screen tiebreak is preserved via the optional second argument. Its doc comment
+carries the broken shape above as the worked example.
+
+**Applied to, and other sorting fixed in the same pass:**
+
+- The four comparators above.
+- **MR list screens now sort by MR date descending**, MR number descending as tiebreak —
+  Billing, Estimate, Testing, and both inspection screens. They previously sorted by MR
+  number **ascending**, so the oldest MR appeared first. Sorting by number would not have
+  fixed it: **MR numbers are not chronological** in this data — MR 9344 predates MR 1563,
+  and MR 1 sits among five-digit numbers — so number-descending would present an order
+  that is not newest-first at all. Number is the tiebreak only.
+- **DispatchChallan's Dispatched table** sorted by job number while its Pending table
+  sorted by test date; now `deliveryDate || challanDate` descending, job number as
+  tiebreak.
+- **Reports' Excel export** sorted **oldest first**; now newest first, undated last.
+- **`MrLedger`** used `new Date(x || 0)`, making a missing date epoch 1970 — which sorts
+  last only *by accident*, and would sort **first** if the direction were ever flipped.
+  Replaced with `byDateDesc`: correct by construction rather than by coincidence.
+- **In-place sorts converted to copies — but only where the array's origin is not
+  visible from the sort site.** Converted: the `useMemo` returns in `BillingSystem` (×2),
+  `EstimateGenerate` (×2) and `MrLedger`. There the safety depends on the memo returning
+  a fresh array, which the sort site cannot see; change the memo later and the counts
+  above the table corrupt silently.
+
+  **Deliberately NOT converted, and this is not an oversight:** four sorts operating on
+  an array created on the immediately adjacent line — `AdminPanel:77`,
+  `SupportTickets:40`, `OilInward:189`, `NewJob:304`, all of the form
+  `const list = snap.docs.map(...); list.sort(...)`. The hazard being guarded against is
+  **invisibility of origin**, not mutation as such. Where the origin is one line above,
+  a defensive copy adds noise and — worse — dilutes the signal in the three places where
+  the copy is load-bearing. If every sort is copied, the copy stops meaning anything.
+
+  Do not "complete" this conversion. The inconsistency is the point: a `[...list]` in
+  this codebase means *"the origin of this array is not local, do not assume it is
+  disposable."*
+
+**Left deliberately:** within-MR job lists still sort by job number. Every job in an MR
+shares its MR date, so date order there would be arbitrary; job number is the meaningful
+sequence. DispatchChallan's Pending list and its user-facing sort toggle are unchanged.
 
 ---
 

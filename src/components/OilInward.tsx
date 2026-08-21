@@ -12,6 +12,7 @@ import {
   doc,
   serverTimestamp,
 } from "firebase/firestore";
+import { formatDDMMYYYY } from '../lib/utils';
 import {
   Droplet,
   Plus,
@@ -453,7 +454,7 @@ export default function OilInward() {
       wsData.push([]);
       wsData.push(["Receive Date", "MR No.", "MR Date", "Division", "Oil Type", "Barrels", "Gross (LTR)", "Loss %", "Net (LTR)"]);
       filteredTransactions.forEach((tx) => {
-        const date = new Date(tx.date).toLocaleDateString();
+        const date = formatDDMMYYYY(tx.date);
         const mrDate = tx.mrDate || getMrDate(tx.mrNo);
         wsData.push([
           date,
@@ -1001,7 +1002,7 @@ export default function OilInward() {
                         className={`hover:bg-slate-50 ${editingId === tx.id ? "bg-blue-50/50" : ""}`}
                       >
                         <td className="px-4 py-3 whitespace-nowrap">
-                          {new Date(tx.date).toLocaleDateString()}
+                          {formatDDMMYYYY(tx.date)}
                         </td>
                         <td className="px-4 py-3 font-medium text-slate-900">
                           {tx.mrNo}

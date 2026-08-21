@@ -28,7 +28,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
@@ -276,7 +276,10 @@ export default function DispatchChallan() {
         }
       }
       return true;
-    }).sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
+    }).sort(byDateDesc<any>(
+      j => j.deliveryDate || j.challanDate,
+      (x, y) => (x.jobNo || '').localeCompare(y.jobNo || '', undefined, { numeric: true })
+    ));
   }, [allDispatchedJobs, historyDivisionFilter, historyMrFilter, historyCategoryFilter, historySearchQuery, historyGpFilter]);
 
   // Group filtered jobs into challan groups
@@ -320,9 +323,7 @@ export default function DispatchChallan() {
     
     return Object.entries(groups)
       .filter(([_, data]) => data.jobs.length > 0)
-      .sort((a, b) => {
-        return new Date(b[1].challanDate).getTime() - new Date(a[1].challanDate).getTime();
-      });
+      .sort(byDateDesc(entry => entry[1].challanDate));
   }, [allDispatchedJobs, filteredDispatchedJobs]);
 
   const historyRepairableCount = useMemo(() => {

@@ -492,6 +492,60 @@
     console.log('paperwork before setting repairType - the field decides billability (F14).');
   }
 
-  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows, gpCharged, falseProv, unsetType };
+  // ---------------------------------------------------------------------------
+  // SECTION 9 - OIL TRANSACTIONS WITH NO DATE (closes O6's measurement gap)
+  // ---------------------------------------------------------------------------
+  // The printed oil statement rendered `tx.date ? ... : billDate` - a transaction with
+  // no date printed the BILL's date in its place, indistinguishable from a real one.
+  // The code is fixed (shows '-'), but any statement already printed carries the
+  // substituted value with nothing marking it.
+  //
+  // `date` is written as epoch ms by OilInward. Missing means undefined, null, empty,
+  // or a value that does not parse.
+  const oilTx = await snap('oilTransactions', where('ownerId', '==', uid), where('agencyId', '==', agencyId));
+
+  const badDate = v => {
+    if (v === undefined || v === null || String(v).trim() === '') return true;
+    const t = typeof v === 'number' ? v : new Date(v).getTime();
+    return isNaN(t);
+  };
+
+  const undatedOil = oilTx.filter(t => badDate(t.date));
+
+  hdr(`OIL TRANSACTIONS WITH NO DATE - ${undatedOil.length} of ${oilTx.length}`);
+  if (undatedOil.length === 0) {
+    console.log('(none - no oil statement can have carried a substituted bill date)');
+    console.log('O6 exposure measured as nil. The fix is preventive only.');
+  } else {
+    console.table(undatedOil.map(t => {
+      // What the old code would have printed: the bill date, which handleSelectMr
+      // derives per MR. Reconstructed the same way BillingSystem does.
+      const mrJobs = jobs.filter(j => j.mrNo === t.mrNo);
+      const savedBill = mrJobs.find(j => j.billSentDate || j.billDate);
+      const wouldHavePrinted = savedBill?.billSentDate || savedBill?.billDate || '(today, at print time)';
+      const billed = mrJobs.some(j => j.billNo || j.billSentDate);
+      return {
+        txId: t.id,
+        mrNo: t.mrNo || '(none)',
+        mrDate: t.mrDate || '',
+        division: t.division || '(none)',
+        oilType: t.oilType || '',
+        grossLiters: t.grossLiters ?? '',
+        netLiters: t.netLiters ?? '',
+        rawDate: String(t.date),
+        // Nothing records whether a statement was PRINTED - printing leaves no trace.
+        // A sent bill is the closest proxy: the oil statement is page 4 of that package.
+        mrHasSentBill: billed,
+        statementLikelyIssued: billed ? 'YES - bill sent, oil statement is part of that package' : 'no bill sent for this MR',
+        wouldHavePrintedAsDate: wouldHavePrinted,
+      };
+    }));
+    console.log('');
+    console.log('NOTE: nothing in the data records whether an oil statement was PRINTED -');
+    console.log('printing leaves no trace. `mrHasSentBill` is the closest proxy, since the');
+    console.log('oil statement is part of the bill package. Treat YES rows as issued.');
+  }
+
+  window.__blastRadius = { rows, flipped, submitted, skipped, gpRows, gpNoStamp: noStamp, scrapRows, mrRows, gpCharged, falseProv, unsetType, undatedOil };
   console.log('\nFull results: window.__blastRadius');
 })();

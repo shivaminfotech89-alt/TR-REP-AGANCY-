@@ -447,7 +447,10 @@ export default function Reports() {
       // 1. Date comparison
       const dateA = a.dateOfIssue || a.mrDate || a.createdAt || '';
       const dateB = b.dateOfIssue || b.mrDate || b.createdAt || '';
-      const dateCompare = dateA.localeCompare(dateB);
+      // Newest first, undated last - matches every list in the app.
+      if (dateA && !dateB) return -1;
+      if (!dateA && dateB) return 1;
+      const dateCompare = dateB.localeCompare(dateA);
       if (dateCompare !== 0) return dateCompare;
 
       // 2. MR No comparison

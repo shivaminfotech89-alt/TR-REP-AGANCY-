@@ -4,6 +4,7 @@ import { collection, query, where, getDocs, addDoc, orderBy } from 'firebase/fir
 import { useAgency } from '../lib/AgencyContext';
 import { SupportTicket, TicketCategory, TicketPriority } from '../types/admin';
 import { LifeBuoy, PlusCircle, MessageSquare, Clock, CheckCircle2, AlertCircle, RefreshCw, Send, ShieldAlert, Sparkles } from 'lucide-react';
+import { formatDDMMYYYY } from '../lib/utils';
 
 export default function SupportTickets() {
   const { activeAgency } = useAgency();
@@ -203,7 +204,7 @@ export default function SupportTickets() {
                     {getPriorityBadge(t.priority)}
                     <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-medium">{t.category}</span>
                   </div>
-                  <span>{new Date(t.createdAt).toLocaleDateString()}</span>
+                  <span>{formatDDMMYYYY(t.createdAt)}</span>
                 </div>
 
                 {t.adminReply && (

@@ -17,7 +17,7 @@
 // THE WRITE SETS `condition` AND NOTHING ELSE. status, dates, challan fields,
 // bill fields and everything else are never touched.
 
-const MODE ='write';   // 'dry-run' | 'write'
+const MODE = 'dry-run';   // 'dry-run' | 'write'
 
 (async () => {
   const db = window.__db, auth = window.__auth, fs = window.__fs;

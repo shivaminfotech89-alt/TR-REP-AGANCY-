@@ -3,6 +3,7 @@ import { useAgency, AtMaster } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
+import { formatDDMMYYYY } from '../lib/utils';
 
 // Live hint for an AT percentage field while it's still a string mid-edit (e.g. "-",
 // "-.", "." are valid intermediate states that aren't a usable number yet).
@@ -186,7 +187,7 @@ export function AtSettings() {
                   </span>
                 </div>
                 <div className="text-slate-500 text-[11px] flex items-center gap-2">
-                  <span>{new Date(activeAtMaster.startDate).toLocaleDateString()} - {new Date(activeAtMaster.endDate).toLocaleDateString()}</span>
+                  <span>{formatDDMMYYYY(activeAtMaster.startDate)} - {formatDDMMYYYY(activeAtMaster.endDate)}</span>
                   <span>•</span>
                   <span>CRGO: {activeAtMaster.atPercentageCRGO ?? activeAtMaster.atPercentage ?? 4}%</span>
                   <span>•</span>
@@ -241,7 +242,7 @@ export function AtSettings() {
                               )}
                             </div>
                             <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
-                              <span className="flex items-center"><Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" /> {new Date(at.startDate).toLocaleDateString()} to {new Date(at.endDate).toLocaleDateString()}</span>
+                              <span className="flex items-center"><Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" /> {formatDDMMYYYY(at.startDate)} to {formatDDMMYYYY(at.endDate)}</span>
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${at.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
                                 {at.status}
                               </span>

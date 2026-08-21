@@ -3,6 +3,7 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
+import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
@@ -246,6 +247,19 @@ export default function BillingSystem() {
   }, [mrGroups, billTypeFilter]);
 
   // Filter MRs matching search & division (STAGE 1: Bill Generator - Unsent Only)
+
+  /** MR date for sorting: the date of issue recorded on the MR's jobs. MR NUMBERS ARE
+   *  NOT CHRONOLOGICAL (MR 9344 predates MR 1563; MR 1 sits among five-digit numbers),
+   *  so sorting by number would not be newest-first. Number is the tiebreak only. */
+  const mrSortDate = (mr: string): string => {
+    const g = mrGroups[mr] || [];
+    for (const j of g) {
+      const d = j.dateOfIssue || j.mrDate || '';
+      if (d) return d;
+    }
+    return '';
+  };
+
   const filteredMrNos = useMemo(() => {
     return Object.keys(mrGroups).filter(mr => {
       const groupJobs = mrGroups[mr] || [];
@@ -268,7 +282,7 @@ export default function BillingSystem() {
       });
 
       return matchesSearch && matchesDivision && hasMatchingType;
-    }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }).sort(byDateDesc(mr => mrSortDate(mr), byNumericDesc(mr => mr)));
   }, [mrGroups, searchQuery, selectedDivision, billTypeFilter]);
 
   // Selected jobs for the active bill (Resilient matching)
@@ -1288,12 +1302,9 @@ export default function BillingSystem() {
       }
     });
 
-    return list.sort((a, b) => {
-      if (a.billSentDate && b.billSentDate) {
-        return b.billSentDate.localeCompare(a.billSentDate);
-      }
-      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
-    });
+    // Copy + undated-last. The old guard fell through to MR order whenever EITHER
+    // side lacked a date, scattering undated rows through the list (AUDIT F17).
+    return [...list].sort(byDateDesc(x => x.billSentDate, byNumericDesc(x => x.mrNo)));
   }, [mrGroups, activeAtMaster, activeAgency]);
 
   // Unpaid Sent Bills List (Awaiting Payment)
@@ -1303,12 +1314,9 @@ export default function BillingSystem() {
 
   // Paid Bills List (Payments Received)
   const paidBillsList = useMemo(() => {
-    return sentBillsList.filter(item => item.isPaid).sort((a, b) => {
-      if (a.paymentDate && b.paymentDate) {
-        return b.paymentDate.localeCompare(a.paymentDate);
-      }
-      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
-    });
+    return sentBillsList
+      .filter(item => item.isPaid)
+      .sort(byDateDesc(x => x.paymentDate, byNumericDesc(x => x.mrNo)));
   }, [sentBillsList]);
 
   // Filtered Unpaid Sent Bills List (Stage 2: Sent Bills Awaiting Payment)
@@ -2932,7 +2940,9 @@ export default function BillingSystem() {
                           mrOilTxList.map((tx, idx) => (
                             <tr key={tx.id || idx} className="border-b border-black">
                               <td className="border border-black p-0.5 font-mono font-bold">{tx.mrNo}</td>
-                              <td className="border border-black p-0.5">{tx.date ? new Date(tx.date).toLocaleDateString() : billDate}</td>
+                              {/* A missing transaction date shows '-', never the bill date. Substituting billDate
+                                  put a fabricated date on a financial document - see AUDIT.md O6. */}
+                              <td className="border border-black p-0.5">{formatDDMMYYYY(tx.date)}</td>
                               <td className="border border-black p-0.5">{tx.oilType || 'Fresh'}</td>
                               <td className="border border-black p-0.5 font-mono">{Number(tx.grossLiters || 0).toFixed(1)}</td>
                               <td className="border border-black p-0.5 font-mono">{tx.barrels || 0}</td>

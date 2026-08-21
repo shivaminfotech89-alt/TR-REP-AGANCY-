@@ -38,7 +38,7 @@ import {
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 
 interface Job {
   id: string;
@@ -147,9 +147,10 @@ export default function MrLedger() {
       });
       
       // Sort MRs by date (newest first)
-      const sortedGroups = Object.values(groups).sort((a, b) => {
-        return new Date(b.dateOfIssue || 0).getTime() - new Date(a.dateOfIssue || 0).getTime();
-      });
+      // Was `new Date(x || 0)` - a missing date became epoch 1970, which sorts last
+      // only by accident and would sort FIRST if the direction were ever flipped.
+      // byDateDesc sinks undated rows by construction, in either direction.
+      const sortedGroups = [...Object.values(groups)].sort(byDateDesc((g: any) => g.dateOfIssue));
       
       setMrGroups(sortedGroups);
     } catch (err) {

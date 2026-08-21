@@ -4,7 +4,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { PrintableA4Page } from './LetterheadHeader';
 import { classifyCoreType } from './SingleJobEstimateReport';
@@ -564,6 +564,17 @@ export default function InternalInspection() {
     if (!mrGroups[j.mrNo]) mrGroups[j.mrNo] = [];
     mrGroups[j.mrNo].push(j);
   });
+
+  /** MR date for sorting: MR NUMBERS ARE NOT CHRONOLOGICAL, so number is the tiebreak
+   *  only. Undated MRs sink via byDateDesc. */
+  const mrSortDate = (mr: string): string => {
+    const g = mrGroups[mr] || [];
+    for (const j of g) {
+      const d = j.dateOfIssue || j.mrDate || '';
+      if (d) return d;
+    }
+    return '';
+  };
   
   const availableDivisions = Array.from(new Set(jobs.map(j => j.division).filter(Boolean))).sort();
   
@@ -574,7 +585,7 @@ export default function InternalInspection() {
       return isComplete;
     }
     return !isComplete && jobsForMr.some(j => !inspections.some(i => i.jobId === j.id) && (j.status === 'External Done' || j.status === 'Received' || !j.status));
-  }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  }).sort(byDateDesc(mr => mrSortDate(mr), byNumericDesc(mr => mr)));
 
   const filteredMrNos = uniqueMrNos.filter(mr => {
     if (!searchQuery) return true;

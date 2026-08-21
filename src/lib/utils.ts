@@ -24,13 +24,72 @@ export function formatDDMMYYYY(dateInput?: string | number | Date | null): strin
   }
   try {
     const d = new Date(dateInput);
-    if (isNaN(d.getTime())) return String(dateInput);
+    // Unparseable input renders as '-', NOT as the raw value. This branch is reachable
+    // only for genuine garbage: dd-mm-yyyy and yyyy-mm-dd are caught by the regexes
+    // above, and anything Date can parse - including readable forms like '15 Aug 2026' -
+    // succeeds below. Returning the raw string could therefore only ever surface
+    // unusable data looking like a date. One contract: a value that cannot be rendered
+    // as a date renders as '-'.
+    if (isNaN(d.getTime())) return '-';
     const day = String(d.getDate()).padStart(2, '0');
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
     return `${day}-${month}-${year}`;
   } catch {
-    return String(dateInput);
+    return '-';
   }
 }
 
+
+/**
+ * Comparator: most recent first, with rows that have NO date always sorting LAST.
+ *
+ * The "always last" part is the point. A naive descending sort puts undated rows on
+ * top, because an empty string sorts before any real date ascending. The subtler
+ * failure - and the one this codebase actually had - is a guarded comparator:
+ *
+ *   if (a.date && b.date) return b.date.localeCompare(a.date);
+ *   return b.mrNo.localeCompare(a.mrNo);          // <-- reached whenever EITHER is missing
+ *
+ * That looks correct and is not. When only one side has a date the guard fails and the
+ * pair is compared by an unrelated key, so undated rows scatter through the list
+ * instead of sinking, and the resulting order can depend on input sequence because the
+ * comparator is not transitive.
+ *
+ * Missing is defined as null, undefined, or empty/whitespace. ISO `yyyy-mm-dd` strings
+ * compare correctly with `localeCompare`, so no Date parsing is needed; epoch numbers
+ * and Date objects are also accepted.
+ *
+ * Always use on a COPY: `[...rows].sort(byDateDesc(r => r.billSentDate))`. Sorting in
+ * place mutates the array, which corrupts any count derived from the same reference.
+ *
+ * @param getDate   pulls the date out of a row
+ * @param tieBreak  optional comparator for rows whose dates are equal or both missing
+ */
+export function byDateDesc<T>(
+  getDate: (row: T) => string | number | Date | null | undefined,
+  tieBreak?: (a: T, b: T) => number
+) {
+  const key = (row: T): string => {
+    const v = getDate(row);
+    if (v === null || v === undefined) return '';
+    if (v instanceof Date) return isNaN(v.getTime()) ? '' : v.toISOString();
+    if (typeof v === 'number') return isNaN(v) ? '' : new Date(v).toISOString();
+    return String(v).trim();
+  };
+
+  return (a: T, b: T): number => {
+    const ka = key(a);
+    const kb = key(b);
+    if (ka && !kb) return -1;   // undated always sinks, whatever the direction
+    if (!ka && kb) return 1;
+    if (ka !== kb) return kb.localeCompare(ka);   // newest first
+    return tieBreak ? tieBreak(a, b) : 0;
+  };
+}
+
+/** Descending numeric-aware compare, for MR numbers as a tiebreak. */
+export function byNumericDesc(get: (row: any) => string | undefined) {
+  return (a: any, b: any) =>
+    String(get(b) ?? '').localeCompare(String(get(a) ?? ''), undefined, { numeric: true });
+}

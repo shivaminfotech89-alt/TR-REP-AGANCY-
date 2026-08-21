@@ -19,6 +19,7 @@ import SingleJobEstimateReport from './SingleJobEstimateReport';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { paginateRows } from '../lib/pagination';
+import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 
 // Helper function to calculate item rate, quantity, and amount for any core type
 export function calculateJobItemDetails(
@@ -470,7 +471,7 @@ export default function EstimateGenerate() {
   }, [activeAgency, currentSelectedDivision]);
 
   useEffect(() => {
-    const todayStr = new Date().toLocaleDateString('en-GB');
+    const todayStr = formatDDMMYYYY(new Date());
     setLetterDateText(todayStr);
     const discomPrefix = activeAgency?.discomName ? activeAgency.discomName.split(' ')[0].toUpperCase() : 'EST';
     setRefNoText(`${discomPrefix}/EE-T-1/TRANS-REP/${selectedMrNo || '001'}`);
@@ -585,6 +586,19 @@ export default function EstimateGenerate() {
   }, [mrGroups]);
 
   // Stage 1: Only show unsent MRs
+
+  /** MR date for sorting: the date of issue recorded on the MR's jobs. MR NUMBERS ARE
+   *  NOT CHRONOLOGICAL (MR 9344 predates MR 1563; MR 1 sits among five-digit numbers),
+   *  so sorting by number would not be newest-first. Number is the tiebreak only. */
+  const mrSortDate = (mr: string): string => {
+    const g = mrGroups[mr] || [];
+    for (const j of g) {
+      const d = j.dateOfIssue || j.mrDate || '';
+      if (d) return d;
+    }
+    return '';
+  };
+
   const filteredMrNos = useMemo(() => {
     return Object.keys(mrGroups).filter(mr => {
       const groupJobs = mrGroups[mr] || [];
@@ -595,7 +609,7 @@ export default function EstimateGenerate() {
       const matchesSearch = !searchQuery || mr.toLowerCase().includes(searchQuery.toLowerCase());
       const matchesDivision = selectedDivision === 'All' || groupJobs.some(j => j.division === selectedDivision);
       return matchesSearch && matchesDivision;
-    }).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    }).sort(byDateDesc(mr => mrSortDate(mr), byNumericDesc(mr => mr)));
   }, [mrGroups, searchQuery, selectedDivision]);
 
   const handlePrint = () => {
@@ -716,7 +730,7 @@ export default function EstimateGenerate() {
   };
 
   const today = new Date();
-  const dateString = today.toLocaleDateString('en-GB'); // dd/mm/yyyy
+  const dateString = formatDDMMYYYY(today);
 
   // Thin wrappers over the pure calculators in lib/estimateCalc.ts, supplying this
   // screen's own state (inspection maps, agency, AT master) so every existing call
@@ -956,12 +970,7 @@ export default function EstimateGenerate() {
       }
     });
 
-    return list.sort((a, b) => {
-      if (a.estimateSentDate && b.estimateSentDate) {
-        return b.estimateSentDate.localeCompare(a.estimateSentDate);
-      }
-      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
-    });
+    return [...list].sort(byDateDesc(x => x.estimateSentDate, byNumericDesc(x => x.mrNo)));
   }, [mrGroups, activeAtMaster, activeAgency]);
 
   // Received Approvals List
@@ -1002,12 +1011,7 @@ export default function EstimateGenerate() {
       }
     });
 
-    return list.sort((a, b) => {
-      if (a.approvalDate && b.approvalDate) {
-        return b.approvalDate.localeCompare(a.approvalDate);
-      }
-      return b.mrNo.localeCompare(a.mrNo, undefined, { numeric: true });
-    });
+    return [...list].sort(byDateDesc(x => x.approvalDate, byNumericDesc(x => x.mrNo)));
   }, [mrGroups, activeAtMaster, activeAgency]);
 
   // Filtered Sent Estimates List (Uses Universal Filters)
