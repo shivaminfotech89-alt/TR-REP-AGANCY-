@@ -97,6 +97,52 @@ argument for the enumeration habit above being a written step rather than a ment
 
 ---
 
+## Pattern: a sweep defined by "every call to X" cannot find where X was never called
+
+F16 replaced every date-formatting call site in the app and verified the result:
+`toLocaleDateString` count zero, local `formatDate` definitions zero. The sweep was
+complete against its own definition — and the printed oil account sheet still showed
+`2026-08-11`.
+
+**The search shape determined the blind spot.** Searching for *calls to a formatter*
+finds only places that already call one. It cannot, by construction, find a raw ISO
+string rendered straight into JSX — the exact defect being fixed. F18 found **20 such
+sites**, 8 of them on documents that go to UGVCL.
+
+**Working rule.** When centralising a rule, search for the *inputs the rule should
+apply to*, not for existing calls to it. Ask "what values of this kind exist?" before
+"where is the function called?". For dates that meant grepping for identifiers matching
+`/date/i` rendered inside JSX and template literals, then classifying each as formatted
+or raw — a much noisier search that finds the cases the clean one cannot.
+
+**And verify against the symptom, not the metric.** "Zero `toLocaleDateString` calls
+remain" was true and reassuring and did not mean dates were formatted. A completion
+check that measures the *fix* rather than the *outcome* will confirm work that is not
+done.
+
+This generalises well past dates. Several fixes this session were signed off on
+`npm run lint` passing or a grep returning empty — **neither of which observes any
+behaviour**. A type checker confirms the code compiles; a grep confirms a string is
+absent. Both are necessary and neither is evidence that the screen shows the right
+thing. The distinction:
+
+| Confirms the fix | Confirms the outcome |
+|---|---|
+| `tsc --noEmit` passes | the printed sheet shows `11-08-2026` |
+| grep for the old pattern is empty | the MR list opens with the newest MR on top |
+| the guard exists in the code | saving with a bad value is actually refused |
+
+**The check that caught F18 was opening the oil account sheet and reading the date.** It
+took the user two seconds and no tooling, and it found what a complete, verified,
+type-checked sweep had missed entirely.
+
+So: where a change has a visible effect, look at it. Where it does not — a data
+migration, a comparator's tie-breaking, an exclusion rule — that absence is itself the
+argument for a read-only script that reports what the data now says, which is why this
+audit has as many scripts as entries. Lint is a floor, not a finish line.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
@@ -1166,6 +1212,55 @@ carries the broken shape above as the worked example.
 **Left deliberately:** within-MR job lists still sort by job number. Every job in an MR
 shares its MR date, so date order there would be arbitrary; job number is the meaningful
 sequence. DispatchChallan's Pending list and its user-facing sort toggle are unchanged.
+
+### F18. Twenty dates rendered as raw ISO, never having called a formatter
+
+Reported symptom: the printed oil account sheet showed `MR NO: 85558 | Date: 2026-08-18`
+and `Insp. Date: 2026-08-18` — ISO, not `dd-mm-yyyy`, **after** F16 had centralised every
+formatter call site and verified zero remained. See the pattern note above for why the
+sweep could not have found these.
+
+**20 sites across 6 files**, of which **8 are on documents that reach UGVCL**:
+
+| File | Printed | On-screen / Excel |
+|---|---|---|
+| `BillingSystem` | oil-sheet MR date + insp. date, invoice Bill Date + Order Date, settlement line, forwarding-letter body, oil "Up to" heading | MR-row "Sent:", 2 Excel headers |
+| `SingleJobEstimateReport` | `Dt.:` order date on both layouts | — |
+| `InternalInspection` | `INT. INSP DATE` on the printed report | — |
+| `OilInward` | — | MR date column, summary MR date, "up to" caption, 3 export/subtotal headers |
+| `EstimateGenerate` | — | Dispatched date, Approval date |
+| `AtAllotments` | — | allotment record date, confirmation date |
+
+`Reports.tsx` was **clean** — every `cycle.*` date is formatted at construction. An
+initial reading of mine listed `cycle.paymentDate` as raw; it does not exist, the field
+is `paymentReceivedDate` and is already formatted. Corrected before any change was made.
+
+**Excel headers were included deliberately.** An exported spreadsheet is read outside the
+app, and `Bill Date: 2026-08-11` carries the same ambiguity — worse, Excel may reinterpret
+an ISO string as a date and re-render it in the opening machine's locale. The *filename*
+(`Oil_Ledger_..._Upto_2026-08-11.xlsx`) is deliberately left ISO: filenames sort usefully
+that way and are not read as a document.
+
+**Root cause — the same helper, three times.** `getMrDate` was duplicated
+character-for-character between `OilInward` and `BillingSystem`, with a **third**
+near-copy (`selectedMrDate`) sharing the fallback chain but differing in one respect:
+
+**it fell back to the BILL DATE instead of `'-'`.** So an MR with no recorded date
+printed the date its bill happened to be raised, on the oil statement, indistinguishable
+from a real MR date — the same fabricated-value shape as O6, one level up.
+
+**Fixed:** one `getMrDateIso(mrNo, jobs, transactions)` in `lib/utils.ts`, returning raw
+ISO or `'-'`. All three copies replaced. It **returns ISO on purpose** — it feeds
+comparisons, filters and form state as well as display, so formatting happens at the
+render site only, and `formatDDMMYYYY` passes `'-'` through unchanged.
+
+**Two downstream consumers needed guarding** once `selectedMrDate` could be `'-'`:
+- `effectiveOilUptoDate` read `selectedMrDate || billDate` — and `'-'` is **truthy**, so
+  it would have returned the dash. Now an explicit `!== '-'` check. Its `billDate`
+  fallback is kept: that value is a *filter bound* for the oil balance, not a claim about
+  the MR.
+- `mrOilTxList` matched undated transactions by `tDateStr === selectedMrDate`, which
+  would have matched against the `'-'` sentinel. Guarded.
 
 ---
 

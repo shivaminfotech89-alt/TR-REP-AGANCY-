@@ -2203,7 +2203,7 @@ Circle Office : SABARMATI`}
                           </div>
                           <span className="text-slate-600 font-medium block">{item.division} Division • {item.jobCount} T/F</span>
                           {item.mrDate !== '-' && (
-                            <span className="text-[10px] text-slate-400 block font-mono mt-0.5">MR Date: {item.mrDate}</span>
+                            <span className="text-[10px] text-slate-400 block font-mono mt-0.5">MR Date: {formatDDMMYYYY(item.mrDate)}</span>
                           )}
                         </td>
 
@@ -2211,7 +2211,7 @@ Circle Office : SABARMATI`}
                         <td className="px-4 py-3.5">
                           <span className="font-mono font-bold text-slate-800 block text-xs">{item.estimateRefNo}</span>
                           <span className="text-slate-500 flex items-center mt-0.5 text-[11px]">
-                            <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Dispatched: {item.estimateSentDate}
+                            <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Dispatched: {formatDDMMYYYY(item.estimateSentDate)}
                           </span>
                         </td>
 
@@ -2397,7 +2397,7 @@ Circle Office : SABARMATI`}
                         <td className="px-4 py-3.5">
                           <span className="font-mono font-bold text-emerald-900 text-xs block">{item.approvalNo}</span>
                           <span className="text-slate-500 flex items-center mt-0.5 text-[11px]">
-                            <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Approval Date: {item.approvalDate}
+                            <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Approval Date: {formatDDMMYYYY(item.approvalDate)}
                           </span>
                           <span className="text-[10px] text-slate-400 block font-mono">Ref: {item.estimateRefNo}</span>
                         </td>

@@ -777,7 +777,7 @@ export default function InternalInspection() {
                       <span>MR DATE: <strong className="font-mono">({mrDateStr})</strong></span>
                       <span>DIVISION: <strong className="uppercase">{sampleJob?.division || '-'}</strong></span>
                       <span>EXT. INSP DATE: <strong className="font-mono">{sampleJob?.externalInspectionDate || '-'}</strong></span>
-                      <span>INT. INSP DATE: <strong className="font-mono">{internalInspectionDate}</strong></span>
+                      <span>INT. INSP DATE: <strong className="font-mono">{formatDDMMYYYY(internalInspectionDate)}</strong></span>
                       <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
                     </div>
 

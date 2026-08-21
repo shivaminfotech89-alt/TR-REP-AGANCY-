@@ -12,7 +12,7 @@ import {
   doc,
   serverTimestamp,
 } from "firebase/firestore";
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, getMrDateIso } from '../lib/utils';
 import {
   Droplet,
   Plus,
@@ -113,19 +113,9 @@ export default function OilInward() {
     return "";
   };
 
-  const getMrDate = (mrNo: string) => {
-    if (!mrNo) return "-";
-    const matchingJob = jobs.find((j) => j.mrNo === mrNo);
-    if (matchingJob?.dateOfIssue) return matchingJob.dateOfIssue;
-    if (matchingJob?.mrDate) return matchingJob.mrDate;
-    if (matchingJob?.createdAt) {
-      const d = formatDateStr(matchingJob.createdAt);
-      if (d) return d;
-    }
-    const tx = transactions.find((t) => t.mrNo === mrNo && t.mrDate);
-    if (tx?.mrDate) return tx.mrDate;
-    return "-";
-  };
+  /** Raw ISO (or '-'), shared with BillingSystem - see lib/utils getMrDateIso.
+   *  Format at the render site, never here: this also feeds formData. */
+  const getMrDate = (mrNo: string) => getMrDateIso(mrNo, jobs, transactions);
 
   const handleMrNoChange = (newMrNo: string) => {
     const derivedDate = getMrDate(newMrNo);
@@ -446,7 +436,7 @@ export default function OilInward() {
   const exportToExcel = () => {
     const wsData: any[][] = [];
 
-    const filterInfo = `Division: ${filterDivision} | Mode: ${filterDateMode === "upto" ? `Up to ${filterUptoDate}` : filterDateMode === "exact" ? `Date: ${filterExactDate}` : "All Dates"}`;
+    const filterInfo = `Division: ${filterDivision} | Mode: ${filterDateMode === "upto" ? `Up to ${formatDDMMYYYY(filterUptoDate)}` : filterDateMode === "exact" ? `Date: ${formatDDMMYYYY(filterExactDate)}` : "All Dates"}`;
 
     if (viewMode === "transactions") {
       wsData.push(["OIL INWARD TRANSACTIONS LEDGER"]);
@@ -490,7 +480,7 @@ export default function OilInward() {
       });
       wsData.push([]);
       wsData.push([
-        `SUB TOTAL (${filterDivision !== 'All' ? filterDivision : 'All Divisions'}${filterDateMode === 'upto' ? ` - Up to ${filterUptoDate}` : ''})`,
+        `SUB TOTAL (${filterDivision !== 'All' ? filterDivision : 'All Divisions'}${filterDateMode === 'upto' ? ` - Up to ${formatDDMMYYYY(filterUptoDate)}` : ''})`,
         "",
         "",
         Number(subTotalShortage.toFixed(2)),
@@ -705,7 +695,7 @@ export default function OilInward() {
                 Billing Reconciliation
               </span>
               <span>
-                Cumulative oil account for <strong>{filterDivision}</strong> up to <strong>{filterUptoDate}</strong>.
+                Cumulative oil account for <strong>{filterDivision}</strong> up to <strong>{formatDDMMYYYY(filterUptoDate)}</strong>.
                 Sub Total Shortage: <strong className="font-mono">{subTotalShortage.toFixed(2)} LTR</strong> |
                 Total Inward: <strong className="font-mono">{subTotalReceived.toFixed(2)} LTR</strong> |
                 Net Due: <strong className="font-mono">{subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR</strong>.
@@ -1008,7 +998,7 @@ export default function OilInward() {
                           {tx.mrNo}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-slate-700">
-                          {mrDateVal}
+                          {formatDDMMYYYY(mrDateVal)}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           {tx.division}
@@ -1052,7 +1042,7 @@ export default function OilInward() {
                       colSpan={6}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
-                      SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${filterUptoDate}` : ''}):
+                      SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${formatDDMMYYYY(filterUptoDate)}` : ''}):
                     </td>
                     <td className="px-4 py-3 text-right font-mono">
                       {filteredTransactions
@@ -1118,7 +1108,7 @@ export default function OilInward() {
                           {summary.mrNo}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap text-slate-700">
-                          {summary.mrDate}
+                          {formatDDMMYYYY(summary.mrDate)}
                         </td>
                         <td className="px-4 py-3 whitespace-nowrap">
                           {summary.division}
@@ -1149,7 +1139,7 @@ export default function OilInward() {
                       colSpan={3}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
-                      SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${filterUptoDate}` : ''}):
+                      SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${formatDDMMYYYY(filterUptoDate)}` : ''}):
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-amber-700 font-bold">
                       {subTotalShortage.toFixed(2)}

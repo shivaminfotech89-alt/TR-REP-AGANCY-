@@ -799,7 +799,7 @@ export default function SingleJobEstimateReport({
                         </div>
                         <div className="flex text-[9px] pt-0.5">
                           <span className="font-bold w-24">Order No.:</span>
-                          <span className="font-mono truncate">{orderNo}, Dt.: {orderDate}</span>
+                          <span className="font-mono truncate">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
                         </div>
                       </div>
 
@@ -1001,7 +1001,7 @@ export default function SingleJobEstimateReport({
                       </div>
                       <div className="flex text-[9px] pt-0.5">
                         <span className="font-bold w-24">Order No.:</span>
-                        <span className="font-mono truncate">{orderNo}, Dt.: {orderDate}</span>
+                        <span className="font-mono truncate">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
                       </div>
                     </div>
 

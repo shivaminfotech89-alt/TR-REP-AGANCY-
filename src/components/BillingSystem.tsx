@@ -3,7 +3,7 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
-import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
+import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
@@ -363,20 +363,14 @@ export default function BillingSystem() {
   }, [selectedJobsData, jobs, selectedMrNo]);
 
   // Selected MR Date
-  const selectedMrDate = useMemo(() => {
-    if (!selectedMrNo) return billDate;
-    const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
-    const sample = mrJobs[0];
-    if (sample?.dateOfIssue) return sample.dateOfIssue;
-    if (sample?.mrDate) return sample.mrDate;
-    if (sample?.createdAt) {
-      const d = new Date(sample.createdAt);
-      if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
-    }
-    const tx = oilTransactions.find(t => t.mrNo === selectedMrNo && t.mrDate);
-    if (tx?.mrDate) return tx.mrDate;
-    return billDate;
-  }, [selectedMrNo, jobs, oilTransactions, billDate]);
+  // Raw ISO, or '-' when the MR has no date. This was a third copy of getMrDate whose
+  // only difference was falling back to the BILL date - putting a plausible but
+  // fabricated date on the printed oil statement for an MR that has none (same shape as
+  // O6). One implementation, one fallback: '-'.
+  const selectedMrDate = useMemo(
+    () => getMrDateIso(selectedMrNo, jobs, oilTransactions),
+    [selectedMrNo, jobs, oilTransactions]
+  );
 
   // Sync letter fields whenever activeAgency or currentDivision changes
   useEffect(() => {
@@ -656,19 +650,8 @@ export default function BillingSystem() {
     return '';
   };
 
-  const getMrDate = (mrNo: string) => {
-    if (!mrNo) return "-";
-    const matchingJob = jobs.find((j) => j.mrNo === mrNo);
-    if (matchingJob?.dateOfIssue) return matchingJob.dateOfIssue;
-    if (matchingJob?.mrDate) return matchingJob.mrDate;
-    if (matchingJob?.createdAt) {
-      const d = formatDateStr(matchingJob.createdAt);
-      if (d) return d;
-    }
-    const tx = oilTransactions.find((t) => t.mrNo === mrNo && t.mrDate);
-    if (tx?.mrDate) return tx.mrDate;
-    return "-";
-  };
+  /** Raw ISO (or '-'), shared with OilInward - see lib/utils getMrDateIso. */
+  const getMrDate = (mrNo: string) => getMrDateIso(mrNo, jobs, oilTransactions);
 
   // Inspection Date for the selected MR
   const selectedMrInspectionDate = useMemo(() => {
@@ -771,7 +754,10 @@ export default function BillingSystem() {
       const derived = getMrDate(selectedMrNo);
       if (derived && derived !== '-') return derived;
     }
-    return selectedMrDate || billDate;
+    // selectedMrDate can now be '-', which is TRUTHY - guard explicitly. This is a
+    // filter bound (oil balance "up to"), not a claim about the MR, so falling back to
+    // billDate here is a functional choice rather than a fabricated MR date.
+    return (selectedMrDate && selectedMrDate !== '-') ? selectedMrDate : billDate;
   }, [customOilUptoDate, selectedMrNo, selectedMrDate, billDate, jobs, oilTransactions]);
 
   const formatToYyyyMmDd = (val: string): string => {
@@ -801,7 +787,7 @@ export default function BillingSystem() {
 
       if (!t.mrNo || t.mrNo.trim() === '') {
         const tDateStr = t.mrDate || formatDateStr(t.date);
-        if (tDateStr && selectedMrDate && tDateStr === selectedMrDate) return true;
+        if (tDateStr && selectedMrDate && selectedMrDate !== '-' && tDateStr === selectedMrDate) return true;
       }
       return false;
     });
@@ -896,8 +882,8 @@ export default function BillingSystem() {
 
     const wsData: any[][] = [];
     wsData.push([`TAX INVOICE / REPAIR BILL - MR NO: ${selectedMrNo}`]);
-    wsData.push([`Bill No: ${billNo}`, `Bill Date: ${billDate}`, `Division: ${currentDivision}`]);
-    wsData.push([`Appr No: ${apprNo}`, `Appr Date: ${apprDate}`, `Division GSTIN: ${divisionGstin}`]);
+    wsData.push([`Bill No: ${billNo}`, `Bill Date: ${formatDDMMYYYY(billDate)}`, `Division: ${currentDivision}`]);
+    wsData.push([`Appr No: ${apprNo}`, `Appr Date: ${formatDDMMYYYY(apprDate)}`, `Division GSTIN: ${divisionGstin}`]);
     wsData.push([]);
 
     // Table Header
@@ -1795,7 +1781,7 @@ export default function BillingSystem() {
 
                                   {sampleJob.billSentDate && (
                                     <div className="text-[10px] text-slate-500">
-                                      Sent: <span className="font-semibold text-slate-700">{sampleJob.billSentDate}</span>
+                                      Sent: <span className="font-semibold text-slate-700">{formatDDMMYYYY(sampleJob.billSentDate)}</span>
                                     </div>
                                   )}
                                 </div>
@@ -2591,7 +2577,7 @@ export default function BillingSystem() {
                     <p>Dear Sir,</p>
                     <div className="pl-4 space-y-1">
                       <p>
-                        Please find enclosed herewith our bill No. - <strong className="font-bold">{billNo}</strong> dated <strong className="font-bold">{billDate}</strong>
+                        Please find enclosed herewith our bill No. - <strong className="font-bold">{billNo}</strong> dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong>
                       </p>
                       <p>
                         <strong className="font-bold">Rs. {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-</strong> in words <strong className="font-bold">{numberToIndianWords(grandTotal)}</strong>
@@ -2709,9 +2695,9 @@ export default function BillingSystem() {
                         </div>
                         <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px]">
                           <div><span className="font-bold">Bill No:</span> <strong className="font-bold font-mono">{billNo}</strong></div>
-                          <div><span className="font-bold">Bill Date:</span> <span className="font-mono">{billDate}</span></div>
+                          <div><span className="font-bold">Bill Date:</span> <span className="font-mono">{formatDDMMYYYY(billDate)}</span></div>
                           <div><span className="font-bold">Order No:</span> <span className="font-mono">{apprNo}</span></div>
-                          <div><span className="font-bold">Order Date:</span> <span className="font-mono">{apprDate}</span></div>
+                          <div><span className="font-bold">Order Date:</span> <span className="font-mono">{formatDDMMYYYY(apprDate)}</span></div>
                         </div>
                       </div>
                       <div className="mt-1 pt-1 border-t border-black p-1 text-[9px] grid grid-cols-2 gap-x-2">
@@ -2817,7 +2803,7 @@ export default function BillingSystem() {
                     <div>
                       <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold">{grandTotal.toFixed(2)}</span></p>
                       <p className="font-semibold italic text-[8px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
-                      <p className="mt-1 text-[8px]">In full settlement of Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{billDate}</strong></p>
+                      <p className="mt-1 text-[8px]">In full settlement of Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{formatDDMMYYYY(billDate)}</strong></p>
                       {(activeAgency?.bankName || activeAgency?.accountNumber) && (
                         <div className="mt-1 pt-1 border-t border-dashed border-slate-300 text-[8px]">
                           <div><strong>Bank:</strong> {activeAgency?.bankName || '-'} | <strong>A/C:</strong> <span className="font-mono font-bold">{activeAgency?.accountNumber || '-'}</span> | <strong>IFSC:</strong> <span className="font-mono font-bold">{activeAgency?.ifscCode || '-'}</span></div>
@@ -2861,8 +2847,8 @@ export default function BillingSystem() {
                 <div>
                   <div className="grid grid-cols-4 gap-1 font-semibold text-[9px] border-b border-black pb-1 mb-2">
                     <div>Order: <span className="font-mono font-bold">{apprNo}</span></div>
-                    <div>MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | Date: <span className="font-mono font-bold">{selectedMrDate}</span></div>
-                    <div>Insp. Date: <span className="font-mono font-bold text-blue-900">{selectedMrInspectionDate}</span></div>
+                    <div>MR NO: <span className="font-mono font-bold">{selectedMrNo}</span> | Date: <span className="font-mono font-bold">{formatDDMMYYYY(selectedMrDate)}</span></div>
+                    <div>Insp. Date: <span className="font-mono font-bold text-blue-900">{formatDDMMYYYY(selectedMrInspectionDate)}</span></div>
                     <div className="text-right">Division: <strong className="font-bold uppercase text-black">{currentDivision}</strong></div>
                   </div>
 
@@ -2972,7 +2958,7 @@ export default function BillingSystem() {
 
                     <div className="space-y-0.5 border-l border-black pl-2">
                       <h4 className="font-bold border-b border-black pb-0.5 mb-0.5 uppercase text-[8px]">
-                        2. {currentDivision} Division Balance (Up to: {effectiveOilUptoDate})
+                        2. {currentDivision} Division Balance (Up to: {formatDDMMYYYY(effectiveOilUptoDate)})
                       </h4>
                       <div className="flex justify-between">
                         <span>Cumulative Shortage:</span>

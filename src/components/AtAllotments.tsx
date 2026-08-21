@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { formatDDMMYYYY } from '../lib/utils';
 import { useAgency, AtMaster, AllotmentRecord } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, FileText, History, Lock, ShieldCheck, CheckCircle2, ArrowRight, X } from 'lucide-react';
 
@@ -274,7 +275,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                 <tbody className="divide-y divide-slate-100">
                   {[...at.allotmentHistory].reverse().map((record, idx) => (
                     <tr key={record.id || idx} className="hover:bg-blue-50/40 transition-colors">
-                      <td className="p-2.5 text-slate-700 font-medium">{record.date}</td>
+                      <td className="p-2.5 text-slate-700 font-medium">{formatDDMMYYYY(record.date)}</td>
                       <td className="p-2.5 font-mono font-bold text-slate-800">{record.letterNo}</td>
                       <td className="p-2.5 font-bold text-slate-800">{record.division}</td>
                       <td className="p-2.5 font-mono text-[11px] text-blue-700">
@@ -430,7 +431,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
 
                 <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-200/60">
                   <span className="text-slate-600 font-medium">Letter Date:</span>
-                  <span className="font-semibold text-slate-900">{confirmationData.date}</span>
+                  <span className="font-semibold text-slate-900">{formatDDMMYYYY(confirmationData.date)}</span>
                 </div>
 
                 <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-200/60">

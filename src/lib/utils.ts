@@ -93,3 +93,50 @@ export function byNumericDesc(get: (row: any) => string | undefined) {
   return (a: any, b: any) =>
     String(get(b) ?? '').localeCompare(String(get(a) ?? ''), undefined, { numeric: true });
 }
+
+/** Coerce a stored date value (ISO string, epoch ms, or Firestore Timestamp) to an ISO
+ *  `yyyy-mm-dd` string, or '' if it cannot be. Storage/comparison shape - NOT display. */
+export function toIsoDateStr(dateVal: any): string {
+  if (!dateVal) return '';
+  if (typeof dateVal === 'string') return dateVal;
+  if (typeof dateVal === 'number') {
+    const d = new Date(dateVal);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+  if (dateVal?.seconds) {
+    const d = new Date(dateVal.seconds * 1000);
+    if (!isNaN(d.getTime())) return d.toISOString().split('T')[0];
+  }
+  const d = new Date(dateVal);
+  return isNaN(d.getTime()) ? '' : d.toISOString().split('T')[0];
+}
+
+/**
+ * The MR's date of issue, as raw ISO `yyyy-mm-dd`, or '-' when the MR has none.
+ *
+ * RETURNS ISO ON PURPOSE. It feeds comparisons, filters and form state as well as
+ * display, so it must stay in the sortable/comparable shape. Wrap it in
+ * `formatDDMMYYYY()` at the render site - which passes '-' through unchanged.
+ *
+ * Previously duplicated character-for-character in OilInward and BillingSystem, with a
+ * third near-copy (`selectedMrDate`) that differed in one respect: it fell back to the
+ * BILL date instead of '-', putting a plausible but fabricated date on the printed oil
+ * statement for an MR that has none. One implementation, one fallback: '-'.
+ */
+export function getMrDateIso(
+  mrNo: string | undefined | null,
+  jobs: any[],
+  transactions: any[] = []
+): string {
+  if (!mrNo) return '-';
+  const job = (jobs || []).find(j => j.mrNo === mrNo);
+  if (job?.dateOfIssue) return job.dateOfIssue;
+  if (job?.mrDate) return job.mrDate;
+  if (job?.createdAt) {
+    const d = toIsoDateStr(job.createdAt);
+    if (d) return d;
+  }
+  const tx = (transactions || []).find(t => t.mrNo === mrNo && t.mrDate);
+  if (tx?.mrDate) return tx.mrDate;
+  return '-';
+}
