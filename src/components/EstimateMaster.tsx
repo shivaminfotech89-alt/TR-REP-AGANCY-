@@ -13,6 +13,7 @@ import {
   Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
 } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
+import { checkMasterSection, MasterSection } from '../lib/estimateMasterHealth';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
@@ -481,6 +482,7 @@ export default function EstimateMaster() {
 
   // Synchronize Wound Core to be exactly identical to Amorphous Estimate Master
   const handleSyncWoundCoreWithAmorphous = () => {
+    const before = woundCoreData.length;
     const cloned = JSON.parse(JSON.stringify(amorphousData)).map((it: EstimateItem) => ({
       ...it,
       unit: (it.unit || '').toLowerCase().includes('each') ? 'QTY' : (it.unit || 'QTY')
@@ -488,7 +490,16 @@ export default function EstimateMaster() {
     setWoundCoreData(cloned);
     setEditingSection('WOUND_CORE');
     setOpenWoundCore(true);
-    setSyncSuccessMsg('✓ Wound Core master updated to match your saved Amorphous items with unit "QTY"! Click "Save as Default" to save.');
+    // The message states the DIRECTION and the overwrite. "Updated to match" named
+    // neither the section read nor the section replaced, so it read equally as a merge or
+    // as the reverse copy - for one click that destroys a whole section. Same family as
+    // the "Move ALL My Data" bulk-move button: an operation whose feedback does not describe
+    // what it did.
+    setSyncSuccessMsg(
+      `✓ COPIED Amorphous → Wound Core. The Wound Core section's ${before} item(s) were REPLACED ` +
+      `by ${cloned.length} item(s) copied from Amorphous, with unit "QTY". Amorphous is unchanged. ` +
+      `Nothing is saved yet - click "Save as Default" to keep this, or reload the page to discard it.`
+    );
     setTimeout(() => setSyncSuccessMsg(null), 6000);
   };
 
@@ -718,6 +729,64 @@ export default function EstimateMaster() {
                 </span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+
+              {/*
+                SECTION HEALTH LINE. Both checks that would have caught the misfiled
+                masters already existed - one in getEstimateMasterForCore, one in this
+                screen's own load path - and both ran where nobody could see them, so a
+                CRGO card sat in AARATI's Wound Core section for an unknown length of time
+                while the screen displayed Amorphous. A check whose output nobody reads is
+                not a check. This is that output.
+
+                Reads the STORED section, deliberately NOT `data`: `data` is what the load
+                path resolved, and the fallback makes it look healthy by construction -
+                which is exactly how this stayed invisible.
+              */}
+              {(() => {
+                if (sectionKey === 'CIRCLE_LIMITS') return null;
+                const stored = ({
+                  CRGO: activeAgency?.estimateMasterCRGO,
+                  AMORPHOUS: activeAgency?.estimateMasterAmorphous,
+                  WOUND_CORE: activeAgency?.estimateMasterWoundCore,
+                  OVERHAULING: activeAgency?.estimateMasterOverhauling,
+                } as Record<string, EstimateItem[] | undefined>)[sectionKey];
+                const health = checkMasterSection(sectionKey as MasterSection, stored);
+                if (health.problems.length === 0) {
+                  return (
+                    <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1 font-semibold">
+                      <ShieldCheck className="w-3 h-3 shrink-0" />
+                      <span>
+                        Stored {health.label} section: {health.itemCount} items
+                        {health.requiredScrapCode !== null ? `, scrap code "${health.requiredScrapCode}" present` : ''}
+                      </span>
+                    </p>
+                  );
+                }
+                return (
+                  <div className={`mt-1.5 p-2 rounded border text-[11px] leading-relaxed ${
+                    health.blocking
+                      ? 'bg-red-50 border-red-300 text-red-800'
+                      : 'bg-amber-50 border-amber-300 text-amber-900'
+                  }`}>
+                    <strong className="font-bold flex items-center gap-1">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      {health.blocking
+                        ? `This section does not hold the ${health.label} schedule`
+                        : `${health.label} section needs attention`}
+                    </strong>
+                    <ul className="list-disc list-inside mt-0.5 space-y-0.5">
+                      {health.problems.map((prob, i) => <li key={i}>{prob}</li>)}
+                    </ul>
+                    {health.blocking && (
+                      <p className="mt-1">
+                        What is shown below comes from a fallback section, so prices are not
+                        wrong - the STORED master is. Correct it by hand; nothing is repaired
+                        automatically.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
           </div>
 
@@ -732,7 +801,7 @@ export default function EstimateMaster() {
                       handleSyncWoundCoreWithAmorphous();
                     }}
                     className="flex items-center px-2.5 py-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg transition-colors shadow-2xs"
-                    title="Make Wound Core master identical to Amorphous Estimate Master"
+                    title="Copies Amorphous → Wound Core. REPLACES every item in the Wound Core section with a copy of the Amorphous section. Amorphous is not changed. Not saved until you click Save as Default."
                   >
                     <RefreshCw className="w-3.5 h-3.5 mr-1" />
                     Make Same as Amorphous

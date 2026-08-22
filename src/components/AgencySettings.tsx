@@ -2,9 +2,7 @@ import { AtSettings } from './AtSettings';
 import React, { useState, useRef } from 'react';
 import { useAgency } from '../lib/AgencyContext';
 import EditAgencyForm from "./EditAgencyForm";
-import { Loader2, Plus, Building, Trash2, FileUp, DatabaseZap, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
-import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
+import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
 
@@ -42,40 +40,6 @@ export default function AgencySettings() {
   const [marginLeftMm, setMarginLeftMm] = useState<number>(12);
   const [marginRightMm, setMarginRightMm] = useState<number>(12);
 
-  const [migrating, setMigrating] = useState(false);
-  const handleMigrateData = async () => {
-    if (!activeAgency || !auth.currentUser) return;
-    if (!confirm('This will move ALL your existing jobs to ' + activeAgency.name + '. Continue?')) return;
-    
-    setMigrating(true);
-    try {
-      const q = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid));
-      const snapshot = await getDocs(q);
-      
-      let batch = writeBatch(db);
-      let count = 0;
-      
-      snapshot.docs.forEach((document) => {
-        const data = document.data();
-        if (data.agencyId !== activeAgency.id) {
-          batch.update(doc(db, 'jobs', document.id), { agencyId: activeAgency.id });
-          count++;
-          if (count === 450) {
-            batch.commit();
-            batch = writeBatch(db);
-            count = 0;
-          }
-        }
-      });
-      
-      if (count > 0) await batch.commit();
-      alert('Successfully moved ' + snapshot.docs.length + ' jobs to ' + activeAgency.name);
-    } catch (err) {
-      console.error(err);
-      alert('Failed to migrate data');
-    }
-    setMigrating(false);
-  };
 
   
   // Dynamic divisions state
@@ -516,15 +480,10 @@ export default function AgencySettings() {
         <AtSettings />
       )}
 
-      <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-        <h2 className="text-lg font-bold text-slate-900 mb-1">Data Tools</h2>
-        <p className="text-xs text-slate-500 mb-4">Rarely-needed maintenance actions.</p>
-        <button onClick={handleMigrateData} disabled={migrating} className="flex items-center space-x-2 text-sm text-slate-600 hover:text-blue-600 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200 hover:border-blue-300 transition-colors">
-          <DatabaseZap className="w-4 h-4" />
-          <span>{migrating ? 'Moving data...' : 'Move ALL My Data To Active Agency'}</span>
-        </button>
-        <p className="text-[10px] text-slate-400 mt-2">Use this if your older jobs are not showing up in the current agency.</p>
-      </div>
+      {/* The "Data Tools" card and its "Move ALL My Data To Active Agency" button were
+          removed here - see AUDIT.md F28. Nothing replaced them: the orphaned-job case
+          they nominally served is empty (0 of 44), and the button's actual behaviour was
+          to reassign every job of the signed-in owner to whichever agency was active. */}
     </div>
   );
 }

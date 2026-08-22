@@ -1990,6 +1990,150 @@ The empty state replaces the validation banner rather than sitting beside it —
 one division is required"* reads as a fault when it is the starting position, and an error
 shown for a normal state trains the operator to ignore errors.
 
+### F27. Estimate masters misfiled per agency — the pricing was right, the data was wrong, and the screen showed a third thing
+
+**Start with the correction, because it is the finding.** The reported fear was that a
+Wound Core job in AARATI would price from CRGO item rates. **It would not.** Both the
+resolver (`AgencyContext.getEstimateMasterForCore`) and the master screen's own load path
+tested the stored Wound Core section for CRGO-card item names and, on a match, silently
+skipped it and fell back to Amorphous. So:
+
+| | state |
+|---|---|
+| **Pricing** | **correct** — falls back to Amorphous, which is correct Schedule-B |
+| **Stored data** | **wrong** — AARATI's Wound Core holds a copy of the CRGO card (32 items, scrap at `"18"`); MEGHA's Amorphous is an empty skeleton with scrap at `"1"` |
+| **The screen** | **a third thing** — displays the Amorphous content the fallback produced, not what is stored |
+
+**The heuristic repaired the symptom well enough that nobody could see the cause**, for
+however long AARATI has been in this state — which is unknowable, because nothing recorded
+it. That is the defect. A silent repair of a data fault is a fault that never gets fixed,
+and it consumed the only signal that would have prompted anyone to look.
+
+The scrap-charge blocks are what surfaced it, and they were the code working: four scrap
+codes exist across two agencies (`22`, `0`, `18`, `1`) while `resolveScrapCharge` insists on
+one per core type. **There are not four codes the resolver tolerates — there are four codes
+in the data and one in the rule.** Tolerance would have hidden this permanently, and these
+codes print on UGVCL documents.
+
+#### 1. `isLegacy` was a blacklist of four strings — the fabricated-value shape in a new position
+
+The test was `itemName` containing `dismental`, `washer ring`, `hv metal` or `lv metal`.
+Not a wrong number this time but **a wrong verdict, produced confidently from an incomplete
+test**. A CRGO card that happens not to contain those exact words passes as a valid Wound
+Core master, and *then* the job really does price from CRGO item rates. The blacklist is
+indistinguishable from a real check right up to the case it does not cover — the same
+property that makes a seeded GSTIN or a `|| '3'` coil count dangerous.
+
+Replaced by a **positive identity test** (`lib/estimateMasterHealth.ts`): do this section's
+item *codes* belong to the CRGO card or to its own schedule, measured against the shipped
+defaults, which are the definition of each schedule. The four signature names are folded in
+as one input to the score rather than dropped.
+
+**Safety argument, stated because it is load-bearing:** relative to the blacklist the new
+test can only newly *reject* a section (a CRGO card lacking the signature words), never
+newly *accept* one. **No job's price changes.** The fallback behaviour is deliberately
+untouched — it is what keeps pricing correct while the stored data is wrong.
+
+A Wound Core section that merely *equals Amorphous* is **not** reported. Wound Core's
+shipped default IS a clone of Amorphous (`estimateData.ts:121`) and the resolver falls back
+Wound Core → Amorphous by design, so "equals Amorphous" cannot distinguish a deliberate
+sync from a misfiling. The data does not carry that distinction and the check does not
+invent one.
+
+#### 2. Both existing checks ran where nobody could see them
+
+This is the part worth generalising. The fault was *detected* — twice, independently, by
+two correct checks — and both wrote their conclusion into a fallback decision and nowhere
+else. `getEstimateMasterForCore` returns `EstimateItem[]` and has **no error channel**: it
+cannot say "the section you asked for is wrong, so I used another one". The screen's load
+path had the same shape.
+
+**A check whose output nobody reads is not a check.** Fixed in three parts:
+
+- **An error channel** — `validateEstimateMaster(agency, coreType)` returns named problems.
+  Separated from the pricing path so pricing is unchanged. It reads the **stored** section,
+  never the resolved one: the resolved list is the fallback's output and looks healthy by
+  construction, which is precisely how this stayed invisible.
+- **A loud per-core-type block** — `EstimateGenerate` and `BillingSystem` refuse to print
+  or export while a core type on the document prices from a misfiled section, naming the
+  section, the core type and what is actually in it, and routing to `/estimate-master`.
+  Only a *wrong schedule* blocks; a missing scrap code is reported but already blocks where
+  it matters, and stopping correct work over a fault that does not affect it would train
+  operators to click through blocks.
+- **A per-section health line on the master screen** — the fix for this specific failure.
+  It reads the stored section and says what is in it, so the misfiling is visible on the
+  screen that owns it rather than only in a fallback nobody observes.
+
+Nothing is auto-repaired. Only someone with the tender can say which schedule belongs in a
+section, and a confident silent correction is what produced this state.
+
+#### 3. The sync button's feedback did not describe what it did
+
+`handleSyncWoundCoreWithAmorphous` copies **Amorphous → Wound Core**, one way, replacing
+every item in the target section. It is one click, cross-section, destructive — and the
+message read *"Wound Core master updated to match your saved Amorphous items"*, which names
+neither the section read nor the section replaced and parses equally as a merge or as the
+reverse copy.
+
+Fixed in the same pass rather than deferred, because it is the same family as the
+"Move ALL My Data To Active Agency" button now being removed: an operation whose
+feedback does not describe what it did. (That removal is still pending the orphan-job
+count, so it has no entry number yet.) The
+message now states the direction, the item counts before and after, that Amorphous is
+unchanged, and that nothing is saved yet. The tooltip says the same.
+
+**Not fixed, and the user's to do:** the misfiled masters themselves. The code now makes it
+obvious which section is wrong; it does not decide what belongs there.
+
+### F28. "Move ALL My Data To Active Agency" removed — an unscoped irreversible write with feedback that could not describe it
+
+Removed: the button, its "Data Tools" card, `handleMigrateData`, the `migrating` state, and
+the Firestore/auth imports it alone used. It had exactly one caller, so leaving the handler
+would have left dead code that reads as a feature.
+
+**Its label described a narrow symptom; its action was unscoped.** The card said *"Use this
+if your older jobs are not showing up in the current agency"*. The query was
+`where('ownerId','==',uid)` over `jobs` with **no agency filter**, updating every job whose
+`agencyId` differed from the active agency. It did not rescue stranded jobs — it reassigned
+**correctly assigned jobs belonging to other agencies**. It dated from before `agencyId` was
+reliably set at creation, which is no longer the case.
+
+**Three defects found while checking it, each independently disqualifying:**
+
+1. **Unscoped and irreversible.** With several agencies it collapses all of them into
+   whichever is active, with no undo and no record of what moved.
+2. **The batch flush was not awaited.** `if (count === 450) { batch.commit(); ... }` — no
+   `await` — and `count` was then reset to `0`, so the trailing `if (count > 0) await
+   batch.commit()` could skip the tail. Over 450 jobs it can **partially apply**. This is a
+   data-integrity defect inside an irreversible bulk operation and is recorded on its own
+   account, not as a footnote to the removal: the pattern outlives the code.
+3. **Success was reported from a number it never measured.** The alert printed
+   `snapshot.docs.length` — *all* jobs — not the count actually written. So a no-op and a
+   full sweep produce the same message, and a partial application produces a confident
+   complete one.
+
+Together (2) and (3) are the worst arrangement available: an operation that can partly fail,
+reporting success by a figure unrelated to what it wrote. **Not a wrong value this time but
+a wrong reassurance** — the same shape as the seeded defaults in the Recurring theme, moved
+from data into feedback. It is also the family the sync-button message in F27 belongs to:
+an operation whose feedback does not describe what it did.
+
+**Checked before removing, because the removal had to not cost a remedy.** This was the only
+thing in the app that could reach a job whose `agencyId` was empty or pointed at a
+non-existent agency — such a job is invisible to every agency-scoped view, so no screen can
+correct it. `scripts/orphan-jobs-console.js` (read-only) counted that population:
+**0 of 44 — nothing stranded.** Nothing was lost by removing it, and no targeted replacement
+was built, because building a repair for an empty set is speculative work.
+
+**The live demonstration.** Before removal it had already run: all 44 jobs were reassigned to
+AARATI TRANSFORMER, which is what surfaced the attribution shift. That is the hazard
+demonstrated, not an argument the button was useful. Recovery is possible only by luck — it
+touched **only** `jobs`, so `inspections.agencyId`, `oilTransactions.agencyId`, `atId` and
+the job numbers all survive as independent witnesses to the original attribution
+(`scripts/reverse-bulk-move.js`, dry-run by default, writes `agencyId` and nothing else). A
+version that had also swept the side collections "for consistency" would have destroyed the
+evidence needed to undo it.
+
 ---
 
 ## Recurring theme

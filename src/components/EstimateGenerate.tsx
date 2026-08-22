@@ -13,6 +13,7 @@ import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
 import { GP_TEXT_CLASS, missingForEstimate } from '../lib/jobDisplay';
+import { validateEstimateMaster } from '../lib/estimateMasterHealth';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
@@ -634,8 +635,43 @@ export default function EstimateGenerate() {
     return true;
   };
 
+  /**
+   * Blocks when the estimate master section a job prices from does not contain that
+   * section's schedule - AARATI's Wound Core holding the CRGO card, and the like.
+   *
+   * The pricing path silently falls back to a healthy section, so the figures are right;
+   * what is wrong is the STORED master, and nothing said so. Blocking is the point - a
+   * tolerant resolver is what kept this invisible. It names the section and the core
+   * type, because "the estimate master is wrong" does not tell an operator which of five
+   * sections to open.
+   */
+  const blockIfMasterMisfiled = (action: string) => {
+    const cores: string[] = Array.from(new Set<string>(
+      jobs.filter((j: any) => j.mrNo === selectedMrNo).map((j: any) => String(j.coreType || 'CRGO'))
+    ));
+    for (const core of cores) {
+      const health = validateEstimateMaster(activeAgency, core);
+      if (!health.blocking) continue;
+      setSetupGap({
+        title: `${health.label} estimate master holds the wrong schedule`,
+        problem: `The estimate cannot be ${action}: this MR contains ${core} transformer(s), and the ${health.label} section of ${activeAgency?.name || 'this agency'}'s estimate master does not contain the ${health.label} schedule.`,
+        position: `${health.label} section: ${health.itemCount} items, ${Math.round(health.crgoScore * 100)}% of their codes belong to the CRGO card`,
+        detail: [
+          ...health.problems,
+          'Prices shown come from a fallback section, so they are not wrong - but the stored master is, and it must be corrected by hand.',
+          'Nothing here is repaired automatically: only someone with the tender can say which schedule belongs in this section.',
+        ],
+        actionLabel: 'Open Estimate Master',
+        actionTo: '/estimate-master',
+      });
+      return true;
+    }
+    return false;
+  };
+
   const handlePrint = () => {
     if (blockIfDiscomIncomplete('printed')) return;
+    if (blockIfMasterMisfiled('printed')) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-estimate-container', `Estimate Report & Forwarding Letter - MR ${selectedMrNo}`, `Estimate_MR_${selectedMrNo}.pdf`);
     } else {

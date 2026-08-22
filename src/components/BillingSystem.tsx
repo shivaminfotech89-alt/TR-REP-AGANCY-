@@ -5,6 +5,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
+import { validateEstimateMaster } from '../lib/estimateMasterHealth';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -884,6 +885,39 @@ export default function BillingSystem() {
     return true;
   };
 
+  /**
+   * Blocks when the estimate master section a billed job prices from does not hold that
+   * section's schedule. Distinct from blockIfUnresolvedCharges, which fires when a
+   * specific rate is missing: this fires when the whole SECTION is the wrong schedule,
+   * which is a data fault the resolver hides by falling back (AUDIT F27).
+   *
+   * Keyed off selectedJobsData - the money path - so a GP transformer, which is never
+   * billed, cannot block a bill over a master it does not price from.
+   */
+  const blockIfMasterMisfiled = (action: string) => {
+    const cores: string[] = Array.from(new Set<string>(
+      selectedJobsData.map((j: any) => String(j.coreType || 'CRGO'))
+    ));
+    for (const core of cores) {
+      const health = validateEstimateMaster(activeAgency, core);
+      if (!health.blocking) continue;
+      setSetupGap({
+        title: `${health.label} estimate master holds the wrong schedule`,
+        problem: `This bill cannot be ${action}: it contains ${core} transformer(s), and the ${health.label} section of ${activeAgency?.name || 'this agency'}'s estimate master does not contain the ${health.label} schedule.`,
+        position: `${health.label} section: ${health.itemCount} items, ${Math.round(health.crgoScore * 100)}% of their codes belong to the CRGO card`,
+        detail: [
+          ...health.problems,
+          'Amounts come from a fallback section, so they are not wrong - but the stored master is, and a tax invoice should not be issued against a master nobody has confirmed.',
+          'Nothing is repaired automatically: only someone with the tender can say which schedule belongs in this section.',
+        ],
+        actionLabel: 'Open Estimate Master',
+        actionTo: '/estimate-master',
+      });
+      return true;
+    }
+    return false;
+  };
+
   const blockIfUnresolvedCharges = (action: string) => {
     if (scrapChargeErrors.length === 0) return false;
     // Same block as before - now with a route to where the missing item is added.
@@ -901,6 +935,7 @@ export default function BillingSystem() {
   const handlePrint = () => {
     if (blockIfDiscomIncomplete('printed')) return;
     if (blockIfUnresolvedCharges('print this bill')) return;
+    if (blockIfMasterMisfiled('printed')) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-billing-container', `Tax Invoice & Letter Documents - MR ${selectedMrNo}`, `Bill_Package_MR_${selectedMrNo}.pdf`);
     } else {
@@ -912,6 +947,7 @@ export default function BillingSystem() {
     if (!selectedMrNo || selectedJobsData.length === 0) return;
     if (blockIfDiscomIncomplete('exported')) return;
     if (blockIfUnresolvedCharges('export this bill')) return;
+    if (blockIfMasterMisfiled('exported')) return;
 
     const wsData: any[][] = [];
     wsData.push([`TAX INVOICE / REPAIR BILL - MR NO: ${selectedMrNo}`]);

@@ -10,6 +10,7 @@ import {
   withMissingDefaults,
   EstimateItem
 } from './estimateData';
+import { checkMasterSection } from './estimateMasterHealth';
 
 export interface GlobalDefaultEstimateMaster {
   estimateMasterCRGO?: EstimateItem[];
@@ -225,10 +226,20 @@ export function getEstimateMasterForCore(
   }
 
   if (type.includes('WOUND') || type.includes('WC')) {
-    const isLegacy = (arr?: EstimateItem[]) => arr && arr.some(it => {
-      const name = (it.itemName || '').toLowerCase();
-      return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
-    });
+    // Was a blacklist of four item-name substrings. Now a POSITIVE identity test: do this
+    // section's item codes belong to the CRGO card rather than to Schedule-B? The
+    // blacklist produced a confident verdict from an incomplete test - a CRGO card
+    // without those exact words passed as a valid Wound Core master and priced Wound Core
+    // jobs from CRGO item rates (AUDIT F27).
+    //
+    // The signature names are folded into the score rather than dropped, so relative to
+    // the blacklist this can only newly REJECT a CRGO card, never newly accept anything.
+    // No job's price changes. The fallback below is deliberately untouched - it is what
+    // keeps pricing correct while the stored data is wrong. What was missing was not a
+    // better fallback but any way to SAY it had happened: that is validateEstimateMaster
+    // in lib/estimateMasterHealth.ts, which the pricing screens now block on.
+    const isLegacy = (arr?: EstimateItem[]) =>
+      arr !== undefined && checkMasterSection('WOUND_CORE', arr).holdsCrgoCard;
 
     if (agency?.estimateMasterWoundCore && agency.estimateMasterWoundCore.length > 0 && !isLegacy(agency.estimateMasterWoundCore)) {
       return withMissingDefaults(normalizeUnits(agency.estimateMasterWoundCore), defaultWoundCoreEstimateData);
