@@ -64,3 +64,35 @@ export function matchesGpFilter(job: any, filter: GpFilter): boolean {
   const isGp = job?.repairType === 'GP' || job?.isGp === true;
   return filter === 'GP' ? isGp : !isGp;
 }
+
+// ---------------------------------------------------------------------------
+// DISCOM identity gates - per document, on the fields that document prints
+// ---------------------------------------------------------------------------
+// Deliberately NOT one agency-wide "is the DISCOM configured" check. Each document
+// carries different fields, so each is gated on its own, and the dialog names the
+// specific field that is missing rather than "DISCOM not configured".
+//
+// The delivery challan, oil statement and forwarding letter are NOT gated: they carry no
+// tax registration, and blocking a dispatch over a missing GSTIN would stop physical
+// work for a gap that does not affect the document being produced.
+
+const LABELS: Record<string, string> = {
+  discomName: 'DISCOM name',
+  discomGstin: "DISCOM GSTIN",
+  discomAddress: 'DISCOM address',
+  circleOfficeName: 'Circle office name',
+};
+
+function missingFields(agency: any, required: string[]): string[] {
+  return required.filter(f => !String(agency?.[f] ?? '').trim()).map(f => LABELS[f] || f);
+}
+
+/** The tax invoice prints the DISCOM's name, GSTIN and address. */
+export function missingForTaxInvoice(agency: any): string[] {
+  return missingFields(agency, ['discomName', 'discomGstin', 'discomAddress']);
+}
+
+/** The estimate prints the DISCOM's name and the circle office it is addressed to. */
+export function missingForEstimate(agency: any): string[] {
+  return missingFields(agency, ['discomName', 'circleOfficeName']);
+}

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
+import { stateCodeFromGstin } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
 import {
   Loader2, Plus, Trash2, FileUp, Check, Building2,
@@ -18,8 +19,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   // Agency (Supplier) Details
   const [agencyName, setAgencyName] = useState(agency.name || '');
   const [address, setAddress] = useState(agency.address || '');
-  const [agencyState, setAgencyState] = useState(agency.agencyState || 'Gujarat');
-  const [agencyStateCode, setAgencyStateCode] = useState(agency.agencyStateCode || '24');
+  const [agencyState, setAgencyState] = useState(agency.agencyState || '');
+  // Not defaulted to '24' - see AUDIT O8. Derived from the agency's own GSTIN below.
+  const [agencyStateCode, setAgencyStateCode] = useState(agency.agencyStateCode || '');
   const [gstin, setGstin] = useState(agency.gstin || '');
   const [pan, setPan] = useState(agency.pan || '');
   const [phone, setPhone] = useState(agency.phone || '');
@@ -39,9 +41,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [showPageNumbers, setShowPageNumbers] = useState<boolean>(agency.showPageNumbers !== false);
 
   // DISCOM / Client (Buyer) & Tax Details
-  const [discomName, setDiscomName] = useState(agency.discomName || 'Uttar Gujarat Vij Company Ltd.');
-  const [discomGstin, setDiscomGstin] = useState(agency.discomGstin || '24AAACU6551F1ZI');
-  const [discomPan, setDiscomPan] = useState(agency.discomPan || 'AAACU6551F');
+  const [discomName, setDiscomName] = useState(agency.discomName || '');
+  const [discomGstin, setDiscomGstin] = useState(agency.discomGstin || '');
+  const [discomPan, setDiscomPan] = useState(agency.discomPan || '');
   const [discomAddress, setDiscomAddress] = useState(
     agency.discomAddress || 'Registered Office: Sardar Patel Vidyut Bhavan, Race Course, Vadodara - 390007'
   );
@@ -50,7 +52,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [serviceSacCode, setServiceSacCode] = useState(agency.serviceSacCode || '998719');
 
   // Authorities & Document Routing
-  const [circleOfficeName, setCircleOfficeName] = useState(agency.circleOfficeName || 'SABARMATI');
+  const [circleOfficeName, setCircleOfficeName] = useState(agency.circleOfficeName || '');
   const [circleAuthority, setCircleAuthority] = useState(agency.circleAuthority || 'Superintending Engineer (O & M)');
   const [divisionAuthority, setDivisionAuthority] = useState(agency.divisionAuthority || 'The Executive Engineer');
   const [estimateCcTemplate, setEstimateCcTemplate] = useState(agency.estimateCcTemplate || 'E. E. (O & M) DIVISION - {division}');
@@ -85,8 +87,8 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   useEffect(() => {
     setAgencyName(agency.name || '');
     setAddress(agency.address || '');
-    setAgencyState(agency.agencyState || 'Gujarat');
-    setAgencyStateCode(agency.agencyStateCode || '24');
+    setAgencyState(agency.agencyState || '');
+    setAgencyStateCode(agency.agencyStateCode || '');
     setGstin(agency.gstin || '');
     setPan(agency.pan || '');
     setPhone(agency.phone || '');
@@ -94,9 +96,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setMsmeNo(agency.msmeNo || '');
     setGpValidationMonths(agency.gpValidationMonths ?? 18);
 
-    setDiscomName(agency.discomName || 'Uttar Gujarat Vij Company Ltd.');
-    setDiscomGstin(agency.discomGstin || '24AAACU6551F1ZI');
-    setDiscomPan(agency.discomPan || 'AAACU6551F');
+    setDiscomName(agency.discomName || '');
+    setDiscomGstin(agency.discomGstin || '');
+    setDiscomPan(agency.discomPan || '');
     setDiscomAddress(
       agency.discomAddress || 'Registered Office: Sardar Patel Vidyut Bhavan, Race Course, Vadodara - 390007'
     );
@@ -104,7 +106,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setDiscomStateCode(agency.discomStateCode || '24');
     setServiceSacCode(agency.serviceSacCode || '998719');
 
-    setCircleOfficeName(agency.circleOfficeName || 'SABARMATI');
+    setCircleOfficeName(agency.circleOfficeName || '');
     setCircleAuthority(agency.circleAuthority || 'Superintending Engineer (O & M)');
     setDivisionAuthority(agency.divisionAuthority || 'The Executive Engineer');
     setEstimateCcTemplate(agency.estimateCcTemplate || 'E. E. (O & M) DIVISION - {division}');
@@ -324,7 +326,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         // Agency details
         address,
         agencyState,
-        agencyStateCode,
+        // Persist the DERIVED code when a GSTIN exists, so the stored value can never
+        // drift from the GSTIN it is part of.
+        agencyStateCode: stateCodeFromGstin(gstin) || agencyStateCode,
         gstin,
         pan,
         phone,
@@ -512,13 +516,22 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
                   State Code (GST)
                 </label>
+                {/* DERIVED, not entered: the first two digits of a GSTIN ARE the state
+                    code, so deriving it means the two can never disagree. Editable only
+                    while no GSTIN is set. */}
                 <input
                   type="text"
-                  value={agencyStateCode}
+                  readOnly={Boolean(stateCodeFromGstin(gstin))}
+                  value={stateCodeFromGstin(gstin) || agencyStateCode}
                   onChange={e => setAgencyStateCode(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                  placeholder="e.g. 24"
+                  className={`w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 ${stateCodeFromGstin(gstin) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`}
+                  placeholder="Set the agency GSTIN above"
                 />
+                <p className="text-[10px] text-slate-500 mt-1">
+                  {stateCodeFromGstin(gstin)
+                    ? `Derived from the agency GSTIN (${gstin.slice(0, 2)}…).`
+                    : 'Enter the agency GSTIN above and this fills in from its first two digits.'}
+                </p>
               </div>
 
               <div className="md:col-span-2">
@@ -1174,7 +1187,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 Estimate Letter Header (Circle Office)
               </span>
               <div className="font-mono text-[11px] text-slate-800 leading-tight whitespace-pre-wrap bg-slate-50 p-3 rounded border border-slate-200">
-                {`TO,\n${circleAuthority || 'Superintending Engineer (O & M)'},\n${discomName || 'Uttar Gujarat Vij Company Ltd.'},\nCircle Office : ${circleOfficeName || 'SABARMATI'}`}
+                {`TO,\n${circleAuthority || 'Superintending Engineer (O & M)'},\n${discomName || '[DISCOM name not set]'},\nCircle Office : ${circleOfficeName || '[Circle office not set]'}`}
               </div>
               <p className="text-[11px] text-slate-600">
                 <strong>C.C.:</strong> {estimateCcTemplate ? estimateCcTemplate.replace(/{division}/gi, 'SABARMATI') : 'E. E. (O & M) DIVISION - SABARMATI'}
@@ -1187,7 +1200,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 Billed Copy Header (Division Office)
               </span>
               <div className="font-mono text-[11px] text-slate-800 leading-tight whitespace-pre-wrap bg-slate-50 p-3 rounded border border-slate-200">
-                {`To,\n${divisionAuthority || 'The Executive Engineer'},\n${discomName || 'Uttar Gujarat Vij Company Ltd.'},\nDivision Office : SABARMATI`}
+                {`To,\n${divisionAuthority || 'The Executive Engineer'},\n${discomName || '[DISCOM name not set]'},\nDivision Office : SABARMATI`}
               </div>
               <p className="text-[11px] text-slate-600">
                 Automatically uses each MR / Job's specific Division Office.

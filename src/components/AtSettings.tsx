@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAgency, AtMaster } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
@@ -23,6 +24,24 @@ export function AtSettings() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
+
+  // Deep link from a setup-gap dialog: /agency-settings?section=allotments&atId=...
+  // Opens the named AT on the right tab so the operator lands where the fix is, rather
+  // than on a settings page with the problem still to find.
+  const [searchParams] = useSearchParams();
+  const deepLinkAtId = searchParams.get('atId');
+  const deepLinkSection = searchParams.get('section');
+
+  useEffect(() => {
+    if (!deepLinkAtId && deepLinkSection !== 'allotments' && deepLinkSection !== 'divisions' && deepLinkSection !== 'at') return;
+    setIsExpanded(true);                       // open the AT Masters section
+    if (deepLinkSection === 'allotments') setActiveAtTab('allotments');
+    if (deepLinkSection === 'divisions') setActiveAtTab('divisions');
+    // The allotments panel renders for the ACTIVE AT, so make the named one active.
+    if (deepLinkAtId && atMasters.some(a => a.id === deepLinkAtId)) {
+      setActiveAtMasterId(deepLinkAtId);
+    }
+  }, [deepLinkAtId, deepLinkSection, atMasters]);
   
   const [editingAtId, setEditingAtId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<{

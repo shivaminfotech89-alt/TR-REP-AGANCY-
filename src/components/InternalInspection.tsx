@@ -8,6 +8,7 @@ import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { PrintableA4Page } from './LetterheadHeader';
 import { classifyCoreType } from './SingleJobEstimateReport';
+import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 import { getJobFullEstimate, checkJobCircleLimit } from '../lib/estimateCalc';
@@ -52,6 +53,8 @@ export default function InternalInspection() {
   const [gpFilter, setGpFilter] = useState<GpFilter>('All');
   
   const [statusFilter, setStatusFilter] = useState<'Pending' | 'Completed'>('Pending');
+  /** Blocking setup gap awaiting the operator's decision - see SetupGapDialog. */
+  const [setupGap, setSetupGap] = useState<SetupGap | null>(null);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -669,6 +672,29 @@ export default function InternalInspection() {
           ? 'Rate not configured - cannot estimate'
           : null;
     if (blockedMessage) {
+      // "Limit not configured" is a setup gap - offer the route, not just the message.
+      if (!check.hasLimit) {
+        return (
+          <button
+            type="button"
+            onClick={() => setSetupGap({
+              title: 'Circle approval limit not configured',
+              problem: `No Clause 4.0 circle approval limit is recorded for ${job.capacityKva} KVA at "${check.ratingLabel}", so this job cannot be checked against the SE's sanction power.`,
+              detail: [
+                `Capacity: ${job.capacityKva} KVA`,
+                `Rating / voltage class: ${check.ratingLabel}`,
+                'Set it under Estimate Master - Circle Authority Estimate Approval Limit.',
+              ],
+              actionLabel: 'Open Estimate Master',
+              actionTo: '/estimate-master',
+            })}
+            className="block text-[9px] font-semibold text-slate-500 italic underline hover:text-slate-800"
+            title="Click to set the circle approval limit"
+          >
+            Limit not configured
+          </button>
+        );
+      }
       return <span className="block text-[9px] font-semibold text-slate-400 italic">{blockedMessage}</span>;
     }
 
@@ -1438,7 +1464,9 @@ export default function InternalInspection() {
                 </table>
               </div>
               
-              {scrapNote && (
+              <SetupGapDialog gap={setupGap} onCancel={() => setSetupGap(null)} />
+
+      {scrapNote && (
                 <div className="p-4 text-xs font-bold text-red-900 bg-red-50 uppercase tracking-wider border-t border-red-200 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
                   <span>{scrapNote}</span>

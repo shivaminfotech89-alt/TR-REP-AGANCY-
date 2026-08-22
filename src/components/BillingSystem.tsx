@@ -3,7 +3,9 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
-import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso } from '../lib/utils';
+import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
+import SetupGapDialog, { SetupGap } from './SetupGapDialog';
+import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
@@ -131,6 +133,9 @@ export default function BillingSystem() {
   };
 
   // Modal State for Pending Delivery Alert
+  /** Blocking setup gap awaiting the operator's decision - see SetupGapDialog. */
+  const [setupGap, setSetupGap] = useState<SetupGap | null>(null);
+
   const [pendingAlertModal, setPendingAlertModal] = useState<{
     isOpen: boolean;
     mrNo: string;
@@ -405,7 +410,7 @@ export default function BillingSystem() {
     }
 
     const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
-    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || activeAgency?.atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052';
+    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || activeAgency?.atNumber || '';
     
     // Check if bill details were already recorded for THIS BILL TYPE's jobs. Searching
     // every job in the MR prefilled a mixed MR's scrap bill with the repair bill's
@@ -429,8 +434,8 @@ export default function BillingSystem() {
     setBillDate(defaultBillDate);
     setApprNo(savedJobWithAppr?.apprNo || savedJobWithAppr?.orderNo || orderNum);
     setApprDate(savedJobWithApprDate?.apprDate || savedJobWithApprDate?.orderDate || '02.03.2026');
-    setDivisionGstin(mrJobs[0]?.divisionGstin || activeAgency?.discomGstin || '24AAACU6551F1ZI');
-    setDivisionPan(mrJobs[0]?.divisionPan || activeAgency?.discomPan || 'AAACU6551F');
+    setDivisionGstin(mrJobs[0]?.divisionGstin || activeAgency?.discomGstin || '');
+    setDivisionPan(mrJobs[0]?.divisionPan || activeAgency?.discomPan || '');
     setServiceSacCode(activeAgency?.serviceSacCode || '998719');
     setForwardingTo(getBillDivisionRecipient(activeAgency, div));
     setForwardingCc(activeAgency?.billCcTemplate || '');
@@ -856,18 +861,45 @@ export default function BillingSystem() {
   // The named error already blocked the Send Bill WRITE, but printing and exporting
   // were ungated - so an invoice went out showing 0.00 for an unresolvable scrap line
   // instead of refusing to generate. Every path that produces a document is gated.
+  /**
+   * The tax invoice prints the DISCOM's name, GSTIN and address. A tax invoice with no
+   * buyer GSTIN is a document that cannot be issued, so this blocks - where previously
+   * the fields were seeded with another company's registration and printed silently
+   * (AUDIT O7). Gated on the fields THIS document carries, naming the missing one.
+   */
+  const blockIfDiscomIncomplete = (action: string) => {
+    const missing = missingForTaxInvoice(activeAgency);
+    if (missing.length === 0) return false;
+    setSetupGap({
+      title: 'DISCOM details incomplete',
+      problem: `The tax invoice cannot be ${action} until the DISCOM's details are recorded for ${activeAgency?.name || 'this agency'}. It prints on the invoice as the buyer.`,
+      position: `Missing: ${missing.join(', ')}`,
+      detail: [
+        'Enter these from your own tender paperwork - they are not pre-filled.',
+        'A tax invoice without the buyer GSTIN cannot be issued.',
+      ],
+      actionLabel: 'Open Agency Settings',
+      actionTo: '/agency-settings',
+    });
+    return true;
+  };
+
   const blockIfUnresolvedCharges = (action: string) => {
     if (scrapChargeErrors.length === 0) return false;
-    alert(
-      `⚠️ Cannot ${action}: a charge on this bill could not be resolved.\n\n` +
-      `${scrapChargeErrors.join('\n\n')}\n\n` +
-      `A bill must not show a zero line for a charge that has no rate. ` +
-      `Add the missing item to the estimate master, then try again.`
-    );
+    // Same block as before - now with a route to where the missing item is added.
+    setSetupGap({
+      title: 'Scrap charge not configured',
+      problem: `This bill cannot be produced: a charge on it has no rate in the estimate master.`,
+      position: `Blocked action: ${action}`,
+      detail: scrapChargeErrors,
+      actionLabel: 'Open Estimate Master',
+      actionTo: '/estimate-master',
+    });
     return true;
   };
 
   const handlePrint = () => {
+    if (blockIfDiscomIncomplete('printed')) return;
     if (blockIfUnresolvedCharges('print this bill')) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-billing-container', `Tax Invoice & Letter Documents - MR ${selectedMrNo}`, `Bill_Package_MR_${selectedMrNo}.pdf`);
@@ -878,6 +910,7 @@ export default function BillingSystem() {
 
   const handleExportExcel = () => {
     if (!selectedMrNo || selectedJobsData.length === 0) return;
+    if (blockIfDiscomIncomplete('exported')) return;
     if (blockIfUnresolvedCharges('export this bill')) return;
 
     const wsData: any[][] = [];
@@ -2142,6 +2175,8 @@ export default function BillingSystem() {
             </div>
           )}
 
+          <SetupGapDialog gap={setupGap} onCancel={() => setSetupGap(null)} />
+
           {/* Pending Delivery Alert Modal */}
           {pendingAlertModal && pendingAlertModal.isOpen && (
             <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -2561,7 +2596,7 @@ export default function BillingSystem() {
                 <div>
                   {/* Recipient */}
                   <div className="mb-4 text-xs text-black whitespace-pre-wrap font-medium">
-                    {forwardingTo || `To\n${activeAgency?.divisionAuthority || 'The Executive Engineer ,'}\n${activeAgency?.discomName || 'Uttar Gujarat Vij Company Ltd.'}\nDivision Office : ${currentDivision}`}
+                    {forwardingTo || `To\n${activeAgency?.divisionAuthority || 'The Executive Engineer ,'}\n${activeAgency?.discomName || ''}\nDivision Office : ${currentDivision}`}
                     {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
                   </div>
 
@@ -2673,8 +2708,10 @@ export default function BillingSystem() {
                       </div>
                       <div className="mt-1 pt-1 border-t border-slate-200 text-[9px] space-y-0.5">
                         <div className="flex justify-between">
-                          <span><strong>State:</strong> {activeAgency?.agencyState || 'Gujarat'}</span>
-                          <span><strong>State Code:</strong> {activeAgency?.agencyStateCode || '24'}</span>
+                          <span><strong>State:</strong> {activeAgency?.agencyState || '-'}</span>
+                          {/* Derived from the agency's own GSTIN - its first two digits
+                              ARE the state code - so it cannot disagree with it. */}
+                          <span><strong>State Code:</strong> {getAgencyStateCode(activeAgency) || '-'}</span>
                         </div>
                         {(activeAgency?.phone || activeAgency?.email) && (
                           <div>

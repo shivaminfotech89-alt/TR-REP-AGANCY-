@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getAgencyStateCode } from '../lib/utils';
 import { Agency } from '../lib/AgencyContext';
 import { convertPdfPageToImage } from '../lib/letterheadUtils';
 
@@ -106,7 +107,7 @@ export function LetterheadHeader({
       <div className="flex flex-wrap justify-center gap-x-4 gap-y-0.5 text-[10px] font-bold text-black mt-1">
         {agency?.gstin && <span>GSTIN: {agency.gstin}</span>}
         {agency?.pan && <span>PAN: {agency.pan}</span>}
-        {agency?.agencyState && <span>State: {agency.agencyState}{agency.agencyStateCode ? ` (${agency.agencyStateCode})` : ''}</span>}
+        {agency?.agencyState && <span>State: {agency.agencyState}{getAgencyStateCode(agency) ? ` (${getAgencyStateCode(agency)})` : ''}</span>}
         {agency?.phone && <span>Phone: {agency.phone}</span>}
         {agency?.email && <span>Email: {agency.email}</span>}
       </div>

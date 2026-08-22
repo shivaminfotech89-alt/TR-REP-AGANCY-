@@ -12,7 +12,8 @@ import {
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
-import { GP_TEXT_CLASS } from '../lib/jobDisplay';
+import { GP_TEXT_CLASS, missingForEstimate } from '../lib/jobDisplay';
+import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import SingleJobEstimateReport from './SingleJobEstimateReport';
@@ -612,7 +613,29 @@ export default function EstimateGenerate() {
     }).sort(byDateDesc(mr => mrSortDate(mr), byNumericDesc(mr => mr)));
   }, [mrGroups, searchQuery, selectedDivision]);
 
+  /** Blocking setup gap awaiting the operator's decision - see SetupGapDialog. */
+  const [setupGap, setSetupGap] = useState<SetupGap | null>(null);
+
+  /**
+   * The estimate prints the DISCOM name and the circle office it is addressed to.
+   * Gated on those two fields only - not on GSTIN, which the estimate does not carry.
+   */
+  const blockIfDiscomIncomplete = (action: string) => {
+    const missing = missingForEstimate(activeAgency);
+    if (missing.length === 0) return false;
+    setSetupGap({
+      title: 'DISCOM details incomplete',
+      problem: `The estimate cannot be ${action} until these are recorded for ${activeAgency?.name || 'this agency'}. They print on the estimate and address the forwarding letter.`,
+      position: `Missing: ${missing.join(', ')}`,
+      detail: ['Enter these from your own tender paperwork - they are not pre-filled.'],
+      actionLabel: 'Open Agency Settings',
+      actionTo: '/agency-settings',
+    });
+    return true;
+  };
+
   const handlePrint = () => {
+    if (blockIfDiscomIncomplete('printed')) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-estimate-container', `Estimate Report & Forwarding Letter - MR ${selectedMrNo}`, `Estimate_MR_${selectedMrNo}.pdf`);
     } else {
@@ -1662,6 +1685,8 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               </div>
             </div>
           )}
+
+          <SetupGapDialog gap={setupGap} onCancel={() => setSetupGap(null)} />
 
           <div id="printable-estimate-container" className="space-y-6 print:space-y-0">
             {/* VIEW MODE 1: COMPLETE SUBMISSION PACKAGE (PAGE 1: COMMON FORWARDING LETTER + PAGE 2..N: SEPARATE JOB ESTIMATES) */}

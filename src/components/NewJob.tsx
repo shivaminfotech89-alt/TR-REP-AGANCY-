@@ -35,6 +35,7 @@ import {
 import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
+import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 
@@ -212,6 +213,8 @@ export default function NewJob() {
   const [showSaveConfirmModal, setShowSaveConfirmModal] = useState<boolean>(false);
   /** Repair type the operator asked to switch to, held while confirming the reset. */
   const [pendingTypeSwitch, setPendingTypeSwitch] = useState<'OGP' | 'GP' | null>(null);
+  /** Blocking setup gap awaiting the operator's decision - see SetupGapDialog. */
+  const [setupGap, setSetupGap] = useState<SetupGap | null>(null);
 
   const [commonData, setCommonData] = useState({
     mrNo: '',
@@ -374,6 +377,83 @@ export default function NewJob() {
     gpPriorJobId: null,
     gpLookupMissFor: undefined,
   });
+
+  // Restore a stashed intake, once, on return from fixing agency setup.
+  useEffect(() => {
+    if (!activeAgency) return;
+    try {
+      const raw = sessionStorage.getItem(`intakeDraft_${activeAgency.id}`);
+      if (!raw) return;
+      sessionStorage.removeItem(`intakeDraft_${activeAgency.id}`);
+      const draft = JSON.parse(raw);
+      if (draft?.commonData) setCommonData(draft.commonData);
+      if (Array.isArray(draft?.transformers) && draft.transformers.length) {
+        setTransformers(draft.transformers);
+      }
+      setAutoFillNotice('Your previous intake has been restored.');
+      setTimeout(() => setAutoFillNotice(null), 5000);
+    } catch {
+      // A corrupt draft is discarded silently - it was already removed above.
+    }
+  }, [activeAgency?.id]);
+
+  /**
+   * When a job number fails its prefix check, work out WHY and raise the right setup
+   * gap. Returns true if a gap was raised (caller should stop), false if the prefix is
+   * genuinely configured and the operator simply typed a bad number.
+   */
+  const setupGapForPrefix = (coreType: string): boolean => {
+    const draftWarning = intakeHasData()
+      ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
+      : undefined;
+
+    if (!activeAtMaster) {
+      setSetupGap({
+        title: 'No AT / tender period is active',
+        problem: 'Job numbers cannot be generated until an AT (tender period) is set up and selected. The prefix and the number sequence both come from it.',
+        detail: ['Add an AT under Agency Settings, then select it as the active AT.'],
+        actionLabel: 'Set Up AT',
+        actionTo: '/agency-settings?section=at',
+        unsavedWarning: draftWarning,
+        onBeforeNavigate: saveIntakeDraft,
+      });
+      return true;
+    }
+
+    const info = getNextJobNoInfo(commonData.division, coreType, 'OGP');
+    if (info.prefix === 'JOB') {
+      const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
+      setSetupGap({
+        title: 'No job number prefix configured',
+        problem: `No job number prefix is configured for ${commonData.division} / ${coreType} under ${atLabel}.`,
+        detail: [
+          `AT: ${atLabel}`,
+          `Division: ${commonData.division}`,
+          `Core type: ${coreType}`,
+          'Each division needs a prefix per core type - they generate separate number sequences.',
+        ],
+        actionLabel: 'Configure Prefixes',
+        actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
+        unsavedWarning: draftWarning,
+        onBeforeNavigate: saveIntakeDraft,
+      });
+      return true;
+    }
+    return false;
+  };
+
+  /** Stash the in-progress intake so leaving to fix agency setup does not mean
+   *  re-entering it. Session-scoped and agency-scoped; cleared once restored. */
+  const intakeDraftKey = `intakeDraft_${activeAgency?.id || 'none'}`;
+
+  const saveIntakeDraft = () => {
+    try {
+      sessionStorage.setItem(intakeDraftKey, JSON.stringify({ commonData, transformers }));
+    } catch {
+      // A failed stash must never block navigation - the operator still needs to go fix
+      // the setup. Worst case they re-enter the rows.
+    }
+  };
 
   /**
    * Has the operator entered anything worth warning about losing?
@@ -849,13 +929,28 @@ export default function NewJob() {
       return;
     }
     if (!activeAgency) {
-      setModalAlertMessage("Please select or create an active agency in Agency Settings before saving jobs.");
+      setSetupGap({
+        title: 'No agency selected',
+        problem: 'Jobs are recorded against an agency. Select an existing agency, or create one, before saving this intake.',
+        actionLabel: 'Go to Agency Settings',
+        actionTo: '/agency-settings',
+        unsavedWarning: intakeHasData()
+          ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
+          : undefined,
+        onBeforeNavigate: saveIntakeDraft,
+      });
       return;
     }
     if (commonData.repairType === 'OGP') {
       for (const t of transformers) {
         const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
         if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
+          // Diagnose the REAL cause before reporting. 'JOB' is the fallback prefix
+          // returned when there is no AT master or no prefix configured for this
+          // division + core type, so the old message ("expected prefix JOB-") named the
+          // job number - the one thing that is not wrong - and sent the operator
+          // hunting through job numbers for a problem in agency settings.
+          if (setupGapForPrefix(t.coreType)) return;
           const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
@@ -930,6 +1025,7 @@ export default function NewJob() {
         for (const t of transformers) {
           const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
           if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
+            if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
             const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
@@ -1112,7 +1208,27 @@ export default function NewJob() {
             });
             
             if (used + countToAdd > allowed) {
-              setErrorMsg(`Cannot receive job. ${cType} allotment exceeded for ${commonData.division}.\nAllowed Allotment: ${allowed}\nAlready Used: ${used}\nAttempting to Add: ${countToAdd}`);
+              // Same block as before - only the presentation changes. The dialog names
+              // the division, core type and AT, states the position, and offers a route
+              // to the screen where the allotment is raised.
+              const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
+              setSetupGap({
+                title: `${cType} allotment exhausted for ${commonData.division}`,
+                problem: `This intake needs ${countToAdd} more ${cType} job${countToAdd > 1 ? 's' : ''} in ${commonData.division}, but the allotment recorded against ${atLabel} does not cover it.`,
+                position: `${used} of ${allowed} used - adding ${countToAdd} would make ${used + countToAdd}`,
+                detail: [
+                  `AT: ${atLabel}`,
+                  `Division: ${commonData.division}`,
+                  `Core type: ${cType}`,
+                  'GP repairs and Overhauling (OH) do not draw on the allotment.',
+                ],
+                actionLabel: 'Add Allotment',
+                actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
+                unsavedWarning: intakeHasData()
+                  ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
+                  : undefined,
+                onBeforeNavigate: saveIntakeDraft,
+              });
               setLoading(false);
               return;
             }
@@ -2451,6 +2567,8 @@ export default function NewJob() {
       )}
 
       {/* Save Confirmation Modal */}
+      <SetupGapDialog gap={setupGap} onCancel={() => setSetupGap(null)} />
+
       {/* CONFIRM DISCARD ON REPAIR-TYPE SWITCH */}
       {pendingTypeSwitch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">

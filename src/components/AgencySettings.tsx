@@ -8,10 +8,22 @@ import { db, auth } from '../lib/firebase';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
 
+/** The four Gujarat DISCOMs. Names only - see AUDIT O7 for why no registration
+ *  details are attached to these. */
+const DISCOM_OPTIONS = [
+  'Uttar Gujarat Vij Company Ltd.',
+  'Madhya Gujarat Vij Company Ltd.',
+  'Paschim Gujarat Vij Company Ltd.',
+  'Dakshin Gujarat Vij Company Ltd.',
+];
+
 export default function AgencySettings() {
   const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading, atMasters } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAgencyName, setNewAgencyName] = useState('');
+  /** Required at creation, no default. Stores the NAME only - GSTIN, PAN and address are
+   *  entered by the agency from its own tender paperwork. */
+  const [discomName, setDiscomName] = useState('');
   
   const [address, setAddress] = useState('');
   const [gstin, setGstin] = useState('');
@@ -67,16 +79,18 @@ export default function AgencySettings() {
 
   
   // Dynamic divisions state
-  const [divisions, setDivisions] = useState([{ 
-    name: 'SABARMATI', 
-    prefixCRGO: '21 IS',
-    prefixAmorphous: 'AM21 IS',
-    prefixWoundCore: 'WC21 IS',
-    prefixLSTC: 'LS21 IS',
-    prefixOH: 'OH21 IS',
-    allotmentCRGO: '20',
-    allotmentAmorphous: '15',
-    allotmentWoundCore: '10'
+  // Not seeded with SABARMATI / '21 IS' - that is one UGVCL division's numbering
+  // scheme, and pre-filling it made every new agency inherit it (AUDIT O7).
+  const [divisions, setDivisions] = useState([{
+    name: '',
+    prefixCRGO: '',
+    prefixAmorphous: '',
+    prefixWoundCore: '',
+    prefixLSTC: '',
+    prefixOH: '',
+    allotmentCRGO: '',
+    allotmentAmorphous: '',
+    allotmentWoundCore: ''
   }]);
   
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -141,16 +155,33 @@ export default function AgencySettings() {
         letterheadFooterHeightMm: footerHeightMm,
         letterheadMarginLeftMm: marginLeftMm,
         letterheadMarginRightMm: marginRightMm,
-        agencyState: 'Gujarat',
-        agencyStateCode: '24',
-        discomName: 'Uttar Gujarat Vij Company Ltd.',
-        discomGstin: '24AAACU6551F1ZI',
-        discomPan: 'AAACU6551F',
-        discomAddress: 'Registered Office: Sardar Patel Vidyut Bhavan, Race Course, Vadodara - 390007',
+        // NOT seeded. An agency's own registration state is a fact about that agency and
+        // the app has no way to know it - a seeded '24' asserted Gujarat registration for
+        // every agency (AUDIT O8). The state CODE is derived from the agency's own GSTIN
+        // (its first two digits), so it cannot disagree with the GSTIN; the state NAME is
+        // entered. Both start empty.
+        agencyState: '',
+        agencyStateCode: '',
+        // DISCOM IDENTITY IS NOT SEEDED. It used to be pre-filled with UGVCL's real
+        // registration - name, GSTIN, PAN, address, circle office - so every new agency
+        // was created carrying another company's tax identity, and printed it. Because
+        // the values were WRITTEN they were truthy, so no fallback fired and nothing
+        // marked them as unchosen (AUDIT O7).
+        //
+        // discomName comes from the required select on the creation form. GSTIN, PAN and
+        // address are entered by the agency from its own tender paperwork - deliberately
+        // NOT prefilled from a built-in table, because only UGVCL's is verified and only
+        // because it happened to be in this codebase.
+        discomName: discomName.trim(),
+        discomGstin: '',
+        discomPan: '',
+        discomAddress: '',
         discomState: 'Gujarat',
+        // Not agency-specific: all four DISCOMs are Gujarat entities, and this drives the
+        // CGST/SGST vs IGST determination rather than appearing on the document.
         discomStateCode: '24',
         serviceSacCode: '998719',
-        circleOfficeName: 'SABARMATI',
+        circleOfficeName: '',
         circleAuthority: 'Superintending Engineer (O & M)',
         divisionAuthority: 'The Executive Engineer',
         estimateCcTemplate: 'E. E. (O & M) DIVISION - {division}',
@@ -180,7 +211,11 @@ export default function AgencySettings() {
       setEmail('');
       setPhone('');
       setLetterheadBase64('');
-      setDivisions([{ name: 'SABARMATI', prefix: '21 IS' }]);
+      setDivisions([{
+        name: '', prefixCRGO: '', prefixAmorphous: '', prefixWoundCore: '',
+        prefixLSTC: '', prefixOH: '', allotmentCRGO: '', allotmentAmorphous: '', allotmentWoundCore: ''
+      }]);
+      setDiscomName('');
     } catch (err) {
       console.error(err);
       alert('Failed to add agency');
@@ -291,6 +326,26 @@ export default function AgencySettings() {
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Agency Name</label>
               <input required type="text" value={newAgencyName} onChange={e => setNewAgencyName(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">
+                DISCOM <span className="text-red-500">*</span>
+              </label>
+              <select
+                required
+                value={discomName}
+                onChange={e => setDiscomName(e.target.value)}
+                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50"
+              >
+                <option value="">Select the DISCOM this agency works with…</option>
+                {DISCOM_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
+              </select>
+              <p className="text-[11px] text-slate-500 mt-1">
+                Name only. Enter the DISCOM's GSTIN, PAN and address afterwards in Edit
+                Agency, from your own tender paperwork - they are not pre-filled, and the
+                tax invoice and estimate will not generate until they are set.
+              </p>
             </div>
 
             <div className="border-t border-slate-200 pt-6 mt-6">

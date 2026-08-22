@@ -579,6 +579,151 @@ and `billAmount` all unset. MSBT-12 is the only GP job ever charged.
 forwarding letter table and TOTAL, and from all billing paths. Oil accounting is
 deliberately unaffected — oil is consumed regardless of who pays for the repair.
 
+### O7. A new agency is seeded with UGVCL's identity — and prints it
+
+**The most serious finding of the setup-gap review, and it is not a fallback problem.**
+
+`AgencySettings.tsx:146-157` **seeds every newly created agency** with a specific
+DISCOM's registration details:
+
+| Field | Seeded value |
+|---|---|
+| `discomName` | `Uttar Gujarat Vij Company Ltd.` |
+| `discomGstin` | `24AAACU6551F1ZI` |
+| `discomPan` | `AAACU6551F` |
+| `discomAddress` | `Sardar Patel Vidyut Bhavan, Race Course, Vadodara - 390007` |
+| `circleOfficeName` | `SABARMATI` |
+| `serviceSacCode` | `998719` |
+| division / prefix | `SABARMATI` / `21 IS` |
+
+Because these are **written to the agency document**, they are truthy — so no `||`
+fallback ever fires and nothing signals they were never chosen. They read as deliberate
+configuration.
+
+A **second layer** of the same constants sits in render-time fallbacks
+(`BillingSystem` 407-434, `EstimateGenerate` 458-460 / 1089, `EditAgencyForm` 42-53,
+`SingleJobEstimateReport` 813/1015), including
+`atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052'` — a specific historical UGVCL
+order number — so clearing a field re-applies the same identity.
+
+**What a fresh agency prints before anyone edits anything:**
+
+- **Tax invoice** — DISCOM GSTIN `24AAACU6551F1ZI` and PAN `AAACU6551F`. These are a real
+  company's tax registration numbers on a tax document issued by a different company.
+- **Estimate forwarding letter** — `Uttar Gujarat Vij Company Ltd.`,
+  `Superintending Engineer (O & M)`, `Circle Office : SABARMATI`.
+- **Estimate sheets** — `DIVISION : SABARMATI`, and an ORDER NO falling back to that
+  hardcoded UGVCL order.
+- **Job numbers** — prefix `21 IS`, a UGVCL division's scheme.
+
+An agency working with DGVCL, MGVCL or PGVCL would issue documents carrying UGVCL's
+identity. **This is the F1/O6 fabricated-value pattern reaching a customer-facing
+financial document** — and it defeats the purpose of the multi-DISCOM support the app
+otherwise has.
+
+**FIXED — seeding stopped, both layers removed, generation gated.**
+
+1. **No seeding.** `AgencySettings` no longer writes `discomName`, `discomGstin`,
+   `discomPan`, `discomAddress` or `circleOfficeName` into a new agency, and the
+   `SABARMATI` / `21 IS` division seed is gone. A new agency starts empty.
+2. **DISCOM is a required choice at creation** — a select of the four Gujarat DISCOMs
+   with nothing pre-selected, storing the **name only**. GSTIN, PAN and address are
+   entered by the agency from its own tender paperwork, deliberately **not** pre-filled
+   from a built-in table: only UGVCL's is verified, and only because it happened to be
+   in this codebase.
+   *`discomStateCode` is still set to `24`* — all four DISCOMs are Gujarat entities, so
+   it is not agency-specific, and it drives the CGST/SGST vs IGST determination rather
+   than appearing on the document.
+3. **Second layer removed.** The render-time fallbacks in `BillingSystem`,
+   `EstimateGenerate`, `EditAgencyForm` and `SingleJobEstimateReport` no longer
+   re-apply the constants, including
+   `atNumber || 'UGVCL/EE-T-1/Trans.Rep/2020-21/01/1052'`. Clearing a field now clears it.
+4. **Generation blocked, per document, on the fields that document prints** — not one
+   agency-wide check. `missingForTaxInvoice` requires name + GSTIN + address;
+   `missingForEstimate` requires name + circle office. The dialog names the specific
+   missing field. The **delivery challan, oil statement and forwarding letter are
+   deliberately NOT gated**: they carry no tax registration, and blocking a dispatch over
+   a missing GSTIN would stop physical work for a gap that does not affect the document
+   being produced.
+
+**Migration — report only, nothing changed.** `scripts/agency-identity-console.js` lists,
+per agency, which of the six fields still exactly equal the seed. **The data cannot
+settle whether that is wrong:** a UGVCL agency that never needed to change a value is
+indistinguishable from a non-UGVCL agency that never noticed it. So affected agencies are
+flagged for confirmation, never cleared automatically.
+
+### O8. `agencyStateCode` was seeded '24' — asserting an unverified registration
+
+Seeded alongside the DISCOM identity (O7), but a different kind of wrong: `discomStateCode`
+`24` is true of **every** option in the DISCOM select — all four are Gujarat entities — so
+seeding it cannot be incorrect. An agency's **own** registration state is a fact about
+that agency, and the app has no way to know it. Seeding `24` asserted Gujarat
+registration for every agency created.
+
+**Fixed by derivation rather than by asking.** The GST state code **is** the first two
+digits of a GSTIN — it is part of the number, not a separate fact. `stateCodeFromGstin`
+derives it, `getAgencyStateCode` uses it everywhere (invoice, letterhead, edit form), and
+`EditAgencyForm` shows it **read-only** with "Derived from the agency GSTIN (24…)"
+whenever a GSTIN exists, persisting the derived value on save. Two places to be wrong
+about one fact become one. Seeding removed from `agencyState` and `agencyStateCode`, and
+the `|| 'Gujarat'` / `|| '24'` render fallbacks are gone — the invoice shows `-` rather
+than asserting.
+
+**See O9**: this fixes the *data*. It does not fix the tax treatment, which was
+originally attributed to it.
+
+### O9. No IGST path exists — out-of-state agencies are charged the wrong tax
+
+**Correcting an earlier conclusion in this trail.** The seeded `agencyStateCode` of `24`
+(O8) was described as causing a non-Gujarat agency to "silently get CGST+SGST where IGST
+is due". That overstated it, and the distinction matters:
+
+- **The seed made the DATA wrong** — it asserted a registration state nobody had entered.
+- **It does not cause the tax treatment**, because **there is no IGST path to bypass.**
+
+`BillingSystem` applies `cgstRate` and `sgstRate` **unconditionally** (defaulting 9/9).
+A repo-wide search finds no `igst` anywhere, and **nothing compares agency state to DISCOM
+state**. The state codes are display-only: they print on the invoice and drive nothing.
+
+**Consequence:** a non-Gujarat agency is charged the wrong tax on **every** invoice,
+*regardless of how correct its data is*. Entering a correct `27…` Maharashtra GSTIN
+changes what prints; it does not change the split applied.
+
+**New visibility, as a side effect of O8.** With the code now derived rather than seeded,
+an out-of-state agency's invoice will display a state code that **visibly disagrees with
+the CGST/SGST split printed beside it** — a discrepancy a DISCOM's accounts department
+could reasonably spot. Correct data exposes the gap instead of hiding it. That is an
+argument for O8 having been worth doing even though it did not fix this.
+
+**The decision this needs is a product one, not a code one: is a non-Gujarat agency
+actually in scope?**
+
+All four DISCOMs are Gujarat entities. An agency registered outside Gujarat repairing
+transformers for them is *possible* but may never occur in practice.
+
+- **If it cannot happen** — IGST is correctly absent, and the right fix is to **block
+  agency creation with a non-`24` GSTIN**, naming the reason. That is a smaller, more
+  honest change than building a tax path nobody will exercise: it refuses the case
+  rather than half-supporting it.
+- **If it can happen** — IGST support is required, and the intra/inter-state rule should
+  be confirmed against the tender before any calculation is written.
+
+**Neither implemented.** Both are tax-calculation decisions. Recorded for the decision,
+not pre-empted by it.
+
+### A3. Open question: are allotment quotas meant to be opt-in?
+
+`NewJob.tsx:1093-1101` resolves an unrecorded allotment to `0`, and the whole quota
+check sits inside `if (allowed > 0)`. **An agency that never configures allotments has
+no quota enforcement at all** — every intake is permitted.
+
+This may be deliberate (quotas are opt-in per division and core type) or a gap (the
+check silently does nothing when the data is missing, the F1/F2 shape). The setup-gap
+dialog was **not** applied here, because making it block would change what blocks.
+
+Needs a decision before anything is built on it: is an unset allotment "unlimited", or
+"not yet configured, refuse to receive"?
+
 ### A2. `incrementJobNoCounter` is dead code that looks like the allocator
 
 `AgencyContext.tsx:710` defines `incrementJobNoCounter(counterKey, count)` and the
@@ -1261,6 +1406,50 @@ render site only, and `formatDDMMYYYY` passes `'-'` through unchanged.
   the MR.
 - `mrOilTxList` matched undated transactions by `tDateStr === selectedMrDate`, which
   would have matched against the `'-'` sentinel. Guarded.
+
+### F19. Blocking setup gaps named the problem but not the way out
+
+Five blocking conditions caused by missing agency setup showed a message and stopped
+there, leaving the operator to work out *where* the fix lives — across Agency Settings,
+AT Settings, the Divisions & Prefixes tab, the Allotments tab and the Estimate Master.
+
+**Fixed:** one shared `SetupGapDialog` (route, wording shape and unsaved-work handling in
+one place — six alerts each growing their own redirect is the "rule applied once"
+pattern). It presents only; **callers keep their own guard, so nothing about what blocks
+changed**. Converted:
+
+| Condition | Now routes to |
+|---|---|
+| Allotment exhausted | Agency Settings → that AT → Allotments tab |
+| No agency selected | Agency Settings |
+| No AT master / none active | Agency Settings → AT section |
+| No prefix for division + core type | Agency Settings → that AT → Divisions & Prefixes |
+| Scrap charge code missing | Estimate Master |
+| Circle approval limit missing | Estimate Master |
+
+**The prefix message was wrong, not merely unhelpful.** It read *"Invalid Job Number
+prefix… Expected prefix starting with `JOB-`"* — but `'JOB'` is the **fallback** returned
+by `getNextJobNoInfo` when there is no AT master *or* no prefix for that division and
+core type. So the message named the job number, which is the one thing that is not
+wrong, and sent the operator hunting through job numbers for a problem in agency
+settings. It now diagnoses the actual cause first:
+
+- no AT master → *"No AT / tender period is active. Job numbers cannot be generated
+  until one is set up."*
+- AT active, no prefix → *"No job number prefix is configured for SABARMATI / CRGO under
+  AT 26-27."*
+
+each with its own destination. The generic message survives only for a genuinely
+mistyped number against a configured prefix.
+
+**Never auto-navigates.** Where the screen holds unsaved work the primary button asks a
+second time, naming the row count, and `NewJob` stashes the intake to `sessionStorage`
+before leaving and restores it on return — so fixing setup does not cost the operator
+their typing. A failed stash never blocks navigation.
+
+**Not converted, deliberately:** a missing *rate* in the master (too many causes for one
+route), and a missing external inspection (a data gap, not setup — a different dialog
+shape, since the fix is doing an inspection rather than editing configuration).
 
 ---
 

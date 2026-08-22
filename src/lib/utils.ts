@@ -140,3 +140,23 @@ export function getMrDateIso(
   if (tx?.mrDate) return tx.mrDate;
   return '-';
 }
+
+/**
+ * The GST state code is the FIRST TWO DIGITS of a GSTIN - it is part of the number, not
+ * a separate fact. Deriving it means it can never disagree with the GSTIN, and the
+ * agency does not have to know or restate it.
+ *
+ * Returns '' when there is no GSTIN or it does not start with two digits, rather than
+ * guessing. Nothing is assumed about which state an agency is registered in - that was
+ * the defect: a seeded '24' asserted Gujarat registration for every agency (AUDIT O8).
+ */
+export function stateCodeFromGstin(gstin?: string | null): string {
+  const g = String(gstin ?? '').trim();
+  return /^\d{2}/.test(g) ? g.slice(0, 2) : '';
+}
+
+/** An agency's GST state code: derived from its own GSTIN, falling back to a stored
+ *  value only for agencies recorded before derivation existed. Never defaulted. */
+export function getAgencyStateCode(agency: any): string {
+  return stateCodeFromGstin(agency?.gstin) || String(agency?.agencyStateCode ?? '').trim();
+}
