@@ -792,6 +792,44 @@ checked on intake nor counted afterwards. That is now blocked too (F21).
 AT-linked jobs - AT-less jobs do not inflate it. The exposure runs the other way: they
 consume no quota anywhere, so real work can exceed an allotment without the app noticing.
 
+### A6. The job-number read and write test different conditions on the same field
+
+**A defect in its own right, independent of the seeding fix (F25) that made it harmless
+today.** Both functions decide *which document holds the counter*, and they decide it
+differently:
+
+| | test |
+|---|---|
+| `getNextJobNoInfo` (`AgencyContext.tsx`) | `if (activeAtMaster && activeAtMaster.lastJobNumbers)` |
+| `incrementJobNoCounter` (`AgencyContext.tsx`) | `if (activeAtMaster)` — the object alone |
+
+The read consults the AT's counter map; the write consults only whether an AT exists. For
+an AT with a populated map the two agree, and that is the only reason nothing is currently
+broken — F25 removed the one state where an AT could be active with an empty map.
+
+**Why this stays on the OPEN list even though nothing misbehaves.** The tests are not
+equivalent, and their agreement is a property of the *data* rather than of the code. A
+future change to either one alone re-opens the exact failure F25 closed:
+
+- Make the read test for a **non-empty** object (the obvious-looking fix, and the one
+  considered first): job 1 is numbered from the agency (say 47), the increment still writes
+  to the AT starting from *its* zero (1), and job 2 is numbered from the AT (2). Duplicate
+  job numbers — one job later and quieter than the original bug.
+- Make the write test `activeAtMaster.lastJobNumbers` to match: increments go to the agency
+  while an AT is active, so the AT's map never becomes non-empty and the handover never
+  happens. Two live counter sources indefinitely.
+
+**Neither is fixable at one site.** Any change here has to move both, and has to be checked
+against **the first job of a newly created AT** specifically — the only state where the two
+tests can disagree. Both functions now carry a comment saying so and pointing here; a
+one-way note would be found only by whoever happened to read the right function, which is
+never the person about to change the other.
+
+This is the F24 guard-and-rebuild shape in a second place: *two sites individually correct,
+safe only in combination, with the dependency invisible from either.* The difference is
+that F24's coupling was discovered by breaking it, and this one is recorded before anyone
+does.
+
 ### A5. Inspection `createdAt` uses the client clock, not the server's
 
 **Narrower than first reported, and worth stating precisely because the first version was
@@ -1802,6 +1840,156 @@ than the dash this fix avoided, because there is no wrong-looking output to noti
 future timestamp change on `jobs` must start from the same census, and must fix the
 arithmetic readers — not only the display ones.
 
+### F24. Divisions & Prefixes made read-only on the agency form — and the coupling that nearly broke on the way
+
+**The authority, settled from the code rather than from preference.**
+`getNextJobNoInfo` (`AgencyContext.tsx:701-704`) reads `activeAtMaster.prefixes` when the
+AT has any and `activeAgency.prefixes` **only** when it has none. The AT is the source of
+truth; the agency copy is a legacy fallback. That matches the domain — divisions and
+prefixes are issued with a tender, allotments arrive against that tender over time — so
+both belong to the AT. The agency form now **displays** them and routes to the AT to edit,
+instead of being a second editor whose writes the first would overwrite.
+
+Changed: the panel resolves its source the same way `getNextJobNoInfo` does and labels it
+(*from AT «number»* / *from agency record — legacy fallback* / *none configured*);
+allotments are labelled **per cell**, because they resolve per cell
+(`NewJob.tsx:1223-1226`) unlike prefixes which resolve as a whole object; two buttons route
+via `SetupGapDialog` on the existing `?section=divisions|allotments|at&atId=` params;
+with no AT active there is one button, *Set up an AT period*.
+
+Division **Circle Office** stays editable — it is agency routing data, is not stored on the
+AT, and `AtDivisions` has no field for it, so this form is its only editor.
+
+#### The finding: the save-time guard and the save-time rebuild were load-bearing together
+
+Removing the inputs forced two consequential changes, and **doing only the obvious one
+would have introduced a silent data deletion.**
+
+1. The save began `if (!validation.isValid) { setActiveTab('divisions'); return; }`. With
+   the inputs gone that is a **deadlock** — an agency whose stored prefixes are invalid
+   could never save *any* field, including its bank account, and the fault has no editor on
+   that screen. So the block had to go.
+2. The save then **rebuilt** `prefixes` and `allotments` from `divisions` state, keeping a
+   division only `if (d.name.trim() && d.prefixCRGO.trim())`.
+
+Each is defensible alone. Together, (1) is the **only thing that made (2) safe**: a stored
+division with a blank CRGO prefix is silently dropped by the rebuild, and the only reason
+that had never happened is that validation refused the save first. Remove the guard and
+keep the rebuild, and **saving a bank account detail deletes a division from the agency
+record** — no warning, no visible failure, and the loss surfaces later as a job numbered
+`JOB-1`.
+
+Fixed by removing the rebuild too: `prefixes` and `allotments` are now passed through
+verbatim from the stored document. Nothing on the form can change them, so the correct
+write is the unchanged value. Counter-key seeding is preserved over the same set as before.
+
+**Neither site said any of this.** The guard read as input validation; the rebuild read as
+normal form serialisation. The dependency existed only in the fact that one ran before the
+other, and was invisible from either. This is the coupling shape from the Recurring theme
+again — *two things individually correct that are only safe in combination* — and it is the
+second time this session that the dangerous move was **deleting** a check that looked
+redundant rather than adding one.
+
+#### Reachability: is any agency now unable to fix prefixes the app is using?
+
+Traced exhaustively, because if the AT screen can always reach them the migration question
+is moot regardless of any count.
+
+| State | Live source | Editable? |
+|---|---|---|
+| AT active, has prefixes | that AT | **yes** — `AtDivisions` |
+| AT active, no prefixes | agency (fallback) | **yes** — `AtDivisions` seeds its editor from `activeAgency.prefixes` (`AtDivisions.tsx:14-16`) and saves to **both** (`:89-91`), which also ends the fallback |
+| Several ATs, active one has none | agency (fallback) | **yes** — same path |
+| An AT exists but is not active | agency (fallback) | **yes** — clicking its card activates it |
+| **No AT at all** | agency | **NO** |
+
+**Exactly one unreachable case: an agency with zero ATs.** `AtDivisions` renders only inside
+an active AT's card, so there is no AT screen to reach. Its `agency.prefixes` are live —
+`activeAtMaster` is null, so `getNextJobNoInfo` uses them — and after this change nothing
+can edit them.
+
+**This makes a migration the wrong answer everywhere.** For an agency with any AT the
+fallback repairs itself on the first AT save. For an agency with none there is nothing to
+copy *onto*. The remedy in the one stuck case is to create an AT, which is exactly what the
+button says.
+
+#### Two hazards on the route this fix now recommends — NOT changed, reported
+
+Both pre-date this change; they matter because the new buttons send people down that path.
+
+1. **Creating an agency's first AT restarts every job-number counter at 1.**
+   `AtSettings.handleAdd` writes `lastJobNumbers: {}`, and `getNextJobNoInfo` branches on
+   `if (activeAtMaster && activeAtMaster.lastJobNumbers)` — `{}` is **truthy**, so the
+   populated `activeAgency.lastJobNumbers` in the `else if` is never consulted. An agency
+   that has been numbering jobs off its own counters silently returns to 1. Related to O2
+   (job numbers not uniquely allocated) and C1 (three collisions): this is a mechanism that
+   *produces* collisions, on the path taken to fix a prefix.
+2. **`AtDivisions.tsx:41` seeds a hardcoded division** — `SABARMATI` / `21 IS` — when both
+   the AT and the agency have none. An operator arriving with nothing configured finds a
+   filled-in division that looks entered. Same family as O7's seeded DISCOM identity, and
+   the same reason it is dangerous: it renders plausibly.
+
+### F25. Creating an agency's first AT no longer restarts every job-number counter
+
+Found on the route F24 now recommends — *to fix a prefix, set up an AT* — which made it
+urgent rather than theoretical.
+
+**The bug.** `addAtMaster` wrote the new AT with `lastJobNumbers: {}`, and
+`getNextJobNoInfo` branches on `activeAtMaster && activeAtMaster.lastJobNumbers`. **`{}` is
+truthy**, so the populated `activeAgency.lastJobNumbers` in the `else if` was never reached
+and every counter read back as 0. An agency that had been numbering off its own counters
+returned to **1** the moment its first AT existed — producing duplicate job numbers
+immediately, on the first job. This is a mechanism that *manufactures* the O2/C1 collisions.
+
+**Why seeding rather than fixing the read.** The obvious fix — test the read for a
+non-empty object — does not work, because the read and the write test different things
+(**A6**). Job 1 would be numbered from the agency (47), the increment would still write to
+the AT from *its* zero (1), and job 2 would be numbered from the AT (2): the same collision,
+one job later and quieter. Seeding puts read and write on the same document from the first
+job, which is also the model already used for `prefixes` — the AT is the authority, the
+agency copy is the fallback.
+
+**Narrowed to the agency's FIRST AT.** Once an AT exists every increment goes to it and the
+agency map freezes, so copying that frozen map into a *second* AT would start a new tender
+from an arbitrary old number. A new tender starts its own series — which is what per-AT
+counters are for. The staleness objection to seeding is real and applies only from the
+second AT onward, and that is exactly where this does not seed. A caller that supplies its
+own non-empty counters is left alone.
+
+**Residual risks, stated rather than buried:**
+- The map is copied wholesale, including keys for divisions the new AT may not have.
+  Harmless — a counter for a division that does not exist is never read.
+- The agency map goes stale by design after seeding, exactly as `prefixes` does. It is read
+  again only if the AT is deleted or deactivated, where it would be behind. That hazard
+  pre-dates this fix and was **worse** before it: the AT previously started at 1, so the
+  divergence was immediate and total.
+- Two tabs creating the first AT simultaneously could both seed. They would seed identical
+  values.
+
+**This does not close O2.** Job numbers are still not uniquely allocated; one mechanism that
+produces collisions is gone.
+
+**Retrospective check added** to `scripts/prefix-authority-console.js` (read-only): an AT
+whose counters are empty or behind the agency's on the same key, while the agency's map is
+populated and jobs exist. It also lists realised collisions and flags those that **straddle
+different ATs** — the signature this bug leaves, as against a collision inside a single AT,
+which is O2 and a separate renumbering decision. A gap alone is deliberately *not* reported
+as proof: an AT legitimately starting its own series at 1 looks identical on those fields.
+
+### F26. `AtDivisions` no longer seeds a hardcoded division
+
+`AtDivisions.tsx:41` pushed `SABARMATI` / `21 IS` when neither the AT nor the agency had
+any divisions. An operator arriving with nothing configured found a division that **looks
+entered** — no way to tell a placeholder from a configured value, and saving it writes a
+real division and a real job-number prefix for a tender that never had one.
+
+Same family as O7's seeded DISCOM identity, and dangerous for the same reason recorded in
+the Recurring theme: it renders plausibly. Removed; the panel starts empty and says so.
+
+The empty state replaces the validation banner rather than sitting beside it — *"At least
+one division is required"* reads as a fault when it is the starting position, and an error
+shown for a normal state trains the operator to ignore errors.
+
 ---
 
 ## Recurring theme
@@ -1852,3 +2040,17 @@ in isolation is often the visible half of an invariant maintained somewhere else
 Before removing one, find what establishes the data it depends on. Where a coupling
 exists, note it **on both sides** — a one-way note is only found by whoever happens to
 read the right entry, which is never the person about to break it.
+
+**F24 is the same shape arriving from the other direction, and worth reading as the
+general case.** There the coupling was not between two fixes but between a *guard* and a
+*rebuild* in the same function, three lines apart: the validation block was the only thing
+that kept the rebuild from silently dropping a division. Removing the guard was correct —
+it had become a deadlock — and removing it alone would have been a data-loss bug. Neither
+site referenced the other; the dependency lived entirely in the order they ran.
+
+So the working rule generalises past "an invariant maintained elsewhere". **When removing a
+guard, do not only ask what it was protecting against — ask what ran after it and assumed
+it had passed.** A guard that returns early is a precondition for everything downstream of
+it, whether or not anything downstream says so. And the risk concentrates exactly where the
+guard has become obviously obsolete: obsolescence is an argument for deleting the *check*,
+never evidence about what came to depend on it.

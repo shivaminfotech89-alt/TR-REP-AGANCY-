@@ -665,7 +665,41 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         throw new Error('Cannot create an AT with no agency. Select an agency first - an AT with no agencyId is invisible to every agency-scoped view.');
       }
       const newRef = doc(collection(db, 'atMasters'));
-      const newAt = { ...atData, ownerId: auth.currentUser.uid };
+
+      // SEED THE COUNTERS FROM THE AGENCY, BUT ONLY FOR ITS FIRST AT.
+      //
+      // Before this, a new AT was written with `lastJobNumbers: {}` and job numbering
+      // silently restarted at 1. The cause is that the read and the write test different
+      // things: getNextJobNoInfo branches on `activeAtMaster && activeAtMaster.lastJobNumbers`
+      // - and `{}` is TRUTHY - so the populated `activeAgency.lastJobNumbers` in its
+      // `else if` was never reached, while incrementJobNoCounter branches on
+      // `activeAtMaster` alone. An agency that had been numbering off its own counters
+      // returned to 1 the moment its first AT existed, producing duplicate job numbers
+      // immediately (AUDIT O2/C1). That sits on the path the agency form now recommends
+      // for fixing prefixes, which is how it was found.
+      //
+      // WHY SEEDING RATHER THAN TESTING THE READ FOR A NON-EMPTY OBJECT: the read alone
+      // does not fix it. Job 1 would be numbered from the agency (47), the increment
+      // would still write to the AT starting from ITS zero (1), and job 2 would be
+      // numbered from the AT (2) - the same collision, one job later and quieter. Fixing
+      // it at the read means fixing the write too, and the consistent version of that
+      // keeps writing to the agency while an AT is active, so the AT's map never becomes
+      // non-empty and the handover never happens. Seeding puts read and write on the same
+      // document from the first job.
+      //
+      // ONLY THE FIRST AT. Once an AT exists, every increment goes to it and the agency
+      // map freezes, so copying that frozen map into a second AT would start a new tender
+      // from an arbitrary old number. A new tender starts its own series - which is what
+      // per-AT counters are for. Staleness only exists from the second AT onward, and
+      // that is exactly where this does not seed.
+      const agencyHasAnyAt = atMasters.some(a => a.agencyId === atData.agencyId);
+      const callerCounters = (atData as any).lastJobNumbers;
+      const seededCounters =
+        (!agencyHasAnyAt && Object.keys(callerCounters || {}).length === 0)
+          ? { ...(agencies.find(a => a.id === atData.agencyId)?.lastJobNumbers || {}) }
+          : (callerCounters || {});
+
+      const newAt = { ...atData, lastJobNumbers: seededCounters, ownerId: auth.currentUser.uid };
       await setDoc(newRef, newAt);
       setAtMasters(prev => [...prev, { id: newRef.id, ...newAt }]);
       // Activate the new AT when nothing is active FOR THIS AGENCY - not merely when
@@ -696,6 +730,25 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  /**
+   * PAIRED PRECONDITION - read this together with incrementJobNoCounter below.
+   *
+   * These two functions decide WHICH DOCUMENT holds the counter, and they test different
+   * things to decide it:
+   *
+   *     getNextJobNoInfo      if (activeAtMaster && activeAtMaster.lastJobNumbers)
+   *     incrementJobNoCounter if (activeAtMaster)
+   *
+   * They agree today only because an AT is never left with an empty `lastJobNumbers`
+   * (addAtMaster seeds the first AT from the agency; later ATs start their own series and
+   * are incremented into existence). Change EITHER test alone and they disagree for a
+   * newly created AT: the number issued comes from one document and the increment lands on
+   * the other, so job 1 is numbered from the agency and job 2 from the AT - duplicate job
+   * numbers, one job later and quieter than the bug the seeding fixed.
+   *
+   * If this needs changing, change both, and check what happens on the FIRST job of a new
+   * AT specifically. See AUDIT.md A6.
+   */
   const getNextJobNoInfo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
     if (!activeAgency) return { prefix: 'JOB', nextNum: 1, counterKey: 'JOB' };
     
@@ -743,6 +796,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     return { prefix, nextNum: lastNum + 1, counterKey };
   };
 
+  /**
+   * PAIRED PRECONDITION - see the note on getNextJobNoInfo above. This branches on
+   * `activeAtMaster` alone; the read branches on `activeAtMaster.lastJobNumbers` as well.
+   * They must be changed together. AUDIT.md A6.
+   */
   const incrementJobNoCounter = async (counterKey: string, count: number) => {
     try {
       if (activeAtMaster) {

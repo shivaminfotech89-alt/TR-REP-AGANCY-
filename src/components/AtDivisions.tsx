@@ -37,9 +37,11 @@ export function AtDivisions({ at }: { at: AtMaster }) {
       }
     });
     
-    if (divs.length === 0) {
-      divs.push({ name: 'SABARMATI', prefixCRGO: '21 IS', prefixAmorphous: '', prefixWoundCore: '', prefixLSTC: '', prefixOH: '' });
-    }
+    // NO SEEDED DIVISION. This used to push a hardcoded SABARMATI / 21 IS when neither
+    // the AT nor the agency had any, which rendered as a division that looks entered -
+    // the operator cannot tell a placeholder from a configured value, and saving it
+    // writes a real division and a real job-number prefix for a tender that never had
+    // one. Same family as the seeded DISCOM identity (AUDIT O7). Start empty and say so.
     setDivisions(divs);
   }, [at, activeAgency]);
 
@@ -121,8 +123,21 @@ export function AtDivisions({ at }: { at: AtMaster }) {
         </button>
       </div>
 
+      {/* Empty state. Shown INSTEAD of the validation banner when there is simply nothing
+          configured yet - "At least one division is required" reads as a fault when it is
+          really the starting position. */}
+      {divisions.length === 0 ? (
+        <div className="p-4 bg-white border border-dashed border-slate-300 rounded-lg text-center space-y-1">
+          <p className="text-xs font-bold text-slate-700">No divisions configured for this AT yet.</p>
+          <p className="text-[11px] text-slate-500">
+            Add each division named in the tender, with the job number prefix issued for it.
+            Until then, job numbers use the <span className="font-mono font-bold">JOB</span> prefix.
+          </p>
+        </div>
+      ) : null}
+
       {/* Validation alert banner */}
-      {!validation.isValid && (
+      {divisions.length > 0 && !validation.isValid && (
         <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2.5 text-xs text-red-800">
           <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
           <div>
