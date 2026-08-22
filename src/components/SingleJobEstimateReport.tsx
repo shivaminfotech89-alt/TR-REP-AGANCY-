@@ -920,7 +920,7 @@ export default function SingleJobEstimateReport({
                   <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
                     <div className="text-left">
                       <div className="h-10"></div>
-                      <p className="font-bold">For, {agency?.discomName || 'DISCOM'}</p>
+                      <p className="font-bold">For, {agency?.discomName || '-'}</p>
                     </div>
                     <div className="text-right">
                       <div className="h-10"></div>
@@ -1129,7 +1129,7 @@ export default function SingleJobEstimateReport({
                 <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
                   <div className="text-left">
                     <div className="h-10"></div>
-                    <p className="font-bold">For, {agency?.discomName || 'DISCOM'}</p>
+                    <p className="font-bold">For, {agency?.discomName || '-'}</p>
                   </div>
                   <div className="text-right">
                     <div className="h-10"></div>

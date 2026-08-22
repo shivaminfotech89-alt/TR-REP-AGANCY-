@@ -71,7 +71,7 @@ export function AtSettings() {
     if (!newAt.atNumber) return;
     setIsSubmitting(true);
     try {
-      await addAtMaster({
+      const createdId = await addAtMaster({
         atNumber: newAt.atNumber,
         name: newAt.name,
         startDate: new Date(newAt.startDate).getTime(),
@@ -84,6 +84,10 @@ export function AtSettings() {
         atPercentageAmorphous: Number(newAt.atPercentageAmorphous) || 0,
         atPercentageWoundCore: Number(newAt.atPercentageWoundCore) || 0,
       });
+      // Creating an AT is a clear signal of intent to work with it, so make it active.
+      // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
+      // a newly created AT showed a card with no way into its configuration.
+      if (createdId) setActiveAtMasterId(createdId);
       setShowAddForm(false);
       setNewAt({
         atNumber: '',
@@ -254,9 +258,16 @@ export function AtSettings() {
                             <div className="flex items-center flex-wrap gap-2">
                               <h3 className="font-bold text-slate-900">{at.atNumber}</h3>
                               {at.name && <span className="text-slate-500 font-normal">- {at.name}</span>}
-                              {activeAtMaster?.id === at.id && (
+                              {activeAtMaster?.id === at.id ? (
                                 <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full flex items-center">
                                   <Check className="w-3 h-3 mr-1"/> Active AT
+                                </span>
+                              ) : (
+                                /* The Divisions & Allotments panel renders only for the
+                                   ACTIVE AT, and the only way in was an unlabelled click
+                                   on a card that does not look clickable. Say so. */
+                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 bg-slate-100 border border-slate-300 px-2 py-0.5 rounded-full flex items-center">
+                                  Select to configure divisions &amp; allotments
                                 </span>
                               )}
                             </div>

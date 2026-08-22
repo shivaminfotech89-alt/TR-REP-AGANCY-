@@ -1044,7 +1044,7 @@ export default function Dashboard() {
                     <span className="text-[10px] font-mono text-slate-500 font-bold">{job.capacityKva || '-'} KVA</span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
-                    <span className="truncate">{job.division || 'DISCOM'}</span>
+                    <span className="truncate">{job.division || '-'}</span>
                     <span className={`px-1 rounded font-bold ${badgeColor}`}>{actionLabel}</span>
                   </div>
                 </Link>

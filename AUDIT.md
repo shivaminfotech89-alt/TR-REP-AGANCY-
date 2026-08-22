@@ -1451,6 +1451,69 @@ their typing. A failed stash never blocks navigation.
 route), and a missing external inspection (a data gap, not setup — a different dialog
 shape, since the fix is doing an inspection rather than editing configuration).
 
+### F20. A new AT's Divisions & Allotments panel never appeared
+
+Reported as blocking new agency setup: create an AT, and there is no way to enter its
+divisions, prefixes or allotments.
+
+**The panel renders only for the ACTIVE AT** (`AtSettings`:
+`activeAtMaster?.id === at.id`). Four things combined to leave a newly created AT
+inactive, and the panel therefore unreachable for every AT at once:
+
+**1. The activation guard tested the wrong thing.** `addAtMaster` read
+`if (!activeAtMasterId) setActiveAtMasterId(newRef.id)` — activating only when *nothing
+at all* was stored. But `activeAtMasterId` is a **bare id** while `activeAtMaster` is
+**agency-scoped**:
+
+```js
+atMasters.find(a => a.id === activeAtMasterId && a.agencyId === activeAgencyId) || null
+```
+
+So an id belonging to **another agency** is truthy at the guard yet resolves to `null` at
+the derivation. The guard passed, nothing was activated, and no panel appeared. It asked
+*"is anything stored"* when it meant *"is anything active for this agency"*. This is the
+same shape as the earlier fix that added the agency check to the derivation but left this
+guard reading the raw id.
+
+**2. The source was a legacy global localStorage key.** `getInitialAtId()` fell back to
+`activeAtMasterId` (global) when no `activeAtMasterId_${agencyId}` existed — seeding state
+with **another agency's AT** on first load, which is what made the guard see a truthy
+foreign id. Fixing the guard alone would have left the initial state wrong until a later
+effect corrected it, with `activeAtMaster` having already resolved `null` in between.
+
+**3. Adding a *second* AT never activated it either** — by then something was active, so
+the guard declined. Only the very first AT of the very first agency was ever activated.
+
+**4. The one route in was invisible.** Clicking an AT card calls `setActiveAtMasterId`,
+which opens the panel — but nothing on the card said so, and the card does not look
+clickable. An operator who has just created an AT and is looking for where to enter
+divisions sees no affordance.
+
+**Fixed — five changes, one concept:**
+
+1. `AtSettings` activates the new AT after `addAtMaster` succeeds; `addAtMaster` now
+   returns the new id.
+2. The guard tests `atMasters.some(a => a.id === activeAtMasterId && a.agencyId === newAt.agencyId)`.
+3. Non-active AT cards show **"Select to configure divisions & allotments"**.
+4. The legacy global key is no longer **read, written, or listened to** — removed from
+   `getInitialAtId`, from `setActiveAtMasterId`, and from the cross-tab storage listener
+   (which would otherwise still let another tab push a foreign AT id into this tab).
+   `setActiveAtMasterId` now **does not persist at all** when no agency is active: a
+   global-only record cannot be attributed to any agency, and restoring it later means
+   guessing. Not persisting beats persisting something unattributable.
+5. The remaining unfiltered `fetchedAts.find(...)` branch carries a comment recording why
+   it is safe — the agency-scoped branch above it handles the real case, and this one is
+   reachable only for an agency with no ATs — so its safety is not left to be re-derived
+   by whoever next edits the condition above it.
+
+**⚠️ ONE-TIME BEHAVIOUR CHANGE ON FIRST LOAD AFTER DEPLOY — not a new bug.** Anyone whose
+AT selection was stored only under the legacy global key loses that selection once. On
+next load the fetch effect picks a valid AT **for their actual agency** (preferring one
+with status `Active`). This is deliberate: the global key was the leak vector, and a
+selection with no agency attached was never restorable correctly — it was applied to
+whichever agency happened to load first. Someone noticing their AT selection reset after
+a deploy should find this entry rather than treat it as a regression.
+
 ---
 
 ## Recurring theme

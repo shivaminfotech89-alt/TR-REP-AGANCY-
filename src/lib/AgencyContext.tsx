@@ -325,10 +325,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   
   const getInitialAtId = () => {
     const agId = localStorage.getItem('activeAgencyId');
-    if (agId && localStorage.getItem(`activeAtMasterId_${agId}`)) {
-      return localStorage.getItem(`activeAtMasterId_${agId}`);
-    }
-    return localStorage.getItem('activeAtMasterId') || null;
+    // ONLY the agency-scoped key. The legacy global `activeAtMasterId` is no longer
+    // read, written or listened to: a selection stored with no agency attached cannot be
+    // restored correctly to anything - restoring it applied one agency's AT to whichever
+    // agency loaded first, which is the cross-agency leak this whole change closes.
+    return (agId && localStorage.getItem(`activeAtMasterId_${agId}`)) || null;
   };
 
   const [activeAtMasterId, setActiveAtMasterIdState] = useState<string | null>(getInitialAtId());
@@ -363,16 +364,15 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
   const setActiveAtMasterId = (id: string | null) => {
     setActiveAtMasterIdState(id);
+    // Persist ONLY against an agency. With no active agency the selection is held in
+    // state but not written: a global-only record cannot be attributed to anything, so
+    // restoring it later means guessing which agency it belonged to. Not persisting is
+    // better than persisting something unattributable.
+    if (!activeAgencyId) return;
     if (id) {
-      localStorage.setItem('activeAtMasterId', id);
-      if (activeAgencyId) {
-        localStorage.setItem(`activeAtMasterId_${activeAgencyId}`, id);
-      }
+      localStorage.setItem(`activeAtMasterId_${activeAgencyId}`, id);
     } else {
-      localStorage.removeItem('activeAtMasterId');
-      if (activeAgencyId) {
-        localStorage.removeItem(`activeAtMasterId_${activeAgencyId}`);
-      }
+      localStorage.removeItem(`activeAtMasterId_${activeAgencyId}`);
     }
   };
 
@@ -385,7 +385,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
           if (scopedAt) setActiveAtMasterIdState(scopedAt);
         }
       }
-      if (e.key === 'activeAtMasterId' || (activeAgencyId && e.key === `activeAtMasterId_${activeAgencyId}`)) {
+      // Scoped key only. Listening to the global key let another tab push a FOREIGN
+      // agency's AT id into this tab's state - the same leak as the initial read.
+      if (activeAgencyId && e.key === `activeAtMasterId_${activeAgencyId}`) {
         setActiveAtMasterIdState(e.newValue);
       }
       if (e.key === 'cached_global_estimate_master' && e.newValue) {
@@ -490,6 +492,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
           const activeAts = agencyAts.filter(at => at.status === 'Active');
           const chosen = activeAts.length > 0 ? activeAts[0] : agencyAts[0];
           setActiveAtMasterId(chosen.id);
+        // Safe, but only because the branch above already handled the agency-scoped
+        // case: this one searches UNFILTERED `fetchedAts`, so an id from another agency
+        // IS found and the branch is skipped. It is reachable only when `agencyAts` is
+        // empty - an agency with no ATs - where skipping is correct because there is
+        // nothing to activate. If the condition above ever changes, re-check this one:
+        // matching against the unfiltered list is not agency-scoped on its own.
         } else if (fetchedAts.length > 0 && !fetchedAts.find(a => a.id === activeAtMasterId)) {
           const activeAts = fetchedAts.filter(at => at.status === 'Active');
           setActiveAtMasterId(activeAts.length > 0 ? activeAts[0].id : fetchedAts[0].id);
@@ -636,14 +644,25 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     await saveGlobalDefaultEstimateMaster(payload);
   };
 
-  const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>) => {
-    if (!auth.currentUser) return;
+  /** Returns the new AT's id so the caller can activate it (AtSettings does). */
+  const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>): Promise<string | undefined> => {
+    if (!auth.currentUser) return undefined;
     try {
       const newRef = doc(collection(db, 'atMasters'));
       const newAt = { ...atData, ownerId: auth.currentUser.uid };
       await setDoc(newRef, newAt);
       setAtMasters(prev => [...prev, { id: newRef.id, ...newAt }]);
-      if (!activeAtMasterId) setActiveAtMasterId(newRef.id);
+      // Activate the new AT when nothing is active FOR THIS AGENCY - not merely when
+      // the stored id is empty. `activeAtMasterId` is a bare id while `activeAtMaster`
+      // is agency-scoped (see its derivation below), so an id belonging to another
+      // agency is truthy here yet resolves to null there: the guard passed, nothing was
+      // activated, and the AT's Divisions/Allotments panel never appeared. The guard was
+      // asking "is anything stored" when it meant "is anything active for this agency".
+      const activeForThisAgency = atMasters.some(
+        a => a.id === activeAtMasterId && a.agencyId === newAt.agencyId
+      );
+      if (!activeForThisAgency) setActiveAtMasterId(newRef.id);
+      return newRef.id;
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'atMasters');
       throw err;

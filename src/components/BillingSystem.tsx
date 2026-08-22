@@ -2750,7 +2750,12 @@ export default function BillingSystem() {
                       <div>
                         <span className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-0.5">Billed To (Client / Consignee):</span>
                         <p className="font-bold uppercase text-[9px]">{activeAgency?.divisionAuthority || 'EXECUTIVE ENGINEER (O&M)'}</p>
-                        <p className="font-bold text-black">{activeAgency?.discomName || 'DISCOM'}</p>
+                        {/* No placeholder. This is the BUYER NAME on a tax invoice: a
+                            literal like 'DISCOM' looks like a filled field and survives
+                            review, where an empty one does not. The gate
+                            (missingForTaxInvoice) already prevents reaching this state -
+                            the dash is what shows if that gate is ever loosened. */}
+                        <p className="font-bold text-black">{activeAgency?.discomName || '-'}</p>
                         <p className="text-[9px]">Division Office: <strong className="font-bold">{currentDivision}</strong></p>
                         {activeAgency?.discomAddress && (
                           <p className="text-[8px] text-slate-700 mt-0.5 leading-tight">{activeAgency.discomAddress}</p>
