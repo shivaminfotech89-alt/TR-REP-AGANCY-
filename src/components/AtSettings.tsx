@@ -69,6 +69,14 @@ export function AtSettings() {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAt.atNumber) return;
+    // Guard the agency explicitly rather than writing `agencyId: activeAgency?.id || ''`.
+    // That fallback produced an AT belonging to no agency - written successfully,
+    // invisible everywhere. The context throws on an empty agencyId too; this catches it
+    // before the round trip and says something more useful than a generic failure.
+    if (!activeAgency?.id) {
+      alert('Select an agency before creating an AT. An AT belongs to one agency, and one created without it would not appear under any.');
+      return;
+    }
     setIsSubmitting(true);
     try {
       const createdId = await addAtMaster({
@@ -77,7 +85,7 @@ export function AtSettings() {
         startDate: new Date(newAt.startDate).getTime(),
         endDate: new Date(newAt.endDate).getTime(),
         status: 'Active',
-        agencyId: activeAgency?.id || '',
+        agencyId: activeAgency.id,
         lastJobNumbers: {},
         atPercentage: Number(newAt.atPercentageCRGO) || 0,
         atPercentageCRGO: Number(newAt.atPercentageCRGO) || 0,
@@ -98,8 +106,9 @@ export function AtSettings() {
         atPercentageAmorphous: '4',
         atPercentageWoundCore: '4',
       });
-    } catch (err) {
-      alert("Failed to create AT Master");
+    } catch (err: any) {
+      // Surface the real reason - the context throws a named error for an orphan AT.
+      alert(err?.message || 'Failed to create AT Master');
     } finally {
       setIsSubmitting(false);
     }

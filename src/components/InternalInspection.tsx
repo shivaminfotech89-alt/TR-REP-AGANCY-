@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
+import { collection, query, where, getDocs, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
@@ -491,7 +491,13 @@ export default function InternalInspection() {
         };
         
         if (!jobData.inspectionId) {
-          (payload as any).createdAt = now;
+          // serverTimestamp(), not Date.now(): this is the one part of an inspection
+          // record the operator cannot choose. `inspectionDate` is typed by hand, so a
+          // record stamped from the same browser clock cannot corroborate itself - and
+          // these records are the evidentiary basis for scrap identity (F5), the GP
+          // flow, and stage-order gating. Written on FIRST CREATE only, so an edit never
+          // overwrites it. (formatDDMMYYYY learned Timestamps first - see A5.)
+          (payload as any).createdAt = serverTimestamp();
         }
 
         batch.set(inspectionRef, payload, { merge: true });

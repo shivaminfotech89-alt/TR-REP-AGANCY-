@@ -5,8 +5,20 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDDMMYYYY(dateInput?: string | number | Date | null): string {
+export function formatDDMMYYYY(dateInput?: string | number | Date | any | null): string {
   if (!dateInput) return '-';
+  // Firestore Timestamp. Handled BEFORE the generic paths because `new Date(timestamp)`
+  // is Invalid Date, which since F16 renders as '-' - a silent blanking rather than a
+  // visible error. Accepts both the SDK object (.toDate()) and the plain {seconds,...}
+  // shape a document read can produce.
+  if (typeof dateInput === 'object' && !(dateInput instanceof Date)) {
+    if (typeof dateInput.toDate === 'function') {
+      return formatDDMMYYYY(dateInput.toDate());
+    }
+    if (typeof dateInput.seconds === 'number') {
+      return formatDDMMYYYY(new Date(dateInput.seconds * 1000));
+    }
+  }
   if (typeof dateInput === 'string') {
     const trimmed = dateInput.trim();
     if (!trimmed) return '-';

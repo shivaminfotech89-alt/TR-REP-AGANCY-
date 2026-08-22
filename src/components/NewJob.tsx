@@ -1020,6 +1020,40 @@ export default function NewJob() {
     try {
       const now = Date.now();
 
+      // An AT must be active BEFORE anything else is validated. Checked directly here
+      // rather than reached by accident when the prefix check happens to fail: with a
+      // usable agency-level prefix the save previously went through AT-less, and three
+      // things degraded silently -
+      //   - getAtPercentageForCore(null) returns 4, so the AT percentage multiplying
+      //     every estimate and bill for the job is an assumed default, with nothing on
+      //     the document saying so (the same shape as the capacity defaults, F1/F2);
+      //   - the allotment check is gated on activeAtMaster, so it never ran - the job
+      //     escapes quota not because the allotment is unset but because there is no AT
+      //     to check against (see A3);
+      //   - the job number came from the agency-level fallback sequence, which may
+      //     belong to no AT at all.
+      // The job also stores atId: '' and is then invisible to every per-AT report,
+      // including the allotment count, which queries where('atId','==',activeAtMaster.id).
+      if (!activeAtMaster) {
+        setSetupGap({
+          title: 'No AT / tender period is active',
+          problem: 'Jobs are recorded against an AT. Without one the AT percentage, the job number sequence and the allotment check all have no source.',
+          detail: [
+            'The AT percentage would fall back to an assumed 4% on every estimate and bill for this job.',
+            'The allotment check cannot run, so the job would consume no quota.',
+            'Set up an AT, or select one, under Agency Settings.',
+          ],
+          actionLabel: 'Set Up AT',
+          actionTo: '/agency-settings?section=at',
+          unsavedWarning: intakeHasData()
+            ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
+            : undefined,
+          onBeforeNavigate: saveIntakeDraft,
+        });
+        setLoading(false);
+        return;
+      }
+
       // Check OGP prefix validation
       if (commonData.repairType === 'OGP') {
         for (const t of transformers) {
@@ -1193,7 +1227,34 @@ export default function NewJob() {
           }
           
           allowed = allowed || 0;
-          
+
+          // An unrecorded allotment used to mean UNLIMITED: `allowed` resolved to 0 and
+          // the whole check sat inside `if (allowed > 0)`, so the quota silently did
+          // nothing (AUDIT A3). It now blocks - an allotment that was never recorded is
+          // not a quota of zero and not a quota of infinity, it is missing data.
+          if (allowed === 0) {
+            const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
+            setSetupGap({
+              title: `No ${cType} allotment recorded for ${commonData.division}`,
+              problem: `No allotment is recorded for ${cType} in ${commonData.division} under ${atLabel}, so this intake cannot be checked against a quota.`,
+              detail: [
+                `AT: ${atLabel}`,
+                `Division: ${commonData.division}`,
+                `Core type: ${cType}`,
+                `This intake would add ${countToAdd} job${countToAdd > 1 ? 's' : ''}.`,
+                'GP repairs and Overhauling (OH) do not draw on the allotment.',
+              ],
+              actionLabel: 'Add Allotment',
+              actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
+              unsavedWarning: intakeHasData()
+                ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
+                : undefined,
+              onBeforeNavigate: saveIntakeDraft,
+            });
+            setLoading(false);
+            return;
+          }
+
           if (allowed > 0) {
             let used = 0;
             existingJobsData.forEach(data => {

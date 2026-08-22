@@ -580,8 +580,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const addAgency = async (agencyData: Omit<Agency, 'id'>) => {
-    if (!auth.currentUser) return;
+  /** Returns the new agency's id so the caller can select it. */
+  const addAgency = async (agencyData: Omit<Agency, 'id'>): Promise<string | undefined> => {
+    if (!auth.currentUser) return undefined;
     try {
       const newRef = doc(collection(db, 'agencies'));
       
@@ -614,7 +615,14 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       };
       await setDoc(newRef, newAgency);
       setAgencies(prev => [...prev, { id: newRef.id, ...newAgency }]);
-      if (!activeAgencyId) setActiveAgencyId(newRef.id);
+      // Activate the agency just created. The old guard was `if (!activeAgencyId)` -
+      // "is anything stored" where it meant "is this the one being worked on". Creating
+      // a second agency while another was active left the first one active, so an AT
+      // added next was written with the WRONG agencyId: a successful write, filtered out
+      // of the new agency's list and appearing under the old one. Same guard shape as
+      // F20 in atMasters (see the pattern note on scope-specific guards).
+      setActiveAgencyId(newRef.id);
+      return newRef.id;
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'agencies');
       throw err;
@@ -648,6 +656,14 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>): Promise<string | undefined> => {
     if (!auth.currentUser) return undefined;
     try {
+      // Refuse to write an AT with no agency. `agencyId: ''` produces a document that is
+      // read back (the fetch filters on ownerId) but excluded from every per-agency list,
+      // so it looks exactly like the bug this replaces - a write that silently vanishes.
+      // THROWN, not returned: the caller's catch already surfaces failures, and a silent
+      // refusal would be indistinguishable from the old behaviour.
+      if (!String(atData.agencyId ?? '').trim()) {
+        throw new Error('Cannot create an AT with no agency. Select an agency first - an AT with no agencyId is invisible to every agency-scoped view.');
+      }
       const newRef = doc(collection(db, 'atMasters'));
       const newAt = { ...atData, ownerId: auth.currentUser.uid };
       await setDoc(newRef, newAt);

@@ -68,6 +68,64 @@ cannot drift. Where the operation is spread through UI event handlers and cannot
 reasonably be centralised (F11), the enumeration is the substitute, and it belongs in
 the commit that adds the guard.
 
+### The scope-specific guard: "is anything stored" where it means "is this the one"
+
+**Three instances in this codebase, two of them character-identical in different
+collections.** That repetition is the point: it is evidence the shape is *easy to write*,
+not that someone was careless twice.
+
+```js
+if (!activeAgencyId) setActiveAgencyId(newRef.id);      // addAgency  - F22
+if (!activeAtMasterId) setActiveAtMasterId(newRef.id);  // addAtMaster - F20
+```
+
+Both read "activate this if nothing is active". Both mean **"activate this if nothing is
+active for the scope being worked on"**. A truthy value from a *different* scope
+satisfies the check and the activation is skipped — so the thing just created is not
+selected, and in `addAgency`'s case the *next* thing created is attached to the wrong
+parent.
+
+The failure is quiet in a particular way: the write succeeds, the data is correct against
+the wrong parent, and it is read back fine — it simply never appears where the operator
+is looking. F22 presented as "AT details disappear after a page refresh", which is three
+inferences away from the actual cause.
+
+**The test, applicable by inspection: does the guard read a RAW ID or a DERIVED,
+SCOPE-CHECKED OBJECT?**
+
+```js
+activeAgencyId, activeAtMasterId     // raw ids - carry NO scope
+activeAgency, activeAtMaster         // derived, scope-checked:
+                                     //   atMasters.find(a => a.id === activeAtMasterId
+                                     //                   && a.agencyId === activeAgencyId)
+```
+
+A raw id is just a string. It cannot tell you whether it belongs to the scope you are
+working in, so **a guard on a raw id is asking a weaker question than it appears to** —
+it tests presence where the author meant relevance. A derived object has already had the
+scope check applied in its derivation, so a guard on one is safe by construction.
+
+Both bugs found were guards on raw ids. All three sound guards were on derived objects.
+That correspondence is exact, and it turns "audit every guard" into something checkable
+by reading a single identifier: **if the guard names an `…Id`, look twice.**
+
+**Working rule.** A guard on a "current X" must name the scope it is comparing within.
+`if (!activeAgencyId)` asks about storage; `if (!agencyAts.some(...))` asks about the
+agency. When the answer differs between those two questions, the second is almost always
+the one intended.
+
+**Audited across the context, the remaining guards are sound** — recorded so the audit is
+not repeated:
+
+| Site | Guard | Verdict |
+|---|---|---|
+| `setActiveAtMasterId` | `if (!activeAgencyId) return` | correct — genuinely asks "is there an agency to key storage against" |
+| `addAtMaster` | `if (!activeForThisAgency)` | fixed in F20; scope-explicit |
+| `getNextJobNoInfo` | `if (!activeAgency)` | correct — needs the object, not an id |
+| `incrementJobNoCounter` | `if (activeAtMaster) … else if (activeAgency)` | correct — both are agency-scoped derivations, not raw ids |
+
+Each verdict follows directly from the raw-id/derived-object test above.
+
 ### The inverse failure: one filter, two concerns sharing a data source
 
 The same shape runs the other way. Excluding a job class from one concern silently
@@ -711,7 +769,104 @@ transformers for them is *possible* but may never occur in practice.
 **Neither implemented.** Both are tax-calculation decisions. Recorded for the decision,
 not pre-empted by it.
 
-### A3. Open question: are allotment quotas meant to be opt-in?
+### A3. RESOLVED: an unrecorded allotment now blocks
+
+`NewJob.tsx` resolved an unrecorded allotment to `0` and the whole quota check sat inside
+`if (allowed > 0)`, so **an agency that never configured allotments had no quota
+enforcement at all** - every intake was permitted. The check was silently inert, the
+F1/F2 shape applied to a control rather than a value.
+
+**Decided: it blocks.** An allotment that was never recorded is not a quota of zero and
+not a quota of infinity - it is missing data, and receiving against it means receiving
+against nothing. It raises the same setup-gap dialog as an exhausted allotment, routed to
+that AT's Allotments tab.
+
+**A second reading of the same question, found while implementing it.** A job can escape
+the quota for a completely different reason: **having no AT at all.** The allotment check
+is gated on `activeAtMaster`, and the count queries
+`where('atId', '==', activeAtMaster.id)` - so a job saved with `atId: ''` is neither
+checked on intake nor counted afterwards. That is now blocked too (F21).
+
+**Note for anyone reading allotment figures:** because the count query filters on
+`atId`, AT-less jobs are excluded from it. A "19 of 20 used" figure is 19 genuine
+AT-linked jobs - AT-less jobs do not inflate it. The exposure runs the other way: they
+consume no quota anywhere, so real work can exceed an allotment without the app noticing.
+
+### A5. Inspection `createdAt` uses the client clock, not the server's
+
+**Narrower than first reported, and worth stating precisely because the first version was
+wrong.** Inspections **are** dated: both inspection screens write
+`createdAt: Date.now()` on first create only, so the stamp is not overwritten by later
+edits. Ordering and dating of inspection records *is* possible.
+
+What remains is that `Date.now()` is the **browser's clock**. It can be wrong, and it can
+be set deliberately. `serverTimestamp()` cannot.
+
+**Why this matters more here than elsewhere:** inspection records have been the
+evidentiary basis for much of this audit —
+- **F5** read `data.condition` from them to restore scrap identity on 26 jobs;
+- the **GP flow** reads them to establish what a unit was;
+- **stage-order gating** treats their existence as proof an inspection happened.
+
+None of that is undermined by a client clock in normal use, but a record whose
+`inspectionDate` and `createdAt` both come from the same untrusted source cannot
+corroborate itself. A server stamp is the only part of such a record the operator cannot
+choose.
+
+**FIXED — as two changes, formatter first (F23).** Switching to `serverTimestamp()` changes
+the stored type from a **number** to a **Firestore Timestamp object**, which would have
+broken a reader. See F23 for the consumer census and the order the two changes were made
+in. The reason for the order is exactly the F16 lesson: had the writes gone first, the
+symptom would have been inspection dates silently turning into dashes on the Job Lifecycle
+report — a blank, not an error.
+
+### A4. Creation order is unrecoverable for most collections — no `createdAt`
+
+Only four write sites in the app record a creation timestamp: `jobs`
+(`NewJob`, `MrLedger`), `oilTransactions` (`serverTimestamp()`), and `supportTickets`.
+
+**`atMasters` and `agencies` record none.** For those collections the
+question *"which was added first"* **cannot be answered at all** — not by a query, not by
+a script, not retrospectively. Firestore auto-ids are not chronological in any documented
+way, so they cannot substitute.
+
+This surfaced while writing `scripts/find-misattached-at-console.js`, which needs "the
+newest AT" to identify a misattached one (F22). It falls back to sorting by `startDate`,
+which is the *tender period* start — a business date the operator types, not a creation
+time. Two ATs created a month apart can carry the same `startDate`, and one created later
+can start earlier. The script says so rather than implying the order is real.
+
+**Consequences beyond that script:**
+- No audit trail of when an agency or AT was set up, so "was this configured before or
+  after the tender was signed" is unanswerable.
+- Any future migration that needs "the earliest record wins" has no basis for it.
+
+**CORRECTION.** An earlier version of this entry claimed `inspections` record no
+`createdAt`. **That was wrong** — both `ExternalInspection` and `InternalInspection` write
+`createdAt` on first create (guarded by `if (!jobData.inspectionId)`, so an edit does not
+overwrite it). Inspections *are* dated; see A5 for the narrower concern that was real.
+
+**This was the third pattern note applied to itself.** The claim came from a *survey by
+proxy* — grepping for which collection names appear near a `createdAt`, then reading the
+absences as findings — rather than opening each write site and reading what it writes.
+That is the same shape as the F16 date sweep: **the method could not see what it was not
+looking for.** A grep for collection-name adjacency finds collections mentioned near the
+token; it cannot find a write that stamps `createdAt` through a `payload` object built
+twenty lines earlier, which is exactly how both inspection screens do it.
+
+The survey-by-proxy signature is worth naming, because it is cheap and it reads as
+thorough: *a question about what the code does, answered from a search over how the code
+is written.* "Which collections have a `createdAt`" is a question about write sites, and
+only reading write sites answers it. The proxy was faster and produced a confident wrong
+list — and the confidence came from the search having been exhaustive **against its own
+definition**, which is precisely the failure mode the F16 note already describes.
+
+**Not fixed.** Adding `createdAt` to new writes is trivial (`serverTimestamp()`, as
+`OilInward` already does), but it is **not retroactive** — existing documents stay
+unordered forever, so the gap narrows going forward without ever closing. Worth doing for
+that reason alone, but it is a schema addition and wants deciding rather than slipping in.
+
+### A3-original. Open question: are allotment quotas meant to be opt-in?
 
 `NewJob.tsx:1093-1101` resolves an unrecorded allotment to `0`, and the whole quota
 check sits inside `if (allowed > 0)`. **An agency that never configures allotments has
@@ -1514,6 +1669,139 @@ selection with no agency attached was never restorable correctly — it was appl
 whichever agency happened to load first. Someone noticing their AT selection reset after
 a deploy should find this entry rather than treat it as a regression.
 
+### F21. Jobs could be created with no AT attached
+
+`confirmSaveJob` checked `if (!activeAgency)` but never checked `activeAtMaster`, and
+wrote `atId: activeAtMaster ? activeAtMaster.id : ''`. A job saved while no AT was active
+- the state the cross-agency AT id leak produced (F20) - carried an empty `atId`, and
+three things degraded silently:
+
+1. **The AT percentage fell back to an assumed 4%.** `getAtPercentageForCore(null, …)`
+   returns `4` on its first line, and that percentage multiplies **every estimate and
+   bill for that job**, with nothing on the document indicating it was a default. The
+   capacity-defaults shape (F1/F2), reaching money.
+2. **The allotment check could not run** - it is gated on `activeAtMaster`. The job
+   escaped quota not because the allotment was unset but because there was no AT to check
+   against. See A3.
+3. **The job number came from the agency-level fallback sequence**, which may belong to
+   no AT at all.
+
+The job was then invisible to every per-AT report, since those query
+`where('atId', '==', …)`.
+
+**Fixed:** an active AT is now required at the top of `confirmSaveJob`, **before** the
+prefix check. It was previously reachable only by accident - `setupGapForPrefix` raises
+"No AT / tender period is active", but only when the *prefix check fails*, so an agency
+with a usable agency-level prefix saved AT-less regardless. Checking directly means the
+condition is tested for its own sake rather than caught as a side effect of another
+failing.
+
+Same `SetupGapDialog`, routed to the AT section, naming what would otherwise be assumed.
+
+**Existing AT-less jobs are not repaired by this** - it prevents new ones.
+`scripts/job-at-linkage-console.js` lists them with a `hasAnyDownstream` flag, so a job
+with nothing estimated, billed or dispatched against it can be deleted safely, and one
+with downstream records is corrected instead.
+
+### F22. A new agency's AT was written against the previous agency
+
+Reported as: **AT details entered for a new agency, including the percentages, disappear
+after a page refresh.** They were never attached to that agency.
+
+**Not a write failure.** `addAtMaster` awaits `setDoc`, and its catch rethrows, so
+`handleAdd`'s `setShowAddForm(false)` is skipped on error — a rules rejection would keep
+the form open, not look like success. `ownerId` is set identically to MEGHA's. The three
+`atPercentage` fields are present and `Number()`-converted; `|| 0` can turn a blank into
+`0` but cannot drop a field, and a negative value survives (`Number('-2.5') || 0` →
+`-2.5`), so the negative-percentage change was not implicated.
+
+**A read/filter failure with a write-time cause.** `addAgency` did not activate the
+agency it had just created:
+
+```js
+if (!activeAgencyId) setActiveAgencyId(newRef.id);
+```
+
+Creating a second agency while MEGHA was active left **MEGHA active**. The AT added next
+was therefore written with `agencyId: <MEGHA's id>` — a correct, successful write to the
+wrong parent. The fetch reads it (it filters on `ownerId` only), but the display filter
+`atMasters.filter(at => at.agencyId === activeAgency?.id)` excludes it from the new
+agency's list, and it appears under MEGHA instead. The refresh did not lose it; it was
+never there.
+
+**Fixed:**
+1. `addAgency` activates the agency it creates, unconditionally, and returns its id.
+2. `addAtMaster` **throws a named error** on an empty `agencyId` rather than writing an
+   orphan — thrown rather than returned, because a silent refusal is indistinguishable
+   from the bug it replaces.
+3. `AtSettings` guards `activeAgency` before building the payload instead of
+   `agencyId: activeAgency?.id || ''`, and surfaces `err.message` rather than a generic
+   "Failed to create AT Master".
+
+See the pattern note on scope-specific guards: this is F20's guard shape in a second
+collection.
+
+### F23. Inspection `createdAt` moved to the server clock — formatter taught first
+
+Closes A5. Made deliberately as **two changes in a fixed order**, because doing them in
+the other order breaks a reader silently.
+
+**The consumer census, done before touching the writes.** Every read of a `createdAt`
+anywhere in the app, classified by *which collection's* `createdAt` it reads — because
+only `inspections` was changing type:
+
+| Consumer | Collection | Use | Affected? |
+|---|---|---|---|
+| `Reports.tsx:170` `formatDDMMYYYY(extInsp.createdAt)` | **inspections** | display | **yes** |
+| `Reports.tsx:185` `formatDDMMYYYY(intInsp.createdAt)` | **inspections** | display | **yes** |
+| `NewJob.tsx:307` `(b.createdAt \|\| 0) - (a.createdAt \|\| 0)` | jobs | arithmetic sort | no |
+| `NewJob.tsx:688` past-jobs sort | jobs | arithmetic sort | no |
+| `Dashboard.tsx:70-71` `new Date(a.createdAt).getTime()` | jobs | arithmetic sort | no |
+| `Reports.tsx:448-449` date fallback chain | jobs | comparison | no |
+| `AdminPanel.tsx:77`, `SupportTickets.tsx:40` `b.createdAt - a.createdAt` | supportTickets | arithmetic sort | no |
+| `AdminPanel.tsx:631`, `SupportTickets.tsx:207` | supportTickets | display | no |
+| `BillingSystem.tsx:689`, `OilInward.tsx:313`, `DispatchChallan`, `TestingReport`, both inspection screens' MR headers | jobs | display fallback | no |
+| `duplicate-jobno-console.js:60,115` | jobs | string sort | no |
+
+**Only two consumers touch an inspection's `createdAt`, and both are display.** Nothing
+sorts inspections, nothing computes elapsed time from one, and the GP guarantee window
+uses `gpDeliveredDate` / the prior job's delivery date — not an inspection stamp. So the
+arithmetic hazard the change was checked against **does not exist here**; the risk was
+entirely the two display paths. That is worth recording as a *finding*, not a relief: the
+census was the only thing that could establish it, and the plausible-sounding fear (a
+silent `NaN` in a sort) turned out to be the wrong worry while the real one was a blank
+cell.
+
+**Change 1 — `utils.ts`, `formatDDMMYYYY` accepts Firestore Timestamps.** Handled
+*before* the string/number/`Date` paths, accepting both the SDK object (`.toDate()`) and
+the plain `{seconds}` shape a raw document read can yield, then recursing. Placed first
+because `new Date(timestampObj)` is Invalid Date, which since F16 renders as `-` — the
+failure would have been a **silent blanking, not a visible error**. Backwards compatible:
+existing numeric stamps still take the old path, so records written before and after this
+change both render.
+
+**Change 2 — both inspection screens write `serverTimestamp()`.** Still on first create
+only, so an edit never restamps. The stored type changes for new records only; old ones
+stay numbers, and the formatter now reads both.
+
+**What is not fixed:** existing inspection records keep their client-clock numbers. As
+with A4, the gap narrows going forward without ever closing — there is nothing to migrate
+*to*, because the true server time of a past write was never recorded.
+
+**Deliberately left alone: `updatedAt` on inspections.** Still `Date.now()`. The census
+found it has **no readers at all** — every `updatedAt` consumer in the app reads the one on
+`jobs` (`Dashboard.tsx:299`, `Reports.tsx:202`, `blast-radius-console.js:228`) or on
+`userRoles` (`AdminPanel.tsx:551`). Changing an unread field buys nothing, and `createdAt`
+is the stamp the audit's evidentiary claims actually rest on.
+
+**A hazard this census exposes for later.** `Dashboard.tsx:299` does
+`new Date(j.updatedAt).getTime()` — arithmetic, on a **job**. If `jobs.updatedAt` is ever
+moved to `serverTimestamp()`, that produces `NaN`, and a `NaN` in a comparator does not
+throw: it makes the sort order arbitrary and silently non-deterministic. Strictly worse
+than the dash this fix avoided, because there is no wrong-looking output to notice. Any
+future timestamp change on `jobs` must start from the same census, and must fix the
+arithmetic readers — not only the display ones.
+
 ---
 
 ## Recurring theme
@@ -1527,6 +1815,30 @@ Every entry above is one of two shapes:
 
 New code should fail loudly on missing inputs, and should never key identity to a
 field that changes as the unit moves through its lifecycle.
+
+**What both shapes share: the wrong output is the plausible-looking one.** Four instances
+this session, and none of them looked broken —
+
+| Defect | What was shown | Why nobody caught it |
+|---|---|---|
+| F1 capacity defaults | a complete, well-formed estimate | 29 of 36 priced from defaults, all overstated |
+| O7/O8 seeded DISCOM identity | a filled-in GSTIN and state code | correct-*looking* for one DISCOM, wrong for the rest |
+| F17 `\|\| '3'` coil counts | `3` on a printed report | indistinguishable from a measured 3 |
+| F23's `NaN` hazard | a sorted list | arbitrary order renders as confidently as a correct one |
+
+An error that renders as a dash, a blank or a crash is **self-reporting** — the operator
+sees it and says so. An error that renders as a plausible number is not: it is indefinitely
+survivable, and it reaches a UGVCL document with nothing in its appearance to distinguish
+it from a right answer. This is why every one of these was found by tracing a *value's
+provenance*, and none by looking at a screen.
+
+The design consequence, and it runs against the instinct to be tidy: **a fallback that
+produces a well-formed value is more dangerous than no fallback at all.** `|| '3'` is worse
+than a blank; a seeded GSTIN is worse than an empty field; a default AT percentage is worse
+than a refusal to price. When the substitute is indistinguishable from the real thing,
+prefer the dash, the throw or the block — F23 chose its change order on exactly this
+ground, and A5 was worth fixing at all only because a client clock is *plausible* rather
+than absent.
 
 **Several of today's fixes are only correct in combination, and the couplings are not
 visible from any one call site.** F12's scrap exclusion works only because F5 restored
