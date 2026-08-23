@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, getFirestore, collection, query, where, getDocs, doc, getDoc, writeBatch } from 'firebase/firestore';
+import { initializeFirestore, getFirestore, collection, query, where, getDocs, doc, getDoc, writeBatch, updateDoc } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
@@ -24,7 +24,13 @@ export const auth = getAuth(app);
 if (import.meta.env.DEV) {
   (window as any).__db = db;
   (window as any).__auth = auth;
-  (window as any).__fs = { collection, query, where, getDocs, doc, getDoc, writeBatch };
+  // Keep this list in step with what the scripts in /scripts destructure. A script that
+  // needs a handle absent from here fails at its own guard rather than mid-write, which is
+  // the intended behaviour - but the fix belongs here, not in the script.
+  //   collection/query/where/getDocs/doc/getDoc - every read-only diagnostic
+  //   writeBatch  - backfill-condition.js, reverse-bulk-move.js (bulk, batched)
+  //   updateDoc   - fix-woundcore-scrap-code.js (single document, single field)
+  (window as any).__fs = { collection, query, where, getDocs, doc, getDoc, writeBatch, updateDoc };
 }
 
 export enum OperationType {

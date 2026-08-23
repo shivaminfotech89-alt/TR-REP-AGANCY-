@@ -92,6 +92,8 @@ export interface MasterHealth {
   problems: string[];
   /** Whether pricing for this core type should be blocked until a human fixes it. */
   blocking: boolean;
+  /** Overhauling: an empty section is the normal state, not a gap. */
+  emptyIsNormalHere: boolean;
 }
 
 /**
@@ -140,6 +142,15 @@ export function checkMasterSection(section: MasterSection, list: EstimateItem[] 
     // or the CRGO card's signature items are present with a weak own-schedule match.
     ((crgoScore > ownScore && crgoScore >= 0.5) || (signatureNames && ownScore < 0.5));
 
+  // OVERHAULING is exempt from the empty check, and the exemption is not a special case -
+  // it is what the section IS. There is no separate Overhauling schedule: an OH job prices
+  // through `resolveRate` (SingleJobEstimateReport), which reads the master by item code
+  // and otherwise falls through to UGVCL Schedule-A. The shipped default is five items
+  // with every rate null - a rate-OVERRIDE shell, not a schedule. Empty is therefore the
+  // normal, correct state, and reporting it as a problem trains operators to ignore this
+  // panel on the one section where it is always wrong.
+  const emptyIsNormal = section === 'OVERHAULING';
+
   const problems: string[] = [];
   if (holdsCrgoCard) {
     problems.push(
@@ -148,7 +159,7 @@ export function checkMasterSection(section: MasterSection, list: EstimateItem[] 
       `${Math.round(ownScore * 100)}% to ${SECTION_LABEL[section]}).`
     );
   }
-  if (isEmpty) {
+  if (isEmpty && !emptyIsNormal) {
     problems.push(`The ${SECTION_LABEL[section]} section is empty - nothing is configured for this core type.`);
   }
   if (requiredScrapCode !== null && !isEmpty && !scrapCodePresent) {
@@ -176,6 +187,11 @@ export function checkMasterSection(section: MasterSection, list: EstimateItem[] 
     crgoScore,
     holdsCrgoCard,
     problems,
+    /**
+     * Overhauling only. True when the section is empty and that is correct - the caller
+     * can then say so positively rather than showing nothing, which reads as "not checked".
+     */
+    emptyIsNormalHere: emptyIsNormal,
     // ONLY a wrong schedule blocks. A missing scrap code is reported here and already
     // blocks at the point it matters - resolveScrapCharge refuses to bill scrap without
     // it - so blocking every estimate for that would stop correct work over a fault that
@@ -209,12 +225,20 @@ const STORED: Record<MasterSection, string> = {
  * Reads the STORED section, not the resolved one: the resolved list is the fallback's
  * output and looks healthy by construction.
  */
+export function storedSection(agency: any, section: MasterSection): EstimateItem[] | undefined {
+  // `__storedMasters` is the raw Firestore value, carried alongside by AgencyContext's
+  // enrichment. Without it this reads the ENRICHED field, which is never empty and never
+  // misfiled - the fallback's output, which is exactly what this check exists to see past.
+  // The `??` fallback is for callers holding an agency object from before enrichment.
+  return agency?.__storedMasters?.[section] ?? agency?.[STORED[section]];
+}
+
 export function validateEstimateMaster(agency: any, coreType: string): MasterHealth {
   const section = sectionForCoreType(coreType);
-  return checkMasterSection(section, agency?.[STORED[section]]);
+  return checkMasterSection(section, storedSection(agency, section));
 }
 
 /** Every section of an agency's master, for the health line on the master screen. */
 export function checkAllMasterSections(agency: any): MasterHealth[] {
-  return (Object.keys(STORED) as MasterSection[]).map(s => checkMasterSection(s, agency?.[STORED[s]]));
+  return (Object.keys(STORED) as MasterSection[]).map(s => checkMasterSection(s, storedSection(agency, s)));
 }

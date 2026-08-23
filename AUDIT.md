@@ -792,6 +792,142 @@ checked on intake nor counted afterwards. That is now blocked too (F21).
 AT-linked jobs - AT-less jobs do not inflate it. The exposure runs the other way: they
 consume no quota anywhere, so real work can exceed an allotment without the app noticing.
 
+### O10. Product question: should the estimate master be shared, or per-agency?
+
+**Recorded as an open product question, not a task.** The stated intent is that the estimate
+master is COMMON across all agencies - editing one item should affect all of them. The code
+stores it per agency and shares it by **broadcast**, not by reference:
+
+- `getEstimateMasterForCore` reads **agency -> global -> built-in default**, so an agency's
+  own copy always wins where it exists.
+- `saveGlobalDefaultEstimateMaster` (superadmin only) writes `public_config/estimate_master`,
+  mirrors to `system_config/estimate_master`, and then **copies all sections into every
+  agency document**.
+- After that first publish, every agency holds a full local copy, the copy wins, and
+  `public_config` is never consulted again for those sections. Any later per-agency save
+  diverges that agency silently.
+
+So sharing is a one-time broadcast that decays. Six sections across two agencies now hold
+six different things (AUDIT F27), which is that decay observed.
+
+**The alternative** - agencies read `public_config` live and store only genuine overrides -
+is real sharing, and is **deliberately not being done now**. It is a data-model change to
+what every agency prices from, and doing it while four of six sections hold the wrong
+schedule would install the wrong data as the shared baseline. The order has to be: correct
+the sections, then decide the model.
+
+**Decision for now: keep the broadcast**, with a guard on the publish path (F29) so it
+cannot broadcast fallback-resolved content.
+
+### O12. `public_config/estimate_master` stays stale — accepted for now, with a stated expiry
+
+**Decision: do not publish.** The four agencies are repaired individually from the account
+that owns them; the shared default keeps its old content.
+
+**Why publishing was not the answer, and this is the substantive finding.** Publishing
+requires super admin, which is a single hardcoded email
+(`AgencyContext.tsx` for the UI, `firestore.rules:16` for the write). But
+`saveGlobalDefaultEstimateMaster`'s fan-out iterates the **owner-scoped** agency list —
+`query(collection(db,'agencies'), where('ownerId','==',uid))`. So publishing from the admin
+account would have written `public_config` plus **only that account's own agencies**. The
+four agencies in question belong to a different owner and would have kept their own copies,
+which win in `getEstimateMasterForCore`. **The publish would have changed nothing for the
+agencies it was meant to fix**, while appearing to succeed.
+
+Granting super admin to the owning account was rejected as disproportionate: it is a
+permission change made for a convenience, and super admin also reads `system_config`, which
+holds payment-gateway secrets. Correct call — the blast radius of the grant far exceeds the
+task.
+
+**Why staleness is tolerable.** `public_config` is read in exactly two places:
+1. as a **fallback** in `getEstimateMasterForCore`, reached only when an agency's own
+   section is empty or misfiled — after the repair, no agency reaches it;
+2. as the **seed** in `addAgency` for a newly created agency.
+
+So no existing agency prices from it, and nothing printed today depends on it.
+
+**The condition under which this stops being acceptable — and it is a single event:**
+
+> **A new agency created before `public_config` is corrected will seed from the stale
+> shared default**, and will start life with a CRGO section missing scrap code `"22"` and an
+> Amorphous section missing `"0"`. Neither blocks estimates; both block scrap billing, and
+> only when a scrap unit reaches the bill — long after creation, with nothing pointing back
+> to it.
+
+That is the whole exposure, and it is latent in the F32 sense: dormant until an ordinary
+action triggers it. **Correct `public_config` before creating another agency**, or accept
+that the next agency needs its sections repaired by hand like these four.
+
+Note that F30 removed the worse version of this — seeding from whichever agency happened to
+be active. What remains seeds from a document that is merely incomplete, not misfiled.
+
+### O11. `normalizeAmorphousOrWoundCoreData` backfills `fixedRate` from an arbitrary capacity
+
+`EstimateMaster.tsx`, inside the load-time normaliser: when a stored row's `fixedRate` is
+absent, null or zero, it is filled from the default's `fixedRate` — and failing that, from
+**the first non-zero per-capacity rate it happens to find**:
+
+```
+const nonNull = Object.entries(ratesObj).find(([k, v]) => v !== null && Number(v) > 0);
+if (nonNull) fRate = Number(nonNull[1]);
+```
+
+For a per-capacity item that installs **one arbitrary capacity's rate as a flat rate for
+every capacity**, decided by key iteration order. A 5 kVA rate becomes the rate for a 500
+kVA unit, and the row looks properly configured afterwards.
+
+**Inert today, and only by accident of what reads it.** Amorphous and Wound Core repair
+charges do not come from the estimate master at all —
+`SingleJobEstimateReport.tsx:226` returns early for those core types and prices every line
+from the hardcoded `SCHEDULE_B` table. The master is consulted for exactly one thing on
+those core types: `resolveScrapCharge` reading the `"0"` row, which is legitimately flat at
+Rs 500. So a backfilled `fixedRate` on any other row is currently read by nothing.
+
+**One code change from producing wrong money.** Anything that starts pricing Amorphous or
+Wound Core items from the master — a per-item override, a new charge type, a future tender
+that itemises what Schedule-B currently bundles — reads a flat rate that was never entered
+by anyone and cannot be told apart from one that was.
+
+**Same latent shape as F32's placeholder**, and worth stating as a pair: a plausible value
+sitting in a field nothing reads yet. F32's was inert because nobody typed into it; this one
+is inert because nobody reads it. Neither is safe; both are one ordinary change away, and
+neither can be found by looking for damage.
+
+**Not fixed.** The honest repair is to stop inventing a `fixedRate` and leave it absent —
+absent is the truth — but that changes what the master screen displays for every Amorphous
+and Wound Core row, and it should not be done in the middle of a hand repair. After.
+
+### A7. Three places decide whether a stored section "is the CRGO card", and they can disagree
+
+**Introduced by the F27 fix, not found by it.** F27 replaced the four-string name blacklist
+with a positive identity test — but only in `AgencyContext.getEstimateMasterForCore`. Two
+copies of the old blacklist remain in `EstimateMaster.tsx`:
+
+| Site | Test | Decides |
+|---|---|---|
+| `AgencyContext` (`isLegacy`) | `checkMasterSection(...).holdsCrgoCard` | what the app **prices** from |
+| `EstimateMaster.tsx:293` (`isLegacyWc`) | four `itemName` substrings | what the master screen **displays** |
+| `EstimateMaster.tsx:84` (`isLegacyCrgo`, inside `normalizeAmorphousOrWoundCoreData`) | the same four substrings | whether a loaded section is **replaced by defaults** |
+
+A CRGO card that does not contain `dismental` / `washer ring` / `hv metal` / `lv metal`
+would now be **rejected by the resolver and accepted by the screen** — the screen would show
+and offer to save a section the pricing path refuses to use. The reverse is also reachable.
+
+That third site carries a second heuristic besides: `isOldPlaceholder` — ten or fewer items
+with every rate null or zero — which is a shape test for the F32 placeholder. It works, and
+it is a fourth independent definition of "this section is not what it claims to be".
+
+**Not fixed now, deliberately.** Collapsing these onto `checkMasterSection` changes what the
+master screen loads, and doing that midway through a hand repair would mean the operator's
+next Save writes something different from what they inspected. **After the repair, not
+during.** None of the current sections is affected either way — all three CRGO-card Wound
+Core sections contain "Dismentaling", so every test agrees on them today.
+
+This is the "rule enforced at one call site" pattern, in a place this audit created. The
+F27 entry claimed to have replaced the blacklist; it replaced one of three copies. Worth
+noting as the same shape as the A4 error — a change verified against the site it was made
+in, rather than against every site that answers the question.
+
 ### A6. The job-number read and write test different conditions on the same field
 
 **A defect in its own right, independent of the seeding fix (F25) that made it harmless
@@ -2134,6 +2270,280 @@ the job numbers all survive as independent witnesses to the original attribution
 version that had also swept the side collections "for consistency" would have destroyed the
 evidence needed to undo it.
 
+### F29. Estimate master: rows can be deleted safely, and publishing cannot broadcast a fallback
+
+**Delete was not missing - it was invisible.** `handleDeleteItem` and a per-row trash button
+already existed, but the whole column rendered only when `editingSection === sectionKey`. A
+master that can gain rows but never lose them accumulates wrong data permanently, and this
+one looked exactly like that. The column now renders in both modes, disabled outside edit
+mode with the reason in the tooltip.
+
+Two protections it never had:
+
+- **Confirmation naming the row** - item code and description, because "Delete this item?"
+  is answerable without knowing what is about to go. It also says the change is unsaved
+  until Save, which is the difference between a mistake and a disaster here.
+- **A guard on the resolver's scrap code.** Deleting the last row carrying `"22"` (CRGO) or
+  `"0"` (Amorphous / Wound Core) does not fail at the click - it fails later, in
+  `resolveScrapCharge`, when a scrap bill is produced. Blocked, with a message naming the
+  code and what it prices. Allowed when another row already carries the same code: the
+  guard is about the code surviving, not about that particular row.
+
+**The health line now separates STORED from SHOWING.** It previously reported only the
+stored section - correct for detecting a misfiling, wrong while someone is editing, because
+it describes a state the operator is in the middle of leaving. It now shows both when they
+differ, and distinguishes the two reasons they can:
+
+- *unsaved edits* - "Nothing is written until you click Save", plus what the section would
+  look like after saving, so a pending deletion that removes the scrap code is visible
+  **before** the save rather than at bill time;
+- *fallback-resolved* - "the stored section holds N item(s); what you see was resolved from
+  a fallback section. Saving would write what is shown here into the stored section."
+
+That second case is the one that matters, because it is how the misfiling spread.
+
+**Publish guard.** `handleConfirmSaveSection` (scope ALL) and `handleExecuteFullSync` now
+refuse when any section being published is fallback-resolved - stored data absent, or
+holding the wrong schedule. Publishing writes the on-screen content into **every** agency
+and into `public_config`; publishing a fallback would install the substituted content as
+the shared baseline for all of them. That is F27's finding (c)(1) at six times the blast
+radius, and the health line already knew the difference - it just was not consulted at the
+one moment it mattered most.
+
+The test is deliberately **not** "the screen differs from stored", which is also true of
+ordinary unsaved edits - precisely what publishing is for. It is "the stored section could
+not have produced what is on screen". The message names each offending section and says the
+stored data must be corrected first.
+
+Untouched, as required: `getEstimateMasterForCore`, `resolveScrapCharge`,
+`SCRAP_ITEM_CODE_BY_CORE_CLASS`, and every printed layout.
+
+### F30. New agencies no longer inherit another agency's estimate master — the propagator
+
+Three of four agencies held **identical** 32-item CRGO cards in their Wound Core section.
+Identical content across agencies is the signature of a copy, not of repeated human error,
+and there were two mechanisms.
+
+**Origin, historical and already gone.** Before commit `6282d3f` (18 Aug 2026) there was no
+`defaultWoundCoreEstimateData` at all, and `getEstimateMasterForCore`'s Wound Core branch
+fell back `estimateMasterWoundCore → estimateMasterCRGO → estimateMaster →
+defaultEstimateData`. **Every one of those is the CRGO card.** So a Wound Core section with
+nothing stored resolved to the CRGO card, the master screen displayed it in the Wound Core
+slot, and any save persisted it there. Not four mistakes — one systematic fallback.
+
+**The propagator, live until now.** `addAgency` seeded a new agency's sections from
+`globalDefaultEstimateMaster ?? activeAgency ?? shipped default`. The middle term is
+**whichever agency happened to be selected at the moment of creation**. Create an agency
+while one holding the CRGO card is active and the new agency inherits it verbatim — which is
+why the copies match exactly. Nothing recorded which agency was the template, so the
+provenance is unrecoverable: the same class as the seeded DISCOM identity in **O7**, and the
+same reason it is bad — a value that looks configured but was inherited from an arbitrary
+neighbour.
+
+Fixed: a new agency inherits the **published shared default or the shipped defaults**, never
+another agency's data.
+
+**Second bug at the same site: `arr || fallback` is wrong for arrays.** `[]` is truthy in
+JavaScript, so an *empty* stored section was used in place of the shipped default rather
+than falling through. Everywhere else in this file the test is `arr && arr.length > 0`. Both
+occurrences are fixed — `addAgency`, and the `enrichedAgencies` fallback where
+`fetchedGlobalMaster?.estimateMasterX || default` had the same shape. A swept check found no
+others; the remaining `|| {}` cases are on objects, where the idiom is correct.
+
+#### The finding that corrected a check shipped in F27
+
+While sweeping for the array bug: `enrichedAgencies` (`AgencyContext`) **fills every empty
+section with the global or shipped default before the agency object ever reaches a
+component.** After enrichment no agency in memory has an empty or missing section.
+
+So `activeAgency.estimateMasterWoundCore` is the **resolved** value, never the stored one —
+and the F27 health line, which claimed to read "stored" precisely so it could see past the
+fallback, was reading the fallback's output. An empty section would have rendered as
+healthy. The scorecard script was right and the in-app panel was wrong, because the script
+reads Firestore directly and the panel read the context.
+
+**This is the F27 defect committed a second time, by the fix for it.** The fallback that
+hides the fault turned out to have a second layer, one call earlier, and "read the stored
+field" was not the same thing as "read what is stored". The lesson generalises past this
+file: *when a check exists to see past a fallback, verify which layer its input came from* —
+naming a field is not evidence about its provenance.
+
+Fixed by carrying the raw Firestore values alongside as `__storedMasters` and reading those
+via `storedSection()`. The enrichment itself is untouched, because pricing reads those
+fields and changing it would change prices.
+
+### F31. Overhauling: an empty section is the correct state, and is no longer reported as a gap
+
+There is **no separate Overhauling schedule**. An OH job prices through `resolveRate`
+(`SingleJobEstimateReport.tsx:312`), which looks the item up in the master by code and
+otherwise falls through to **UGVCL Schedule-A**. The shipped `defaultOverhaulingEstimateData`
+is five items with every rate `null` — a rate-**override** shell, not a schedule. With
+nothing stored, every OH rate comes from Schedule-A, which is the tender.
+
+So "the Overhauling section is empty" was reporting a non-problem. The `isEmpty` rule was
+written for Amorphous and Wound Core, where empty means the schedule is missing, and was
+applied to a section where empty is normal. An error shown for a normal state is worse than
+no error: it trains the operator to ignore the panel on the one section where it is always
+wrong.
+
+The section now reports positively — *"Nothing stored, which is correct. Overhauling holds
+optional per-item overrides of UGVCL Schedule-A; with none stored, OH jobs price straight
+from Schedule-A."* — and an empty Overhauling section no longer trips the publish guard.
+
+### F32. The "corrupted" Amorphous sections were a former shipped default — inert, but one keystroke from real
+
+**CLOSED, no money impact.** Three agencies (MEGHA, DRISHIV, suchit) held a 10-item
+Amorphous section whose descriptions were character-identical across all three. Not three
+mistakes and not a corruption: it is the **original `defaultAmorphousEstimateData`** from
+commit `1f1e735`, a placeholder that shipped as the default, was seeded into agencies, and
+was left behind when the default was replaced with the real 13-item Schedule-B list.
+
+**Identified by a code-only fingerprint, not by text.** The placeholder carries a bare item
+code `1d`; the real default uses `1d-1` and `1d-2`. So affected sections are detectable
+without relying on description matching, which is what let `public_config` and AARATI be
+cleared confidently (12 items, `1d-1`/`1d-2`, 100% own codes) while the other three were
+identified.
+
+**The two numbering schemes collide on the same codes:**
+
+| code | placeholder says | Schedule-B says |
+|---|---|---|
+| `1a` | Repairing of **25 KVA** Transformer (AL) | **10 KVA** Aluminium winding |
+| `1b` | Repairing of **63 KVA** | **16 KVA** |
+| `1c` | Repairing of **100 KVA** | **25 KVA** |
+| `1e` | Repairing of **200 KVA** | **100 KVA** |
+| `6` | Labour charge per transformer | Rate for **sealing of uneconomical unit** (Rs 189) |
+
+This is not a one-band shift inside a single scheme — it is two schemes assigning different
+meanings to the same codes. The repair is replacement, not relabelling.
+
+**Nothing was ever mispriced.** Verified by dumping every rate in all three sections:
+**0 values greater than zero.** `resolveRate` prefers a master rate only when it is `> 0`
+and otherwise falls through to UGVCL Schedule-A, so every Amorphous line on every estimate
+and bill came from Schedule-A regardless of what these labels said. The placeholder shipped
+with `defaultRates` all `null` and four entries at `0.00`, and in a year nobody typed into
+it.
+
+#### The finding: it was inert only because nobody typed into it
+
+**The exposure was one keystroke away, for a year.** A rate entered against the row labelled
+*"Repairing of 25 KVA Transformer (AL)"* would have filled item code `1a` — which
+Schedule-B defines as **10 kVA**. A correct-looking entry, in the right-looking row, under
+the wrong code, pricing from that moment on and looking right on the printed estimate.
+
+That is the difference between this and every other entry in this audit: the others are
+faults that **had** happened, found by their consequences. This one had no consequences to
+find. It was discovered only by asking what the section contained, and it would have been
+discovered by its consequences the first time someone maintained it — which is the one
+moment a master is *supposed* to be edited.
+
+A latent fault of this shape cannot be found by looking for damage. Only by reading the
+data and asking whether it means what it says.
+
+#### Related: the scrap item codes were never chosen — they were assigned by row position
+
+Found while working out the repair steps. `handleAddItem` sets
+the new item code to `data.length + 1` — **a row's code is its position in the list**. So:
+
+- adding a scrap row to an empty section produces code `"1"` — MEGHA's Wound Core;
+- adding one to a 17-item section produces `"18"` — AARATI's Wound Core, and the same `"18"`
+  that `SCRAP_ITEM_CODE_BY_CORE_CLASS` records CRGO as having been *moved off* because it
+  collides with "Repl. Of Tank".
+
+So the four scrap codes across two agencies (`22`, `0`, `18`, `1`) are not four decisions
+that need reconciling. Three of them are **row numbers**. That strengthens the standing rule
+not to make the resolver tolerant of what it finds: tolerance would enshrine an artefact of
+insertion order as tender data, on documents that go to UGVCL.
+
+Not changed — auto-numbering by position is a defect in its own right and is recorded here
+rather than fixed mid-repair.
+
+### F33. New estimate-master rows no longer arrive with a code invented from their position
+
+`handleAddItem` set `itemCode` to `data.length + 1` — **a row's position, presented as its
+identity**. Confirmed live: adding to a 13-item Amorphous gave `"14"`, to a 32-item CRGO
+gave `"33"`. It is where three of the four scrap codes in this database came from (F32):
+`"1"` is row 1 of a then-empty section, `"18"` is row 18 — including the `"18"` that CRGO
+was deliberately moved off because it collides with "Repl. Of Tank".
+
+**A blank field asks a question; an auto-filled one asserts an answer** — and here the
+answer is wrong by construction, in the field that identifies a priced line on a UGVCL
+document. New rows now arrive with an empty code.
+
+**Checked before changing it: nothing depends on a new row having a code immediately.**
+`resolveRate` and `resolveScrapCharge` both look codes up with `.find()`, so a blank never
+matches; `checkMasterSection` and `withMissingDefaults` filter empty codes out; the table
+keys rows by index. A half-entered row affects nothing while it sits there.
+
+**Saving it is the problem, and duplicates are the worse half.** `.find()` returns the
+FIRST match, so a second row carrying an existing code is silently unreachable — it renders,
+it can be edited, it can be given a rate, and it prices nothing. That is indistinguishable
+from a rate that did not take effect, which is the failure mode this audit keeps finding.
+
+So validation sits at the save boundary, not at the keystroke: every entry point that writes
+a section — the per-agency save, the publish modal behind it, and the "Save All" button,
+which bypasses the first two — refuses while any row has a blank or duplicated code, naming
+the rows. Blank and duplicate codes are also marked in the row itself (amber and red), so
+the fault is visible where it is created rather than only in an alert at save time.
+
+### F34. Publishing sends stored data, not the screen's normalised view
+
+**The defect.** `handleConfirmSaveSection` and `handleExecuteFullSync` published component
+state — `woundCoreData`, `amorphousData`, `crgoData`. That is the **post-normaliser** view:
+`normalizeAmorphousOrWoundCoreData` clones in any default row the stored section lacks,
+reorders to default order, forces units to `QTY` and backfills `fixedRate` (O11). So every
+publish this repair was building toward would have broadcast **rows nobody authored** into
+all four agencies *and* into `public_config` — which then seeds every future agency (F30).
+
+Concretely: MEGHA's Wound Core stores 13 rows; the screen shows 14, the extra being a `"0"`
+scrap row cloned from the default because storage lacks it. Publishing would have made that
+phantom real in four places at once.
+
+**The fix.** A section publishes **what is stored** when the operator has not edited it, and
+**what is on screen** when they have — because that is what they chose, normalisation and
+all.
+
+The edit test is deliberately *not* "the loaded data differs from storage". That is true of
+almost every section almost always, precisely because the load normalises; using it would
+classify everything as edited and the distinction would do nothing. `editedSections` is set
+only by an actual operator action — a cell edit, add, delete, a reset, the Amorphous → Wound
+Core sync — and cleared on load and after a successful publish.
+
+**The dialogs now say which, in rows.** *"Publishing the 13 Wound Core row(s) STORED for
+MEGHA - not the 14 shown on screen"*, against *"Publishing your 14 edited row(s), 1 of which
+was added automatically and is not in storage: "0""*. The all-sections modal prints one such
+line per section, and its existing item counts are relabelled *"Rows currently on screen (not
+necessarily what is published)"*. A distinction the operator cannot see is a distinction that
+does not exist for them.
+
+**Severity of what was avoided, stated honestly.** For Amorphous and Wound Core the merged
+rows price nothing today — those core types take every repair rate from the hardcoded
+`SCHEDULE_B` table, and the master supplies only the scrap row. CRGO's normaliser
+(`mergeDefaultRates`) only adds absent rate keys as `null`, changing no value. So this was
+not a live mispricing. It was the broadcast of unauthored data into the document that seeds
+every future agency, which is permanent in a way a wrong rate is not.
+
+### F35. The "not what is stored" band no longer guesses why
+
+The band added in F29 branched on `isEditing` alone and told everyone else *"what you see was
+resolved from a fallback section"* — **a confident verdict from a test that never examined
+the cause**, inside the panel built to expose exactly that pattern. Since `differs` is true
+of nearly every section (the load normalises), it would have gone on asserting "fallback"
+about sections that were completely correct — including MEGHA's Wound Core immediately after
+its scrap code is fixed.
+
+It now distinguishes three causes and says which:
+
+| cause | test | wording |
+|---|---|---|
+| **edited** | the operator changed it | "Showing your N edited row(s) - not saved" |
+| **fallback** | nothing usable is stored, or the section holds the wrong schedule | "Showing N row(s) from a FALLBACK section" |
+| **normalised** | stored is fine; the display merged defaults in | "Showing N row(s) - stored M, the rest filled in for display" |
+
+The normalised case also names the specific rows that are not in storage and warns that
+saving would make them real — which is the fact an operator needs before pressing anything,
+and the one the original band obscured by asserting something else.
+
 ---
 
 ## Recurring theme
@@ -2157,6 +2567,20 @@ this session, and none of them looked broken —
 | O7/O8 seeded DISCOM identity | a filled-in GSTIN and state code | correct-*looking* for one DISCOM, wrong for the rest |
 | F17 `\|\| '3'` coil counts | `3` on a printed report | indistinguishable from a measured 3 |
 | F23's `NaN` hazard | a sorted list | arbitrary order renders as confidently as a correct one |
+
+**F32 is the same shape, latent rather than realised — and it is the hardest variant.** The
+placeholder Amorphous section was a plausible-looking row waiting for someone to trust it:
+correct-looking description, correct-looking position, wrong code underneath. It never
+produced a wrong number because nobody typed into it, and the moment someone did — the
+ordinary act of maintaining a master — it would have priced a 10 kVA item at a 25 kVA
+label and looked right on the printed estimate.
+
+Every other entry in this table was found by its damage. This one had none. It follows that
+**a survey of what has gone wrong cannot find this class at all**, and the audit habit that
+did find it was reading the data and asking whether it means what it says. Where a screen
+invites a person to enter a value, the row they are trusting is part of the calculation -
+it should be checked with the same suspicion as a fallback, and before anyone relies on it,
+not after.
 
 An error that renders as a dash, a blank or a crash is **self-reporting** — the operator
 sees it and says so. An error that renders as a plausible number is not: it is indefinitely

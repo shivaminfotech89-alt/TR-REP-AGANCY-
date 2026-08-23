@@ -13,7 +13,8 @@ import {
   Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
 } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
-import { checkMasterSection, MasterSection } from '../lib/estimateMasterHealth';
+import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
+import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
@@ -287,6 +288,9 @@ export default function EstimateMaster() {
         currentAmorphous = JSON.parse(JSON.stringify(defaultAmorphousEstimateData));
       }
       setAmorphousData(currentAmorphous);
+      // A fresh load is not an edit. Cleared here so `editedSections` means exactly
+      // "the operator changed this since it was loaded".
+      setEditedSections({});
 
       // Load Wound Core
       const isLegacyWc = (arr?: EstimateItem[]) => !arr || arr.length === 0 || arr.some(it => {
@@ -355,7 +359,29 @@ export default function EstimateMaster() {
     return circleLimitsData;
   };
 
+  /**
+   * WHICH SECTIONS THE OPERATOR HAS ACTUALLY TOUCHED.
+   *
+   * Deliberately NOT "the loaded data differs from what is stored" - that is true of
+   * almost every section almost always, because the load path normalises: it merges
+   * default rows in, reorders to default order, forces units to QTY and backfills
+   * fixedRate. Using "differs from stored" as the edit test would classify every section
+   * as edited and the distinction would do nothing.
+   *
+   * This is set only where an operator action changes a section: cell edits, add, delete,
+   * the resets, and the Amorphous -> Wound Core sync. It is cleared when the agency's data
+   * is (re)loaded and after a successful save.
+   */
+  const [editedSections, setEditedSections] = useState<Record<string, boolean>>({});
+  const markEdited = (...sections: string[]) =>
+    setEditedSections(prev => {
+      const next = { ...prev };
+      sections.forEach(sec => { next[sec] = true; });
+      return next;
+    });
+
   const setSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', newData: EstimateItem[]) => {
+    markEdited(section);
     if (section === 'CRGO') setCrgoData(newData);
     else if (section === 'AMORPHOUS') setAmorphousData(newData);
     else if (section === 'WOUND_CORE') setWoundCoreData(newData);
@@ -420,8 +446,16 @@ export default function EstimateMaster() {
   const handleAddItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     const data = [...getSectionData(section)];
     const isFixedTable = section === 'AMORPHOUS' || section === 'WOUND_CORE' || section === 'OVERHAULING';
+    // ITEM CODE LEFT BLANK ON PURPOSE. It used to be `${data.length + 1}` - a row's
+    // POSITION, presented as its identity. That is where three of the four scrap codes in
+    // this database came from: "1" is row 1 of a then-empty section, "18" is row 18 -
+    // including the "18" CRGO was deliberately moved off because it collides with
+    // "Repl. Of Tank" (AUDIT F32). Nobody chose them; the list length did.
+    //
+    // A blank field asks a question. An auto-filled one asserts an answer that is wrong
+    // by construction, in the field that prices a line on a UGVCL document.
     data.push({
-      itemCode: `${data.length + 1}`,
+      itemCode: '',
       itemName: '',
       unit: section === 'CIRCLE_LIMITS' ? 'Rs.' : 'QTY',
       fixedRate: isFixedTable ? 0 : undefined,
@@ -433,6 +467,7 @@ export default function EstimateMaster() {
 
   // Reset Circle Limits to Official UGVCL Clause 4.0 Standard Schedule
   const handleResetCircleLimitsToDefault = () => {
+    markEdited(...['CIRCLE_LIMITS']);
     setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
     setEditingSection('CIRCLE_LIMITS');
     setOpenCircleLimits(true);
@@ -441,6 +476,7 @@ export default function EstimateMaster() {
   };
 
   const handleRestoreFromGlobalDefaults = () => {
+    markEdited(...['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS']);
     if (globalDefaultEstimateMaster) {
       if (globalDefaultEstimateMaster.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
         setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
@@ -482,6 +518,7 @@ export default function EstimateMaster() {
 
   // Synchronize Wound Core to be exactly identical to Amorphous Estimate Master
   const handleSyncWoundCoreWithAmorphous = () => {
+    markEdited('WOUND_CORE');
     const before = woundCoreData.length;
     const cloned = JSON.parse(JSON.stringify(amorphousData)).map((it: EstimateItem) => ({
       ...it,
@@ -505,6 +542,45 @@ export default function EstimateMaster() {
 
   const handleDeleteItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number) => {
     const data = [...getSectionData(section)];
+    const item = data[index];
+    if (!item) return;
+
+    const code = String(item.itemCode ?? '').trim();
+    const name = String(item.itemName ?? '').trim();
+
+    // A master that can gain rows but never lose them accumulates wrong data forever, so
+    // deletion has to exist. But ONE row in some sections is load-bearing: the scrap item
+    // code the resolver looks up. Removing the last one does not fail here - it fails
+    // later, at bill time, in resolveScrapCharge, far from the click that caused it.
+    // Allowed when another row already carries the same code, since the lookup finds that
+    // one; the guard is about the code surviving, not about this particular row.
+    const requiredScrapCode = SCRAP_ITEM_CODE_BY_CORE_CLASS[section];
+    if (requiredScrapCode !== undefined && code === requiredScrapCode) {
+      const others = data.filter((it, i) => i !== index && String(it.itemCode ?? '').trim() === requiredScrapCode);
+      if (others.length === 0) {
+        alert(
+          `Cannot delete item "${requiredScrapCode}" - ${name || '(no description)'}.\n\n` +
+          `It is the only row in the ${section.replace('_', ' ')} section carrying scrap item code ` +
+          `"${requiredScrapCode}", which is the code a scrap transformer is billed under for this ` +
+          `core type. Deleting it would not fail now - it would fail later, when a scrap bill is ` +
+          `produced and the charge cannot be resolved.\n\n` +
+          `Add a replacement row with code "${requiredScrapCode}" first, then delete this one.`
+        );
+        return;
+      }
+    }
+
+    // Names the row, because "Delete this item?" is answerable without knowing what is
+    // about to go. Says it is unsaved, because that is the difference between a mistake
+    // and a disaster here.
+    const ok = confirm(
+      `Delete this row from the ${section.replace('_', ' ')} estimate master?\n\n` +
+      `  Item code : ${code || '(none)'}\n` +
+      `  Description: ${name || '(none)'}\n\n` +
+      `This is not saved until you click Save - reloading the page discards it.`
+    );
+    if (!ok) return;
+
     data.splice(index, 1);
     setSectionData(section, data);
   };
@@ -541,8 +617,177 @@ export default function EstimateMaster() {
     }
   };
 
+  /**
+   * WHAT A PUBLISH WOULD ACTUALLY SEND, and why it is not simply what is on screen.
+   *
+   * The screen shows NORMALISED data: normalizeAmorphousOrWoundCoreData clones in any
+   * default row the stored section lacks, reorders to default order, forces units to QTY
+   * and backfills fixedRate from the first non-zero rate it finds. Publishing component
+   * state therefore broadcasts rows nobody authored, into every agency AND into
+   * public_config, which then seeds every future agency (AUDIT F34).
+   *
+   * So an UNEDITED section publishes what is STORED. An EDITED one publishes what the
+   * operator has on screen, because that is what they chose - normalisation and all. The
+   * dialog says which, in counts, so the difference is legible rather than merely present.
+   */
+  const publishPlanFor = (
+    section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS'
+  ) => {
+    const shown = getSectionData(section);
+    const stored = section === 'CIRCLE_LIMITS'
+      ? activeAgency?.estimateMasterCircleLimits
+      : storedSection(activeAgency, section as MasterSection);
+    const edited = Boolean(editedSections[section]);
+
+    // Rows on screen whose code is absent from storage - the normaliser's additions.
+    const storedCodes = new Set(
+      (stored || []).map(it => String(it.itemCode ?? '').trim().toLowerCase()).filter(Boolean)
+    );
+    const autoAdded = shown.filter(it => {
+      const code = String(it.itemCode ?? '').trim().toLowerCase();
+      return code && !storedCodes.has(code);
+    });
+
+    // An unedited section with nothing stored has nothing to publish FROM. The publish
+    // guard already refuses those (except Overhauling, where empty is normal and there is
+    // genuinely nothing to send), so this only ever falls back for Overhauling.
+    const useStored = !edited && Array.isArray(stored) && stored.length > 0;
+
+    return {
+      section,
+      edited,
+      useStored,
+      payload: useStored ? (stored as EstimateItem[]) : shown,
+      storedCount: Array.isArray(stored) ? stored.length : 0,
+      shownCount: shown.length,
+      autoAdded,
+    };
+  };
+
+  /** One plain sentence naming what is being sent and where it came from. */
+  const publishSummary = (
+    section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS'
+  ): string => {
+    const p = publishPlanFor(section);
+    const label = section.replace('_', ' ');
+    if (p.useStored) {
+      return `Publishing the ${p.storedCount} ${label} row(s) STORED for ${activeAgency?.name || 'this agency'} - not the ${p.shownCount} shown on screen.`;
+    }
+    if (!p.edited) {
+      return `Nothing is stored for ${label}; publishing the ${p.shownCount} row(s) shown.`;
+    }
+    const added = p.autoAdded.length;
+    return added > 0
+      ? `Publishing your ${p.shownCount} edited ${label} row(s), ${added} of which ${added === 1 ? 'was' : 'were'} added automatically and ${added === 1 ? 'is' : 'are'} not in storage: ${p.autoAdded.map(r => `"${r.itemCode}"`).join(', ')}.`
+      : `Publishing your ${p.shownCount} edited ${label} row(s).`;
+  };
+
+  /**
+   * PUBLISH GUARD. Publishing writes the on-screen content of a section into EVERY agency
+   * and into public_config. If that content was resolved from a FALLBACK rather than read
+   * from the section's own stored data, publishing broadcasts the fallback as the shared
+   * baseline - the same defect that produced the misfiled masters, at six times the blast
+   * radius (AUDIT F27 finding (c)(1)).
+   *
+   * A section is fallback-resolved when its stored data is absent, or holds the wrong
+   * schedule. In both cases what the screen shows came from somewhere else. Deliberately
+   * NOT "the screen differs from stored" - that is also true of ordinary unsaved edits,
+   * which are exactly what publishing is for.
+   */
+  const blockPublishIfFallbackResolved = (
+    sections: ('CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS')[]
+  ): boolean => {
+    const offenders = sections
+      .filter(sec => sec !== 'CIRCLE_LIMITS')
+      .map(sec => {
+        const stored = storedSection(activeAgency, sec as MasterSection);
+        const health = checkMasterSection(sec as MasterSection, stored);
+        // An empty Overhauling section is the normal state (it holds optional overrides
+        // of Schedule-A), so emptiness there is not fallback content and must not block.
+        const fallbackResolved = (health.isEmpty && !health.emptyIsNormalHere) || health.blocking;
+        return { sec, health, fallbackResolved };
+      })
+      .filter(o => o.fallbackResolved);
+
+    if (offenders.length === 0) return false;
+
+    alert(
+      `Cannot publish: ${offenders.length === 1 ? 'a section is' : `${offenders.length} sections are`} showing ` +
+      `fallback content, not their own stored data.\n\n` +
+      offenders.map(o =>
+        `  ${o.health.label}: ${o.health.isEmpty
+          ? 'nothing is stored for this section, so what you see was substituted from another one.'
+          : 'the stored section holds the wrong schedule, so what you see was substituted from another one.'}`
+      ).join('\n') +
+      `\n\nPublishing writes what is on screen into EVERY agency and into the shared default. ` +
+      `That would make the substituted content the shared baseline for all of them.\n\n` +
+      `Correct the stored data for ${offenders.length === 1 ? 'that section' : 'those sections'} first - ` +
+      `enter the right schedule and save it for this agency - then publish.`
+    );
+    return true;
+  };
+
+  /**
+   * Item codes must be present and unique before a section can be saved.
+   *
+   * NOTHING BREAKS while a code is blank on screen - checked rather than assumed:
+   * `resolveRate` and `resolveScrapCharge` both look a code up with `.find()`, so a blank
+   * one simply never matches; `checkMasterSection` filters empty codes out of its overlap
+   * score; `withMissingDefaults` filters them too; the table keys rows by index, not code.
+   * So the row can sit there half-entered without affecting anything.
+   *
+   * SAVING it is the problem, and duplicates are the worse half. `.find()` returns the
+   * FIRST match, so a second row carrying an existing code is silently unreachable - it
+   * renders, it can be edited, it can be given a rate, and it prices nothing. That is
+   * indistinguishable from a rate that did not take effect.
+   */
+  const BR = '\n';
+
+  const codeProblems = (
+    section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS',
+    data: EstimateItem[]
+  ): string[] => {
+    const problems: string[] = [];
+    const seen = new Map<string, number>();
+    data.forEach((it, idx) => {
+      const code = String(it.itemCode ?? '').trim();
+      const name = String(it.itemName ?? '').trim();
+      if (!code) {
+        problems.push(`Row ${idx + 1}${name ? ` ("${name.slice(0, 40)}")` : ''} has no item code.`);
+        return;
+      }
+      const key = code.toLowerCase();
+      if (seen.has(key)) {
+        problems.push(
+          `Item code "${code}" is used by both row ${seen.get(key)} and row ${idx + 1}. ` +
+          `Only the first would ever be found - the second would price nothing.`
+        );
+      } else {
+        seen.set(key, idx + 1);
+      }
+    });
+    return problems;
+  };
+
+  const blockSaveIfCodeProblems = (
+    section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS',
+    data: EstimateItem[]
+  ): boolean => {
+    const problems = codeProblems(section, data);
+    if (problems.length === 0) return false;
+    alert(
+      `Cannot save the ${section.replace('_', ' ')} section:` + BR + BR +
+      problems.map(p => `  - ${p}`).join(BR) + BR + BR +
+      `Item codes identify the row to the estimate and the bill. Give every row a code, ` +
+      `unique within this section, taken from the tender - not from its position in the list.`
+    );
+    return true;
+  };
+
   // Trigger Save
   const handleInitiateSave = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
+    // Gates BOTH destinations - the per-agency save and the publish modal behind it.
+    if (blockSaveIfCodeProblems(section, getSectionData(section))) return;
     if (!isSuperAdmin) {
       // Regular user: directly save to current agency without affecting any other user
       handleSaveSectionToActiveAgency(section);
@@ -556,6 +801,12 @@ export default function EstimateMaster() {
   // Direct 1-click Save for Active Agency Only (Safe & Isolated)
   const handleSaveAllToCurrentAgency = async () => {
     if (!activeAgency) return;
+    // Every section it writes is checked - this button bypasses handleInitiateSave.
+    const sections: ('CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS')[] =
+      ['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS'];
+    for (const sec of sections) {
+      if (blockSaveIfCodeProblems(sec, getSectionData(sec))) return;
+    }
     setIsSaving(true);
     try {
       const payload = {
@@ -586,24 +837,29 @@ export default function EstimateMaster() {
       return handleSaveSectionToActiveAgency(section);
     }
 
+    if (blockPublishIfFallbackResolved([section])) return;
+
     setIsSaving(true);
     try {
+      // STORED when unedited, screen state when edited - see publishPlanFor.
+      const plan = publishPlanFor(section);
       const updatePayload: any = {};
       if (section === 'CRGO') {
-        updatePayload.estimateMasterCRGO = crgoData;
-        updatePayload.estimateMaster = crgoData;
+        updatePayload.estimateMasterCRGO = plan.payload;
+        updatePayload.estimateMaster = plan.payload;
       } else if (section === 'AMORPHOUS') {
-        updatePayload.estimateMasterAmorphous = amorphousData;
+        updatePayload.estimateMasterAmorphous = plan.payload;
       } else if (section === 'WOUND_CORE') {
-        updatePayload.estimateMasterWoundCore = woundCoreData;
+        updatePayload.estimateMasterWoundCore = plan.payload;
       } else if (section === 'OVERHAULING') {
-        updatePayload.estimateMasterOverhauling = overhaulingData;
+        updatePayload.estimateMasterOverhauling = plan.payload;
       } else if (section === 'CIRCLE_LIMITS') {
-        updatePayload.estimateMasterCircleLimits = circleLimitsData;
+        updatePayload.estimateMasterCircleLimits = plan.payload;
       }
 
       // Save as global system default in Firestore and across all agencies
       await updateAllAgenciesEstimateMaster(updatePayload);
+      setEditedSections(prev => ({ ...prev, [section]: false }));
       setSyncSuccessMsg(`✓ Successfully published ${section} rates as the GLOBAL DEFAULT for all users & agencies!`);
 
       setEditingSection(null);
@@ -624,15 +880,22 @@ export default function EstimateMaster() {
       setShowFullSyncModal(false);
       return;
     }
+    // Every section is being published here, so every section is checked.
+    if (blockPublishIfFallbackResolved(['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING'])) {
+      setShowFullSyncModal(false);
+      return;
+    }
     setIsSaving(true);
     try {
+      // Each section independently: stored when untouched, screen state when edited.
+      const pCrgo = publishPlanFor('CRGO');
       const fullPayload = {
-        estimateMasterCRGO: crgoData,
-        estimateMaster: crgoData,
-        estimateMasterAmorphous: amorphousData,
-        estimateMasterWoundCore: woundCoreData,
-        estimateMasterOverhauling: overhaulingData,
-        estimateMasterCircleLimits: circleLimitsData,
+        estimateMasterCRGO: pCrgo.payload,
+        estimateMaster: pCrgo.payload,
+        estimateMasterAmorphous: publishPlanFor('AMORPHOUS').payload,
+        estimateMasterWoundCore: publishPlanFor('WOUND_CORE').payload,
+        estimateMasterOverhauling: publishPlanFor('OVERHAULING').payload,
+        estimateMasterCircleLimits: publishPlanFor('CIRCLE_LIMITS').payload,
       };
 
       await saveGlobalDefaultEstimateMaster(fullPayload);
@@ -744,30 +1007,116 @@ export default function EstimateMaster() {
               */}
               {(() => {
                 if (sectionKey === 'CIRCLE_LIMITS') return null;
-                const stored = ({
-                  CRGO: activeAgency?.estimateMasterCRGO,
-                  AMORPHOUS: activeAgency?.estimateMasterAmorphous,
-                  WOUND_CORE: activeAgency?.estimateMasterWoundCore,
-                  OVERHAULING: activeAgency?.estimateMasterOverhauling,
-                } as Record<string, EstimateItem[] | undefined>)[sectionKey];
+                // storedSection reads the RAW Firestore value. Reading
+                // activeAgency.estimateMasterX directly would read the ENRICHED field,
+                // which AgencyContext fills from the global default when the stored one is
+                // empty - so an empty section would render as healthy. This panel exists
+                // to see past exactly that.
+                const stored = storedSection(activeAgency, sectionKey as MasterSection);
                 const health = checkMasterSection(sectionKey as MasterSection, stored);
+
+                // STORED vs SHOWING. These are different things and the difference is the
+                // whole point of the panel, so it never collapses them into one verdict.
+                //
+                // `stored` is what the database holds - the only thing that can be wrong
+                // in the way AARATI's Wound Core is wrong. `data` is what the screen is
+                // showing, which may be a fallback the resolver substituted, or edits the
+                // operator has not saved. Reporting only `stored` while someone is midway
+                // through editing describes a state they are in the middle of leaving;
+                // reporting only `data` hides the misfiling this panel exists to surface.
+                const showing = checkMasterSection(sectionKey as MasterSection, data);
+                const differs = JSON.stringify(stored || []) !== JSON.stringify(data || []);
+
+                // WHY the displayed list differs from storage - tested, not assumed.
+                //
+                // The first version of this band branched on `isEditing` alone and told
+                // everyone else "resolved from a fallback section". That was a confident
+                // verdict from a test that never looked at the cause - the same defect as
+                // the isLegacy blacklist this panel was built to expose, committed inside
+                // the panel. It would have gone on saying "fallback" about a section that
+                // was by then completely correct, because `differs` is true of almost
+                // every section: the load path NORMALISES, merging default rows in,
+                // reordering, forcing units to QTY and backfilling fixedRate.
+                //
+                // Three distinguishable causes, in order of seriousness:
+                const edited = Boolean(editedSections[sectionKey]);
+                const fallbackResolved = !stored || stored.length === 0 || health.blocking;
+                const storedCodes = new Set(
+                  (stored || []).map(it => String(it.itemCode ?? '').trim().toLowerCase()).filter(Boolean)
+                );
+                const addedRows = (data || []).filter(it => {
+                  const code = String(it.itemCode ?? '').trim().toLowerCase();
+                  return code && !storedCodes.has(code);
+                });
+                const cause: 'edited' | 'fallback' | 'normalised' =
+                  edited ? 'edited' : (fallbackResolved ? 'fallback' : 'normalised');
+                const pendingBand = differs ? (
+                  <div className={`mt-1.5 p-2 rounded border text-[11px] leading-relaxed ${
+                    cause === 'fallback'
+                      ? 'bg-amber-50 border-amber-300 text-amber-900'
+                      : (showing.problems.length > 0
+                          ? 'bg-amber-50 border-amber-300 text-amber-900'
+                          : 'bg-blue-50 border-blue-200 text-blue-900')
+                  }`}>
+                    <strong className="font-bold flex items-center gap-1">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      {cause === 'edited'
+                        ? `Showing your ${showing.itemCount} edited row(s) - not saved`
+                        : cause === 'fallback'
+                          ? `Showing ${showing.itemCount} row(s) from a FALLBACK section`
+                          : `Showing ${showing.itemCount} row(s) - stored ${health.itemCount}, the rest filled in for display`}
+                    </strong>
+                    <p className="mt-0.5">
+                      {cause === 'edited'
+                        ? 'These are your unsaved edits. Nothing is written until you click Save.'
+                        : cause === 'fallback'
+                          ? `Nothing usable is stored for ${health.label}, so this content came from another section. Saving would write it into the stored section as though it had been configured here.`
+                          : `The stored ${health.label} section holds ${health.itemCount} row(s) and is used as-is for pricing. The display merges in default rows and rewrites units and order; that is presentation, not storage.`}
+                    </p>
+                    {cause === 'normalised' && addedRows.length > 0 && (
+                      <p className="mt-1">
+                        <strong>Not in storage:</strong> {addedRows.map(r => `"${r.itemCode}"`).join(', ')}
+                        {' '}- shown from the default list. Saving would make {addedRows.length === 1 ? 'it' : 'them'} real.
+                      </p>
+                    )}
+                    {showing.problems.length > 0 && (
+                      <>
+                        <p className="mt-1 font-bold">After saving, this section would have:</p>
+                        <ul className="list-disc list-inside mt-0.5 space-y-0.5">
+                          {showing.problems.map((prob, i) => <li key={i}>{prob}</li>)}
+                        </ul>
+                      </>
+                    )}
+                  </div>
+                ) : null;
+
                 if (health.problems.length === 0) {
                   return (
-                    <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1 font-semibold">
-                      <ShieldCheck className="w-3 h-3 shrink-0" />
-                      <span>
-                        Stored {health.label} section: {health.itemCount} items
-                        {health.requiredScrapCode !== null ? `, scrap code "${health.requiredScrapCode}" present` : ''}
-                      </span>
-                    </p>
+                    <>
+                      <p className="text-[11px] text-emerald-700 mt-1 flex items-center gap-1 font-semibold">
+                        <ShieldCheck className="w-3 h-3 shrink-0" />
+                        <span>
+                          {health.emptyIsNormalHere && health.isEmpty
+                            ? 'Nothing stored - which is correct. Overhauling holds optional per-item overrides of UGVCL Schedule-A; with none stored, OH jobs price straight from Schedule-A.'
+                            : <>
+                                Stored {health.label} section: {health.itemCount} items
+                                {health.requiredScrapCode !== null ? `, scrap code "${health.requiredScrapCode}" present` : ''}
+                                {health.emptyIsNormalHere ? ' (optional overrides of Schedule-A)' : ''}
+                              </>}
+                        </span>
+                      </p>
+                      {pendingBand}
+                    </>
                   );
                 }
                 return (
+                  <>
                   <div className={`mt-1.5 p-2 rounded border text-[11px] leading-relaxed ${
                     health.blocking
                       ? 'bg-red-50 border-red-300 text-red-800'
                       : 'bg-amber-50 border-amber-300 text-amber-900'
                   }`}>
+                    <span className="block text-[9px] uppercase font-bold tracking-wider opacity-70 mb-0.5">Stored in the database</span>
                     <strong className="font-bold flex items-center gap-1">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                       {health.blocking
@@ -785,6 +1134,8 @@ export default function EstimateMaster() {
                       </p>
                     )}
                   </div>
+                  {pendingBand}
+                  </>
                 );
               })()}
             </div>
@@ -975,7 +1326,7 @@ export default function EstimateMaster() {
                         {kva} / 11 KVA
                       </th>
                     ))}
-                    {isEditing && <th className="px-2.5 py-3 text-center w-16">Action</th>}
+                    {sectionKey !== 'CIRCLE_LIMITS' && <th className="px-2.5 py-3 text-center w-16">Action</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -987,7 +1338,23 @@ export default function EstimateMaster() {
                             type="text" 
                             value={item.itemCode} 
                             onChange={(e) => handleItemDetailsChange(sectionKey, idx, 'itemCode', e.target.value)}
-                            className="w-14 px-1.5 py-1 text-xs border border-slate-300 rounded font-mono font-bold"
+                            placeholder="code"
+                            title={
+                              !String(item.itemCode ?? '').trim()
+                                ? 'Enter the item code from the tender. It identifies this row to the estimate and the bill - it is not a row number.'
+                                : (data.filter(o => String(o.itemCode ?? '').trim().toLowerCase() === String(item.itemCode ?? '').trim().toLowerCase()).length > 1
+                                    ? 'Duplicate item code. Only the first row with this code is ever found - this one would price nothing.'
+                                    : undefined)
+                            }
+                            /* Marked in place, so a blank or duplicated code is visible in the
+                               row rather than only in an alert when Save is pressed. */
+                            className={`w-14 px-1.5 py-1 text-xs border rounded font-mono font-bold ${
+                              !String(item.itemCode ?? '').trim()
+                                ? 'border-amber-400 bg-amber-50 placeholder-amber-600'
+                                : (data.filter(o => String(o.itemCode ?? '').trim().toLowerCase() === String(item.itemCode ?? '').trim().toLowerCase()).length > 1
+                                    ? 'border-red-400 bg-red-50'
+                                    : 'border-slate-300')
+                            }`}
                           />
                         ) : (
                           <span className="font-mono font-bold">{item.itemCode}</span>
@@ -1048,13 +1415,24 @@ export default function EstimateMaster() {
                           </td>
                         );
                       })}
-                      {isEditing && (
+                      {/* Rendered in BOTH modes. It used to appear only while editing, so a
+                          master with wrong rows in it looked like one that could not lose
+                          them - the control was not missing, it was invisible. Disabled
+                          outside edit mode, with the reason in the tooltip. */}
+                      {sectionKey !== 'CIRCLE_LIMITS' && (
                         <td className="px-2 py-2.5 text-center align-top w-16">
                           <button
                             type="button"
+                            disabled={!isEditing}
                             onClick={() => handleDeleteItem(sectionKey, idx)}
-                            className="p-1 text-red-500 hover:bg-red-50 rounded"
-                            title="Delete item row"
+                            className={`p-1 rounded ${
+                              isEditing
+                                ? 'text-red-500 hover:bg-red-50'
+                                : 'text-slate-300 cursor-not-allowed'
+                            }`}
+                            title={isEditing
+                              ? `Delete row "${item.itemCode || '(no code)'}" - asks for confirmation, and is not saved until you click Save`
+                              : 'Click Edit on this section to remove rows'}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -1340,6 +1718,24 @@ export default function EstimateMaster() {
                       <p className="text-xs text-slate-500 mt-1">
                         Updates the central cloud master so that all other users and new agencies will adopt these {pendingSaveSection} rates as their default.
                       </p>
+                      {/* Names WHAT is being sent, in rows. The screen shows normalised data -
+                          default rows merged in, order and units rewritten - so "publish this
+                          section" is ambiguous without saying which version. An operator who
+                          cannot tell the difference gains nothing from the distinction. */}
+                      {pendingSaveSection && (
+                        <div className={`mt-2 p-2 rounded border text-[11px] leading-relaxed ${
+                          publishPlanFor(pendingSaveSection).useStored
+                            ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                            : 'bg-amber-50 border-amber-300 text-amber-900'
+                        }`}>
+                          <strong className="font-bold block">{publishSummary(pendingSaveSection)}</strong>
+                          <span>
+                            {publishPlanFor(pendingSaveSection).useStored
+                              ? 'You have not edited this section, so the stored rows are published as they are. Rows the screen adds for display are not sent.'
+                              : 'This section has unsaved edits, so what you see is what will be published - to every agency and to the shared default.'}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1427,8 +1823,27 @@ export default function EstimateMaster() {
                 This will save all rates (CRGO, Amorphous, Wound Core, Overhauling & Circle Limits) from <span className="font-bold text-blue-900">{activeAgency.name}</span> into the global database so that <strong>every user and every agency</strong> uses these rates by default.
               </p>
 
+              {/* Per section, in rows, which version is being sent. The counts below are
+                  the SCREEN's counts and can differ from what is published - that is the
+                  whole point of this block. */}
+              <div className="border border-slate-300 rounded-xl p-3 space-y-1 bg-white">
+                <div className="font-bold text-slate-800 text-xs mb-1">Exactly what will be published:</div>
+                {(['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS'] as const).map(sec => {
+                  const plan = publishPlanFor(sec);
+                  return (
+                    <div key={sec} className={`px-2 py-1 rounded text-[11px] leading-relaxed border ${
+                      plan.useStored
+                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                        : 'bg-amber-50 border-amber-200 text-amber-900'
+                    }`}>
+                      {publishSummary(sec)}
+                    </div>
+                  );
+                })}
+              </div>
+
               <div className="border border-slate-200 rounded-xl p-3.5 space-y-2 bg-slate-50/50">
-                <div className="font-bold text-slate-800 text-xs mb-1">Rate Master Summary to be Saved as Default:</div>
+                <div className="font-bold text-slate-800 text-xs mb-1">Rows currently on screen (not necessarily what is published):</div>
                 <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
                   <div className="bg-white p-2 rounded-lg border border-slate-200">
                     <span className="block text-xs font-bold text-blue-700">{crgoData.length}</span>

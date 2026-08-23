@@ -456,27 +456,52 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         const agSnapshot = await getDocs(agQ);
         const fetchedAgencies = agSnapshot.docs.map(d => ({ id: d.id, ...d.data() } as Agency));
         
-        // If agencies don't have rates or have empty rates, populate with global defaults
+        // If agencies don't have rates or have empty rates, populate with global defaults.
+        //
+        // NOTE WHAT THIS COSTS, because a check shipped in F27 was reading the wrong thing
+        // because of it: after enrichment NO agency object in memory has an empty section.
+        // `activeAgency.estimateMasterWoundCore` is the RESOLVED value, never the stored
+        // one, so anything asking "what does this agency actually have stored" and reading
+        // the context gets the fallback's output and concludes all is well.
+        //
+        // The enrichment itself is left alone - pricing reads these fields and changing
+        // that would change prices. The raw values are carried alongside instead, under
+        // __storedMasters, so a health check can see what Firestore really holds.
+        const rawMasters = (ag: any) => ({
+          CRGO: ag.estimateMasterCRGO,
+          AMORPHOUS: ag.estimateMasterAmorphous,
+          WOUND_CORE: ag.estimateMasterWoundCore,
+          OVERHAULING: ag.estimateMasterOverhauling,
+          CIRCLE_LIMITS: ag.estimateMasterCircleLimits,
+        });
+
+        // `arr || fallback` is wrong for arrays: [] is TRUTHY, so an empty section stored
+        // in public_config would be used in place of the shipped default. Same bug as the
+        // one fixed in addAgency below.
+        const nonEmpty = <T,>(arr: T[] | undefined, fallback: T[]): T[] =>
+          (arr && arr.length > 0) ? arr : fallback;
+
         const enrichedAgencies = fetchedAgencies.map(ag => ({
           ...ag,
+          __storedMasters: rawMasters(ag),
           estimateMasterCRGO: (ag.estimateMasterCRGO && ag.estimateMasterCRGO.length > 0) 
             ? ag.estimateMasterCRGO 
-            : (fetchedGlobalMaster?.estimateMasterCRGO || defaultEstimateData),
+            : nonEmpty(fetchedGlobalMaster?.estimateMasterCRGO, defaultEstimateData),
           estimateMaster: (ag.estimateMaster && ag.estimateMaster.length > 0) 
             ? ag.estimateMaster 
-            : (fetchedGlobalMaster?.estimateMasterCRGO || defaultEstimateData),
+            : nonEmpty(fetchedGlobalMaster?.estimateMasterCRGO, defaultEstimateData),
           estimateMasterAmorphous: (ag.estimateMasterAmorphous && ag.estimateMasterAmorphous.length > 0) 
             ? ag.estimateMasterAmorphous 
-            : (fetchedGlobalMaster?.estimateMasterAmorphous || defaultAmorphousEstimateData),
+            : nonEmpty(fetchedGlobalMaster?.estimateMasterAmorphous, defaultAmorphousEstimateData),
           estimateMasterWoundCore: (ag.estimateMasterWoundCore && ag.estimateMasterWoundCore.length > 0) 
             ? ag.estimateMasterWoundCore 
-            : (fetchedGlobalMaster?.estimateMasterWoundCore || defaultWoundCoreEstimateData),
+            : nonEmpty(fetchedGlobalMaster?.estimateMasterWoundCore, defaultWoundCoreEstimateData),
           estimateMasterOverhauling: (ag.estimateMasterOverhauling && ag.estimateMasterOverhauling.length > 0) 
             ? ag.estimateMasterOverhauling 
-            : (fetchedGlobalMaster?.estimateMasterOverhauling || defaultOverhaulingEstimateData),
+            : nonEmpty(fetchedGlobalMaster?.estimateMasterOverhauling, defaultOverhaulingEstimateData),
           estimateMasterCircleLimits: (ag.estimateMasterCircleLimits && ag.estimateMasterCircleLimits.length > 0) 
             ? ag.estimateMasterCircleLimits 
-            : (fetchedGlobalMaster?.estimateMasterCircleLimits || defaultCircleLimitsEstimateData),
+            : nonEmpty(fetchedGlobalMaster?.estimateMasterCircleLimits, defaultCircleLimitsEstimateData),
         }));
 
         setAgencies(enrichedAgencies);
@@ -597,22 +622,35 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     try {
       const newRef = doc(collection(db, 'agencies'));
       
-      // Default to global default master if available, otherwise active agency or code default
-      const defaultCRGO = globalDefaultEstimateMaster?.estimateMasterCRGO || 
-                          activeAgency?.estimateMasterCRGO || 
-                          defaultEstimateData;
-      const defaultAmorphous = globalDefaultEstimateMaster?.estimateMasterAmorphous || 
-                               activeAgency?.estimateMasterAmorphous || 
-                               defaultAmorphousEstimateData;
-      const defaultWoundCore = globalDefaultEstimateMaster?.estimateMasterWoundCore || 
-                               activeAgency?.estimateMasterWoundCore || 
-                               defaultWoundCoreEstimateData;
-      const defaultOverhauling = globalDefaultEstimateMaster?.estimateMasterOverhauling || 
-                                 activeAgency?.estimateMasterOverhauling || 
-                                 defaultOverhaulingEstimateData;
-      const defaultCircleLimits = globalDefaultEstimateMaster?.estimateMasterCircleLimits || 
-                                  activeAgency?.estimateMasterCircleLimits || 
-                                  defaultCircleLimitsEstimateData;
+      // SEEDING A NEW AGENCY'S ESTIMATE MASTER.
+      //
+      // TWO BUGS FIXED HERE, both of which propagated bad data into every agency created
+      // afterwards (AUDIT F30).
+      //
+      // 1. It seeded from `activeAgency` - whichever agency happened to be selected at the
+      //    moment of creation. That is how three of four agencies came to hold IDENTICAL
+      //    32-item CRGO cards in their Wound Core section: one agency acquired it from a
+      //    pre-6282d3f fallback, and every agency created while it was active inherited it
+      //    verbatim. Nothing recorded which agency was the template, so the provenance is
+      //    unrecoverable - the same class as the seeded DISCOM identity in O7. A new
+      //    agency now inherits the published shared default or the shipped defaults, and
+      //    never another agency's data.
+      //
+      //    (It was reading the ENRICHED `activeAgency` besides, so even an agency with
+      //    nothing stored handed over its fallback content as though it were configured.)
+      //
+      // 2. `arr || fallback` is wrong for arrays: `[]` is TRUTHY in JavaScript, so an
+      //    empty stored section was used instead of falling through to the shipped
+      //    default. Everywhere else in this file the test is `arr && arr.length > 0`; here
+      //    it was not, which is a plausible route by which empty sections spread.
+      const seed = <T,>(published: T[] | undefined, shipped: T[]): T[] =>
+        (published && published.length > 0) ? published : shipped;
+
+      const defaultCRGO = seed(globalDefaultEstimateMaster?.estimateMasterCRGO, defaultEstimateData);
+      const defaultAmorphous = seed(globalDefaultEstimateMaster?.estimateMasterAmorphous, defaultAmorphousEstimateData);
+      const defaultWoundCore = seed(globalDefaultEstimateMaster?.estimateMasterWoundCore, defaultWoundCoreEstimateData);
+      const defaultOverhauling = seed(globalDefaultEstimateMaster?.estimateMasterOverhauling, defaultOverhaulingEstimateData);
+      const defaultCircleLimits = seed(globalDefaultEstimateMaster?.estimateMasterCircleLimits, defaultCircleLimitsEstimateData);
 
       const newAgency = { 
         estimateMasterCRGO: defaultCRGO,
