@@ -202,6 +202,21 @@ thing. The distinction:
 | grep for the old pattern is empty | the MR list opens with the newest MR on top |
 | the guard exists in the code | saving with a bad value is actually refused |
 
+**A field-name sweep returns non-dates, and that is not a defect to fix.** Running the
+sweep again later (F41) surfaced `approvalDate` — a date-named field that can hold
+`AT 26-27`, because the Bill Date and Appr Date controls on the billing screen are
+`type="text"`, not `type="date"`, so an operator can type anything into them. Since F16 a
+non-date renders as `-` rather than as garbage, which is the correct outcome. **A date-named
+field carrying an identifier is the reverse of the usual problem** and the next person
+sweeping will hit it too: do not "fix" it by coercing the value, and do not assume a field
+called `*Date` holds one.
+
+The same sweep flags `<input type="date">` values, `.xlsx` filenames and
+`new Date().getFullYear()`. A date input REQUIRES `yyyy-mm-dd` and the browser renders it in
+the user's locale, so formatting one breaks the control. **The noise is the price of
+searching by field rather than by symptom, and it is worth paying** — F41 found two raw
+renders that the reported symptom did not name.
+
 **The check that caught F18 was opening the oil account sheet and reading the date.** It
 took the user two seconds and no tooling, and it found what a complete, verified,
 type-checked sweep had missed entirely.
@@ -2956,6 +2971,41 @@ widening, which is the only thing still available.
 `find-misattached-at-console.js` now prints `createdAt` beside `startDate`, showing
 `(not recorded - predates F38)` where absent, so a real creation order can be read directly
 where one exists and is visibly unavailable where it does not.
+
+### F41. Four raw ISO dates, found by sweeping fields rather than symptoms
+
+Reported symptom: the printed tax invoice showed `2026-08-14` in the Chalan Date column
+while Bill Date and Order Date, two columns away on the same document, read `23-08-2026` and
+`03-02-2026`.
+
+**The reported site**, `BillingSystem.tsx:2960` — the invoice line-item Date column:
+`{job.deliveryDate || job.challanDate || billDate}`, three unformatted values. All three are
+ISO: the first two come from the challan's date inputs, and `billDate` is initialised as
+`new Date().toISOString().split('T')[0]`.
+
+**Three more the symptom did not name**, all in the Sent Bills / payments views:
+`:2068` (`billSentDate` in the register table), `:2225` (`paymentDate` in the payment row),
+`:2239` (`billSentDate` on the sent-bill card).
+
+All four now route through `formatDDMMYYYY`, which returns `-` for an absent value, so the
+`|| '-'` fallbacks each site carried are subsumed rather than duplicated.
+
+**Why the extra three were found.** Two passes were run: one over JSX expressions that look
+date-shaped, and one over the seventeen date FIELD NAMES themselves, excluding lines that
+already call the formatter. The second pass is the F18 lesson applied — *a site that never
+called the formatter cannot be found by searching for calls to it* — and it is what turned
+up `paymentDate`, which the reported symptom had no way to point at.
+
+**A limitation stated rather than assumed away.** Both passes are line-based, so a date
+rendered inside a JSX expression split across lines would escape them. The invoice, challan
+and estimate table bodies were read directly to cover that, but reading is weaker evidence
+than a pattern match, and F18's whole lesson is that a sweep can be complete against its own
+definition and still miss the case.
+
+**Not changed, and correctly so:** fifteen `value=` bindings on date controls (ISO is
+required by `<input type="date">`), six `.xlsx` filename stamps, and four
+`new Date().getFullYear()` renders. See the note in the F18 pattern entry on why a
+field-name sweep returns these, and on `approvalDate` holding a non-date.
 
 ---
 

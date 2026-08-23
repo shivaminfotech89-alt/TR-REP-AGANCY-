@@ -2065,7 +2065,7 @@ export default function BillingSystem() {
                               )}
                             </td>
                             <td className="px-4 py-3 align-top text-xs font-medium text-slate-700">
-                              {item.billSentDate || '-'}
+                              {formatDDMMYYYY(item.billSentDate)}
                             </td>
                             <td className="px-4 py-3 align-top">
                               <span className="font-bold text-slate-900 text-sm">
@@ -2222,7 +2222,7 @@ export default function BillingSystem() {
                                 <span className="font-mono text-emerald-700 font-bold">{item.paymentRefNo}</span>
                               </div>
                               <div className="text-[11px] text-slate-500 mt-1">
-                                Payment Date: <span className="font-medium text-slate-700">{item.paymentDate || '-'}</span>
+                                Payment Date: <span className="font-medium text-slate-700">{formatDDMMYYYY(item.paymentDate)}</span>
                               </div>
                               {item.paymentRemarks && (
                                 <div className="text-[10px] text-slate-400 italic mt-0.5">{item.paymentRemarks}</div>
@@ -2236,7 +2236,7 @@ export default function BillingSystem() {
                             <td className="px-4 py-3 align-top text-xs">
                               <div className="font-bold text-slate-800">{item.billNo}</div>
                               <div className="text-[11px] text-slate-500 font-mono mt-0.5">Ref: {item.billRefNo}</div>
-                              <div className="text-[10px] text-slate-400 mt-0.5">Sent: {item.billSentDate || '-'}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">Sent: {formatDDMMYYYY(item.billSentDate)}</div>
                             </td>
                             <td className="px-4 py-3 align-top">
                               <div className="font-bold text-emerald-700 text-sm">
@@ -2957,7 +2957,7 @@ export default function BillingSystem() {
                             <td className="p-1 border-r border-black">{idx + 1}</td>
                             <td className="p-1 border-r border-black font-bold font-mono">{job.jobNo}</td>
                             <td className="p-1 border-r border-black font-mono">{job.challanNo || ''}</td>
-                            <td className="p-1 border-r border-black">{job.deliveryDate || job.challanDate || billDate}</td>
+                            <td className="p-1 border-r border-black">{formatDDMMYYYY(job.deliveryDate || job.challanDate || billDate)}</td>
                             <td className="p-1 border-r border-black">{job.make || ''}</td>
                             <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
                             <td className="p-1 border-r border-black">11</td>
