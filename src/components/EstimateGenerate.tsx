@@ -12,7 +12,8 @@ import {
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
-import { GP_TEXT_CLASS, missingForEstimate } from '../lib/jobDisplay';
+import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
+import { mrStageSummary } from '../lib/inspectionStage';
 import { validateEstimateMaster } from '../lib/estimateMasterHealth';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
@@ -1298,7 +1299,11 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
   }
 
   return (
-    <div className="max-w-6xl mx-auto print:max-w-none print:w-full print:m-0 print:p-0">
+    // ON-SCREEN width only. The print variants on this same element remove the max-width
+    // entirely when printing, and PrintableA4Page pins each sheet to 210mm / 297mm in its
+    // own inline style - so this class cannot reach an A4 document. Widening it changes the
+    // MR list and nothing that goes to UGVCL.
+    <div className="max-w-[1400px] mx-auto print:max-w-none print:w-full print:m-0 print:p-0">
       
       {/* Universal Top Filter Bar & Stage Lifecycle Navigation (Hidden during print) */}
       {!selectedMrNo ? (
@@ -1454,6 +1459,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
                       <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Total Jobs</th>
                       <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Est. Amount</th>
+                      <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Stage</th>
                       <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Status</th>
                       <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Actions</th>
                     </tr>
@@ -1461,7 +1467,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   <tbody className="divide-y divide-slate-100">
                     {filteredMrNos.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                        <td colSpan={7} className="px-4 py-8 text-center text-slate-500">
                           No matching MR numbers found.
                         </td>
                       </tr>
@@ -1478,6 +1484,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                         const isApproved = groupJobs.some(j => !!j.approvalNo || j.estimateApprovalStatus === 'Approved');
                         
                         const hasCircleLimitExceeded = mrHasExceededCircleLimit(mr);
+                        const stages = mrStageSummary(groupJobs, inspections);
 
                         return (
                           <tr key={mr} className="hover:bg-slate-50">
@@ -1515,6 +1522,18 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                                   <AlertTriangle className="w-2.5 h-2.5" /> Exceeds Circle Limit
                                 </span>
                               )}
+                            </td>
+                            {/* Stage: EXTERNAL AND INTERNAL ONLY, deliberately.
+                                Testing and dispatch happen AFTER an estimate is produced and
+                                cannot gate or inform it, so showing them here would invite an
+                                operator to wait for stages that this screen's work does not
+                                depend on. Billing shows all four because a bill does depend on
+                                dispatch. Do not "complete the set" here. */}
+                            <td className="px-4 py-3">
+                              <div className="space-y-0.5">
+                                <StageCell label="External" state={stages.external} />
+                                <StageCell label="Internal" state={stages.internal} />
+                              </div>
                             </td>
                             <td className="px-4 py-3">
                               {isApproved ? (

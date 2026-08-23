@@ -7,6 +7,8 @@ import { classifyCoreType } from './SingleJobEstimateReport';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { validateEstimateMaster } from '../lib/estimateMasterHealth';
+import { mrStageSummary } from '../lib/inspectionStage';
+import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -1587,7 +1589,11 @@ export default function BillingSystem() {
   }
 
   return (
-    <div className="max-w-6xl mx-auto print:max-w-none print:w-full print:m-0 print:p-0">
+    // ON-SCREEN width only. The print variants on this same element remove the max-width
+    // entirely when printing, and PrintableA4Page pins each sheet to 210mm / 297mm in its
+    // own inline style - so this class cannot reach an A4 document. Widening it changes the
+    // MR list and nothing that goes to UGVCL.
+    <div className="max-w-[1400px] mx-auto print:max-w-none print:w-full print:m-0 print:p-0">
       
       {!selectedMrNo ? (
         <div className="space-y-6 print:hidden">
@@ -1760,6 +1766,7 @@ export default function BillingSystem() {
                         <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Division</th>
                         <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Delivered Jobs</th>
                         <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Challan Info</th>
+                        <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Stage</th>
                         <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">Bill & Payment Status</th>
                         <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px] text-right">Actions</th>
                       </tr>
@@ -1767,7 +1774,7 @@ export default function BillingSystem() {
                     <tbody className="divide-y divide-slate-100">
                       {filteredMrNos.length === 0 ? (
                         <tr>
-                          <td colSpan={6} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
+                          <td colSpan={7} className="px-4 py-12 text-center text-slate-500 text-xs sm:text-sm">
                             No delivered jobs found for this filter. Please dispatch jobs from <strong>Delivery Challans</strong> first.
                           </td>
                         </tr>
@@ -1777,6 +1784,11 @@ export default function BillingSystem() {
                           // GP jobs carry no charge and are excluded from every count
                           // below - but the count is SHOWN so the operator can see the
                           // numbers reconcile rather than silently not adding up.
+                          // All four stages here: a bill DOES depend on dispatch, unlike an
+                          // estimate. GP jobs are included - they are excluded from money,
+                          // not from workflow - and scrap is excluded from the testing
+                          // denominator only, per mrStageSummary.
+                          const stages = mrStageSummary(groupJobs, inspections);
                           const gpJobs = groupJobs.filter(j => isGpJob(j));
                           const billableJobs = groupJobs.filter(j => !isGpJob(j));
                           const scrapJobs = billableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
@@ -1903,6 +1915,14 @@ export default function BillingSystem() {
                               <td className="px-4 py-3 text-xs text-slate-500 align-top">
                                 <div><span className="font-bold text-slate-700">Challan:</span> {challans || (deliveredJobs.length > 0 ? 'Dispatched' : 'None')}</div>
                                 <div><span className="font-bold text-slate-700">Date:</span> {dates || '-'}</div>
+                              </td>
+                              <td className="px-4 py-3 align-top">
+                                <div className="space-y-0.5">
+                                  <StageCell label="External" state={stages.external} />
+                                  <StageCell label="Internal" state={stages.internal} />
+                                  <StageCell label="Testing" state={stages.testing} />
+                                  <StageCell label="Dispatch" state={stages.dispatch} notDoneLabel="not dispatched" />
+                                </div>
                               </td>
                               <td className="px-4 py-3 align-top">
                                 <div className="space-y-1.5">

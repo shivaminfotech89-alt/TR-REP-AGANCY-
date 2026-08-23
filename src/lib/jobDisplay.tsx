@@ -126,3 +126,46 @@ export function missingForTaxInvoice(agency: any): string[] {
 export function missingForEstimate(agency: any): string[] {
   return missingFields(agency, ['discomName', 'circleOfficeName']);
 }
+
+// ---------------------------------------------------------------------------
+// MR stage progress - one renderer, both screens
+// ---------------------------------------------------------------------------
+// Defined here rather than in either screen so the Estimate Generator and Billing cannot
+// present the same stage differently. The completeness rules themselves live in
+// lib/inspectionStage.ts; this only renders what that file decides.
+
+import type { StageState } from './inspectionStage';
+import { formatDDMMYYYY } from './utils';
+
+/**
+ * One stage cell: the completion DATE when every applicable job is done, otherwise the
+ * count still outstanding.
+ *
+ * Showing the outstanding count rather than a bare "Pending" is the point - partial
+ * progress must not read as "not started". `notDoneLabel` exists because dispatch is
+ * thought about as a yes/no event ("not dispatched") while inspections are thought about
+ * as a queue ("3 of 5 pending").
+ */
+export function StageCell({ label, state, notDoneLabel }: {
+  label: string;
+  state: StageState;
+  notDoneLabel?: string;
+}) {
+  const outstanding = Math.max(0, state.total - state.doneCount);
+  return (
+    <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+      <span className="text-[10px] uppercase tracking-wide text-slate-400 w-14 shrink-0">{label}</span>
+      {state.total === 0 ? (
+        <span className="text-[11px] text-slate-400">none applicable</span>
+      ) : state.complete ? (
+        <span className="text-[11px] font-mono font-semibold text-emerald-700">
+          {state.date ? formatDDMMYYYY(state.date) : 'done'}
+        </span>
+      ) : (
+        <span className="text-[11px] font-semibold text-amber-700">
+          {notDoneLabel || `${outstanding} of ${state.total} pending`}
+        </span>
+      )}
+    </div>
+  );
+}

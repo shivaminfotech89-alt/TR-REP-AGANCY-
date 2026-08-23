@@ -271,6 +271,32 @@ of the four that would survive a careful review of the method itself.
 
 ---
 
+## Note: where the "wasted margin" on wide screens actually comes from
+
+Two things create it, and only one was changed.
+
+1. **The screen's own `max-w-*` container.** Estimate Generator and Billing were
+   `max-w-6xl` (1152px), now `max-w-[1400px]`. Testing Report uses `max-w-7xl`; Dispatch
+   Challan uses `w-full max-w-full`, which is effectively no container. **Three conventions
+   exist, not one** - worth knowing before adding a fourth.
+2. **The layout's content padding.** `AppLayout.tsx:372` wraps every page in
+   `p-2.5 sm:p-4 md:p-6 print:p-0` - **24px per side, 48px total, at `md` and above**. That
+   applies to every screen in the app.
+
+**The padding was deliberately NOT changed**, and the reason is proportionality rather than
+risk: the request concerned two screens, and this touches all of them - including forms that
+read better narrow. Widening a global to satisfy two callers is how a layout stops having
+any intent.
+
+**If other screens feel cramped later, look here first.** The instinct will be to add
+another per-screen `max-width` override, which grows the set of conventions and leaves the
+padding untouched underneath. One change to `:372` would do what several overrides would
+approximate.
+
+`print:p-0` is already on that element, so nothing here reaches a printed document.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
