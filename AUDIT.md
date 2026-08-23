@@ -831,6 +831,41 @@ the sections, then decide the model.
 **Decision for now: keep the broadcast**, with a guard on the publish path (F29) so it
 cannot broadcast fallback-resolved content.
 
+### O14. No document records which agency issued it
+
+A job carries `billNo`, `billRefNo`, `billSentDate`, `billAmount`, `billStatus`,
+`estimateSentDate`, `estimateRefNo`, `estimateAmount`, `challanNo` — and **not one field
+naming the agency that issued them**. Verified at the write sites, not inferred:
+`BillingSystem.tsx:1136-1145` and `EstimateGenerate.tsx:883-891`. There is no `bills` or
+`estimates` collection either; documents are rendered on demand from the job plus whichever
+agency is **active at print time**.
+
+So the supplier identity of an issued document lived in exactly one place: `job.agencyId`.
+
+**This is the audit's second recurring shape — identity in a mutable field — applied to
+document provenance, and it is the most consequential instance found.** Scrap identity in
+`status` (F5) was erased by dispatch and recoverable from the inspection record. Here the
+field was erased by the bulk move, and there is no side record of the issuing agency at all:
+the reconstruction in `reverse-bulk-move.js` is the only in-database evidence, not because
+it is the best available but because the alternative never existed.
+
+**Two practical consequences:**
+
+1. **Reprinting cannot tell you what was issued.** The letterhead comes from the current
+   session. A reprint today shows the present state, not the document that was sent — so
+   the paper or PDF produced at the time is the only authority, and reprinting to "check" is
+   a trap that produces a confident wrong answer.
+2. **Every document issued from now on has the same gap.** 29 documents are affected today;
+   the count grows with use.
+
+**The fix is small and should be made before more documents are issued:** stamp
+`issuedByAgencyId` (and ideally the agency name and GSTIN as printed) onto the job in the
+same batch that writes `billNo` / `estimateSentDate`. A document's supplier is a fact about
+the past and belongs in an immutable field, not in a pointer that later writes can move.
+
+Not done here: it changes what a billing write stores, and the bulk-move reversal is in
+flight against exactly those documents. After the reversal.
+
 ### O13. "Save All for {agency}" still writes the screen's resolved view, not stored data
 
 **F34 fixed the publish paths and not this one.** `handleConfirmSaveSection` (scope ALL) and

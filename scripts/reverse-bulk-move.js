@@ -63,7 +63,16 @@ const WRITE_SINGLE_WITNESS = true;
   const hdr = t => console.log(`\n${'='.repeat(78)}\n${t}\n${'='.repeat(78)}`);
   const agencyById = Object.fromEntries(agencies.map(a => [a.id, a]));
   const atById = Object.fromEntries(atMasters.map(a => [a.id, a]));
-  const nameOf = id => agencyById[id]?.name || (id ? `${id} (unknown)` : '(none)');
+  // Name AND id, always. Agency names are not unique across owners - two agencies named
+  // "suchit" exist under two accounts (AUDIT F36). This script never RESOLVES by name (every
+  // identity here is an agency id carried by a witness record), but a log line reading
+  // "suchit -> suchit" would be unreadable, and the whole point of the printout is that a
+  // human can check it. Identity in the log is the id; the name is the label.
+  const nameOf = id => {
+    if (!id) return '(none)';
+    const a = agencyById[id];
+    return a ? `${a.name || '(unnamed)'} [${id}]` : `${id} (unknown - not visible to this account)`;
+  };
 
   const inspByJobId = {};
   inspections.forEach(i => { if (i.jobId) (inspByJobId[i.jobId] ||= []).push(i); });
