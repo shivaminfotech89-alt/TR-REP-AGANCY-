@@ -194,7 +194,13 @@ export default function AgencySettings() {
   if (loading) return <Loader2 className="w-6 h-6 animate-spin mx-auto mt-10 text-blue-600" />;
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
+    // 900px, not 672px. The form is two-column by construction (grid-cols-1
+    // md:grid-cols-2 on every tab) and Tailwind breakpoints are VIEWPORT-based, so on any
+    // desktop it goes two-column regardless of the container - which at 672px gave each
+    // field ~328px. The content and the container disagreed; 900px gives ~430px per field,
+    // which fits the pairs this form is actually made of (GSTIN/PAN, bank/IFSC,
+    // DISCOM/circle office). Region B breaks out wider still - see its own note.
+    <div className="max-w-[900px] mx-auto space-y-5">
       {/* ============================ CONTEXT BAR ============================
           The SCOPE everything below sits in, not a section you edit. "Switch Agency" was
           a card list, which implied it was content; it is the frame.
@@ -206,14 +212,21 @@ export default function AgencySettings() {
 
           The AT selector states "none active" explicitly. An absent selector and an
           unset one are indistinguishable, and that ambiguity cost real time. */}
-      <div className="bg-slate-900 text-white p-4 rounded-xl shadow-sm border border-slate-800">
-        <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+      <div className="bg-slate-900 text-white p-5 rounded-xl shadow-sm border border-slate-800">
+        {/* STACKED, not side by side. Two flex-1 selectors plus the Add button inside a
+            672px page left the agency select roughly 190px wide, and `min-w-0` - required
+            so a flex child CAN shrink - let it shrink below its content, truncating the
+            name. Nothing set a width or a truncate class; the truncation was emergent.
+            Full-width rows remove the competition rather than trading one squeeze for
+            another. */}
+        <div className="flex flex-col gap-3">
           <div className="flex-1 min-w-0">
             <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
               Agency
             </label>
             <div className="flex items-center gap-2">
               <select
+                title={activeAgency?.name || ''}
                 value={activeAgency?.id || ''}
                 onChange={e => setActiveAgencyId(e.target.value)}
                 className="flex-1 min-w-0 px-3 py-2 text-sm font-bold rounded-lg bg-slate-800 border border-slate-700 text-white focus:ring-1 focus:ring-blue-400"
@@ -261,10 +274,13 @@ export default function AgencySettings() {
           </div>
         </div>
 
-        <p className="text-[11px] text-slate-400 mt-2.5 leading-relaxed">
-          Everything below is scoped to these two. <strong className="text-slate-200">This Agency</strong> applies to
-          the agency; <strong className="text-slate-200">This AT Period</strong> applies to the tender period.
-          Changing either takes effect immediately across the whole app.
+        {/* ONE line. The bar frames the content below it, so it must read lighter than
+            what it frames - three lines at 11px gave it the visual weight of a section.
+            The fact that matters (these are the only immediate writes on the page) is
+            kept; the restatement of what each region covers is not, because the region
+            headings say it where it applies. */}
+        <p className="text-[11px] text-slate-400 mt-2.5">
+          Both take effect immediately across the app - everything else on this page saves explicitly.
         </p>
       </div>
 
@@ -273,7 +289,7 @@ export default function AgencySettings() {
           Rendered only while open - a permanently visible "Add New Agency" card sitting
           between the frame and "This Agency" implied it was part of one or the other. */}
       {showAddForm && (
-      <div className="bg-white p-6 rounded-xl shadow-xs border-2 border-blue-200">
+      <div className="bg-white p-5 rounded-xl shadow-xs border-2 border-blue-200">
         <div className="flex justify-between items-center mb-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Add New Agency</h2>
@@ -473,13 +489,13 @@ export default function AgencySettings() {
           the form below as tab 4. Moving it is Region B's work. */}
       {activeAgency && (
         <div>
-          <div className="flex items-baseline gap-3 mb-2 px-1">
-            <h2 className="text-sm font-black uppercase tracking-widest text-slate-800">This Agency</h2>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mb-2.5 px-1">
+            <h2 className="text-base font-black text-slate-900">This Agency</h2>
             <span className="text-[11px] text-slate-500">
               {activeAgency.name} - identity, tax, DISCOM routing, bank, letterhead
             </span>
           </div>
-          <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200 border-l-4 border-l-slate-400">
+          <div className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 border-l-4 border-l-slate-400">
             <EditAgencyForm agency={activeAgency} />
           </div>
         </div>
@@ -500,8 +516,8 @@ export default function AgencySettings() {
           the same problem in tidier clothes. */}
       {activeAgency && (
         <div className="relative left-1/2 -translate-x-1/2 w-[min(1400px,94vw)]">
-          <div className="flex items-baseline gap-3 mb-2 px-1">
-            <h2 className="text-sm font-black uppercase tracking-widest text-slate-800">This AT Period</h2>
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mb-2.5 px-1">
+            <h2 className="text-base font-black text-slate-900">This AT Period</h2>
             <span className="text-[11px] text-slate-500">
               Tender periods, divisions &amp; job number prefixes, allotment quotas
             </span>
@@ -511,7 +527,7 @@ export default function AgencySettings() {
             /* SAYS WHAT TO DO, not merely that nothing is here. A section that vanishes is
                indistinguishable from one that does not exist - which is exactly how hours
                were lost looking for divisions that were never missing, only unreachable. */
-            <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-6">
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-5">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                 <div className="min-w-0">
