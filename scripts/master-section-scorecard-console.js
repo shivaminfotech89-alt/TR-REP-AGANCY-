@@ -37,9 +37,19 @@
   //   2 = empty                     - the schedule must be entered (a reset-to-default may do it)
   //   1 = right schedule, scrap code missing or foreign - one row to add or one code to change
   //   0 = correct
+  // `emptyIsNormalHere` is true only for Overhauling: that section holds optional per-item
+  // overrides of UGVCL Schedule-A, and OH jobs price from Schedule-A when it is empty, so
+  // empty IS the correct state (AUDIT F31).
+  //
+  // This scorecard previously tested `h.isEmpty` on its own and labelled an empty
+  // Overhauling "empty - schedule needed", disagreeing with the in-app health line about
+  // the same section read from the same data. F31 changed checkMasterSection's `problems`
+  // but not this script's own labelling - the rule was fixed at one call site and not the
+  // other, which is exactly the pattern this audit keeps recording. Read `problems` and
+  // `emptyIsNormalHere`, never `isEmpty` alone.
   const scoreOf = h => {
     if (h.blocking) return 3;
-    if (h.isEmpty) return 2;
+    if (h.isEmpty && !h.emptyIsNormalHere) return 2;
     if (h.problems.length > 0) return 1;
     return 0;
   };
@@ -62,7 +72,9 @@
         agency: name,
         section: h.label,
         items: h.itemCount,
-        verdict: LABEL[score],
+        verdict: (h.emptyIsNormalHere && h.isEmpty)
+          ? 'empty (correct - overrides of Schedule-A)'
+          : LABEL[score],
         requiredScrapCode: h.requiredScrapCode ?? '-',
         scrapCodePresent: h.requiredScrapCode === null ? '-' : h.scrapCodePresent,
         foreignScrapCodes: h.foreignScrapCodes.join(', ') || '-',

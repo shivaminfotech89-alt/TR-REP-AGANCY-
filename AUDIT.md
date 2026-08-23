@@ -819,6 +819,37 @@ the sections, then decide the model.
 **Decision for now: keep the broadcast**, with a guard on the publish path (F29) so it
 cannot broadcast fallback-resolved content.
 
+### O13. "Save All for {agency}" still writes the screen's resolved view, not stored data
+
+**F34 fixed the publish paths and not this one.** `handleConfirmSaveSection` (scope ALL) and
+`handleExecuteFullSync` now send stored data for untouched sections. The per-agency
+**"Save All for {agency}"** button (`handleSaveAllToCurrentAgency`) still writes component
+state for all five sections unconditionally:
+
+```
+estimateMasterOverhauling: overhaulingData,   // and the other four
+```
+
+**Observed, not theorised.** MEGHA's Overhauling section was empty in Firestore and now
+holds the shipped 5-item all-null shell. Nothing wrote it deliberately: the screen resolved
+the empty section to the shipped default for display, and one press of "Save All for MEGHA"
+persisted that display as stored data. Textbook F27 (c)(1) — a fallback becoming storage
+through an ordinary save.
+
+**Harmless in this instance**, which is why it is an open item rather than a fix in flight:
+the Overhauling shell is all-null, and OH jobs price from Schedule-A whether the section is
+empty or holds the shell. Nothing changed for pricing. But the same button would have
+persisted a *misfiled* Wound Core the same way, and that would not have been harmless.
+
+**Not fixed now** because the button is in use during a hand repair, and changing what Save
+writes midway would mean the operator's next press stores something other than what they
+inspected. The fix is small: route it through `publishPlanFor`, exactly as F34 did for the
+publish paths, so untouched sections write back what is already stored.
+
+**Also worth noting:** F34's `editedSections` machinery already exists and this button
+ignores it. A rule implemented once and not applied at the second call site — the pattern
+this audit opened with.
+
 ### O12. `public_config/estimate_master` stays stale — accepted for now, with a stated expiry
 
 **Decision: do not publish.** The four agencies are repaired individually from the account
