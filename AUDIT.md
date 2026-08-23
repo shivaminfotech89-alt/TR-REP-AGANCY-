@@ -989,6 +989,37 @@ One honest caveat, not a reason to act: `cachedGlobalDefaultEstimateMaster` is s
 through it until the fetch lands on that page load. It is per-browser and self-correcting,
 and no write happens in that window.
 
+### O19. AT activation is decided in two places that disagree; the caller overrides the guard
+
+`addAtMaster` (`AgencyContext`) deliberately does NOT activate a new AT when one is already
+active for that agency — the F20 guard, `atMasters.some(a => a.id === activeAtMasterId &&
+a.agencyId === newAt.agencyId)`. `AtSettings.handleAdd` then calls `setActiveAtMasterId`
+**unconditionally**.
+
+**Today's behaviour is correct, and correct only by override.** A newly created AT does
+become active, which is what a tender rollover needs — but that outcome comes from the
+caller ignoring the context's policy, not from the policy.
+
+**The shape: a guard that is dead policy reading as live.** Anyone auditing `addAtMaster`
+alone would conclude the app deliberately preserves the current selection on creation. It
+does not. And the dangerous direction is the plausible one — someone "fixing" `AtSettings`
+to respect the guard would silently reintroduce the failure this was checked for: an
+operator creates AT 27-28, nothing switches, and they continue booking against last year's
+tender at the wrong percentage, the wrong allotment and the wrong counters.
+
+That is worse than an ordinary duplicated rule, because the two are not merely inconsistent
+— **the correct behaviour depends on one of them being ignored.**
+
+**The guard should be removed or aligned, not obeyed.** Aligning means `addAtMaster`
+activating unconditionally, matching what every caller wants; removing means deleting the
+guard and leaving activation to the caller as an explicit decision. Either is fine. Making
+the caller respect it is the one option that is wrong, which is exactly the change a reader
+of that function would be most likely to make.
+
+Distinct from the "rule enforced at one call site" pattern: there, a rule was applied
+somewhere and not elsewhere. Here it is applied in one place and **deliberately overridden**
+in the only place that calls it.
+
 ### O18. An AT's "Closed" status promises an enforcement that does not exist
 
 `AtSettings` offers "Mark as Closed" on an AT period. **Nothing enforces anything.** Traced
@@ -3182,6 +3213,75 @@ had it.
 required by `<input type="date">`), six `.xlsx` filename stamps, and four
 `new Date().getFullYear()` renders. See the note in the F18 pattern entry on why a
 field-name sweep returns these, and on `approvalDate` holding a non-date.
+
+### F42. New ATs continue the agency's job-number series instead of restarting it
+
+Closes **O2**'s open question, and the answer came from the domain rather than from
+preference: **prefixes belong to the division and the agency, not to the tender period.**
+"21 IS" is the same before and after a rollover, so the number after it must continue — a
+restart reissues "21 IS-1" for a different physical transformer, which is how **C1**'s
+collisions arose. F25 already seeded the FIRST AT of an agency from the agency's counters,
+so continuation was established at one boundary and absent at every later one. That
+asymmetry was a bug, not a design.
+
+**Seeded from actual job numbers, not from the counters.** `lastJobNumbers` is a *cache* of
+a fact that lives in the jobs collection, and it can sit low in ways the cache cannot see:
+
+- the real allocator (`NewJob`'s save transaction) only moves a counter **up to** the
+  highest number in that intake — it reconciles, it does not allocate;
+- it writes only when an AT or agency document resolved, so any job saved with no active AT
+  advanced nothing;
+- `incrementJobNoCounter` looks exactly like the allocator and has zero call sites (**A2**).
+
+Seeding from the cache would inherit all three gaps, and the failure would be the precise
+one this exists to prevent. So the seed is the **max of both** — every stored counter across
+that agency's ATs and its agency record, AND the numeric tail of every job number found for
+that agency — which can never be lower than either alone.
+
+**Per counter key, across every AT — not from the most recent one.** An AT created later but
+used less would otherwise lower the series.
+
+**Both the `${div}_CRGO` and the bare `${div}` key are seeded from the same maximum.**
+`getNextJobNoInfo` reads one and falls back to the other for CRGO only; seeding one would
+let CRGO restart independently while every other core type continued — the legacy split
+producing a partial failure that looks like a whole success.
+
+#### Unparseable job numbers: report and proceed, never block
+
+A job number with no trailing digits cannot be continued from. Those are **counted, listed
+verbatim, and shown to the operator creating the AT** — in the AT panel, not a console log,
+because the person creating the AT is the person who needs it. The message states the
+consequence in plain terms: the starting number for the named division may be lower than the
+highest already issued, **and a duplicate will be refused at save if it occurs.**
+
+That last clause is the point. It tells the operator the failure is *caught* rather than
+silent, which is the difference between a warning they can act on later and one they must
+act on now. Blocking AT creation instead would stop a time-sensitive rollover over a
+historical record nobody can change — the wrong trade: a slightly low seed costs one refused
+save, while a block costs the agency all intake.
+
+A failed seed query is caught and warned, never fatal, for the same reason.
+
+### F43. A new AT's percentages are pre-filled from the previous one, visibly
+
+Skipping the AT percentages was the remaining **silent** wrong result on the rollover path:
+`getAtPercentageForCore` falls back to `4`, and every estimate under that tender prices at
+it while looking correct.
+
+**Not fixed by inheriting the value at write time.** An inherited percentage is *more*
+dangerous than the placeholder it replaces: 4% is obviously unset, whereas last year's 8%
+looks deliberate. That is the F1 shape — a plausible value indistinguishable from a
+configured one — and applying it behind the operator would have made the defect harder to
+see, not easier.
+
+Instead the **create form is pre-filled** from the agency's most recent AT, with a panel
+above the fields stating where the numbers came from and that they are a starting point
+rather than defaults: *"check them against the new tender before creating. A carried-over
+percentage prices every estimate under this AT and looks deliberate whether it is or not."*
+
+The values are therefore on screen before submission and are chosen by the act of
+submitting. The general rule: **when a default would be indistinguishable from a decision,
+put it where the decision is made rather than where the write happens.**
 
 ---
 

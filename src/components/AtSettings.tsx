@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAgency, AtMaster } from '../lib/AgencyContext';
+import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
@@ -21,6 +21,11 @@ function atPercentageHint(value: string): string {
 export function AtSettings() {
   const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
+  // Kept until dismissed, not a toast. It reports what the new AT's job numbering will
+  // start from, and any job number that could not be read - the operator creating the AT
+  // is the person who needs that, and a console log reaches the wrong person entirely.
+  const [seedReport, setSeedReport] = useState<AtSeedReport | null>(null);
+  const [seedReportAtNo, setSeedReportAtNo] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
@@ -66,6 +71,85 @@ export function AtSettings() {
 
   const agencyAts = atMasters.filter(at => at.agencyId === activeAgency?.id);
 
+  /**
+   * The AT a new one would carry its percentages over from - the agency's most recent by
+   * startDate. `startDate` is a tender date the operator types, not a creation time, so
+   * this is a best guess and is LABELLED as one wherever it is used.
+   */
+  const carryOverSource = agencyAts.length
+    ? [...agencyAts].sort((x, y) => (y.startDate || 0) - (x.startDate || 0))[0]
+    : null;
+
+  /**
+   * Opens the create form PRE-FILLED from the previous AT rather than defaulting the write.
+   *
+   * Deliberately not an inherited default applied at save time. An inherited value is MORE
+   * dangerous than a placeholder: 4% is obviously unset, whereas last year's 8% looks
+   * deliberate and would price a whole tender wrongly while appearing configured - the F1
+   * shape exactly. Pre-filling puts the numbers on screen before the operator submits, so
+   * they are chosen by the act of submitting rather than applied behind it, and the panel
+   * says where they came from.
+   */
+  const seedPanel = seedReport && (
+    <div className="p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/60 space-y-2">
+      <div className="flex items-start justify-between gap-3">
+        <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-900">
+          Job numbering for AT {seedReportAtNo}
+        </h4>
+        <button type="button" onClick={() => setSeedReport(null)}
+          className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 shrink-0">Dismiss</button>
+      </div>
+      {Object.keys(seedReport.counters).length === 0 ? (
+        <p className="text-[11px] text-indigo-900">
+          No existing job numbers found for this agency, so numbering starts at 1.
+        </p>
+      ) : (
+        <>
+          <p className="text-[11px] text-indigo-900">
+            Continues the agency's existing series - it does not restart. Scanned {seedReport.jobsScanned} job(s).
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(seedReport.counters).sort().map(([k, v]) => (
+              <span key={k} className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-[10px] font-mono text-indigo-900">
+                {k}: next is {Number(v) + 1}
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+      {seedReport.unparsed.length > 0 && (
+        /* REPORT AND PROCEED. Blocking a tender rollover on historical job numbers nobody
+           can now change would stop intake for the whole agency; a slightly low seed is
+           caught by the duplicate guard at save. So it is stated plainly, with the
+           consequence, rather than either hidden or made fatal. */
+        <div className="p-2.5 rounded-lg bg-amber-100 border border-amber-400 text-[11px] text-amber-900 leading-relaxed">
+          <strong className="font-bold block">
+            {seedReport.unparsed.length} job number(s) could not be read.
+          </strong>
+          <span className="font-mono">{seedReport.unparsed.slice(0, 12).join(', ')}</span>
+          {seedReport.unparsed.length > 12 && ` +${seedReport.unparsed.length - 12} more`}
+          <p className="mt-1">
+            So the starting number for {seedReport.unparsedKeys.join(', ') || 'the affected division(s)'} may
+            be lower than the highest already issued. A duplicate will be refused at save if it occurs.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+
+  const openAddForm = () => {
+    if (carryOverSource) {
+      setNewAt(prev => ({
+        ...prev,
+        atPercentageCRGO: String(carryOverSource.atPercentageCRGO ?? carryOverSource.atPercentage ?? 4),
+        atPercentageAmorphous: String(carryOverSource.atPercentageAmorphous ?? carryOverSource.atPercentage ?? 4),
+        atPercentageWoundCore: String(carryOverSource.atPercentageWoundCore ?? carryOverSource.atPercentage ?? 4),
+      }));
+    }
+    setShowAddForm(true);
+  };
+
+
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAt.atNumber) return;
@@ -79,7 +163,7 @@ export function AtSettings() {
     }
     setIsSubmitting(true);
     try {
-      const createdId = await addAtMaster({
+      const created = await addAtMaster({
         atNumber: newAt.atNumber,
         name: newAt.name,
         startDate: new Date(newAt.startDate).getTime(),
@@ -95,7 +179,8 @@ export function AtSettings() {
       // Creating an AT is a clear signal of intent to work with it, so make it active.
       // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
       // a newly created AT showed a card with no way into its configuration.
-      if (createdId) setActiveAtMasterId(createdId);
+      if (created?.id) setActiveAtMasterId(created.id);
+      if (created?.seed) { setSeedReport(created.seed); setSeedReportAtNo(newAt.atNumber); }
       setShowAddForm(false);
       setNewAt({
         atNumber: '',
@@ -441,7 +526,7 @@ export function AtSettings() {
 
             {!showAddForm ? (
               <button 
-                onClick={() => setShowAddForm(true)} 
+                onClick={openAddForm} 
                 className="flex items-center px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors"
               >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Add AT Period
@@ -449,7 +534,9 @@ export function AtSettings() {
             ) : null}
           </div>
 
-          {showAddForm && (
+          {seedPanel}
+
+      {showAddForm && (
             <form onSubmit={handleAdd} className="space-y-4 bg-slate-50 p-4 border border-indigo-200 rounded-xl">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h4 className="text-xs font-bold uppercase text-indigo-900">Create New AT / Tender Period</h4>
@@ -467,6 +554,13 @@ export function AtSettings() {
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Description (Optional)</label>
                   <input type="text" value={newAt.name} onChange={e => setNewAt({...newAt, name: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" placeholder="e.g. Annual Tender" />
                 </div>
+                {carryOverSource && (
+                  <div className="sm:col-span-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-[11px] text-amber-900 leading-relaxed">
+                    <strong className="font-bold">AT percentages below are carried over from {carryOverSource.atNumber || 'the previous AT'}.</strong>{' '}
+                    They are a starting point, not defaults - check them against the new tender before creating.
+                    A carried-over percentage prices every estimate under this AT and looks deliberate whether it is or not.
+                  </div>
+                )}
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Start Date</label>
                   <input required type="date" value={newAt.startDate} onChange={e => setNewAt({...newAt, startDate: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" />

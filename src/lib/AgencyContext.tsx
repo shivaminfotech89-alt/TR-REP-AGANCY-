@@ -149,6 +149,20 @@ export interface AllotmentRecord {
   addedAt: number;
 }
 
+/**
+ * What seeding a new AT actually found. Returned to the caller so the OPERATOR sees it -
+ * a console log reaches the wrong person entirely.
+ */
+export interface AtSeedReport {
+  /** Counter keys and the starting number seeded for each. */
+  counters: Record<string, number>;
+  /** Job numbers whose numeric tail could not be read, verbatim. */
+  unparsed: string[];
+  /** Counter keys affected by an unparseable job number. */
+  unparsedKeys: string[];
+  jobsScanned: number;
+}
+
 export interface AtMaster {
   id: string;
   atNumber: string;
@@ -327,7 +341,7 @@ interface AgencyContextType {
   atMasters: AtMaster[];
   activeAtMaster: AtMaster | null;
   setActiveAtMasterId: (id: string) => void;
-  addAtMaster: (atData: Omit<AtMaster, 'id' | 'ownerId'>) => Promise<void>;
+  addAtMaster: (atData: Omit<AtMaster, 'id' | 'ownerId'>) => Promise<{ id: string; seed: AtSeedReport } | undefined>;
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
 
   getNextJobNoInfo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
@@ -730,7 +744,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /** Returns the new AT's id so the caller can activate it (AtSettings does). */
-  const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>): Promise<string | undefined> => {
+  const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>): Promise<{ id: string; seed: AtSeedReport } | undefined> => {
     if (!auth.currentUser) return undefined;
     try {
       // Refuse to write an AT with no agency. `agencyId: ''` produces a document that is
@@ -769,12 +783,87 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       // from an arbitrary old number. A new tender starts its own series - which is what
       // per-AT counters are for. Staleness only exists from the second AT onward, and
       // that is exactly where this does not seed.
-      const agencyHasAnyAt = atMasters.some(a => a.agencyId === atData.agencyId);
+      // SEED THIS AT'S JOB-NUMBER COUNTERS FROM THE HIGHEST NUMBER THE AGENCY HAS
+      // ACTUALLY ISSUED - every AT, not only the first (AUDIT F42, closing O2).
+      //
+      // WHY EVERY AT. Prefixes belong to the DIVISION and the agency, not to the tender
+      // period: "21 IS" is the same before and after a rollover. So a new AT that starts
+      // its counters at zero reissues "21 IS-1" for a different physical transformer -
+      // which is exactly how C1's collisions arose. Continuation is already the behaviour
+      // at the FIRST AT boundary and was absent at every later one; that asymmetry was a
+      // bug, not a design.
+      //
+      // WHY FROM JOBS AND NOT FROM COUNTERS. `lastJobNumbers` is a CACHE of a fact that
+      // lives in the jobs collection, and it can sit low in ways the cache cannot see:
+      //   - the real allocator (NewJob's save transaction) only moves a counter UP to the
+      //     highest number in that intake - it reconciles, it does not allocate;
+      //   - it writes only when an AT or agency doc resolved, so jobs saved with no active
+      //     AT advanced nothing;
+      //   - `incrementJobNoCounter` looks like the allocator and has zero call sites (A2).
+      // Seeding from the cache would inherit every one of those gaps, and the failure is
+      // the precise one this exists to prevent. So: the max of BOTH - actual job numbers
+      // and every stored counter - which can never be lower than either alone.
+      const agencyIdForSeed = String(atData.agencyId).trim();
       const callerCounters = (atData as any).lastJobNumbers;
-      const seededCounters =
-        (!agencyHasAnyAt && Object.keys(callerCounters || {}).length === 0)
-          ? { ...(agencies.find(a => a.id === atData.agencyId)?.lastJobNumbers || {}) }
-          : (callerCounters || {});
+      const seededCounters: Record<string, number> = { ...(callerCounters || {}) };
+      const seedUnparsed: string[] = [];
+      const seedUnparsedKeys = new Set<string>();
+      let seedJobsScanned = 0;
+
+      const bump = (key: string, value: number) => {
+        if (!key || !Number.isFinite(value) || value <= 0) return;
+        if (!seededCounters[key] || value > seededCounters[key]) seededCounters[key] = value;
+      };
+
+      try {
+        // Every stored counter for this agency - all its ATs, plus the agency record.
+        // Read from state rather than re-queried: these are already agency-scoped here.
+        atMasters
+          .filter(a => a.agencyId === agencyIdForSeed)
+          .forEach(a => Object.entries(a.lastJobNumbers || {}).forEach(([k, v]) => bump(k, Number(v))));
+        const agencyDoc = agencies.find(a => a.id === agencyIdForSeed);
+        Object.entries(agencyDoc?.lastJobNumbers || {}).forEach(([k, v]) => bump(k, Number(v)));
+
+        // The authority: the numbers actually on jobs.
+        const jobSnap = await getDocs(query(
+          collection(db, 'jobs'),
+          where('ownerId', '==', auth.currentUser.uid),
+          where('agencyId', '==', agencyIdForSeed)
+        ));
+        jobSnap.docs.forEach(d => {
+          const j: any = d.data();
+          seedJobsScanned++;
+          const division = String(j.division ?? '').trim();
+          if (!division) return;
+          const key = getCounterKey(division, j.coreType || 'CRGO');
+          // The numeric TAIL. "21 IS-40" -> 40. A number that does not end in digits
+          // cannot be continued from and is reported rather than guessed at.
+          const raw = String(j.jobNo ?? '').trim();
+          const m = raw.match(/(\d+)\s*$/);
+          if (!m) {
+            if (raw) { seedUnparsed.push(raw); seedUnparsedKeys.add(key); }
+            return;
+          }
+          const n = Number(m[1]);
+          bump(key, n);
+          // CRGO is counted under EITHER `${div}_CRGO` or a bare `${div}` key, and
+          // getNextJobNoInfo reads one and falls back to the other. Seeding only one lets
+          // CRGO restart independently while every other core type continues.
+          if (key.endsWith('_CRGO')) bump(division, n);
+        });
+      } catch (seedErr) {
+        // A failed seed must not block a tender rollover. The AT is still created; the
+        // counters simply start from whatever the caller supplied, and a duplicate is
+        // refused at save rather than issued.
+        console.warn('Could not seed job-number counters from existing jobs:', seedErr);
+      }
+
+      const seedReport: AtSeedReport = {
+        counters: seededCounters,
+        unparsed: [...new Set(seedUnparsed)],
+        unparsedKeys: [...seedUnparsedKeys],
+        jobsScanned: seedJobsScanned,
+      };
 
       const newAt = { ...atData, lastJobNumbers: seededCounters, ownerId: auth.currentUser.uid };
       // Creation time from the server clock - see the note in addAgency. `startDate` is the
@@ -793,7 +882,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         a => a.id === activeAtMasterId && a.agencyId === newAt.agencyId
       );
       if (!activeForThisAgency) setActiveAtMasterId(newRef.id);
-      return newRef.id;
+      return { id: newRef.id, seed: seedReport };
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'atMasters');
       throw err;
