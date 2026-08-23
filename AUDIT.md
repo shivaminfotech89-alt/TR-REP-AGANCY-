@@ -228,6 +228,49 @@ audit has as many scripts as entries. Lint is a floor, not a finish line.
 
 ---
 
+## Pattern: a sound sweep whose evidence was clipped before the judgement
+
+The three notes above are all failures of METHOD - a value standing in for missing data, a
+rule applied at one site and not the others, a search shaped so it cannot see the thing it
+is looking for. This one is different, and worse for being harder to notice: **the method
+was correct, the search reached the site, and the answer was still wrong.**
+
+**What happened (F41).** A sweep for raw ISO dates in printed documents ran two passes and
+reported the documents clear. A third report then found `Dated 2026-08-23` on the printed
+certificate page - a site in the same file, in a printed document. The field-name pass HAD
+surfaced that line. It was printed truncated to 135 characters for readability, and the line
+ends twenty characters before the `{billDate}` that made it a hit. The visible fragment read
+as a bill-NUMBER sentence, so it was discarded - **and never listed among the rejections**,
+so nothing in the report showed that a candidate had been considered and dropped.
+
+Two independent failures, either of which alone would have been survivable:
+
+1. **The evidence was clipped before the judgement.** The search found it; the display lost
+   it. No amount of improving the search would have helped, which is why this is not a
+   variant of the note above.
+2. **The rejection was invisible.** A report listing only what it accepted cannot be
+   reviewed for what it wrongly threw away. Someone re-reading it - including the person who
+   wrote it - sees a clean result, not a decision.
+
+**Working rules:**
+
+- **Never truncate the output a sweep is judged from.** Print the whole matched line, however
+  ugly. The evidence that decides a hit is as likely to sit at column 150 as at column 10,
+  and a formatter added for readability is a filter nobody remembers applying.
+- **Always list rejected candidates, with the reason.** A rejection that is never printed
+  cannot be reviewed. "Found 4, fixed 4" is a weaker claim than "found 31, fixed 4, rejected
+  27 for these reasons" - the second can be audited and the first has to be trusted.
+- **Report the count the search returned, not only the count that survived triage.** The gap
+  between them is where this class of error lives.
+
+**Why it belongs beside the others.** The three method failures produce a wrong answer from a
+flawed process, which is at least discoverable by examining the process. This produces a
+wrong answer from a sound process, and examining the process finds nothing amiss - the fault
+is in a rendering step that feels like presentation rather than reasoning. It is the only one
+of the four that would survive a careful review of the method itself.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
@@ -3002,7 +3045,48 @@ and estimate table bodies were read directly to cover that, but reading is weake
 than a pattern match, and F18's whole lesson is that a sweep can be complete against its own
 definition and still miss the case.
 
-**Not changed, and correctly so:** fifteen `value=` bindings on date controls (ISO is
+#### CORRECTION — F41's completeness claim was false, and the reason matters
+
+F41 stated that both passes "found `:2960` and nothing else in a printed document". **That
+was wrong.** A third report found `Dated 2026-08-23` on the printed CERTIFICATE page
+(`BillingSystem.tsx:2799`), a site in the same file, in a printed document, that F41 declared
+clear.
+
+**The search reached it. The triage lost it.** The field-name pass DID surface line 2799 —
+it is in the output F41 was written from. That output was truncated to 135 characters per
+hit for readability, and at 135 characters the line ends twenty characters before
+`{billDate}`. What remained looked like a bill-NUMBER sentence, so it was dropped, and not
+even listed among the rejections.
+
+**The shape of the error, which is the transferable part:** F41 asserted completeness
+*"in a printed document"* when what it had actually established was completeness *within
+what the method could see* — and the method's reach had been narrowed after the fact by a
+display truncation. **A claim scoped to the tool, stated as though scoped to the domain.**
+
+That is the same defect as the `isLegacy` blacklist (four substrings, verdict stated as "is
+this the CRGO card") and the `KNOWN_SCRAP` list (four codes, verdict stated as "is there a
+stray scrap row"), now applied to a claim about *coverage* rather than about data. Each was
+a confident conclusion from an incomplete test; this one was a confident conclusion about
+how complete a test had been.
+
+**Left as a correction rather than an edit.** The original claim is above, wrong, with this
+underneath — because the next sweep will be tempted to make the same assertion, and an entry
+quietly rewritten to be right teaches nothing.
+
+**Working rule added:** never truncate the output a sweep is triaged from. Print the whole
+matched line, however ugly. The evidence that decides a hit is as likely to be at column 150
+as at column 10.
+
+**The third pass, done by VALUE ORIGIN rather than by field name or formatter call:** find
+every expression that can *produce* an ISO string (`toISOString`, `split('T')[0]`,
+`slice(0,10)`), name the variables they flow into, then find every render of those variables
+anywhere — prose, attribute or bare. Ten carriers across five files; eleven renders; **one
+raw**, `:2799`, now fixed. Every other render of an ISO carrier already calls the formatter,
+including `:2997`, which prints the same value in the same `Dated` sentence two hundred lines
+below the broken one — the pattern was copied and the formatter added, but the original never
+had it.
+
+**Not changed, and correctly so:** thirteen `value=` bindings on date controls (ISO is
 required by `<input type="date">`), six `.xlsx` filename stamps, and four
 `new Date().getFullYear()` renders. See the note in the F18 pattern entry on why a
 field-name sweep returns these, and on `approvalDate` holding a non-date.

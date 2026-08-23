@@ -2788,18 +2788,24 @@ export default function BillingSystem() {
               className={activeDocTab === 'all' || activeDocTab === 'certificate' ? 'block' : 'hidden print:block'}
             >
               <div className="flex flex-col justify-center h-full my-auto">
-                <div className="border-2 border-black p-8 my-auto flex flex-col justify-between">
-                  <div className="text-center mb-6">
+                {/* Content-sized box: nothing here is absolutely positioned, so the
+                    signature escaping the border is the CONTENT being taller than the
+                    printable A4 area, not an element placed over it. `justify-between`
+                    also did nothing - it distributes free space, and a content-sized
+                    column has none - so it is dropped rather than left looking load-bearing.
+                    Spacing reduced just enough to fit; the structure is unchanged. */}
+                <div className="border-2 border-black p-6 my-auto flex flex-col">
+                  <div className="text-center mb-4">
                     <h2 className="text-lg font-black uppercase border-b-2 border-black inline-block tracking-wider pb-1">
                       CERTIFICATE
                     </h2>
                   </div>
 
                   <p className="text-xs text-black leading-loose text-justify font-medium">
-                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{billDate}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certMonthsText || 'Twelve/Eighteen'} months from the date to delivery.
+                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certMonthsText || 'Twelve/Eighteen'} months from the date to delivery.
                   </p>
 
-                  <div className="text-right mt-12 pt-6">
+                  <div className="text-right mt-10">
                     <p className="font-bold text-xs">For, {activeAgency?.name || ''}</p>
                     <p className="text-[10px] text-slate-500 mt-6">(Auth Sign.)</p>
                   </div>
