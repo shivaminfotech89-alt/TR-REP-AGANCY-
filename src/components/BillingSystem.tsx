@@ -2725,6 +2725,26 @@ export default function BillingSystem() {
           </div>
 
           {/* PRINTABLE DOCUMENTS CONTAINER */}
+          {/* REPRINT WARNING - screen only, never on the sheet itself.
+              These figures are RECALCULATED from today's master and today's AT
+              percentage. They are not a record of what was sent: the master can have been
+              edited since, and the AT percentage follows the AT currently selected rather
+              than the one the job was booked under. So a reprint can differ from the copy
+              on file, silently and without either document being wrong.
+
+              print:hidden - the printed sheet is deliberately untouched. A caveat printed
+              onto a document that goes to UGVCL would be worse than the ambiguity it
+              describes. */}
+          {selectedJobsData.some((j: any) => j.billNo || j.billSentDate) && (
+            <div className="print:hidden mb-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-[12px] text-amber-900 leading-relaxed">
+              <strong className="font-bold">Already sent - this is a recalculation, not the copy that was issued.</strong>
+              <p className="mt-0.5">
+                Amounts below are worked out from the estimate master and AT percentage <em>as they are now</em>.
+                If either changed since the bill was sent, this will differ from the document on file.
+                <strong> The copy on file is what was sent.</strong>
+              </p>
+            </div>
+          )}
           <div id="printable-billing-container" className="space-y-8 print:space-y-0">
 
             {/* ==================== PAGE 1: FORWARDING LETTER ==================== */}

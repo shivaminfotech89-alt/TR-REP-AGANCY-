@@ -202,6 +202,19 @@ thing. The distinction:
 | grep for the old pattern is empty | the MR list opens with the newest MR on top |
 | the guard exists in the code | saving with a bad value is actually refused |
 
+**A check made for one instance of a change must be carried BACK to the instances made
+before it.** The `serverTimestamp()` work happened in two passes. The second (F38, agencies
+and ATs) checked `firestore.rules` first and recorded "checked, not assumed" — those
+validators do not name `createdAt`, so a Timestamp passes. The first (F23, inspections) was
+made earlier and never revisited. `isValidInspection` DOES name it, and requires a number or
+a string, so every new inspection was denied for hours (F45).
+
+**The verification existed. It simply was not applied backwards.** That is a distinct
+failure from not thinking of the check: the thinking had been done, written down, and
+attached to the wrong half of the work. When a later instance of a change turns up a
+precondition, **go back and re-run it against every earlier instance** — the earlier ones are
+exactly the code that was written before anyone knew to look.
+
 **A field-name sweep returns non-dates, and that is not a defect to fix.** Running the
 sweep again later (F41) surfaced `approvalDate` — a date-named field that can hold
 `AT 26-27`, because the Bill Date and Appr Date controls on the billing screen are
@@ -3282,6 +3295,103 @@ percentage prices every estimate under this AT and looks deliberate whether it i
 The values are therefore on screen before submission and are chosen by the act of
 submitting. The general rule: **when a default would be indistinguishable from a decision,
 put it where the decision is made rather than where the write happens.**
+
+### F44. The estimate master records when it was last edited, and reprints say they are recalculations
+
+Two small changes, both correct regardless of how the per-AT-master question is settled.
+
+**1. `estimateMasterEditedAt` / `estimateMasterEditedBy`.** Every per-agency master save now
+stamps them. Without this, *"was this estimate produced before or after the rates changed"*
+is **unanswerable** — and that question decides whether a figure on an issued document can
+still be reproduced. `updatedAt` on a job is a different fact; the agency record carried no
+stamp for its master at all.
+
+`serverTimestamp()`, for A5's reason: a stamp from the same browser clock as the thing it
+dates cannot corroborate it. `formatDDMMYYYY` already reads Timestamps (F23).
+
+The name is scoped on purpose — **`estimateMasterEditedAt`, not `updatedAt`.** The agency
+record holds a dozen unrelated things, and a generic name would be read as "the agency
+changed" and would be wrong the moment someone edits a bank detail. Shown on the master
+screen itself, because the question it answers is asked while looking at the master.
+
+**2. The reprint warning.** A reopened estimate or bill that has already been sent now says
+so on screen:
+
+> *Already sent — this is a recalculation, not the copy that was issued. Amounts below are
+> worked out from the estimate master and AT percentage as they are now. If either changed
+> since the estimate was sent, this will differ from the document on file. **The copy on file
+> is what was sent.***
+
+This addresses the genuinely misleading half of the problem. A reprint has always been a
+recomputation — the master can have been edited since, and the AT percentage follows the AT
+currently *selected* rather than the one the job was booked under — and nothing said so, so
+a differing reprint read as an error in one document or the other rather than as two
+correct answers to different questions. Same class as F37's finding that a reprinted invoice
+takes its letterhead from the current session.
+
+**Screen only, `print:hidden`.** A caveat printed onto a document going to UGVCL would be
+worse than the ambiguity it describes.
+
+**What this does NOT fix**, and is deliberately left: an estimate for a job booked under one
+AT and produced after another became active is still priced at the active AT's percentage.
+The warning makes the recomputation visible; it does not make it right. That is the open
+question about whether the master should be per-AT at all — which turns on whether UGVCL
+reprices by changing item rates or only the percentage, and is being checked against the
+tender rather than guessed at here.
+
+### F45. Inspections could not be saved at all — and every Firestore failure was silent
+
+Two defects, one mine and one long-standing. The second is the more important.
+
+**1. The rules reject a Timestamp `createdAt` on an inspection.** `firestore.rules:96`
+requires `createdAt` to be `number` or `string`. F23 changed both inspection screens to
+`serverTimestamp()`, which resolves to a Firestore `Timestamp` — neither — so
+`isValidInspection()` returned false and **every new inspection was denied**.
+
+It looked intermittent rather than broken because `createdAt` is written on FIRST CREATE
+only (`if (!jobData.inspectionId)`): edits to existing records carried no `createdAt`, passed
+validation, and saved normally. New inspections did not.
+
+**Reverted to `Date.now()`** rather than widening the rule — a rules deploy in the middle of
+a save outage is the wrong order of operations, and the property lost is smaller than it
+looked: `inspectionDate` is operator-entered anyway, so a server-stamped `createdAt` sits
+beside a hand-typed date and corroborates nothing on its own. Widening the rule can be a
+deliberate change later.
+
+**How it got in: the check existed and was not carried back.** See the pattern note above —
+F38 checked the rules for the same change to agencies and ATs, and recorded that it had. F23
+predated that check and never received it.
+
+**Data:** nothing was written and nothing was corrupted. Inspections entered today were lost
+unless the form was still open.
+
+#### 2. Every Firestore failure in the app was invisible — this is the wider defect
+
+`handleFirestoreError` logged to the console and **rethrew**. Every caller wraps it in a
+`catch`, so the rethrow escaped as an **unhandled rejection**: no message, no state change,
+the spinner simply stopped. The screen was indistinguishable from a successful save.
+
+**That was true of every write in the app**, not only inspections. The inspection bug is
+merely the first failure common enough to expose it — and an operator who had just typed a
+full inspection saw a form that looked saved and navigated away from data that was never
+written.
+
+Now it shows a message naming **what failed and, first, that nothing was saved**:
+
+> *Could not update the database.*
+> ***NOTHING WAS SAVED. Your entry is still on screen - do not navigate away until it
+> saves.***
+> *The database refused the write. This usually means a field is in a shape the security
+> rules do not accept, or you are signed in as an account without access to this agency.*
+
+Deliberate choices: the **consequence leads**, because "is it safe to leave this screen" is
+the only question the operator actually needs answered, and a generic "an error occurred"
+does not answer it — an operator who cannot tell will assume the save worked, because it
+usually does. Read operations get different wording (*"what you see may be incomplete"*),
+since nothing was at risk. Firestore error codes are translated rather than shown;
+`permission-denied` tells an operator nothing they can act on. The rethrow is **kept**, so
+callers' `finally` blocks still clear their submitting state and any caller wanting to
+handle the error itself still can — this adds a floor, it does not take over.
 
 ---
 

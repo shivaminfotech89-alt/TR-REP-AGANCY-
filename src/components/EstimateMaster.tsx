@@ -12,6 +12,9 @@ import {
   Edit2, Save, FileSpreadsheet, Loader2, X, ChevronDown, ChevronUp, Plus, Trash2, 
   Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
 } from 'lucide-react';
+import { serverTimestamp } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
+import { formatDDMMYYYY } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
 import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
@@ -604,7 +607,7 @@ export default function EstimateMaster() {
         updatePayload.estimateMasterCircleLimits = circleLimitsData;
       }
 
-      await updateAgency(activeAgency.id, updatePayload);
+      await updateAgency(activeAgency.id, { ...updatePayload, ...editStamp() });
       setEditingSection(null);
       setPendingSaveSection(null);
       setSyncSuccessMsg(`✓ Saved ${section} rates specifically for "${activeAgency.name}". (Other users and agencies are NOT affected).`);
@@ -785,6 +788,27 @@ export default function EstimateMaster() {
   };
 
   // Trigger Save
+  /**
+   * WHEN THE RATES LAST CHANGED, and by whom.
+   *
+   * Without this, "was this estimate produced before or after the master was edited" is
+   * unanswerable - and that question decides whether a figure on an issued document can
+   * still be reproduced. The agency document carries no such stamp today; `updatedAt` on a
+   * job says when the JOB changed, which is a different fact.
+   *
+   * serverTimestamp() rather than Date.now() for A5's reason: a stamp from the same
+   * browser clock as the thing it dates cannot corroborate it. formatDDMMYYYY already
+   * reads Timestamps (F23).
+   *
+   * Scoped name on purpose - `estimateMasterEditedAt`, not `updatedAt`. The agency record
+   * holds a dozen unrelated things; a generic name would be read as "the agency changed"
+   * and would be wrong the moment anyone edits a bank detail.
+   */
+  const editStamp = () => ({
+    estimateMasterEditedAt: serverTimestamp(),
+    estimateMasterEditedBy: auth.currentUser?.email || auth.currentUser?.uid || '',
+  });
+
   const handleInitiateSave = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     // Gates BOTH destinations - the per-agency save and the publish modal behind it.
     if (blockSaveIfCodeProblems(section, getSectionData(section))) return;
@@ -817,7 +841,7 @@ export default function EstimateMaster() {
         estimateMasterOverhauling: overhaulingData,
         estimateMasterCircleLimits: circleLimitsData,
       };
-      await updateAgency(activeAgency.id, payload);
+      await updateAgency(activeAgency.id, { ...payload, ...editStamp() });
       setEditingSection(null);
       setSyncSuccessMsg(`✓ Successfully saved all rates for "${activeAgency.name}". Other users and agencies are NOT affected.`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
@@ -1521,6 +1545,17 @@ export default function EstimateMaster() {
               </span>
             )}
           </div>
+          {/* When the rates last changed. Shown beside the master itself, because the
+              question it answers - "could this estimate predate the current rates" - is
+              asked while looking at the master, not while looking at the agency record. */}
+          {(activeAgency as any)?.estimateMasterEditedAt && (
+            <p className="text-[11px] text-slate-500 mt-1">
+              Rates last edited {formatDDMMYYYY((activeAgency as any).estimateMasterEditedAt)}
+              {(activeAgency as any).estimateMasterEditedBy
+                ? ` by ${(activeAgency as any).estimateMasterEditedBy}` : ''}
+              . Estimates produced before that date were priced from different rates.
+            </p>
+          )}
           <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
             {isSuperAdmin 
               ? 'Administrator Mode: Standard tender rate master for CRGO, Amorphous, Wound Core, Overhauling & Circle Limits. You can edit for your agency or publish system-wide defaults.'

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, writeBatch, doc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
@@ -491,13 +491,20 @@ export default function InternalInspection() {
         };
         
         if (!jobData.inspectionId) {
-          // serverTimestamp(), not Date.now(): this is the one part of an inspection
-          // record the operator cannot choose. `inspectionDate` is typed by hand, so a
-          // record stamped from the same browser clock cannot corroborate itself - and
-          // these records are the evidentiary basis for scrap identity (F5), the GP
-          // flow, and stage-order gating. Written on FIRST CREATE only, so an edit never
-          // overwrites it. (formatDDMMYYYY learned Timestamps first - see A5.)
-          (payload as any).createdAt = serverTimestamp();
+          // Date.now(), NOT serverTimestamp() - reverted, see AUDIT F45.
+          //
+          // firestore.rules:96 requires createdAt on an inspection to be a number or a
+          // string. A serverTimestamp() resolves to a Firestore Timestamp, which is
+          // neither, so isValidInspection() returned false and EVERY new inspection was
+          // denied. Edits still worked (createdAt is written on first create only), which
+          // is why it looked intermittent rather than broken.
+          //
+          // The property that was lost is smaller than it looked: `inspectionDate` is
+          // typed by hand anyway, so a server-stamped createdAt sits beside an
+          // operator-entered date and corroborates nothing on its own. Widening the rule
+          // to accept a Timestamp can be a deliberate change later; it is not worth a
+          // rules deploy in the middle of a save outage.
+          (payload as any).createdAt = now;
         }
 
         batch.set(inspectionRef, payload, { merge: true });
