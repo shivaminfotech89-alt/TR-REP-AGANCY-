@@ -271,6 +271,34 @@ of the four that would survive a careful review of the method itself.
 
 ---
 
+## Note: a page-level max-width can suit forms or tables, never both
+
+**The general finding, reached by trying to answer a width question as a single value and
+failing.** Asked to widen Agency Settings, the honest answer turned out not to be a number:
+that screen holds single-column forms AND a divisions grid of six prefix inputs plus three
+quota columns. Widening the page to fit the grid stretches every text input with it - a
+1400px GSTIN field is harder to use than a 672px one, because the eye must travel the full
+width to find a fifteen-character value and the label-to-field relationship weakens as the
+gap grows. Narrowing it to suit the forms leaves the grid unusable.
+
+**One container cannot serve both, so the question has no single answer** - and reaching for
+one produces a compromise width that suits neither. The resolution is structural: split the
+page by CONTENT KIND, then width each region for what it holds. Agency Settings now has a
+narrow forms region and a wider tables region that breaks out of it.
+
+**This is why four per-screen conventions accumulated** across the app -
+`max-w-6xl` / `max-w-[1400px]`, `max-w-7xl`, `w-full max-w-full`, `max-w-2xl` - each one a
+reasonable answer to "how wide should THIS screen be" on a screen that holds more than one
+kind of content. **Before adding a fifth, ask whether the screen actually wants two widths.**
+Where it does, no page-level value is correct and picking one is choosing which half of the
+screen to make worse.
+
+The corollary is worth stating too: a screen that is genuinely all forms (a settings dialog)
+or genuinely all table (a register) has no such tension, and there a single max-width is the
+right tool. The tension is specific to mixed screens, which is most of the substantial ones.
+
+---
+
 ## Note: where the "wasted margin" on wide screens actually comes from
 
 Two things create it, and only one was changed.
@@ -960,6 +988,44 @@ One honest caveat, not a reason to act: `cachedGlobalDefaultEstimateMaster` is s
 `localStorage` at module load, so a user whose browser holds an old cached copy resolves
 through it until the fetch lands on that page load. It is per-browser and self-correcting,
 and no write happens in that window.
+
+### O18. An AT's "Closed" status promises an enforcement that does not exist
+
+`AtSettings` offers "Mark as Closed" on an AT period. **Nothing enforces anything.** Traced
+every consumer: `at.status` is read in exactly three places, all in `AgencyContext`
+(`:373`, `:537`, `:547`), and all three do the same thing —
+
+```
+const activeAts = agencyAts.filter(at => at.status === 'Active');
+const chosen = activeAts.length > 0 ? activeAts[0] : agencyAts[0];
+```
+
+It is a **tie-breaker for which AT is auto-selected** when no choice is stored for that
+agency. Not a filter. A Closed AT is still listed, still selectable, still chosen when it is
+the only one, and jobs can be booked against it exactly as before. Nothing in pricing, job
+numbering, allotments, estimates or bills reads it.
+
+**So the word is doing work the code is not.** "Closed" reads as *no new jobs can be booked
+against this tender period*. An operator who closes an AT and then books a job under it gets
+no warning, because there is nothing to warn about — which is the worst version of this: the
+control appears to have worked.
+
+**Two fixes, and they are not equivalent:**
+
+1. **Rename it to describe what it does** — it affects which AT is offered by default and
+   nothing else. Something like "Preferred / Not preferred", or a plain "Default for new
+   work" toggle. Cheap, honest, and changes no behaviour.
+2. **Add the guard the label implies** — block intake against a Closed AT in `NewJob`, the
+   way an unrecorded allotment now blocks.
+
+**The choice is a tender question, not a code one:** does a closed tender period actually
+prohibit new intake, or is closing it bookkeeping that records the period is over while
+stragglers are still booked against it? Only someone who knows how the division treats a
+lapsed AT can say. **Not decided here.**
+
+Related in kind to D3 and the `Less: 0.00` row — a control or field that looks operative and
+is not — but worse, because a permanently-zero row asserts nothing while this one asserts
+a restriction.
 
 ### O17. Oil shortage is measured everywhere and priced nowhere; the estimate's "Less" row can never be non-zero
 

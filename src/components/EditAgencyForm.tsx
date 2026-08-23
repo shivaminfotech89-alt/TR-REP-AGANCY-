@@ -7,7 +7,6 @@ import {
   Lock, Unlock, AlertTriangle, RotateCcw, FileText
 } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
-import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
 import { AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
 
@@ -37,7 +36,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const prefixSource: 'at' | 'agency' | 'none' =
     atHasPrefixes ? 'at' : (Object.keys(agency.prefixes || {}).length > 0 ? 'agency' : 'none');
 
-  const [setupGap, setSetupGap] = useState<SetupGap | null>(null);
 
   // Active Tab for intuitive categorization
   const [activeTab, setActiveTab] = useState<'agency' | 'discom' | 'bank' | 'divisions' | 'preview'>('agency');
@@ -105,7 +103,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
   // Divisions & Prefixes
   const [divisions, setDivisions] = useState<any[]>([]);
-  const divisionValidation = validateDivisionPrefixes(divisions);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatePopupData, setUpdatePopupData] = useState<{
@@ -208,11 +205,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   // is defined by the AT's prefixes, so adding or removing one here would have written a
   // division the AT does not have - visible on this screen and invisible to job numbering.
 
-  const handleDivisionChange = (index: number, field: string, value: string) => {
-    const newDivs = [...divisions];
-    (newDivs[index] as any)[field] = value.toUpperCase();
-    setDivisions(newDivs);
-  };
 
   const handleUpdateAgency = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1029,258 +1021,40 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         </div>
       )}
 
-      {/* ================= TAB 4: DIVISIONS & PREFIXES (READ-ONLY) ================= */}
+      {/* ================= TAB 4: DIVISIONS & PREFIXES ================= */}
       {/*
-        READ-ONLY BY DESIGN. The AT is the authority for divisions, prefixes and
-        allotments - see the note on `atHasPrefixes` at the top of this file - so this
-        panel displays them and routes to the AT for editing rather than offering a
-        second editor whose writes the first would overwrite.
+        REDUCED TO A POINTER. This tab used to render the whole read-only divisions and
+        prefixes panel - a full mirror of AT-scoped data, three levels down inside an
+        agency-level form, where it read as a second editor that happened not to work.
 
-        The one thing still editable here is each division's CIRCLE OFFICE: agency
-        routing data, not tender data, with no field for it anywhere on the AT.
+        The mirror now sits in "This AT Period" directly beneath the grid that writes it
+        (AtDivisions), where the edit route is the button above it and no explanation is
+        needed. Duplicating it here would recreate the confusion in a second place.
       */}
       {activeTab === 'divisions' && (
         <div className="space-y-4 animate-in fade-in duration-150">
-          <div className="bg-slate-50 p-4 border border-slate-200 rounded-lg space-y-4">
-            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start gap-3 border-b border-slate-200 pb-3">
-              <div className="min-w-0">
-                <h4 className="text-xs font-bold uppercase tracking-widest text-slate-800 flex items-center flex-wrap gap-x-1.5 gap-y-1">
-                  <GitBranch className="w-4 h-4 mr-0.5 text-blue-600 shrink-0" />
-                  <span>Divisions &amp; Prefixes</span>
-                  {prefixSource === 'at' && (
-                    <span className="px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 border border-blue-300 text-[10px] font-bold normal-case tracking-normal">
-                      from AT {activeAtMaster?.atNumber || activeAtMaster?.name || '(unnamed)'}
-                    </span>
-                  )}
-                  {prefixSource === 'agency' && (
-                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-bold normal-case tracking-normal">
-                      from agency record - legacy fallback
-                    </span>
-                  )}
-                  {prefixSource === 'none' && (
-                    <span className="px-1.5 py-0.5 rounded bg-slate-200 text-slate-700 border border-slate-300 text-[10px] font-bold normal-case tracking-normal">
-                      none configured
-                    </span>
-                  )}
-                </h4>
-                <p className="text-[11px] text-slate-500 mt-1 flex items-start gap-1">
-                  <Lock className="w-3 h-3 mt-0.5 shrink-0 text-slate-400" />
-                  <span>
-                    Divisions and prefixes are issued with a tender, so they are held on the AT
-                    period and shown here read-only. Job numbering reads the AT first, and this
-                    agency record only when the AT has no divisions of its own.
-                  </span>
-                </p>
-              </div>
-
-              {/* Routes reuse the deep-link params AtSettings already reads:
-                  ?section=divisions|allotments|at &atId=<id>. No new params invented. */}
-              <div className="flex flex-wrap gap-2 shrink-0">
-                {activeAtMaster ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={() => setSetupGap({
-                        title: 'Job number prefixes are held on the AT',
-                        problem: `Divisions and their per-core-type prefixes belong to AT ${activeAtMaster.atNumber || activeAtMaster.name || ''}, not to the agency record. Editing them there is what job numbering reads.`,
-                        detail: [
-                          'Saving there also refreshes this agency copy, which stays as the fallback for ATs that have no divisions of their own.',
-                        ],
-                        actionLabel: 'Edit Job Number Prefixes',
-                        actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}`,
-                        unsavedWarning: 'Any unsaved changes on this Agency form will be lost.',
-                      })}
-                      className="text-xs font-bold uppercase tracking-wider text-blue-700 hover:text-blue-900 flex items-center bg-blue-50 hover:bg-blue-100 px-3 py-1.5 rounded border border-blue-200 transition-colors"
-                    >
-                      <GitBranch className="w-3.5 h-3.5 mr-1.5" /> Edit Job Number Prefixes
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setSetupGap({
-                        title: 'Allotment quotas are held on the AT',
-                        problem: `Quotas and their allotment letters arrive against AT ${activeAtMaster.atNumber || activeAtMaster.name || ''} over the life of the tender, so they are recorded there.`,
-                        detail: [
-                          'An unrecorded quota blocks intake for that division and core type rather than passing silently.',
-                        ],
-                        actionLabel: 'Add Allotment Quota & Letter',
-                        actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}`,
-                        unsavedWarning: 'Any unsaved changes on this Agency form will be lost.',
-                      })}
-                      className="text-xs font-bold uppercase tracking-wider text-emerald-700 hover:text-emerald-900 flex items-center bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded border border-emerald-200 transition-colors"
-                    >
-                      <FileText className="w-3.5 h-3.5 mr-1.5" /> Add Allotment Quota &amp; Letter
-                    </button>
-                  </>
-                ) : (
-                  /* No active AT: nothing to edit and nowhere to send them. One button,
-                     to the step that has to happen first. */
-                  <button
-                    type="button"
-                    onClick={() => setSetupGap({
-                      title: 'No AT period is active',
-                      problem: 'Divisions, prefixes and allotment quotas are held on an AT period, and this agency has none active. There is nothing to configure until one exists.',
-                      detail: [
-                        'An AT carries the tender number, its dates and the AT percentage per core type.',
-                        'Jobs created with no AT get no percentage and no allotment check.',
-                      ],
-                      actionLabel: 'Set up an AT period',
-                      actionTo: '/agency-settings?section=at',
-                      unsavedWarning: 'Any unsaved changes on this Agency form will be lost.',
-                    })}
-                    className="text-xs font-bold uppercase tracking-wider text-amber-800 hover:text-amber-900 flex items-center bg-amber-50 hover:bg-amber-100 px-3 py-1.5 rounded border border-amber-300 transition-colors"
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 mr-1.5" /> Set up an AT period
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {!activeAtMaster && (
-              <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg flex items-start gap-2 text-xs text-amber-900">
-                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="font-bold">No AT period is active for this agency.</strong>
-                  <p className="mt-0.5 text-[11px] leading-relaxed">
-                    {prefixSource === 'agency'
-                      ? 'The divisions below are the agency record, and with no AT active they are what job numbering is using right now. They cannot be edited here - set up an AT period, then configure its divisions.'
-                      : 'Nothing is configured, so job numbers would fall back to the JOB prefix. Set up an AT period first.'}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {prefixSource === 'agency' && activeAtMaster && (
-              <div className="p-3 bg-amber-50 border border-amber-300 rounded-lg flex items-start gap-2 text-xs text-amber-900">
-                <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="font-bold">
-                    AT {activeAtMaster.atNumber || activeAtMaster.name || ''} has no divisions of its own.
-                  </strong>
-                  <p className="mt-0.5 text-[11px] leading-relaxed">
-                    Job numbering is falling back to this agency record. Opening
-                    <em> Edit Job Number Prefixes </em> loads these same divisions against the AT and
-                    saves them there, which ends the fallback.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Validation still reported - it no longer blocks the save, because the
-                fields it validates cannot be corrected on this screen. */}
-            {divisions.length > 0 && !divisionValidation.isValid && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-start gap-2 text-xs text-red-800">
-                <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-                <div>
-                  <strong className="font-bold">Division Prefix Warnings:</strong>
-                  <ul className="list-disc list-inside mt-0.5 text-[11px] text-red-700">
-                    {divisionValidation.errors.map((err, i) => (
-                      <li key={i}>{err}</li>
-                    ))}
-                  </ul>
-                  <p className="mt-1 text-[11px]">
-                    These are corrected on the AT, not here. Other agency details still save normally.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {divisions.length === 0 ? (
-              <div className="p-4 bg-white border border-dashed border-slate-300 rounded-lg text-center text-xs text-slate-500">
-                No divisions configured. Job numbers would use the{' '}
-                <span className="font-mono font-bold">JOB</span> prefix.
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {divisions.map((div, index) => (
-                  <div key={index} className="p-4 bg-white border border-slate-300 rounded-lg shadow-sm space-y-3">
-                    <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3 border-b border-slate-100 pb-2">
-                      <div>
-                        <span className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">Division</span>
-                        <span className="text-sm font-bold text-slate-900">{div.name}</span>
-                      </div>
-                      {/* The only editable field in this tab - see the save-path note. */}
-                      <div className="flex-1 w-full max-w-xs">
-                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">
-                          Circle Office (Routing / Forwarding)
-                        </label>
-                        <input
-                          type="text"
-                          value={div.circle || ''}
-                          onChange={e => handleDivisionChange(index, 'circle', e.target.value)}
-                          className="w-full px-3 py-1.5 text-sm font-semibold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                          placeholder={circleOfficeName || 'e.g. SABARMATI'}
-                        />
-                      </div>
-                    </div>
-
-                    {div.legacyFlatPrefix && (
-                      <div className="p-2 bg-amber-50 border border-amber-300 rounded text-[11px] text-amber-900 flex items-start gap-1.5">
-                        <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-                        <span>
-                          Stored as a single prefix for the whole division, so every core type uses
-                          <strong className="font-mono"> {div.prefixCRGO}</strong>. Set per-core prefixes on the AT to separate them.
-                        </span>
-                      </div>
-                    )}
-
-                    <div>
-                      <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-600 mb-1">Job Number Prefixes:</span>
-                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
-                        {[
-                          { label: 'CRGO', value: div.prefixCRGO, required: true },
-                          { label: 'Amorphous', value: div.prefixAmorphous, required: false },
-                          { label: 'Wound Core', value: div.prefixWoundCore, required: false },
-                          { label: 'LSTC', value: div.prefixLSTC, required: false },
-                          { label: 'Overhauling (OH)', value: div.prefixOH, required: false },
-                        ].map(f => (
-                          <div key={f.label}>
-                            <span className="block text-[9px] uppercase font-semibold text-slate-500">{f.label}</span>
-                            <div className={`w-full px-2 py-1 text-xs font-mono font-bold rounded border ${
-                              String(f.value || '').trim()
-                                ? 'bg-slate-50 border-slate-200 text-slate-800'
-                                : f.required
-                                  ? 'bg-red-50 border-red-200 text-red-700'
-                                  : 'bg-slate-50 border-slate-200 text-slate-400'
-                            }`}>
-                              {String(f.value || '').trim() || (f.required ? 'not set' : '-')}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="pt-2 border-t border-slate-100">
-                      <span className="block text-[10px] uppercase font-bold tracking-wider text-slate-600 mb-1">Division Allotment Quotas:</span>
-                      <div className="grid grid-cols-3 gap-2">
-                        {[
-                          { label: 'CRGO Quota', cell: div.allotCRGO },
-                          { label: 'Amorphous Quota', cell: div.allotAmorphous },
-                          { label: 'Wound Core Quota', cell: div.allotWoundCore },
-                        ].map(q => (
-                          <div key={q.label}>
-                            <span className="block text-[9px] uppercase font-semibold text-slate-500">{q.label}</span>
-                            <div className={`w-full px-2 py-1 text-xs font-mono rounded border ${
-                              q.cell?.from === 'none'
-                                ? 'bg-slate-50 border-slate-200 text-slate-400'
-                                : 'bg-slate-50 border-slate-200 text-slate-800 font-bold'
-                            }`}>
-                              {q.cell?.from === 'none' ? 'not recorded' : q.cell?.value}
-                            </div>
-                            {/* Allotments resolve per cell, so the source is stated per cell. */}
-                            {q.cell?.from === 'agency' && (
-                              <span className="block text-[9px] text-amber-700 mt-0.5">from agency record</span>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-5">
+            <h4 className="text-xs font-bold uppercase tracking-widest text-slate-800 flex items-center">
+              <GitBranch className="w-4 h-4 mr-1.5 text-blue-600" /> Divisions &amp; Prefixes
+            </h4>
+            <p className="text-[13px] text-slate-600 mt-2 leading-relaxed max-w-2xl">
+              These are <strong>not agency settings</strong>. Divisions, job number prefixes
+              and allotment quotas are issued with a tender, so they belong to an AT period
+              and are edited in <strong>This AT Period</strong> below.
+            </p>
+            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed max-w-2xl">
+              The agency record does keep a read-only fallback copy, used only when the
+              active AT has no divisions of its own. It is shown there, beside the grid that
+              writes it, rather than here.
+            </p>
+            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed max-w-2xl">
+              Each division's <strong>circle office</strong> is agency routing data rather
+              than tender data, and is edited on the AT divisions panel alongside them.
+            </p>
           </div>
         </div>
       )}
+
 
       {/* ================= TAB 5: LIVE PREVIEWS ================= */}
       {activeTab === 'preview' && (
@@ -1481,10 +1255,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           </div>
         </div>
       )}
-      {/* Routing out of this form to the AT, where divisions/prefixes/allotments live.
-          Uses the shared dialog rather than a bare navigate() so the two-step
-          unsaved-work confirmation is the same here as everywhere else. */}
-      <SetupGapDialog gap={setupGap} onCancel={() => setSetupGap(null)} />
     </form>
   );
 }

@@ -280,6 +280,52 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           Save Divisions & Prefixes
         </button>
       </div>
+
+      {/* THE MIRROR, BESIDE ITS SOURCE.
+          The agency document keeps its own copy of `prefixes`. It is a FALLBACK, read only
+          when this AT has none of its own (getNextJobNoInfo), and it is written by the Save
+          above - not by anything on the agency screen.
+
+          It used to be displayed three levels away, as tab 4 of the agency form, where it
+          read as a second editor that happened not to work. Shown here, next to the grid
+          that writes it, "mirror" needs no explaining: the edit route is the button above. */}
+      {activeAgency && (
+        <div className="mt-4 pt-3 border-t border-slate-200">
+          <div className="flex items-baseline gap-2 mb-1.5">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-500">
+              Agency fallback copy
+            </span>
+            <span className="text-[10px] text-slate-400">read-only - written by the Save above</span>
+          </div>
+          {(() => {
+            const agencyPrefixes = activeAgency.prefixes || {};
+            const names = Object.keys(agencyPrefixes);
+            const atNames = Object.keys(at.prefixes || {});
+            const sameSet = names.length === atNames.length && names.every(n => atNames.includes(n));
+            if (names.length === 0) {
+              return (
+                <p className="text-[11px] text-slate-500">
+                  Nothing stored on {activeAgency.name}. This AT's divisions are the only copy -
+                  which is the normal state once an AT carries its own.
+                </p>
+              );
+            }
+            return (
+              <div className={`p-2 rounded border text-[11px] ${
+                sameSet ? 'bg-slate-50 border-slate-200 text-slate-600'
+                        : 'bg-amber-50 border-amber-300 text-amber-900'
+              }`}>
+                <div className="font-mono">{names.join(', ')}</div>
+                <p className="mt-1 leading-relaxed">
+                  {sameSet
+                    ? `Same ${names.length} division(s) as this AT. Job numbering reads the AT; this copy is used only if the AT has none.`
+                    : `DIFFERS from this AT's divisions (${atNames.join(', ') || 'none'}). Saving above overwrites this copy with the AT's.`}
+                </p>
+              </div>
+            );
+          })()}
+        </div>
+      )}
     </div>
   );
 }

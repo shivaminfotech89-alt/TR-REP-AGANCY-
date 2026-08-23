@@ -16,7 +16,10 @@ const DISCOM_OPTIONS = [
 ];
 
 export default function AgencySettings() {
-  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, loading, atMasters } = useAgency();
+  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, loading } = useAgency();
+  // ATs belonging to the ACTIVE agency only - the selector must never offer another
+  // agency's tender period (AUDIT F20 was exactly that leak).
+  const agencyAtsForContext = atMasters.filter(at => at.agencyId === activeAgency?.id);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newAgencyName, setNewAgencyName] = useState('');
   /** Required at creation, no default. Stores the NAME only - GSTIN, PAN and address are
@@ -192,100 +195,95 @@ export default function AgencySettings() {
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
-      <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-        <h2 className="text-lg font-bold text-slate-900 mb-4">Switch Agency</h2>
-        {agencies.length === 0 ? (
-          <p className="text-sm text-slate-500 mb-4">No agencies found. Please create one.</p>
-        ) : (
-          <div className="space-y-3">
-            {agencies.map(agency => {
-              const isActive = activeAgency?.id === agency.id;
-              const divisionCount = Object.keys(agency.prefixes || {}).length;
-              const atCount = atMasters.filter(at => at.agencyId === agency.id).length;
-              const warnings: string[] = [];
-              if (divisionCount === 0) warnings.push('No divisions');
-              if (atCount === 0) warnings.push('No AT period');
-              if (!agency.gstin) warnings.push('No GSTIN');
+      {/* ============================ CONTEXT BAR ============================
+          The SCOPE everything below sits in, not a section you edit. "Switch Agency" was
+          a card list, which implied it was content; it is the frame.
 
-              return (
-                <div
-                  key={agency.id}
-                  onClick={() => setActiveAgencyId(agency.id)}
-                  className={`group relative p-4 rounded-xl border border-l-4 cursor-pointer transition-colors ${
-                    isActive
-                      ? 'border-l-blue-600 border-blue-200 bg-blue-50/70'
-                      : 'border-l-transparent border-slate-200 bg-slate-50 hover:border-blue-300 hover:bg-blue-50/40'
-                  }`}
+          Both selectors write IMMEDIATELY - they are the only immediate writes on this
+          page, and gathering them here is what makes that predictable rather than
+          scattered. Add Agency sits beside the selector because it creates a frame rather
+          than editing anything within one; it does not belong under "This Agency".
+
+          The AT selector states "none active" explicitly. An absent selector and an
+          unset one are indistinguishable, and that ambiguity cost real time. */}
+      <div className="bg-slate-900 text-white p-4 rounded-xl shadow-sm border border-slate-800">
+        <div className="flex flex-col lg:flex-row lg:items-end gap-4">
+          <div className="flex-1 min-w-0">
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+              Agency
+            </label>
+            <div className="flex items-center gap-2">
+              <select
+                value={activeAgency?.id || ''}
+                onChange={e => setActiveAgencyId(e.target.value)}
+                className="flex-1 min-w-0 px-3 py-2 text-sm font-bold rounded-lg bg-slate-800 border border-slate-700 text-white focus:ring-1 focus:ring-blue-400"
+              >
+                {agencies.length === 0 && <option value="">No agencies yet</option>}
+                {agencies.map(a => (
+                  <option key={a.id} value={a.id}>{a.name || '(unnamed)'}</option>
+                ))}
+              </select>
+              {!showAddForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowAddForm(true)}
+                  className="shrink-0 flex items-center px-3 py-2 text-xs font-bold uppercase tracking-widest bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors"
+                  title="Create a new agency. This creates a separate frame - it does not copy anything from the current one."
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="flex items-start gap-3 min-w-0">
-                      <Building className={`w-5 h-5 mt-0.5 shrink-0 ${isActive ? 'text-blue-600' : 'text-slate-400'}`} />
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-bold text-slate-900 truncate">{agency.name}</h3>
-                          {isActive && (
-                            <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-white bg-blue-600 px-2 py-0.5 rounded-full shrink-0">
-                              <CheckCircle2 className="w-3 h-3" />
-                              Currently open
-                            </span>
-                          )}
-                        </div>
-
-                        <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-500 flex-wrap">
-                          <span className="flex items-center gap-1">
-                            <Layers className="w-3.5 h-3.5" />
-                            {divisionCount} division{divisionCount === 1 ? '' : 's'}
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <FileText className="w-3.5 h-3.5" />
-                            {atCount} AT{atCount === 1 ? '' : 's'}
-                          </span>
-                        </div>
-
-                        {(agency.gstin || agency.discomName) && (
-                          <div className="mt-1.5 text-[11px] text-slate-500 space-y-0.5">
-                            {agency.gstin && <div>GSTIN: {agency.gstin}</div>}
-                            {agency.discomName && <div className="truncate">{agency.discomName}</div>}
-                          </div>
-                        )}
-
-                        {warnings.length > 0 && (
-                          <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                            {warnings.map(w => (
-                              <span key={w} className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">
-                                <AlertTriangle className="w-3 h-3" />
-                                {w}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {!isActive && (
-                      <span className="hidden group-hover:flex items-center gap-1 text-xs font-bold text-blue-600 shrink-0 self-center whitespace-nowrap">
-                        Switch to this <ArrowRight className="w-3.5 h-3.5" />
-                      </span>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Agency
+                </button>
+              )}
+            </div>
           </div>
-        )}
-      </div>
 
-      <div className="bg-white p-6 rounded shadow-sm border border-slate-200">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold text-slate-900">Add New Agency</h2>
-          {!showAddForm && (
-            <button onClick={() => setShowAddForm(true)} className="flex items-center px-3 py-1.5 text-xs font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors">
-              <Plus className="w-3 h-3 mr-1" /> Add
-            </button>
-          )}
+          <div className="flex-1 min-w-0">
+            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+              AT Period
+            </label>
+            {agencyAtsForContext.length === 0 ? (
+              <div className="px-3 py-2 text-sm font-semibold rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-200">
+                None active for {activeAgency?.name || 'this agency'}
+              </div>
+            ) : (
+              <select
+                value={activeAtMaster?.id || ''}
+                onChange={e => setActiveAtMasterId(e.target.value)}
+                className="w-full px-3 py-2 text-sm font-bold rounded-lg bg-slate-800 border border-slate-700 text-white focus:ring-1 focus:ring-blue-400"
+              >
+                {!activeAtMaster && <option value="">None selected</option>}
+                {agencyAtsForContext.map(at => (
+                  <option key={at.id} value={at.id}>
+                    {at.atNumber || '(no number)'}{at.name ? ` - ${at.name}` : ''}{at.status === 'Closed' ? '  (closed)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         </div>
 
-        {showAddForm && (
+        <p className="text-[11px] text-slate-400 mt-2.5 leading-relaxed">
+          Everything below is scoped to these two. <strong className="text-slate-200">This Agency</strong> applies to
+          the agency; <strong className="text-slate-200">This AT Period</strong> applies to the tender period.
+          Changing either takes effect immediately across the whole app.
+        </p>
+      </div>
+
+      {/* CREATE PANEL, not a section. It is opened from the context bar, because creating
+          an agency makes a new FRAME rather than editing anything inside the current one.
+          Rendered only while open - a permanently visible "Add New Agency" card sitting
+          between the frame and "This Agency" implied it was part of one or the other. */}
+      {showAddForm && (
+      <div className="bg-white p-6 rounded-xl shadow-xs border-2 border-blue-200">
+        <div className="flex justify-between items-center mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-slate-900">Add New Agency</h2>
+            <p className="text-[11px] text-slate-500 mt-0.5">
+              Creates a separate agency. Nothing is copied from {activeAgency?.name || 'the current agency'} -
+              its estimate master is seeded from the published shared default.
+            </p>
+          </div>
+        </div>
+
           <form onSubmit={handleAddAgency} className="space-y-6 border-t border-slate-100 pt-4">
             <div>
               <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Agency Name</label>
@@ -369,21 +367,16 @@ export default function AgencySettings() {
             </div>
 
             <div className="pt-2">
-              <LetterheadCalibrator
-                letterheadUrl={letterheadBase64}
-                letterheadMode={letterheadMode}
-                headerHeightMm={headerHeightMm}
-                footerHeightMm={footerHeightMm}
-                marginLeftMm={marginLeftMm}
-                marginRightMm={marginRightMm}
-                agencyName={newAgencyName}
-                onLetterheadChange={setLetterheadBase64}
-                onModeChange={setLetterheadMode}
-                onHeaderHeightChange={setHeaderHeightMm}
-                onFooterHeightChange={setFooterHeightMm}
-                onMarginLeftChange={setMarginLeftMm}
-                onMarginRightChange={setMarginRightMm}
-              />
+              {/* LETTERHEAD IS NOT SET UP HERE - one entry point only.
+                  It used to appear twice: once on this create panel and once in the agency
+                  form. Two calibrators for one stored value is a mirror in the other
+                  direction - whichever was saved last won, and neither said so. The form
+                  is the right home because a letterhead is tuned against the real
+                  document, which needs the agency to exist first. */}
+              <p className="text-[11px] text-slate-500 leading-relaxed">
+                Letterhead and print margins are configured after the agency is created -
+                open <strong>This Agency</strong> and use the Letterhead section there.
+              </p>
             </div>
             
             <div>
@@ -466,18 +459,92 @@ export default function AgencySettings() {
               </button>
             </div>
           </form>
-        )}
       </div>
 
+      )}
+
+      {/* ======================= REGION A: THIS AGENCY =======================
+          Agency-level settings. NONE of this depends on an AT period - it stays available
+          and unchanged whichever tender period is selected above, which is the distinction
+          the old flat list of seven sections gave no way to see.
+
+          Note what is NOT here: Divisions, prefixes and allotment quotas are AT-scoped and
+          belong to Region B, even though one read-only mirror of them still sits inside
+          the form below as tab 4. Moving it is Region B's work. */}
       {activeAgency && (
-        <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
-          <h3 className="text-md font-bold text-slate-900 mb-4">Edit Active Agency: {activeAgency.name}</h3>
-          <EditAgencyForm agency={activeAgency} />
+        <div>
+          <div className="flex items-baseline gap-3 mb-2 px-1">
+            <h2 className="text-sm font-black uppercase tracking-widest text-slate-800">This Agency</h2>
+            <span className="text-[11px] text-slate-500">
+              {activeAgency.name} - identity, tax, DISCOM routing, bank, letterhead
+            </span>
+          </div>
+          <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200 border-l-4 border-l-slate-400">
+            <EditAgencyForm agency={activeAgency} />
+          </div>
         </div>
       )}
 
+      {/* ======================= REGION B: THIS AT PERIOD =======================
+          AT-scoped settings, nested under the AT selector in the context bar so the
+          dependency is structural rather than something the operator has to infer.
+
+          WIDER than Region A on purpose. Region A is forms - a 1400px-wide GSTIN field is
+          harder to use than a narrow one. Region B is tables: six core-type prefixes per
+          division plus three quota columns do not fit a form-width column. One container
+          could suit one or the other, never both, which is why the width question could not
+          be answered as a single class on the page.
+
+          EXPANDED, never collapsed by default. AT-scoped content being invisible until you
+          know where to look is the problem this region exists to fix; a collapsed panel is
+          the same problem in tidier clothes. */}
       {activeAgency && (
-        <AtSettings />
+        <div className="relative left-1/2 -translate-x-1/2 w-[min(1400px,94vw)]">
+          <div className="flex items-baseline gap-3 mb-2 px-1">
+            <h2 className="text-sm font-black uppercase tracking-widest text-slate-800">This AT Period</h2>
+            <span className="text-[11px] text-slate-500">
+              Tender periods, divisions &amp; job number prefixes, allotment quotas
+            </span>
+          </div>
+
+          {agencyAtsForContext.length === 0 ? (
+            /* SAYS WHAT TO DO, not merely that nothing is here. A section that vanishes is
+               indistinguishable from one that does not exist - which is exactly how hours
+               were lost looking for divisions that were never missing, only unreachable. */
+            <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-6">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+                <div className="min-w-0">
+                  <h3 className="font-bold text-amber-900 text-sm">
+                    No AT period is active for {activeAgency.name}
+                  </h3>
+                  <p className="text-[13px] text-amber-900 mt-1 leading-relaxed max-w-2xl">
+                    Divisions, prefixes and allotments are recorded against a tender period -
+                    create one to configure them.
+                  </p>
+                  <p className="text-[11px] text-amber-800/80 mt-2 leading-relaxed max-w-2xl">
+                    Until then, job numbers fall back to whatever is stored on the agency
+                    record, and no allotment quota is checked at intake.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => { const el = document.getElementById('at-masters-section'); el?.scrollIntoView({ behavior: 'smooth' }); }}
+                    className="mt-3 inline-flex items-center px-3.5 py-2 text-xs font-bold uppercase tracking-widest bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5 mr-1.5" /> Set up an AT period
+                  </button>
+                </div>
+              </div>
+              <div id="at-masters-section" className="mt-6">
+                <AtSettings />
+              </div>
+            </div>
+          ) : (
+            <div id="at-masters-section" className="border-l-4 border-l-indigo-400 rounded-l">
+              <AtSettings />
+            </div>
+          )}
+        </div>
       )}
 
       {/* The "Data Tools" card and its "Move ALL My Data To Active Agency" button were
