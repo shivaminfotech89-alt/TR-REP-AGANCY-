@@ -860,6 +860,109 @@ One honest caveat, not a reason to act: `cachedGlobalDefaultEstimateMaster` is s
 through it until the fetch lands on that page load. It is per-browser and self-correcting,
 and no write happens in that window.
 
+### O17. Oil shortage is measured everywhere and priced nowhere; the estimate's "Less" row can never be non-zero
+
+Checked while considering whether the bill and the estimate deduct an oil shortage
+differently. **Neither deducts it at all**, so there is no divergence to fix — and the
+absence is the finding.
+
+**The bill has no deduction term.** `BillingSystem.subTotal` is the sum of
+`calculateJobTotal` over the selected jobs; `cgst`, `sgst` and `grandTotal` derive from it.
+`netShortage` is computed (`jobOilDetails`), totalled (`totalNetShortage`) and printed on
+the oil account sheet, but never enters the money path.
+
+**The estimate's `lessAmount` is a hardcoded zero on every path.** `const lessAmount = 0.00`
+in the itemised branch, `lessAmount: 0` in both fixed-rate branches, and
+`finalAmount = amountWithPercentage - lessAmount`. A repository-wide search finds **no
+writer anywhere** — nothing in the app can make it non-zero.
+
+**But it prints.** The estimate renders a `Less:` row showing `0.00` on every document that
+goes to UGVCL. A permanent zero on a line that looks like a working deduction is the F32
+shape once more: a slot that appears functional and has never been connected. It differs
+from F32 in that this one cannot be filled by an operator keystroke — there is no field —
+so it is inert in a stronger sense, and correspondingly more likely to be assumed working
+by whoever next reads the printed form.
+
+**Two open questions, both commercial rather than technical:**
+1. Should an oil shortage be deducted from the estimate, the bill, both, or neither? The
+   tender decides. The code currently implements "neither", consistently — which is at
+   least not a divergence.
+2. If the answer is "neither", the `Less:` row should come off the printed estimate rather
+   than print zero forever. If it is "one or both", `lessAmount` is the slot for it and the
+   bill needs a matching term added at the same time — adding it to one document only is
+   how two totals for one job arise.
+
+**Nothing changed.** This is a calculation and a printed layout, and both are out of scope
+without an explicit decision.
+
+### O16. The estimate and the bill compute the same job by two different models
+
+**This is a defect in the app, not in the data.** The estimate and the bill would disagree
+for the same job even with a perfect master. The master repair did not cause it; it removed
+the thing that was hiding it.
+
+Two functions share the name `calculateJobTotal`, in two files, and they do not compute the
+same thing:
+
+| | |
+|---|---|
+| `EstimateGenerate.calculateJobTotal:819` | `getJobFullEstimate(job).baseTotal` → `buildSingleJobEstimateData` → **branches on core type**; Amorphous / Wound Core take the `SCHEDULE_B` fixed-rate path |
+| `BillingSystem.calculateJobTotal:482` | walks `jobMasterData`, summing `qty * rates[kva]`, with hardcoded quantity rules (`1c`→7, `8`/`9A`/`9B`→3, `15`→6, KG rows→14/15.54/45.36). **No core-type branch at all.** |
+
+`BillingSystem` imports no `SCHEDULE_B`, no `findScheduleBEntry`, no
+`buildSingleJobEstimateData`, no `classifyCoreType`. There is no fixed-rate path in billing.
+
+**The tender says Amorphous and Wound Core are FIXED RATE (Internal & External)**, and a
+comparable issued bill shows a single "Repairing Charge - Fixed Rate" line plus a labour
+line — which is what the estimate produces and not what the bill does. On that reading the
+bill is the wrong one. Not decided here: it is a tender question.
+
+**Found while checking whether the master repair moves any figure. It does — on bills.**
+
+| | Amorphous / Wound Core repair charge |
+|---|---|
+| **Estimate** (`SingleJobEstimateReport.tsx:226`) | returns early, prices from the hardcoded `SCHEDULE_B` table. The master is never consulted except for the scrap row. |
+| **Bill** (`BillingSystem.calculateJobTotal:481`) | **no core-type branch at all** — walks `jobMasterData` for every core type, summing `qty * rates[kva]` over each row with a rate `> 0`. |
+
+`BillingSystem` does not import `SCHEDULE_B`, `findScheduleBEntry`, `buildSingleJobEstimateData`
+or `classifyCoreType`. There is no fixed-rate path in billing.
+
+**Two consequences, the second only now activated.**
+
+1. **The two documents disagree by construction.** Schedule-B is an all-inclusive fixed rate
+   per capacity plus a labour charge. The bill instead itemises: at any capacity, master rows
+   `2` (labour), `3` (tank per KG), `4` (conservator per KG), `5` (radiator) and `6` (sealing)
+   all carry positive rates and would be added to every Amorphous repair, whether or not that
+   work was done. An estimate and a bill for the same job can therefore differ, and neither
+   is derived from the other.
+2. **The placeholder was masking it.** Every rate in the 10-item placeholder was `null` or
+   `0`, and `calculateJobTotal` only accumulates where `rate > 0`. So for the three agencies
+   holding it, **a repairable Amorphous bill totalled 0** — and the repair, by installing a
+   master with real per-capacity rates, turns that 0 into a real itemised sum.
+
+**So the answer to "does the repair change any figure":**
+
+- **CRGO** — no. Same rows, same rates.
+- **Scrap** — yes, and it is a fix: blocked or mis-resolved before, Rs 500 flat now, via
+  `resolveScrapCharge` on both paths.
+- **Amorphous / Wound Core estimate** — no, and for a stronger reason than expected. It is
+  not that `resolveRate` fell back because the rates were zero; `resolveRate` is never
+  reached. The branch returns before it. The estimate total is independent of the master's
+  values whatever they are.
+- **Amorphous / Wound Core bill** — **YES.** 0 before, a real sum now.
+
+**This also corrects F32.** That entry said a rate typed into a placeholder row "would have
+priced from that moment". True of the **bill**, which walks the master; **not** true of the
+estimate, which never reads it. The latent exposure was real but narrower than recorded.
+
+**Nothing changed here.** This is a calculation, and the standing rule is that calculations
+are not altered without explicit approval. It needs a decision: should an Amorphous bill be
+the Schedule-B fixed rate (matching its estimate), or the itemised walk it does today? Only
+someone with the tender can say. Until then, **check any Amorphous or Wound Core bill against
+its estimate before sending** — and note that jobs already billed carry a frozen
+`job.billAmount`, so an issued bill is not retroactively changed by the repair; it is simply
+no longer what the app would now compute.
+
 ### O15. A sixth path writes document fields, in a file called Reports
 
 `Reports.tsx:394` — `handleSaveDates`, behind a "Lifecycle Dates" modal — writes
@@ -2569,7 +2672,12 @@ it.
 
 #### The finding: it was inert only because nobody typed into it
 
-**The exposure was one keystroke away, for a year.** A rate entered against the row labelled
+**The exposure was one keystroke away, for a year — on the BILL, not the estimate.** See
+**O16**: the estimate never reads this master for Amorphous, but `calculateJobTotal` does, so
+the keystroke below would have moved a bill total and not an estimate total. The original
+version of this entry did not distinguish them.
+
+A rate entered against the row labelled
 *"Repairing of 25 KVA Transformer (AL)"* would have filled item code `1a` — which
 Schedule-B defines as **10 kVA**. A correct-looking entry, in the right-looking row, under
 the wrong code, pricing from that moment on and looking right on the printed estimate.

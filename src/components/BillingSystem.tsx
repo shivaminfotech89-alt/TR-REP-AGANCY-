@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
+import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate } from '../lib/estimateCalc';
+import { classifyCoreType } from './SingleJobEstimateReport';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { validateEstimateMaster } from '../lib/estimateMasterHealth';
@@ -478,7 +479,40 @@ export default function BillingSystem() {
     }
   };
 
+  // Inspection records keyed by job, in the same shape EstimateGenerate uses. Needed
+  // because a fixed-rate estimate picks its Schedule-B row by winding type, which lives
+  // on the internal inspection (`windingType` -> Aluminium or Copper).
+  const externalInspMap = useMemo(() => {
+    const map: Record<string, any> = {};
+    inspections.filter(i => (i.type || '').toLowerCase() === 'external').forEach(i => {
+      if (i.jobId) map[i.jobId] = i.data || i;
+    });
+    return map;
+  }, [inspections]);
+
+  const internalInspMap = useMemo(() => {
+    const map: Record<string, any> = {};
+    inspections.filter(i => (i.type || '').toLowerCase() === 'internal').forEach(i => {
+      if (i.jobId) map[i.jobId] = i.data || i;
+    });
+    return map;
+  }, [inspections]);
+
   // Calculate job estimate / bill amount
+  //
+  // BRANCHES ON CORE TYPE, matching buildSingleJobEstimateData (AUDIT F39).
+  //
+  // It used to walk the estimate master for EVERY core type, with hardcoded quantity
+  // rules, and had no fixed-rate path at all. For Amorphous and CRGO Wound Core the tender
+  // is a FIXED RATE (Internal & External) - one repairing charge plus a labour line - so
+  // the itemised walk added tank replacement, conservator, radiator and sealing to every
+  // such repair whether that work was done or not. The estimate and the bill computed the
+  // same job by two different models and would have disagreed even with a perfect master.
+  //
+  // The fixed-rate branch DELEGATES to buildSingleJobEstimateData rather than reading
+  // SCHEDULE_B here. A second implementation of one rate schedule is how the scrap charge
+  // came to sit under four different codes across six agencies; there is one Schedule-B
+  // reader in this codebase and this is not it.
   const calculateJobTotal = (job: any) => {
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
@@ -496,9 +530,28 @@ export default function BillingSystem() {
       return scrapCharge.rate * (1 + atPct / 100);
     }
 
-    // Repairable path. The scrap item is identified by its mapped code only - no
-    // itemName substring matching - and excluded here so a repair bill can never
-    // pick up the scrap charge.
+    // Fixed-rate cores, AFTER the scrap short-circuit above and in the same order as the
+    // estimate: a scrap Amorphous unit is one flat charge, not a Schedule-B repair.
+    // baseTotal is pre-AT; the AT uplift is applied by the caller exactly as on the
+    // itemised path below, so the two branches remain comparable.
+    const coreClass = classifyCoreType(job.coreType || 'CRGO');
+    if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+      const est = getJobFullEstimate(
+        job,
+        externalInspMap[job.id],
+        internalInspMap[job.id],
+        activeAgency,
+        activeAtMaster
+      );
+      // getJobFullEstimate applies the AT percentage itself in amountWithPercentage;
+      // baseTotal is taken so this function keeps returning a pre-AT figure like the
+      // itemised path, and the single uplift below stays the only one.
+      return est.baseTotal * (1 + atPct / 100);
+    }
+
+    // Repairable path - CRGO and Overhauling, UNCHANGED. The scrap item is identified by
+    // its mapped code only - no itemName substring matching - and excluded here so a
+    // repair bill can never pick up the scrap charge.
     const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
     let jobTotal = 0;
     jobMasterData.forEach(item => {
