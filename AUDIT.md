@@ -883,17 +883,16 @@ from F32 in that this one cannot be filled by an operator keystroke — there is
 so it is inert in a stronger sense, and correspondingly more likely to be assumed working
 by whoever next reads the printed form.
 
-**Two open questions, both commercial rather than technical:**
-1. Should an oil shortage be deducted from the estimate, the bill, both, or neither? The
-   tender decides. The code currently implements "neither", consistently — which is at
-   least not a divergence.
-2. If the answer is "neither", the `Less:` row should come off the printed estimate rather
-   than print zero forever. If it is "one or both", `lessAmount` is the slot for it and the
-   bill needs a matching term added at the same time — adding it to one document only is
-   how two totals for one job arise.
+**RESOLVED — the code is correct as it stands.** An oil shortage is **not** deducted from
+either document, and should not be. It is accounted for on the **oil account sheet**, which
+accompanies the bill. The shortage is settled on its own sheet, not against the money, so
+the absence of a deduction term in `calculateJobTotal` and the hardcoded `lessAmount = 0`
+are both right. This entry stands as the record that the absence was checked and is
+deliberate, not an omission.
 
-**Nothing changed.** This is a calculation and a printed layout, and both are out of scope
-without an explicit decision.
+**What remains is presentational only**, and is deferred rather than fixed — see **D3**.
+
+**Nothing changed.**
 
 ### O16. The estimate and the bill compute the same job by two different models
 
@@ -1371,6 +1370,35 @@ a Wound Core job was priced from an array the user edited under a different head
 **Not changed.** Pre-existing and reviewed. If the two core types ever need to diverge
 in rate, the agency must save a Wound Core array first — otherwise the divergence will
 be silently ignored.
+
+---
+
+### D3. The estimate's `Less: 0.00` row stays on the printed form
+
+`lessAmount` is hardcoded to zero on every path in `buildSingleJobEstimateData` and has no
+writer anywhere in the app, so the estimate prints a `Less:` row reading `0.00` on every
+document. Since an oil shortage is settled on the oil account sheet and never deducted from
+the money (**O17**), that row will remain zero indefinitely.
+
+**Not removed, and the reasoning is the same as the "Type" column heading deferral above:**
+estimates carrying this row are already with UGVCL. Changing the shape of the form
+mid-tender creates a discrepancy between the documents they hold and the ones they receive
+next — a reviewer comparing two estimates would find a row present on one and absent on the
+other, and has no way to know that means nothing.
+
+It also sits on the right side of the general rule recorded there: **consistency across
+documents in the same envelope outranks consistency with earlier copies of a single
+document.** A permanently-zero `Less` row is identical on every estimate in every envelope,
+so nothing inside a submission looks inconsistent. Removing it would create exactly the
+cross-submission difference the rule is meant to avoid, for no gain in the document's
+meaning — a zero deduction and no deduction row say the same thing to a reader.
+
+**Recorded so nobody tidies it later without that conversation.** A field that is always
+zero and cannot be set looks like dead code to anyone reading `SingleJobEstimateReport` and
+not the tender history. It is not dead; it is issued.
+
+If the row is ever removed, it should be at a tender boundary, together with the heading
+changes deferred for the same reason — one form change, once, not several small ones.
 
 ---
 
