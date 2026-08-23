@@ -167,6 +167,18 @@ finds only places that already call one. It cannot, by construction, find a raw 
 string rendered straight into JSX — the exact defect being fixed. F18 found **20 such
 sites**, 8 of them on documents that go to UGVCL.
 
+**A uniqueness guard is only unique within its query's scope.** `copy-master-sections.js`
+refused to act on an ambiguous agency name — and still resolved the wrong document, because
+it checked for duplicates within the **owner-scoped** list its query returned. Two agencies
+named "suchit" exist under two different accounts. The guard was not weak; its *scope* was
+the query rather than the domain, and nothing in the code said so. See **F36**.
+
+The generalisation is worth keeping separate from the "one call site" pattern: this rule WAS
+applied at its only call site, and was still wrong. **Ask what population a guard is
+comparing against, not just whether it fires.** A check for "is this unique" answers "unique
+among what I can see", which is a different question whenever the query is filtered — and
+every query in this codebase is filtered by `ownerId`.
+
 **Working rule.** When centralising a rule, search for the *inputs the rule should
 apply to*, not for existing calls to it. Ask "what values of this kind exist?" before
 "where is the function called?". For dates that meant grepping for identifiers matching
@@ -2574,6 +2586,44 @@ It now distinguishes three causes and says which:
 The normalised case also names the specific rows that are not in storage and warns that
 saving would make them real — which is the fact an operator needs before pressing anything,
 and the one the original band obscured by asserting something else.
+
+### F36. Two agencies share a name across owners — a repair was verified against the wrong document
+
+Every visible symptom said the copy script had failed on one agency: the scorecard read
+Firestore and reported the repaired sections; the Estimate Master screen, after a full
+reload, showed the unrepaired ones. Neither "the write did not land" nor "the screen is
+stale" was true.
+
+**Two different agencies are named "suchit", under two different accounts.** The four
+repaired agencies belong to `utparekh007`; the admin account owns its own `SUCHIT` and
+`UPENDRA`. The repair ran signed in as the owner; the screen was being read signed in as the
+admin. Both were showing correct data — about different documents.
+
+**Why the script's guard did not catch it.** `pick()` refuses when a name matches more than
+one agency. But it searches `agencies`, which comes from
+`query(collection(db,'agencies'), where('ownerId','==',uid))`. Within one owner's list
+"suchit" is unique, so the guard passed. **The guard was not weak — its scope was the query,
+not the domain**, and nothing in the code said which population it was asserting uniqueness
+over.
+
+Fixed in both write-capable scripts that resolve by name:
+- `SOURCE_AGENCY_ID` / `TARGET_AGENCY_IDS` take precedence, so work can be done by document
+  id, which cannot be ambiguous;
+- every resolution logs `name  id=…  owner=…`, so the log never identifies a document by
+  name alone;
+- the visible-agency list prints ids, with an explicit note that another account may own
+  agencies with the same names and that this list cannot show them;
+- ambiguity messages list each candidate's id and owner rather than just the count.
+
+`fix-public-config-master.js` needed it more than the copy script, not less: it reads **all**
+agencies as super admin, so the name space it searches is larger than any single owner's —
+a name match there is strictly more ambiguous than the same match made owner-scoped.
+
+**Nothing was wrong with the repair.** The cost was an hour of chasing a cache that did not
+exist. The lesson is the diagnostic one: three explanations were on the table and all three
+were wrong, because each assumed the two observations described the same object. The check
+that settled it printed **document ids** beside names and showed which id the screen was
+pointed at — `scripts/verify-agency-masters-console.js`.
 
 ---
 

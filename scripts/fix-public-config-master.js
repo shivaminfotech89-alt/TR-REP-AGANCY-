@@ -32,7 +32,11 @@
 
 const MODE = 'dry-run';                 // 'dry-run' | 'write'
 
-const SOURCE_AGENCY = 'MEGHA';          // name CONTAINS this, case-insensitive
+// PREFER THE ID. Agency names are not unique across owners, and this script deliberately
+// reads ALL agencies (as super admin), so the name space it searches is larger than any one
+// owner's - which makes a name match strictly more ambiguous here than in the copy script.
+const SOURCE_AGENCY_ID = '';            // set this to work by id; takes precedence
+const SOURCE_AGENCY = 'MEGHA';          // used only when SOURCE_AGENCY_ID is empty
 const MIRROR_TO_SYSTEM_CONFIG = true;   // saveGlobalDefaultEstimateMaster mirrors too
 
 const SECTIONS = [
@@ -90,12 +94,25 @@ const SECTIONS = [
     return;
   }
   console.log(`Signed in as: ${email}`);
-  console.log(`Agencies readable: ${agencies.length} (${agencies.map(a => a.name).join(', ')})`);
+  console.log(`Agencies readable: ${agencies.length}`);
+  agencies.forEach(a => console.log(`  ${String(a.name || '(unnamed)').padEnd(24)} id=${a.id}  owner=${a.ownerId || '(none)'}`));
 
-  const hits = agencies.filter(a => String(a.name ?? '').toLowerCase().includes(SOURCE_AGENCY.toLowerCase()));
-  if (hits.length === 0) { console.error(`No agency matching "${SOURCE_AGENCY}".`); return; }
-  if (hits.length > 1) { console.error(`"${SOURCE_AGENCY}" matches ${hits.length} agencies. Refusing to guess.`); return; }
-  const source = hits[0];
+  let source = null;
+  if (SOURCE_AGENCY_ID) {
+    source = agencies.find(a => a.id === SOURCE_AGENCY_ID) || null;
+    if (!source) { console.error(`No agency with id "${SOURCE_AGENCY_ID}".`); return; }
+  } else {
+    const hits = agencies.filter(a => String(a.name ?? '').toLowerCase().includes(SOURCE_AGENCY.toLowerCase()));
+    if (hits.length === 0) { console.error(`No agency matching "${SOURCE_AGENCY}".`); return; }
+    if (hits.length > 1) {
+      console.error(`"${SOURCE_AGENCY}" matches ${hits.length} agencies:`);
+      hits.forEach(h => console.error(`    ${h.name}  id=${h.id}  owner=${h.ownerId || '(none)'}`));
+      console.error('Refusing to guess. Set SOURCE_AGENCY_ID to the one you mean.');
+      return;
+    }
+    source = hits[0];
+  }
+  console.log(`Source resolved: ${source.name}  id=${source.id}  owner=${source.ownerId || '(none)'}`);
 
   // ------------------------------------------------------------- source must be clean
   hdr(`SOURCE: ${source.name}  (${source.id})`);

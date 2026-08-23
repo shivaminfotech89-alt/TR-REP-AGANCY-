@@ -22,8 +22,18 @@
 
 const MODE = 'dry-run';                                  // 'dry-run' | 'write'
 
-const SOURCE_AGENCY = 'MEGHA';                           // name CONTAINS this, case-insensitive
-const TARGET_AGENCIES = ['AARATI', 'DRISHIV', 'suchit']; // each must match exactly one agency
+// PREFER IDS. Agency NAMES are not unique across owners - two different agencies named
+// "suchit" exist under two accounts. The name guard below refuses ambiguity only WITHIN the
+// signed-in owner's list, because that list is all the query can see; a name that is
+// ambiguous globally passes it. A document id cannot be ambiguous (AUDIT F36).
+//
+// Set the *_ID constants to work by id. Leave them empty to fall back to name matching,
+// which still refuses same-owner duplicates and now prints the owner for every match.
+const SOURCE_AGENCY_ID = '';
+const TARGET_AGENCY_IDS = [];
+
+const SOURCE_AGENCY = 'MEGHA';                           // used only when SOURCE_AGENCY_ID is empty
+const TARGET_AGENCIES = ['AARATI', 'DRISHIV', 'suchit']; // used only when TARGET_AGENCY_IDS is empty
 
 // Sections copied, with the scrap item code the resolver requires for each. Overhauling is
 // deliberately absent: an empty Overhauling section is the correct state (F31).
@@ -93,18 +103,30 @@ const LEGACY_FROM_CRGO = true;
   const snap = async (col, ...c) =>
     (await getDocs(query(collection(db, col), ...c))).docs.map(d => ({ id: d.id, ...d.data() }));
   const agencies = await snap('agencies', where('ownerId', '==', uid));
-  console.log(`Agencies visible to this account: ${agencies.map(a => a.name).join(', ')}`);
+  console.log(`Signed in as: ${auth?.currentUser?.email || '(unknown)'}  uid=${uid}`);
+  console.log('Agencies visible to this account (name / id):');
+  agencies.forEach(a => console.log(`  ${String(a.name || '(unnamed)').padEnd(24)} ${a.id}`));
+  console.log('NOTE: another account may own agencies with these same names. This list is');
+  console.log('owner-scoped, so it cannot show them - resolve by id if there is any doubt.');
 
+  const byId = id => {
+    const hit = agencies.find(a => a.id === id);
+    if (!hit) console.error(`No agency with id "${id}" is visible to this account.`);
+    return hit || null;
+  };
   const pick = (needle, label) => {
     const hits = agencies.filter(a => String(a.name ?? '').toLowerCase().includes(String(needle).toLowerCase()));
     if (hits.length === 0) { console.error(`No ${label} agency matching "${needle}".`); return null; }
-    if (hits.length > 1) { console.error(`"${needle}" matches ${hits.length} agencies (${hits.map(a => a.name).join(', ')}). Refusing to guess.`); return null; }
+    if (hits.length > 1) { console.error(`"${needle}" matches ${hits.length} agencies (${hits.map(a => `${a.name} [${a.id}]`).join(', ')}). Refusing to guess.`); return null; }
+    // Owner and id printed on every resolution, so the document being acted on is never
+    // identified by name alone in the log.
+    console.log(`  ${label}: "${needle}" -> ${hits[0].name}  id=${hits[0].id}  owner=${hits[0].ownerId || '(none)'}`);
     return hits[0];
   };
 
-  const source = pick(SOURCE_AGENCY, 'SOURCE');
+  const source = SOURCE_AGENCY_ID ? byId(SOURCE_AGENCY_ID) : pick(SOURCE_AGENCY, 'SOURCE');
   if (!source) return;
-  const targets = TARGET_AGENCIES.map(n => pick(n, 'TARGET'));
+  const targets = (TARGET_AGENCY_IDS.length ? TARGET_AGENCY_IDS.map(byId) : TARGET_AGENCIES.map(n => pick(n, 'TARGET')));
   if (targets.some(t => !t)) { console.error('Aborting - resolve the names above.'); return; }
   if (targets.some(t => t.id === source.id)) { console.error('A target is the source agency. Aborting.'); return; }
 
