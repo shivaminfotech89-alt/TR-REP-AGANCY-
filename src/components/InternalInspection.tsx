@@ -27,6 +27,15 @@ export interface InternalData {
   lvCoilB: string;
   wtOfCoilLv: string;
   totWtLv: string;
+  /**
+   * Weight of coils marked RI, kept separate from totWtLv (which is DAM only).
+   *
+   * They are different ITEMS at different rates - Schedule-A 13A replacement at Rs 149/kg
+   * against item 14 re-insulation at Rs 115/kg - so one number cannot carry both. It used
+   * to: `badCount` counted anything not OK, so a re-insulated coil was billed as a
+   * replacement.
+   */
+  totWtLvReIns: string;
   wasring: string;
   inPnt: string;
   tstTrn: string;
@@ -128,11 +137,10 @@ export default function InternalInspection() {
         const recomputedTotCoil = ((!isNaN(r) ? r : 0) + (!isNaN(y) ? y : 0) + (!isNaN(b) ? b : 0)) + '';
         const recomputedTotWt = ((Number(recomputedTotCoil) || 0) * (Number(wtOfCoil) || 0)).toFixed(2);
 
-        let badCount = 0;
-        if (lvCoilR !== 'OK') badCount++;
-        if (lvCoilY !== 'OK') badCount++;
-        if (lvCoilB !== 'OK') badCount++;
-        const recomputedTotWtLv = (badCount * (Number(wtOfCoilLv) || 0)).toFixed(2);
+        const damCountLv = [lvCoilR, lvCoilY, lvCoilB].filter(v => v === 'DAM').length;
+        const riCountLv = [lvCoilR, lvCoilY, lvCoilB].filter(v => v === 'RI').length;
+        const recomputedTotWtLv = (damCountLv * (Number(wtOfCoilLv) || 0)).toFixed(2);
+        const recomputedTotWtLvReIns = (riCountLv * (Number(wtOfCoilLv) || 0)).toFixed(2);
 
         if (existingInsp.data.totCoil !== undefined && Number(existingInsp.data.totCoil) !== Number(recomputedTotCoil)) {
           console.log(`Internal inspection totCoil mismatch for job ${j.jobNo}: stored=${existingInsp.data.totCoil}, recomputed=${recomputedTotCoil}`);
@@ -159,6 +167,7 @@ export default function InternalInspection() {
           lvCoilB,
           wtOfCoilLv,
           totWtLv: recomputedTotWtLv,
+          totWtLvReIns: recomputedTotWtLvReIns,
           wasring: existingInsp.data.wasring || '6',
           inPnt: existingInsp.data.inPnt || '-',
           tstTrn: existingInsp.data.tstTrn || 'Y',
@@ -182,6 +191,7 @@ export default function InternalInspection() {
           lvCoilB: 'OK',
           wtOfCoilLv: '',
           totWtLv: '',
+          totWtLvReIns: '',
           wasring: '6',
           inPnt: '-',
           tstTrn: 'Y',
@@ -214,12 +224,13 @@ export default function InternalInspection() {
 
       // Auto-calculate Tot Wt for LV based on damaged coils
       if (['lvCoilR', 'lvCoilY', 'lvCoilB', 'wtOfCoilLv'].includes(field)) {
-        let badCount = 0;
-        if (current.lvCoilR !== 'OK') badCount++;
-        if (current.lvCoilY !== 'OK') badCount++;
-        if (current.lvCoilB !== 'OK') badCount++;
+        // Two weights, not one. DAM drives replacement (Schedule-A 13A, Rs 149/kg); RI
+        // drives re-insulation (item 14, Rs 115/kg). Collapsing them into a single
+        // "not OK" count billed every re-insulated coil at the replacement rate.
+        const states = [current.lvCoilR, current.lvCoilY, current.lvCoilB];
         const wLv = Number(current.wtOfCoilLv) || 0;
-        current.totWtLv = (badCount * wLv).toFixed(2);
+        current.totWtLv = (states.filter(v => v === 'DAM').length * wLv).toFixed(2);
+        current.totWtLvReIns = (states.filter(v => v === 'RI').length * wLv).toFixed(2);
       }
 
       return {
@@ -477,6 +488,7 @@ export default function InternalInspection() {
             lvCoilB: jobData.lvCoilB,
             wtOfCoilLv: jobData.wtOfCoilLv,
             totWtLv: jobData.totWtLv,
+            totWtLvReIns: jobData.totWtLvReIns,
             wasring: jobData.wasring,
             inPnt: jobData.inPnt,
             tstTrn: jobData.tstTrn,
@@ -649,8 +661,9 @@ export default function InternalInspection() {
     />
   );
 
-  const renderSelectField = (jobId: string, field: keyof InternalData, options: string[], widthClass = 'w-full') => (
+  const renderSelectField = (jobId: string, field: keyof InternalData, options: string[], widthClass = 'w-full', title?: string) => (
     <select
+      title={title}
       value={formsData[jobId]?.[field] || ''}
       onChange={(e) => handleChange(jobId, field, e.target.value)}
       className={`px-1 py-1 text-[10px] font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs cursor-pointer ${widthClass}`}
@@ -1423,13 +1436,13 @@ export default function InternalInspection() {
                         
                         {/* LV Damaged Coil Selectors with Group Border */}
                         <td className="p-1 border-l-2 border-r border-indigo-400 bg-indigo-50/20 text-center">
-                          {renderSelectField(job.id, 'lvCoilR', ['OK', 'RI', 'DAM'], 'w-14')}
+                          {renderSelectField(job.id, 'lvCoilR', ['OK', 'RI', 'DAM'], 'w-14', 'OK = sound, no charge.  RI = heated but conductor intact - re-insulation, Schedule-A item 14 at Rs 115/kg.  DAM = damaged - replacement, item 13A at Rs 149/kg.')}
                         </td>
                         <td className="p-1 border-r border-indigo-400 bg-indigo-50/20 text-center">
-                          {renderSelectField(job.id, 'lvCoilY', ['OK', 'RI', 'DAM'], 'w-14')}
+                          {renderSelectField(job.id, 'lvCoilY', ['OK', 'RI', 'DAM'], 'w-14', 'OK = sound, no charge.  RI = heated but conductor intact - re-insulation, Schedule-A item 14 at Rs 115/kg.  DAM = damaged - replacement, item 13A at Rs 149/kg.')}
                         </td>
                         <td className="p-1 border-r-2 border-indigo-400 bg-indigo-50/20 text-center">
-                          {renderSelectField(job.id, 'lvCoilB', ['OK', 'RI', 'DAM'], 'w-14')}
+                          {renderSelectField(job.id, 'lvCoilB', ['OK', 'RI', 'DAM'], 'w-14', 'OK = sound, no charge.  RI = heated but conductor intact - re-insulation, Schedule-A item 14 at Rs 115/kg.  DAM = damaged - replacement, item 13A at Rs 149/kg.')}
                         </td>
                         
                         <td className="p-1 border-r border-slate-200 text-center">
@@ -1437,6 +1450,41 @@ export default function InternalInspection() {
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center font-bold text-indigo-900">
                           {renderReadOnlyField(job.id, 'totWtLv', 'w-16')}
+                          {/* EXCLUSIVITY, MADE VISIBLE. Display only - no calculation is
+                              touched here.
+
+                              LV coil replacement (Schedule-A 13A) and re-insulation (item
+                              14) are alternatives, and the estimate picks between them from
+                              totWtLv: any weight routes to 13A, zero routes to 14. An
+                              operator marking a coil therefore switches one line off and
+                              another on, and the total can move DOWN - which reads as
+                              nothing having changed. Saying which line applies is the point;
+                              inferring it from a total is not something anyone should have
+                              to do. */}
+                          {(() => {
+                            const d = formsData[job.id];
+                            if (!d) return null;
+                            const dam = Number(d.totWtLv || 0);
+                            const ri = Number(d.totWtLvReIns || 0);
+                            const noWeight = !(Number(d.wtOfCoilLv) > 0) &&
+                              [d.lvCoilR, d.lvCoilY, d.lvCoilB].some(v => v === 'DAM' || v === 'RI');
+                            if (noWeight) return (
+                              <div className="text-[9px] text-red-700 leading-tight mt-0.5 font-normal">
+                                enter Wt of Coil LV -<br />the charge cannot be calculated
+                              </div>
+                            );
+                            if (dam === 0 && ri === 0) return (
+                              <div className="text-[9px] text-slate-500 leading-tight mt-0.5 font-normal">
+                                all LV coils OK -<br />no LV coil charge
+                              </div>
+                            );
+                            return (
+                              <div className="text-[9px] text-amber-700 leading-tight mt-0.5 font-normal">
+                                {dam > 0 && <>{dam.toFixed(2)} kg replacement (13A)<br /></>}
+                                {ri > 0 && <>{ri.toFixed(2)} kg re-insulation (14)</>}
+                              </div>
+                            );
+                          })()}
                         </td>
                         
                         <td className="p-1 border-r border-slate-200 text-center">

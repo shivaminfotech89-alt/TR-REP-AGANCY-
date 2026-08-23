@@ -485,18 +485,28 @@ export function buildSingleJobEstimateData(
   internalItems.push({ sr: srCounter++, itemCode: '15', desc: 'Washer Ring', unit: 'NO', qty: wrQty.toString(), numQty: wrQty, rate: wrRate, amt: wrApplies ? wrQty * (wrRate ?? 0) : 0 });
 
   // 20. HV Coil(Aluminium SE)-N
+  // NO PER-CAPACITY DEFAULT. It used to fall through to 47.00 kg at 63 kVA when no weight
+  // was recorded - a fabricated REPLACEMENT weight (Schedule-A has no HV re-insulation
+  // item; the tender clause says "Replacement of all the HV windings"). It fired on the
+  // NOTHING-WRONG path: with all damage counts zero, `totCoil` is the string "0", which is
+  // falsy, so the second branch was skipped and the constant charged HV replacement on a
+  // transformer with no HV work at all.
+  //
+  // Two honest outcomes now: a weight computed from what was measured, or no HV coil line.
   let hvCoilWeight = 0;
+  const hvDamagedCoils =
+    (Number(internalData?.damR) || 0) + (Number(internalData?.damY) || 0) + (Number(internalData?.damB) || 0);
   if (internalData?.totWt && Number(internalData.totWt) > 0) {
     hvCoilWeight = Number(internalData.totWt);
-  } else if (internalData?.wtOfCoil && internalData?.totCoil) {
-    hvCoilWeight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
-  } else if (hasInternalData) {
-    // Per-capacity default for a coil weight missing from an otherwise real
-    // inspection. Deliberately NOT applied when the whole record is absent - that
-    // case is blocked above rather than given a plausible-looking number.
-    hvCoilWeight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
+  } else if (Number(internalData?.wtOfCoil) > 0 && hvDamagedCoils > 0) {
+    hvCoilWeight = Number(internalData.wtOfCoil) * hvDamagedCoils;
   }
   const hvCoilApplies = hvCoilWeight > 0;
+  // Damage recorded but no per-coil weight entered. Removing the default turns a wrong
+  // charge into NO charge, which is worse if it passes silently - so it blocks by name.
+  if (hasInternalData && hvDamagedCoils > 0 && hvCoilWeight === 0) {
+    rateErrors.push(`${jobLabel}: ${hvDamagedCoils} HV coil(s) marked damaged but no per-coil weight ("Wt of Coil") was recorded, so the HV coil charge cannot be calculated.`);
+  }
   // S.E.-variant status is UNCONFIRMED against the tender for either winding. The
   // Aluminium value below (Schedule-A '12A-b1', "with S.E.") matches the rate this
   // app already used before this change, on estimates already issued to and accepted
@@ -529,6 +539,13 @@ export function buildSingleJobEstimateData(
     lvCoilWeight = Number(internalData.totWtLv);
   }
   const lvCoilApplies = lvCoilWeight > 0;
+  // Same rule as HV: an observation without its weight must surface, never price at zero.
+  const lvStates = [internalData?.lvCoilR, internalData?.lvCoilY, internalData?.lvCoilB];
+  const lvDamCount = lvStates.filter(v => v === 'DAM').length;
+  const lvRiCount = lvStates.filter(v => v === 'RI').length;
+  if (hasInternalData && (lvDamCount > 0 || lvRiCount > 0) && !(Number(internalData?.wtOfCoilLv) > 0)) {
+    rateErrors.push(`${jobLabel}: LV coils marked ${lvDamCount ? `${lvDamCount} damaged` : ''}${lvDamCount && lvRiCount ? ' and ' : ''}${lvRiCount ? `${lvRiCount} for re-insulation` : ''}, but no per-coil weight ("Wt of Coil LV") was recorded, so the LV charge cannot be calculated.`);
+  }
   // Same S.E. caveat as HV Coil above. Aluminium (Schedule-A '13A-b', "without S.E.")
   // matches the rate already used before this change; Copper is blocked, not guessed.
   const lvCoilScheduleValue = isCopper ? undefined : scheduleRate('13A-b');
@@ -552,15 +569,24 @@ export function buildSingleJobEstimateData(
   });
 
   // 22. Re-insulation LV Coil(Aluminium) - Schedule-A '14-i'/'14-ii', no S.E. split
-  let reInsWeight = 0;
-  // If LV coils are OK or RI (not replaced as new), calculate re-insulation weight
-  if (hasInternalData && (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG')) {
-    if (lvCoilWeight === 0) {
-      // Same rule as the HV coil default above: a per-capacity stand-in for a field
-      // missing from a real inspection, never a substitute for the whole record.
-      reInsWeight = Number(kva) === 63 ? 24.30 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 35.00 : 12.00));
-    }
-  }
+  // DRIVEN BY THE COILS MARKED 'RI', exactly as 13A is driven by those marked 'DAM'.
+  //
+  // The old guard tested `!== 'DMG'` - a value the form NEVER emits, since the selector
+  // offers 'DAM'. So the comparison never matched, every observation fell through, and
+  // item 14 was charged from a per-capacity constant whenever no replacement weight
+  // existed. The constants were not a design decision; they were covering for a
+  // comparison that could not read the value that was already there.
+  //
+  // Consequences of that, both now gone: an all-OK transformer was charged for
+  // re-insulation nobody performed, and marking a coil damaged REDUCED the estimate,
+  // because the fabricated weight was larger than the real one for any coil under
+  // ~18.75 kg.
+  //
+  // Stored `totWtLvReIns` is preferred; recomputed from the coil states when absent, so
+  // records saved before the split still price correctly.
+  const reInsWeight = Number(internalData?.totWtLvReIns) > 0
+    ? Number(internalData.totWtLvReIns)
+    : lvRiCount * (Number(internalData?.wtOfCoilLv) || 0);
   const reInsApplies = reInsWeight > 0;
   const reInsRate = resolveRate('14', scheduleRate(isCopper ? '14-i' : '14-ii'));
   recordErrorIfApplies(reInsApplies, reInsRate, 'Re-insulation LV Coil');
