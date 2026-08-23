@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, runTransaction } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -662,7 +662,26 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         ...agencyData, 
         ownerId: auth.currentUser.uid 
       };
-      await setDoc(newRef, newAgency);
+      // CREATION TIME, FROM THE SERVER CLOCK (AUDIT A4 -> F38).
+      //
+      // Agencies and ATs recorded no creation timestamp at all, which has now blocked two
+      // separate questions: "which AT is the newest" while diagnosing a misattached one,
+      // and "which agencies predate the public_config correction" during the census. Both
+      // had to fall back to proxies - startDate, which is a tender date an operator types,
+      // and the earliest job under an agency, which says nothing about agencies with no
+      // jobs.
+      //
+      // Not retroactive: existing documents stay undated forever. This stops the gap
+      // widening, which is the only thing still available.
+      //
+      // serverTimestamp() rather than Date.now() for the reason recorded in A5: a stamp
+      // from the same browser clock as everything else it would corroborate cannot
+      // corroborate anything. formatDDMMYYYY already reads Timestamps (F23).
+      //
+      // Deliberately NOT added to the local state object below: serverTimestamp() is a
+      // sentinel, not a value, and storing it in React state would put a FieldValue where
+      // a date is expected. Absent locally until the next fetch is the honest state.
+      await setDoc(newRef, { ...newAgency, createdAt: serverTimestamp() });
       setAgencies(prev => [...prev, { id: newRef.id, ...newAgency }]);
       // Activate the agency just created. The old guard was `if (!activeAgencyId)` -
       // "is anything stored" where it meant "is this the one being worked on". Creating
@@ -749,7 +768,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
           : (callerCounters || {});
 
       const newAt = { ...atData, lastJobNumbers: seededCounters, ownerId: auth.currentUser.uid };
-      await setDoc(newRef, newAt);
+      // Creation time from the server clock - see the note in addAgency. `startDate` is the
+      // TENDER period start, a business date the operator types; two ATs created a month
+      // apart can carry the same one, and one created later can start earlier. It was never
+      // a creation order and scripts had to say so rather than imply it.
+      await setDoc(newRef, { ...newAt, createdAt: serverTimestamp() });
       setAtMasters(prev => [...prev, { id: newRef.id, ...newAt }]);
       // Activate the new AT when nothing is active FOR THIS AGENCY - not merely when
       // the stored id is empty. `activeAtMasterId` is a bare id while `activeAtMaster`

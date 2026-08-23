@@ -831,6 +831,35 @@ the sections, then decide the model.
 **Decision for now: keep the broadcast**, with a guard on the publish path (F29) so it
 cannot broadcast fallback-resolved content.
 
+**CLOSED by census.** `public_config` has since been corrected, and a full cross-owner
+census (`all-agencies-census-console.js`, run as super admin) found **7 agencies across 3
+owners, 1 faulty** — IDEAL ENGINEERING COMPANY, all three sections **EMPTY**, 0 jobs, 0
+issued documents.
+
+Empty is the benign case, and it resolves the worry that other owners were carrying the
+fault: they are not. Verified against the code, both halves —
+
+1. **An agency with all three sections absent resolves entirely through `public_config`.**
+   `getEstimateMasterForCore` tries the agency's section, then the global default, for each
+   of CRGO, Amorphous and Wound Core; with all three absent every lookup lands on
+   `public_config`, which is now correct. `enrichedAgencies` reaches the same value earlier,
+   filling the empty fields from the same document before any component sees them.
+2. **Nothing degrades if left alone.** `addAgency` is creation-only and now seeds from
+   `public_config` or the shipped defaults, never from an active agency (F30). The only
+   other writers are the per-agency saves and the publish fan-out, and both would now write
+   the *corrected* content, because the screen resolves from the corrected default. The
+   moment IDEAL stores anything it stores something right.
+
+So none of the three options considered — a cross-owner bulk write, the live-`public_config`
+data model, or an unscoped super-admin fan-out — is warranted. **The problem the options
+were for does not exist in the data.** Worth recording as its own small lesson: the census
+was cheaper than any of the fixes and made all three unnecessary.
+
+One honest caveat, not a reason to act: `cachedGlobalDefaultEstimateMaster` is seeded from
+`localStorage` at module load, so a user whose browser holds an old cached copy resolves
+through it until the fetch lands on that page load. It is per-browser and self-correcting,
+and no write happens in that window.
+
 ### O15. A sixth path writes document fields, in a file called Reports
 
 `Reports.tsx:394` — `handleSaveDates`, behind a "Lifecycle Dates" modal — writes
@@ -2741,6 +2770,39 @@ that signal while appearing to improve the data.
 The general rule, worth keeping: **when adding a field that asserts a historical fact, do
 not populate it for records that predate it.** An empty field says "unknown"; an inferred
 one says something false with the same confidence as a true one.
+
+### F38. Agencies and ATs now record a server creation time
+
+Closes the forward half of **A4**. `addAgency` and `addAtMaster` write
+`createdAt: serverTimestamp()`.
+
+**It had blocked two separate questions before it was worth fixing**, which is what settled
+it: *"which AT is the newest"* while diagnosing a misattached one, and *"which agencies
+predate the `public_config` correction"* during the cross-owner census. Both fell back to
+proxies — `startDate`, which is a tender date an operator types (two ATs created a month
+apart can share one, and a later-created AT can start earlier), and the earliest job under
+an agency, which says nothing about an agency with no jobs.
+
+`serverTimestamp()` rather than `Date.now()` for A5's reason: a stamp from the same browser
+clock as everything it would corroborate cannot corroborate anything. `formatDDMMYYYY`
+already reads Firestore Timestamps (F23), so no reader needed changing — and none existed
+anyway, the field having never been written.
+
+**Not added to the local state objects.** `serverTimestamp()` is a sentinel, not a value;
+putting it into React state would place a `FieldValue` where a date is expected. Absent
+locally until the next fetch is the honest state, and nothing reads it in that window.
+
+No rules change needed: `isValidAgency` and `isValidAtMaster` assert only about fields they
+name and do not reject unknown ones — checked, not assumed.
+
+**Not retroactive, and deliberately so.** Existing agencies and ATs stay undated forever;
+there is nothing to migrate *to*, because their true creation times were never recorded.
+Inferring one would be the F37 mistake — an inference asserted as a record. The gap stops
+widening, which is the only thing still available.
+
+`find-misattached-at-console.js` now prints `createdAt` beside `startDate`, showing
+`(not recorded - predates F38)` where absent, so a real creation order can be read directly
+where one exists and is visibly unavailable where it does not.
 
 ---
 

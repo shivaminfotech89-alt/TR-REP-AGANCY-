@@ -23,8 +23,11 @@
   const hdr = t => console.log(`\n${'='.repeat(78)}\n${t}\n${'='.repeat(78)}`);
 
   hdr(`ALL AT MASTERS - ${atMasters.length}`);
-  // No createdAt on atMasters, so "newest" is inferred from startDate then the auto-id,
-  // which is roughly chronological. Stated rather than assumed.
+  // ATs created since AUDIT F38 carry a server createdAt; older ones do not, and never
+  // will. So "newest" is still inferred from startDate here, which is the TENDER period
+  // start - a business date the operator types, not a creation time. Stated rather than
+  // assumed. Where createdAt is present it is shown alongside, so a real creation order
+  // can be read directly instead of inferred.
   const sorted = [...atMasters].sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
 
   console.table(sorted.map(at => {
@@ -39,6 +42,9 @@
       agencyId: at.agencyId || '(EMPTY - orphan)',
       status: at.status || '',
       startDate: at.startDate ? new Date(at.startDate).toISOString().split('T')[0] : '',
+      createdAt: at.createdAt?.seconds
+        ? new Date(at.createdAt.seconds * 1000).toISOString().split('T')[0]
+        : (at.createdAt ? String(at.createdAt) : '(not recorded - predates F38)'),
       pctCRGO: at.atPercentageCRGO ?? at.atPercentage ?? '(unset)',
       pctAmorphous: at.atPercentageAmorphous ?? '(unset)',
       pctWoundCore: at.atPercentageWoundCore ?? '(unset)',
