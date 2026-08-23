@@ -1022,6 +1022,18 @@ export default function BillingSystem() {
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
           billSentDate: todayIso,
+          // ISSUING AGENCY, STAMPED WITH THE DOCUMENT (AUDIT O14).
+          //
+          // Written in THIS batch, beside the document field, because a job carrying a
+          // document number and no issuing agency is the state that cost an hour of
+          // reconstruction after the bulk move: the supplier of an issued document used to
+          // live only in `job.agencyId`, a mutable pointer that a later write moved.
+          //
+          // A document's supplier is a fact about the past. It does not change when the
+          // job is later reassigned, so it is recorded here once and never rewritten.
+          issuedByAgencyId: activeAgency?.id || '',
+          issuedByAgencyName: activeAgency?.name || '',
+          issuedByAgencyGstin: activeAgency?.gstin || '',
           billNo: billNo || `BILL/${selectedMrNo}`,
           billAmount: totalJobTaxedAmt,
           updatedAt: new Date().toISOString()
@@ -1042,7 +1054,11 @@ export default function BillingSystem() {
             ...j,
             billSentDate: todayIso,
             billNo: billNo || `BILL/${selectedMrNo}`,
-            billAmount: totalJobTaxedAmt
+            billAmount: totalJobTaxedAmt,
+            // Mirrors the batch above, so the in-memory job matches what was written.
+            issuedByAgencyId: activeAgency?.id || '',
+            issuedByAgencyName: activeAgency?.name || '',
+            issuedByAgencyGstin: activeAgency?.gstin || '',
           };
         }
         return j;
@@ -1135,6 +1151,18 @@ export default function BillingSystem() {
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
           billNo: sendBillNo.trim(),
+          // ISSUING AGENCY, STAMPED WITH THE DOCUMENT (AUDIT O14).
+          //
+          // Written in THIS batch, beside the document field, because a job carrying a
+          // document number and no issuing agency is the state that cost an hour of
+          // reconstruction after the bulk move: the supplier of an issued document used to
+          // live only in `job.agencyId`, a mutable pointer that a later write moved.
+          //
+          // A document's supplier is a fact about the past. It does not change when the
+          // job is later reassigned, so it is recorded here once and never rewritten.
+          issuedByAgencyId: activeAgency?.id || '',
+          issuedByAgencyName: activeAgency?.name || '',
+          issuedByAgencyGstin: activeAgency?.gstin || '',
           billRefNo: sendBillRefNo.trim(),
           billSentDate: sendBillDate,
           billAmount: totalJobTaxedAmt,
@@ -1165,7 +1193,11 @@ export default function BillingSystem() {
             billTotalMrAmount: grandTotal,
             billStatus: 'Sent',
             paymentStatus: j.paymentStatus || 'Unpaid',
-            billRemarks: sendBillRemarks || ''
+            billRemarks: sendBillRemarks || '',
+            // Mirrors the batch above, so the in-memory job matches what was written.
+            issuedByAgencyId: activeAgency?.id || '',
+            issuedByAgencyName: activeAgency?.name || '',
+            issuedByAgencyGstin: activeAgency?.gstin || '',
           };
         }
         return j;

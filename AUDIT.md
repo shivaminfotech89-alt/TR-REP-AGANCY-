@@ -831,6 +831,42 @@ the sections, then decide the model.
 **Decision for now: keep the broadcast**, with a guard on the publish path (F29) so it
 cannot broadcast fallback-resolved content.
 
+### O15. A sixth path writes document fields, in a file called Reports
+
+`Reports.tsx:394` — `handleSaveDates`, behind a "Lifecycle Dates" modal — writes
+`estimateSentDate`, `estimateRefNo`, `estimateAmount`, `billSentDate`, `billNo`,
+`billAmount`, `paymentReceivedDate`, `paymentStatus`, `paymentAmount` and `paymentRefNo`
+straight onto the job, optionally to **every job in the MR** (`applyToAllInMr`). It carries
+no `issuedByAgencyId`, so F37's five stamped sites are five of six.
+
+**How it was missed, which is the point of recording it separately.** The search that found
+the other five asked *"where are documents produced?"* — and the answer was Estimate, Bill,
+Challan. This site produces no document. It is a data-entry screen for recording that a
+document was issued at some point in the past, and it lives in **Reports**, which nobody
+scans when asking where issuing happens. The right question was *"where is `billNo`
+written?"* — the field, not the activity. The sweep-shape lesson again: **search for the
+data being written, not for the activity you believe writes it.**
+
+**And it is NOT simply a missed stamp — stamping it would be wrong as things stand.** This
+path records documents issued *previously*, often by a different agency at a different time.
+Writing `issuedByAgencyId: activeAgency.id` here would assert that whichever agency happens
+to be active now issued a document it may have had nothing to do with. That is F37's
+laundering problem — an inference asserted as a record — arriving at a live write rather
+than at a backfill, and it would be harder to spot because the value would look freshly and
+legitimately captured.
+
+**So this needs a product decision, not a patch.** The options, none implemented:
+- ask for the issuing agency in the modal, defaulting to the job's current one, so the
+  operator states it rather than the session implying it;
+- stamp it only when the modal is creating a record that did not exist (no prior `billNo`),
+  and leave it absent when amending;
+- leave it unstamped, and accept that documents recorded through this path are identified by
+  the printed copy alone — consistent with the 36 reversed jobs.
+
+Until then, a job whose document fields were entered here is indistinguishable from one
+issued before F37: no stamp, meaning "not recorded". That is at least honest, and it is why
+this is an open question rather than a defect in F37.
+
 ### O14. No document records which agency issued it
 
 A job carries `billNo`, `billRefNo`, `billSentDate`, `billAmount`, `billStatus`,
@@ -863,8 +899,8 @@ it is the best available but because the alternative never existed.
 same batch that writes `billNo` / `estimateSentDate`. A document's supplier is a fact about
 the past and belongs in an immutable field, not in a pointer that later writes can move.
 
-Not done here: it changes what a billing write stores, and the bulk-move reversal is in
-flight against exactly those documents. After the reversal.
+**RESOLVED after the reversal — see F37.** Deliberately not backfilled for the jobs the
+reversal touched; the reason is recorded there and is the more important half of the fix.
 
 ### O13. "Save All for {agency}" still writes the screen's resolved view, not stored data
 
@@ -2659,6 +2695,52 @@ exist. The lesson is the diagnostic one: three explanations were on the table an
 were wrong, because each assumed the two observations described the same object. The check
 that settled it printed **document ids** beside names and showed which id the screen was
 pointed at — `scripts/verify-agency-masters-console.js`.
+
+### F37. Issued documents now record the agency that issued them
+
+Closes O14. `issuedByAgencyId`, `issuedByAgencyName` and `issuedByAgencyGstin` are written
+in the **same batch** as the document field, at **every** issue point.
+
+**Five Firestore write sites, not three**, because each issue point has two paths — a quick
+save and a full send dialog — and both write the document field:
+
+| Document | Firestore batch | paired local state |
+|---|---|---|
+| Estimate — quick save | `EstimateGenerate.tsx:755` | `:783` |
+| Estimate — send dialog | `EstimateGenerate.tsx:900` | `:932` |
+| Bill — quick save | `BillingSystem.tsx:1023` | `:1053` |
+| Bill — send dialog | `BillingSystem.tsx:1153` | `:1192` |
+| Challan — dispatch | `DispatchChallan.tsx:401` | `:428` |
+
+Stamping only the dialogs would have left the quick-save paths producing exactly the state
+the field exists to prevent. The paired local-state updates carry it too, so the in-memory
+job matches what was written — otherwise the operator who just issued a document would see
+it, until the next reload, with a document number and no issuing agency.
+
+**Name and GSTIN are stored alongside the id, not just the id.** The id resolves to whatever
+the agency record says *now*; a document names a supplier as it read *then*. An agency that
+is later renamed, or whose GSTIN is corrected, must not retroactively change what an issued
+invoice is recorded as having said.
+
+No rules change needed: `isValidJob` asserts only about fields it names and does not reject
+unknown ones — checked rather than assumed.
+
+#### The part that matters more than the field: the 36 reversed jobs were NOT backfilled
+
+Their `agencyId` is now correct **by reconstruction, not by record**. Stamping
+`issuedByAgencyId` from it would **launder an inference into an assertion** — a field whose
+whole purpose is to say "this is what the document recorded" would, for those 36, say "this
+is what four witnesses agreed the document probably recorded", and nothing downstream could
+tell the two apart. That is the seeded-value shape exactly: a plausible entry, indistinguish­able from a real one, in the field meant to be authoritative.
+
+**Their absence of the field is itself correct and should be preserved.** It means "issued
+before the issuing agency was recorded", which is true, and it is the signal that points a
+future reader at the printed document rather than at the database. A backfill would delete
+that signal while appearing to improve the data.
+
+The general rule, worth keeping: **when adding a field that asserts a historical fact, do
+not populate it for records that predate it.** An empty field says "unknown"; an inferred
+one says something false with the same confidence as a true one.
 
 ---
 

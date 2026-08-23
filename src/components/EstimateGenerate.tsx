@@ -754,6 +754,18 @@ export default function EstimateGenerate() {
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
           estimateSentDate: todayIso,
+          // ISSUING AGENCY, STAMPED WITH THE DOCUMENT (AUDIT O14).
+          //
+          // Written in THIS batch, beside the document field, because a job carrying a
+          // document number and no issuing agency is the state that cost an hour of
+          // reconstruction after the bulk move: the supplier of an issued document used to
+          // live only in `job.agencyId`, a mutable pointer that a later write moved.
+          //
+          // A document's supplier is a fact about the past. It does not change when the
+          // job is later reassigned, so it is recorded here once and never rewritten.
+          issuedByAgencyId: activeAgency?.id || '',
+          issuedByAgencyName: activeAgency?.name || '',
+          issuedByAgencyGstin: activeAgency?.gstin || '',
           estimateRefNo: refNoText || `UGVCL/EST/${selectedMrNo}`,
           estimateAmount: grandTot,
           updatedAt: new Date().toISOString()
@@ -772,7 +784,11 @@ export default function EstimateGenerate() {
             ...j,
             estimateSentDate: todayIso,
             estimateRefNo: refNoText || `UGVCL/EST/${selectedMrNo}`,
-            estimateAmount: grandTot
+            estimateAmount: grandTot,
+            // Mirrors the batch above, so the in-memory job matches what was written.
+            issuedByAgencyId: activeAgency?.id || '',
+            issuedByAgencyName: activeAgency?.name || '',
+            issuedByAgencyGstin: activeAgency?.gstin || '',
           };
         }
         return j;
@@ -882,6 +898,18 @@ export default function EstimateGenerate() {
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
           estimateSentDate: sendDate,
+          // ISSUING AGENCY, STAMPED WITH THE DOCUMENT (AUDIT O14).
+          //
+          // Written in THIS batch, beside the document field, because a job carrying a
+          // document number and no issuing agency is the state that cost an hour of
+          // reconstruction after the bulk move: the supplier of an issued document used to
+          // live only in `job.agencyId`, a mutable pointer that a later write moved.
+          //
+          // A document's supplier is a fact about the past. It does not change when the
+          // job is later reassigned, so it is recorded here once and never rewritten.
+          issuedByAgencyId: activeAgency?.id || '',
+          issuedByAgencyName: activeAgency?.name || '',
+          issuedByAgencyGstin: activeAgency?.gstin || '',
           estimateRefNo: sendRefNo.trim(),
           estimateAmount: grandTot,
           estimateStatus: 'Sent',
@@ -905,7 +933,11 @@ export default function EstimateGenerate() {
             estimateAmount: grandTot,
             estimateStatus: 'Sent',
             estimateApprovalStatus: j.approvalNo ? 'Approved' : (j.estimateApprovalStatus || 'Pending'),
-            estimateRemarks: sendRemarks || ''
+            estimateRemarks: sendRemarks || '',
+            // Mirrors the batch above, so the in-memory job matches what was written.
+            issuedByAgencyId: activeAgency?.id || '',
+            issuedByAgencyName: activeAgency?.name || '',
+            issuedByAgencyGstin: activeAgency?.gstin || '',
           };
         }
         return j;
