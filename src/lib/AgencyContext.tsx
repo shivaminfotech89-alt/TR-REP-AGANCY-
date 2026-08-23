@@ -49,6 +49,15 @@ export interface Agency {
   gpValidationMonths?: number;
   
   // Agency / Supplier Profile (Tax & Identity)
+  /**
+   * Registered business name, as it appears on the GST registration. Printed on the TAX
+   * INVOICE ONLY - every other screen keeps using `name`, the short working name.
+   *
+   * Optional, and falls back to `name` wherever it is read, so an agency that has never
+   * set it prints exactly what it printed before. Absent means "not distinguished yet",
+   * not "blank" - it is never written as an empty string by the form.
+   */
+  legalName?: string;
   address?: string;
   agencyState?: string; // e.g. "Gujarat"
   agencyStateCode?: string; // e.g. "24"

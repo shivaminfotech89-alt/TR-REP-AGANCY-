@@ -2822,7 +2822,10 @@ export default function BillingSystem() {
                         {activeAgency?.letterheadUrl && activeAgency?.letterheadMode === 'header_only' ? (
                           <img src={activeAgency.letterheadUrl} alt="Letterhead" className="max-h-12 object-contain mb-1" />
                         ) : (
-                          <h1 className="text-xs font-black uppercase font-serif tracking-wide">{activeAgency?.name || 'AGENCY NAME'}</h1>
+                          /* Registered business name, falling back to the short name. The
+                             tax invoice is the ONLY document that uses legalName - every
+                             other screen and document prints `name`, deliberately. */
+                          <h1 className="text-xs font-black uppercase font-serif tracking-wide">{activeAgency?.legalName || activeAgency?.name || 'AGENCY NAME'}</h1>
                         )}
                         <p className="font-bold text-[9px] text-slate-800">Repairing of Distribution Transformers</p>
                         <p className="mt-0.5 text-[9px] leading-tight">{activeAgency?.address || ''}</p>
@@ -2902,7 +2905,7 @@ export default function BillingSystem() {
                   <div className="p-1 border-b border-black font-semibold text-center text-[9px]">
                     {billTypeFilter === 'scrap'
                       ? 'The following Transformer(s) declared as scrap by E.E. (TR), inspected & dismantled and returned to the division.'
-                      : 'The following Transformer duly repaired with standard parts and tested o. k. with oil upto level mark.'}
+                      : 'The following Transformer duly repaired with standard parts and tested o.k. with oil up to level mark.'}
                   </div>
 
                   {/* Itemized Table */}
@@ -2924,6 +2927,31 @@ export default function BillingSystem() {
                     <tbody>
                       {selectedJobsData.map((job, idx) => {
                         const jobTotal = calculateJobTotal(job);
+                        // Est. Amount is RECOMPUTED here, not read from job.estimateAmount.
+                        //
+                        // Two reasons. The stored figure is understated - it is built from
+                        // baseTotal rather than finalAmount (AUDIT O4) - and fixing that
+                        // corrects only future writes, leaving every existing job printing
+                        // the wrong number on an invoice today. And computing it from the
+                        // same function the estimate itself prints from means the two
+                        // documents agree by construction rather than by both happening to
+                        // have stored the same value.
+                        //
+                        // WHAT THIS COLUMN IS, for whoever reads it next: a CURRENT
+                        // recomputation of the estimate, not a record of what was sent.
+                        // It reflects today's master and AT percentage, so an invoice
+                        // reprinted after a rate change shows a different figure from the
+                        // estimate that actually went out. THE PRINTED ESTIMATE ON FILE IS
+                        // THE AUTHORITY for what was sent; this column is here so a
+                        // reviewer can compare estimate against bill, which is the whole
+                        // reason the column exists - it previously printed jobTotal twice.
+                        const estAmount = getJobFullEstimate(
+                          job,
+                          externalInspMap[job.id],
+                          internalInspMap[job.id],
+                          activeAgency,
+                          activeAtMaster
+                        ).finalAmount;
                         return (
                           <tr key={job.id} className="border-b border-black">
                             <td className="p-1 border-r border-black">{idx + 1}</td>
@@ -2934,7 +2962,7 @@ export default function BillingSystem() {
                             <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
                             <td className="p-1 border-r border-black">11</td>
                             <td className="p-1 border-r border-black font-mono">{job.serialNo || '-'}</td>
-                            <td className="p-1 border-r border-black text-right font-mono">{jobTotal.toFixed(2)}</td>
+                            <td className="p-1 border-r border-black text-right font-mono">{estAmount.toFixed(2)}</td>
                             <td className="p-1 text-right font-mono font-bold">{jobTotal.toFixed(2)}</td>
                           </tr>
                         );

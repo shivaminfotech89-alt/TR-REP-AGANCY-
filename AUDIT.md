@@ -499,6 +499,23 @@ note at the top of this file.
 **Not yet fixed.** The correct fix is to write the stored field from the same function
 that renders the document, rather than recomputing it.
 
+**No longer urgent — the tax invoice no longer depends on it (F40).** The invoice's
+*Est. Amount* column used to be a duplicate of the bill figure and was pointed at a
+**recomputation** (`getJobFullEstimate(...).finalAmount`) rather than at this stored value,
+precisely because fixing O4 corrects only future writes and would leave every existing job
+printing the understated figure on a document going out today.
+
+**But it stays open, and the reason is narrow:** everything ELSE that reads
+`estimateAmount` still gets the understated number. It is stored on the job at estimate-send
+time and read by the estimate register, the Reports lifecycle view and any comparison of
+estimated against billed that works from stored fields rather than recomputing. Those are
+now the only consumers that carry the fault, which makes this smaller than it was — not
+resolved.
+
+Note also what the invoice change did NOT do: it did not correct the stored value, so a
+future reader comparing `job.estimateAmount` against the invoice's Est. Amount column will
+find them disagreeing. That disagreement is this defect, visible from a new angle.
+
 ### O5. `paymentDeductions` accepts the full payment as a "deduction" — unvalidated
 
 **Not the same class as O3/O4.** Those are code computing a stored figure wrongly. This

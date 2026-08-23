@@ -48,6 +48,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [agencyState, setAgencyState] = useState(agency.agencyState || '');
   // Not defaulted to '24' - see AUDIT O8. Derived from the agency's own GSTIN below.
   const [agencyStateCode, setAgencyStateCode] = useState(agency.agencyStateCode || '');
+  // Registered business name for the tax invoice. Defaults to the short name so an agency
+  // that never touches this field prints exactly what it printed before.
+  const [legalName, setLegalName] = useState(agency.legalName || agency.name || '');
   const [gstin, setGstin] = useState(agency.gstin || '');
   const [pan, setPan] = useState(agency.pan || '');
   const [phone, setPhone] = useState(agency.phone || '');
@@ -115,6 +118,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setAddress(agency.address || '');
     setAgencyState(agency.agencyState || '');
     setAgencyStateCode(agency.agencyStateCode || '');
+    setLegalName(agency.legalName || agency.name || '');
     setGstin(agency.gstin || '');
     setPan(agency.pan || '');
     setPhone(agency.phone || '');
@@ -287,6 +291,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       };
 
       checkChange('Agency Name', agency.name, agencyName);
+      checkChange('Registered Business Name', agency.legalName || agency.name, legalName);
       checkChange('Agency GSTIN', agency.gstin, gstin);
       checkChange('Agency PAN', agency.pan, pan);
       checkChange('Agency State', agency.agencyState, agencyState);
@@ -341,6 +346,10 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         // Persist the DERIVED code when a GSTIN exists, so the stored value can never
         // drift from the GSTIN it is part of.
         agencyStateCode: stateCodeFromGstin(gstin) || agencyStateCode,
+        // Only stored when it actually differs from the short name. Writing it always
+        // would make every agency look as though someone had deliberately set a legal
+        // name, and the invoice fallback could no longer tell the two cases apart.
+        legalName: legalName.trim() && legalName.trim() !== agencyName.trim() ? legalName.trim() : '',
         gstin,
         pan,
         phone,
@@ -483,6 +492,27 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. H. E. ELECTRICALS"
                 />
+              </div>
+
+              {/* Placed immediately before the GSTIN it must agree with, because the
+                  requirement is a relationship between the two, not a property of either. */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
+                  Registered Business Name
+                </label>
+                <input
+                  type="text"
+                  value={legalName}
+                  onChange={e => setLegalName(e.target.value)}
+                  className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  placeholder={agencyName || 'e.g. H. E. ELECTRICALS & ENGINEERING CO.'}
+                />
+                <p className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                  Printed on the <strong>tax invoice only</strong>. It must match the name on
+                  your GST registration exactly - a mismatch between the invoice and the GSTIN
+                  is a ground for rejection. Every other screen keeps using the short name
+                  above; leave this the same as the short name if they are identical.
+                </p>
               </div>
 
               <div>

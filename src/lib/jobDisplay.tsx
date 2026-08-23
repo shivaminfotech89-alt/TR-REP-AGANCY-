@@ -1,3 +1,5 @@
+import { getAgencyStateCode } from './utils';
+
 // Shared presentation for GP (guarantee) jobs. Defined ONCE here and imported by every
 // screen that lists jobs - NewJob, External/Internal Inspection, Testing Report,
 // Dispatch Challan, Billing and Reports. Do not redefine the colour per file.
@@ -81,15 +83,43 @@ const LABELS: Record<string, string> = {
   discomGstin: "DISCOM GSTIN",
   discomAddress: 'DISCOM address',
   circleOfficeName: 'Circle office name',
+  gstin: "Agency GSTIN (your own, printed as Supplier GSTIN)",
+  pan: 'Agency PAN (your own, printed as Supplier PAN)',
 };
 
 function missingFields(agency: any, required: string[]): string[] {
   return required.filter(f => !String(agency?.[f] ?? '').trim()).map(f => LABELS[f] || f);
 }
 
-/** The tax invoice prints the DISCOM's name, GSTIN and address. */
+/**
+ * The tax invoice prints BOTH parties' tax registrations - the DISCOM's as buyer and the
+ * agency's own as supplier.
+ *
+ * It used to gate on the buyer's three fields only. That is one side of a two-sided fact,
+ * and the omission was not theoretical: an invoice went out with "Supplier GSTIN: -" and
+ * "Supplier PAN: -" printed on it. An invoice carrying no seller registration is not a
+ * valid tax invoice and can be rejected on that basis alone, so it blocks exactly as the
+ * missing buyer GSTIN does.
+ */
 export function missingForTaxInvoice(agency: any): string[] {
-  return missingFields(agency, ['discomName', 'discomGstin', 'discomAddress']);
+  const missing = missingFields(agency, [
+    'discomName', 'discomGstin', 'discomAddress',   // buyer
+    'gstin', 'pan',                                  // seller - this is what was missing
+  ]);
+
+  // The supplier State Code is DERIVED from the agency's own GSTIN (its first two digits
+  // ARE the state code - AUDIT O8), so it is normally implied by the GSTIN check above and
+  // reporting it too would just restate one fault as two.
+  //
+  // It earns its own line in exactly one case: a GSTIN is present but does not begin with
+  // two digits, so nothing can be derived from it and `agencyStateCode` is empty as well.
+  // That is a malformed GSTIN, which the field-presence check cannot see.
+  const hasGstin = Boolean(String(agency?.gstin ?? '').trim());
+  if (hasGstin && !getAgencyStateCode(agency)) {
+    missing.push('Agency State Code (cannot be derived - the GSTIN does not start with a two-digit state code)');
+  }
+
+  return missing;
 }
 
 /** The estimate prints the DISCOM's name and the circle office it is addressed to. */
