@@ -338,6 +338,45 @@ approximate.
 
 ---
 
+## Pattern: a message whose truth depended on a collection being homogeneous
+
+`buildSingleJobEstimateData` returned `rateErrors: string[]`, and every consumer rendered
+ONE message for the whole array. The internal-inspection indicator said **"Rate not
+configured - cannot estimate"** whenever it was non-empty.
+
+**That was accurate for every case it ever served** — each entry was a missing RATE: absent
+from the agency master and from Schedule-A, fixable in Estimate Master by whoever maintains
+rates. The message named the cause correctly because the array only ever held one kind of
+cause.
+
+Then a second kind arrived: a measurement the inspector had not entered. The array was still
+`string[]`, every consumer still compiled, every test of `.length` still worked — and the
+indicator began telling an operator that a **rate** was unconfigured when the rate was fine
+and the missing thing was a field on the row in front of them. It sent them to the wrong
+screen to fix the wrong thing.
+
+**Nothing was "introduced".** No line changed meaning. The message's truth had always rested
+on a property of the collection — homogeneity — that nothing stated, nothing enforced, and
+no type expressed. The defect was created by the *absence* of a constraint that had been
+holding by accident.
+
+**The tell is a collection whose consumers all reduce it to one summary.** If every reader
+says "there are problems, here is what problems mean", they are all asserting that the
+collection is uniform. That assertion survives exactly as long as nobody adds a second kind
+— and adding one is invisible, because it breaks no signature.
+
+**Working rule.** When a collection is summarised rather than enumerated, **put the kind in
+the element, not in the reader.** `{ kind, message }` costs one field and makes each reader
+decide what to do with each kind — and a kind added later reaches every reader without any
+of them being edited.
+
+**And prefer that to a second parallel array.** Splitting into `rateErrors` and
+`inputErrors` would leave every consumer needing to know about both and stay in step, which
+is the "rule enforced at one call site" pattern waiting to happen — one reader updated, the
+next one not, and no signal either way.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on

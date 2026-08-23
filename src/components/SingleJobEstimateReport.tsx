@@ -118,6 +118,31 @@ function layoutEstimatePages(rows: EstimateRow[], contentMm: number): EstimateRo
   return fixLastPageOverflow(greedy, contentMm);
 }
 
+/**
+ * Why an estimate cannot be trusted, and WHAT KIND of problem it is.
+ *
+ * It was a plain string[]. Every consumer then had to render one message for the whole
+ * array, and that message was accurate only while the array was HOMOGENEOUS - every entry
+ * being a missing RATE. The moment a second kind arrived (a measurement the operator had
+ * not entered yet), the internal-inspection indicator went on saying "Rate not configured",
+ * sending an operator to the Estimate Master to fix something that was not broken.
+ *
+ * Nothing was introduced by that change: the message's truth had always depended on a
+ * property of the array that nothing stated or enforced. A `kind` states it, and a new kind
+ * added later reaches every reader without any of them being edited - which a second
+ * parallel array would not, since each reader would have to learn about both and stay in
+ * step.
+ *
+ * 'missing-rate'  - configuration: a rate is absent from the master and Schedule-A.
+ *                   Fixed in Estimate Master, by whoever maintains rates.
+ * 'missing-input' - observation: the inspector recorded something but not the measurement
+ *                   it needs. Fixed on the inspection form, by the person in front of it.
+ */
+export interface EstimateRateError {
+  kind: 'missing-rate' | 'missing-input';
+  message: string;
+}
+
 export interface SingleEstimateLineItem {
   sr: number;
   itemCode?: string;
@@ -145,7 +170,7 @@ export interface SingleJobEstimateData {
   finalAmount: number;
   /** Messages for applicable items whose rate couldn't be resolved. Non-empty means
    *  the total must not be shown/trusted - see rateErrors handling in the renderer. */
-  rateErrors: string[];
+  rateErrors: EstimateRateError[];
 }
 
 export function buildSingleJobEstimateData(
@@ -167,7 +192,7 @@ export function buildSingleJobEstimateData(
   const isCopper = winding.toUpperCase().startsWith('CU');
   const windingSuffix = isCopper ? 'Copper' : 'Aluminium SE';
 
-  const rateErrors: string[] = [];
+  const rateErrors: EstimateRateError[] = [];
   const coreClass = classifyCoreType(coreType);
 
   // SCRAP SHORT-CIRCUIT - must come before the core-type branch.
@@ -186,7 +211,7 @@ export function buildSingleJobEstimateData(
   // charge at all.
   if (isScrap) {
     const scrapCharge = resolveScrapCharge(coreType, kva, masterList);
-    if (scrapCharge.error) rateErrors.push(scrapCharge.error);
+    if (scrapCharge.error) rateErrors.push({ kind: 'missing-rate', message: scrapCharge.error });
 
     const scrapAmt = scrapCharge.rate ?? 0;
     const scrapItems: SingleEstimateLineItem[] = [{
@@ -226,10 +251,10 @@ export function buildSingleJobEstimateData(
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
     const entry = findScheduleBEntry(kvaNum, isCopper, job.make);
     const fixedItems: SingleEstimateLineItem[] = [];
-    const fixedRateErrors: string[] = [];
+    const fixedRateErrors: EstimateRateError[] = [];
 
     if (!entry) {
-      fixedRateErrors.push(`No fixed-rate entry found for ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} winding in UGVCL Schedule-B.`);
+      fixedRateErrors.push({ kind: 'missing-rate', message: `No fixed-rate entry found for ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} winding in UGVCL Schedule-B.` });
       fixedItems.push({ sr: 1, desc: 'Repairing Charge - Fixed Rate (Internal & External)', unit: 'NOS', qty: '-', numQty: 0, rate: null, amt: 0 });
       fixedItems.push({ sr: 2, desc: 'Labour Charge', unit: 'NOS', qty: '-', numQty: 0, rate: null, amt: 0 });
     } else {
@@ -295,10 +320,10 @@ export function buildSingleJobEstimateData(
   const hasInternalData = !!internalData && Object.keys(internalData).length > 0;
   const jobLabel = job.jobNo || job.id || 'This job';
   if (!hasExternalData) {
-    rateErrors.push(`${jobLabel}: no external inspection data - quantities cannot be derived.`);
+    rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: no external inspection data - quantities cannot be derived.` });
   }
   if (!hasInternalData) {
-    rateErrors.push(`${jobLabel}: no internal inspection data - quantities cannot be derived.`);
+    rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: no internal inspection data - quantities cannot be derived.` });
   }
 
   const scheduleRate = (sr: string): number | undefined => {
@@ -325,7 +350,7 @@ export function buildSingleJobEstimateData(
   // the printed rate cell blank instead of blocking the whole estimate.
   const recordErrorIfApplies = (applies: boolean, rate: number | null, label: string, customMessage?: string) => {
     if (applies && rate === null) {
-      rateErrors.push(customMessage || `No rate found for "${label}" at ${kva} KVA (checked agency estimate master and UGVCL Schedule-A).`);
+      rateErrors.push({ kind: 'missing-rate', message: customMessage || `No rate found for "${label}" at ${kva} KVA (checked agency estimate master and UGVCL Schedule-A).` });
     }
   };
 
@@ -505,7 +530,7 @@ export function buildSingleJobEstimateData(
   // Damage recorded but no per-coil weight entered. Removing the default turns a wrong
   // charge into NO charge, which is worse if it passes silently - so it blocks by name.
   if (hasInternalData && hvDamagedCoils > 0 && hvCoilWeight === 0) {
-    rateErrors.push(`${jobLabel}: ${hvDamagedCoils} HV coil(s) marked damaged but no per-coil weight ("Wt of Coil") was recorded, so the HV coil charge cannot be calculated.`);
+    rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: ${hvDamagedCoils} HV coil(s) marked damaged but no per-coil weight ("Wt of Coil") was recorded, so the HV coil charge cannot be calculated.` });
   }
   // S.E.-variant status is UNCONFIRMED against the tender for either winding. The
   // Aluminium value below (Schedule-A '12A-b1', "with S.E.") matches the rate this
@@ -544,7 +569,7 @@ export function buildSingleJobEstimateData(
   const lvDamCount = lvStates.filter(v => v === 'DAM').length;
   const lvRiCount = lvStates.filter(v => v === 'RI').length;
   if (hasInternalData && (lvDamCount > 0 || lvRiCount > 0) && !(Number(internalData?.wtOfCoilLv) > 0)) {
-    rateErrors.push(`${jobLabel}: LV coils marked ${lvDamCount ? `${lvDamCount} damaged` : ''}${lvDamCount && lvRiCount ? ' and ' : ''}${lvRiCount ? `${lvRiCount} for re-insulation` : ''}, but no per-coil weight ("Wt of Coil LV") was recorded, so the LV charge cannot be calculated.`);
+    rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: LV coils marked ${lvDamCount ? `${lvDamCount} damaged` : ''}${lvDamCount && lvRiCount ? ' and ' : ''}${lvRiCount ? `${lvRiCount} for re-insulation` : ''}, but no per-coil weight ("Wt of Coil LV") was recorded, so the LV charge cannot be calculated.` });
   }
   // Same S.E. caveat as HV Coil above. Aluminium (Schedule-A '13A-b', "without S.E.")
   // matches the rate already used before this change; Copper is blocked, not guessed.
@@ -909,7 +934,7 @@ export default function SingleJobEstimateReport({
                     <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-[9px]">
                       <p className="font-black uppercase tracking-wide mb-1">⚠ Estimate incomplete - rate not found</p>
                       <ul className="list-disc list-inside space-y-0.5 font-normal">
-                        {estimate.rateErrors.map((msg, i) => <li key={i}>{msg}</li>)}
+                        {estimate.rateErrors.map((e, i) => <li key={i}>{e.message}</li>)}
                       </ul>
                       <p className="mt-1 font-bold">Total withheld until a rate is confirmed.</p>
                     </div>
@@ -1107,7 +1132,7 @@ export default function SingleJobEstimateReport({
                   <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-[9px]">
                     <p className="font-black uppercase tracking-wide mb-1">⚠ Estimate incomplete - rate not found</p>
                     <ul className="list-disc list-inside space-y-0.5 font-normal">
-                      {estimate.rateErrors.map((msg, i) => <li key={i}>{msg}</li>)}
+                      {estimate.rateErrors.map((e, i) => <li key={i}>{e.message}</li>)}
                     </ul>
                     <p className="mt-1 font-bold">Total withheld until every applicable item has a rate.</p>
                   </div>

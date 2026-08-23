@@ -678,7 +678,19 @@ export default function InternalInspection() {
   // CURRENT UNSAVED form values, so it reflects what's on the bench right now, not
   // whatever was last saved.
   const renderCircleLimitIndicator = (job: any) => {
-    if (classifyCoreType(job.coreType || 'CRGO') !== 'CRGO') return null;
+    // NOT blank. Amorphous and Wound Core price from Schedule-B at a fixed rate per
+    // capacity, so nothing entered on this form can move the amount and there is nothing
+    // to check against the circle limit; OH cannot realistically approach it. That is a
+    // reason, and an empty cell does not convey a reason - it is indistinguishable from a
+    // broken one, which is the ambiguity this audit keeps removing.
+    if (classifyCoreType(job.coreType || 'CRGO') !== 'CRGO') {
+      return (
+        <span className="block text-[9px] font-semibold text-slate-400 italic"
+              title="Amorphous and CRGO Wound Core are priced at a fixed rate per capacity from UGVCL Schedule-B, so the circle approval limit is not checked here.">
+          Fixed rate - no limit check
+        </span>
+      );
+    }
 
     const internalDataLive = formsData[job.id];
     if (!internalDataLive) return null;
@@ -690,16 +702,28 @@ export default function InternalInspection() {
 
     // Never show a figure that rests on missing data. Each case says what is actually
     // missing - "Limit not configured" must mean the limit, nothing else.
+    // Ordered by what the operator can act on FIRST, and each message names the thing
+    // that is actually missing. "Rate not configured" used to cover both a missing rate
+    // and a missing measurement - see EstimateRateError - which sent an operator to the
+    // Estimate Master to fix a field on the row in front of them.
+    const inputErrors = est.rateErrors.filter(e => e.kind === 'missing-input');
+    const rateProblems = est.rateErrors.filter(e => e.kind === 'missing-rate');
     const blockedMessage = !externalDataSaved
       ? 'External inspection missing - cannot estimate'
-      : !check.hasLimit
-        ? 'Limit not configured'
-        : est.rateErrors.length > 0
-          ? 'Rate not configured - cannot estimate'
-          : null;
+      : inputErrors.length > 0
+        ? (inputErrors.some(e => e.message.includes('Wt of Coil LV'))
+            ? 'Enter Wt of Coil LV to estimate'
+            : inputErrors.some(e => e.message.includes('Wt of Coil'))
+              ? 'Enter Wt of Coil to estimate'
+              : 'Inspection incomplete - cannot estimate')
+        : !check.hasLimit
+          ? 'Limit not configured'
+          : rateProblems.length > 0
+            ? 'Rate not configured - cannot estimate'
+            : null;
     if (blockedMessage) {
       // "Limit not configured" is a setup gap - offer the route, not just the message.
-      if (!check.hasLimit) {
+      if (!check.hasLimit && inputErrors.length === 0) {
         return (
           <button
             type="button"
@@ -721,7 +745,15 @@ export default function InternalInspection() {
           </button>
         );
       }
-      return <span className="block text-[9px] font-semibold text-slate-400 italic">{blockedMessage}</span>;
+      // An input problem is the operator's own next action, so it is amber rather than
+      // grey - grey reads as "nothing to do here", which is the opposite of the case.
+      const isInput = inputErrors.length > 0;
+      return (
+        <span className={`block text-[9px] font-semibold italic ${isInput ? 'text-amber-700' : 'text-slate-400'}`}
+              title={est.rateErrors.map(x => x.message).join('\n') || undefined}>
+          {blockedMessage}
+        </span>
+      );
     }
 
     const finalRs = Math.round(check.finalAmt).toLocaleString('en-IN');
