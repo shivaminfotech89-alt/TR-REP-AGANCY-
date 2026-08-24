@@ -1021,6 +1021,41 @@ and `billAmount` all unset. MSBT-12 is the only GP job ever charged.
 forwarding letter table and TOTAL, and from all billing paths. Oil accounting is
 deliberately unaffected — oil is consumed regardless of who pays for the repair.
 
+---
+
+**THREE FIGURES, AND THE APP CAN NO LONGER PRODUCE ANY OF THEM.** Recorded because the
+discrepancy is now permanent, not because it changes the remedy.
+
+| figure | where it lives | how it was produced |
+|---|---|---|
+| **6,680** | `paidAmount` | typed by the operator from the bank credit — authoritative, and the refund basis |
+| **6,413** | `billAmount` | computed at send time by `BillingSystem.calculateJobTotal`'s itemised branch |
+| a fourth number | whatever the screen shows today | recomputed live, by the consolidated builder |
+
+**Why the third differs.** Bills are not stored as line items - `billAmount` is a computed
+side-record and every screen recomputes from current data. F57 replaced the itemised branch
+of `calculateJobTotal` with `getJobFullEstimate`, so a reprint now prices from real
+inspection data instead of from `unit`-label quantities. The stored 6,413 is untouched; the
+screen simply no longer agrees with it.
+
+**Why THIS job specifically.** It was billed on 2026-08-15, before `jobsForBillType` filtered
+`isGpJob`. A GP job cannot reach `calculateJobTotal` today, so **this bill could not be
+produced by the current app at all** - not with different numbers, not at all. It is the one
+issued document in that account whose figures are unreproducible, and the reason is that the
+code path that made it has been deleted.
+
+**Note the interaction with F57's safety argument.** F57 concluded that consolidating changed
+no issued bill, partly because GP jobs never reach that function. True today; MSBT-12 predates
+the filter. The conclusion still holds - stored `billAmount` is never rewritten - but the
+reasoning had a gap, and this is where it shows.
+
+**What to do with it: nothing, but write it down.** The refund stands at 6,680 for the reason
+already given - it is the only figure derived from reality rather than a formula. The risk is
+not financial, it is diagnostic: someone opening BILL/1 in six months finds three numbers and
+no explanation, and reasonably concludes the billing is broken. It is not. It is one document
+from a code path that no longer runs, and this paragraph is the explanation they will be
+looking for.
+
 ### O7. A new agency is seeded with UGVCL's identity — and prints it
 
 **The most serious finding of the setup-gap review, and it is not a fallback problem.**
