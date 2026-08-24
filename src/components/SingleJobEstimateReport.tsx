@@ -25,6 +25,42 @@ export function classifyCoreType(coreType: string): CoreClass {
   return 'CRGO';
 }
 
+/**
+ * The winding material, or null if the recorded value does not name one.
+ *
+ * NULL IS A REAL ANSWER HERE. Every other reading of this field defaulted to aluminium,
+ * which is why a blank could never be noticed: it produced the cheaper rate on the most
+ * expensive line and nothing looked wrong. The material is an OBSERVATION - it is read off
+ * the transformer during internal inspection - and an observation that was not made cannot
+ * be inferred from the ones that were.
+ *
+ * Recognised forms are deliberately generous, because the stored value has changed shape
+ * over the life of the app: the select writes 'AL'/'CU' (InternalInspection.tsx:1449) and
+ * older records carry spelled-out words. Anything else is refused rather than bent to fit -
+ * a value this function does not understand is exactly the case the block exists for.
+ */
+export function classifyWindingMaterial(raw: unknown): 'Copper' | 'Aluminium' | null {
+  const v = String(raw ?? '').trim().toUpperCase();
+  if (!v) return null;
+  if (v.startsWith('CU') || v.startsWith('COPPER')) return 'Copper';
+  if (v.startsWith('AL')) return 'Aluminium';  // AL, ALU, ALUMINIUM, ALUMINUM, 'AL SE'
+  return null;
+}
+
+/**
+ * 'missing-input', not 'missing-rate'. The rates exist and are configured correctly; what
+ * is absent is the inspection reading that selects between them. Reporting it as a missing
+ * rate would send the operator to the Estimate Master, where they would find nothing wrong
+ * and no way to fix it.
+ */
+function windingMaterialError(jobLabel: string, raw: unknown): EstimateRateError {
+  const shown = String(raw ?? '').trim();
+  return {
+    kind: 'missing-input',
+    message: `${jobLabel}: winding material ${shown ? `reads "${shown}"` : 'is blank'} on the internal inspection, so the coil rates cannot be selected - Schedule-A prices copper and aluminium separately (HV Rs 357 vs Rs 163 per kg, LV Rs 314 vs Rs 149). Set Winding Type to AL or CU on the internal inspection.`,
+  };
+}
+
 // Schedule-B has exactly one Aluminium/Copper x capacity combination, except 63 KVA
 // Aluminium which has two variants (1d-1 default, 1d-2 for Vijay/Vijai make only).
 function findScheduleBEntry(kvaNum: number, isCopper: boolean, make: string): ScheduleBItem | undefined {
@@ -189,8 +225,23 @@ export function buildSingleJobEstimateData(
   const atPercentage = getAtPercentageForCore(atMaster, coreType);
 
   const isScrap = job.status === 'Scrap' || job.condition === 'Scrap' || internalData?.condition === 'Scrap';
-  const winding = (internalData?.windingType || 'Aluminium').trim();
-  const isCopper = winding.toUpperCase().startsWith('CU');
+  // Declared here rather than in the CRGO branch: both branches raise blocks that name
+  // the job, and two definitions would drift.
+  const jobLabel = job.jobNo || job.id || 'This job';
+
+  // WINDING MATERIAL - recognised, never defaulted.
+  //
+  // This used to read `(internalData?.windingType || 'Aluminium')` and then test
+  // `.startsWith('CU')`, which meant a blank field AND any unrecognised value both
+  // priced as aluminium, silently. On the HV coil that is the difference between
+  // Rs 163/kg and Rs 357/kg - a 194/kg error produced with no visible symptom, on
+  // the single most expensive line of the estimate.
+  //
+  // The census found 55 of 55 internal inspections populated with three distinct
+  // values and no blanks, so blocking costs nothing today; it is here for the row
+  // that arrives blank tomorrow. An unentered field is not evidence of aluminium.
+  const windingMaterial = classifyWindingMaterial(internalData?.windingType);
+  const isCopper = windingMaterial === 'Copper';
   const windingSuffix = isCopper ? 'Copper' : 'Aluminium SE';
 
   const rateErrors: EstimateRateError[] = [];
@@ -253,6 +304,12 @@ export function buildSingleJobEstimateData(
     const entry = findScheduleBEntry(kvaNum, isCopper, job.make);
     const fixedItems: SingleEstimateLineItem[] = [];
     const fixedRateErrors: EstimateRateError[] = [];
+
+    // Schedule-B is banded by winding material too, so an unrecognised value picks the
+    // wrong fixed rate here just as surely as it picks the wrong per-kg rate on CRGO.
+    if (internalData && windingMaterial === null) {
+      fixedRateErrors.push(windingMaterialError(jobLabel, internalData.windingType));
+    }
 
     if (!entry) {
       fixedRateErrors.push({ kind: 'missing-rate', message: `No fixed-rate entry found for ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} winding in UGVCL Schedule-B.` });
@@ -319,12 +376,17 @@ export function buildSingleJobEstimateData(
   // rate: the per-field defaults stay legitimate only INSIDE a real inspection.
   const hasExternalData = !!externalData && Object.keys(externalData).length > 0;
   const hasInternalData = !!internalData && Object.keys(internalData).length > 0;
-  const jobLabel = job.jobNo || job.id || 'This job';
   if (!hasExternalData) {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: no external inspection data - quantities cannot be derived.` });
   }
   if (!hasInternalData) {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: no internal inspection data - quantities cannot be derived.` });
+  }
+  // Only when the record EXISTS. A wholly missing internal inspection already blocked on
+  // the line above; adding a second block naming one of its fields would report the
+  // symptom alongside the cause and read as two separate problems.
+  if (hasInternalData && windingMaterial === null) {
+    rateErrors.push(windingMaterialError(jobLabel, internalData?.windingType));
   }
 
   /**
@@ -353,12 +415,29 @@ export function buildSingleJobEstimateData(
   // Lookup order: (1) the agency's own saved estimate master, if it has a value for
   // this exact capacity, (2) UGVCL Schedule-A via bandForKva(), (3) nothing else -
   // no fixedRate fallback (that belongs to a different capacity) and no defaultEstimateData.
-  const resolveRate = (masterCode: string, scheduleValue: number | undefined): number | null => {
-    const found = masterList.find(m => m.itemCode?.toLowerCase() === masterCode.toLowerCase());
-    if (found?.rates) {
-      const masterVal = found.rates[kva as keyof typeof found.rates];
-      if (masterVal !== undefined && masterVal !== null && !isNaN(Number(masterVal)) && Number(masterVal) > 0) {
-        return Number(masterVal);
+  /**
+   * ACCEPTS SEVERAL MASTER CODES, most specific first.
+   *
+   * It used to take exactly one. That is why the agency master could never override a coil
+   * rate: the estimate asked for '12A', while the master's rows are '12A(a)' (copper) and
+   * '12A(b)' (aluminium). No row matched, the lookup fell through to Schedule-A, and the
+   * result was the correct tender figure - so the failure produced a right-looking number
+   * and stayed invisible. Six of the most expensive lines on the sheet were affected
+   * ('12A', '13A', '14', all split by material in the master).
+   *
+   * Trying the material-specific code first and the generic one second is strictly
+   * additive: a master that only has the old generic row still resolves exactly as before,
+   * and one that has the split rows starts being read instead of ignored.
+   */
+  const resolveRate = (masterCode: string | string[], scheduleValue: number | undefined): number | null => {
+    const codes = Array.isArray(masterCode) ? masterCode : [masterCode];
+    for (const code of codes) {
+      const found = masterList.find(m => m.itemCode?.toLowerCase() === code.toLowerCase());
+      if (found?.rates) {
+        const masterVal = found.rates[kva as keyof typeof found.rates];
+        if (masterVal !== undefined && masterVal !== null && !isNaN(Number(masterVal)) && Number(masterVal) > 0) {
+          return Number(masterVal);
+        }
       }
     }
     return (scheduleValue !== undefined && scheduleValue > 0) ? scheduleValue : null;
@@ -372,6 +451,88 @@ export function buildSingleJobEstimateData(
       rateErrors.push({ kind: 'missing-rate', message: customMessage || `No rate found for "${label}" at ${kva} KVA (checked agency estimate master and UGVCL Schedule-A).` });
     }
   };
+
+  // OVERHAULING - a branch this function declared and never had.
+  //
+  // `CoreClass` has included 'OH' and `classifyCoreType` has returned it since the type was
+  // written, but nothing consumed it: an overhauling job fell straight through to the CRGO
+  // section below, which emits 29 fixed CRGO lines against a 5-row overhauling master. The
+  // comment above even says "Itemised (CRGO / OH)" - the intent was recorded, the branch
+  // was not. It surfaced only when the second estimate engine in EstimateGenerate was being
+  // deleted and its OH handling had nowhere to go (AUDIT O23, F55).
+  //
+  // The overhauling master is short and its rows are self-describing, so this iterates the
+  // master rather than emitting a fixed list: '7' overhauling, '3' tank per kg, '4'
+  // conservator per kg, '5' radiator, '6' sealing of an uneconomical unit.
+  //
+  // DELIBERATELY BEHAVIOUR-PRESERVING, with one exception, because a consolidation that
+  // silently reprices overhauling jobs is not a consolidation. The one thing NOT carried
+  // over is the old engine's last-resort rate lookup - "the first non-null rate in ANY
+  // capacity column" - which priced a 200 KVA job off the 10 KVA cell whenever the 200 cell
+  // was blank. That is the F1 family and it is not being moved into this function; a blank
+  // cell now resolves through Schedule-A or blocks, like everywhere else here.
+  //
+  // The per-kg quantities below are NOT from the tender - see O25. They are carried across
+  // unchanged so the deletion changes no figure, and flagged so they are fixed as a visible
+  // decision rather than as a side effect.
+  if (coreClass === 'OH') {
+    const ohItems: SingleEstimateLineItem[] = [];
+    let ohSr = 1;
+    masterList.forEach((mItem: any) => {
+      const code = String(mItem?.itemCode ?? '').trim();
+      const name = String(mItem?.itemName ?? '').toLowerCase();
+      const unit = String(mItem?.unit ?? '').trim();
+      const isOverhaulLine = code === '7' || name.includes('overhauling');
+      // Only the overhauling line itself has a Schedule-A pairing (sr '21', banded by
+      // capacity). The rest are agency-master rates with no schedule equivalent.
+      const rate = resolveRate(code, isOverhaulLine ? scheduleRate('21') : undefined);
+
+      let qty = 0;
+      let qtyDisplay = '0';
+      if (isOverhaulLine) {
+        qty = 1; qtyDisplay = '1';
+      } else if (rate !== null && rate > 0) {
+        if (unit === 'Y') { qty = 1; qtyDisplay = 'Y'; }
+        else if (unit === 'QTY' || unit === 'No' || unit === 'Each Transformer') { qty = 1; qtyDisplay = '1'; }
+        else if (unit === 'KG') {
+          // O25: no weight field exists for tank or conservator replacement, so the old
+          // engine invented one per capacity. Carried over verbatim, not endorsed.
+          qty = (kva === '10' || kva === '16') ? 14 : kva === '25' ? 15.54 : 45.36;
+          qtyDisplay = qty.toFixed(2);
+        }
+      }
+      if (isOverhaulLine) recordErrorIfApplies(true, rate, mItem?.itemName || 'Overhauling');
+      ohItems.push({
+        sr: ohSr++,
+        itemCode: code,
+        desc: mItem?.itemName || code,
+        unit: unit || 'NOS',
+        qty: qtyDisplay,
+        numQty: qty,
+        rate,
+        amt: qty > 0 ? qty * (rate ?? 0) : 0,
+      });
+    });
+
+    const ohBase = ohItems.reduce((acc, i) => acc + i.amt, 0);
+    const ohPct = Number((ohBase * (atPercentage / 100)).toFixed(2));
+    const ohWith = Number((ohBase + ohPct).toFixed(2));
+    return {
+      job,
+      externalData,
+      internalData,
+      physicalItems: ohItems,
+      internalItems: [],
+      labourItems: [],
+      baseTotal: ohBase,
+      atPercentage,
+      percentageAmount: ohPct,
+      amountWithPercentage: ohWith,
+      lessAmount: 0,
+      finalAmount: ohWith,
+      rateErrors
+    };
+  }
 
   // 1. PHYSICAL ESTIMATION ITEMS
   const physicalItems: SingleEstimateLineItem[] = [];
@@ -597,16 +758,20 @@ export function buildSingleJobEstimateData(
   // accepted document says the customer did not object, not that it was right. It
   // overcharged HV coil work by Rs 50/kg.
   //
-  // Copper stays blocked rather than guessed: '12A-a' w/o S.E. Rs 357 against '12A-a1'
-  // w/ S.E. Rs 407. The agency fact resolves the S.E. axis, not the material axis.
-  const hvCoilScheduleValue = isCopper ? undefined : scheduleRate('12A-b');
-  const hvCoilRate = resolveRate('12A', hvCoilScheduleValue);
-  recordErrorIfApplies(
-    hvCoilApplies,
-    hvCoilRate,
-    'HV Coil',
-    isCopper ? 'Copper HV coil rate requires confirmation of S.E. variant - see tender Schedule-A item 12A.' : undefined
-  );
+  // COPPER PRICES TOO, at '12A-a' Rs 357/kg - the without-S.E. variant, same axis and same
+  // agency fact that selects '12A-b' for aluminium. Copper used to block here on the
+  // grounds that '12A-a' (Rs 357) against '12A-a1' (Rs 407) could not be resolved; but the
+  // agency fact resolves the S.E. axis for BOTH materials, so blocking one and pricing the
+  // other was treating the same evidence two different ways.
+  //
+  // The block also carried an unstated second job - stopping copper rewinds that ought to
+  // be scrapped. That is the circle-limit indicator's work, and it does it properly: it
+  // compares the actual cost against the actual limit instead of inferring the answer from
+  // the material. A copper rewind will breach the limit and be flagged; a minor copper
+  // repair will not, and now prices instead of refusing.
+  const hvCoilScheduleValue = scheduleRate(isCopper ? '12A-a' : '12A-b');
+  const hvCoilRate = resolveRate(isCopper ? ['12A(a)', '12A'] : ['12A(b)', '12A'], hvCoilScheduleValue);
+  recordErrorIfApplies(hvCoilApplies, hvCoilRate, 'HV Coil');
   const hvCoilAmt = hvCoilApplies ? hvCoilWeight * (hvCoilRate ?? 0) : 0;
   internalItems.push({
     sr: srCounter++,
@@ -638,15 +803,13 @@ export function buildSingleJobEstimateData(
   // sites carry the same justification rather than one being explained and the other
   // silently agreeing with it.
   //
-  // Copper blocked, not guessed: '13A-a' Rs 314 against '13A-a1' Rs 364.
-  const lvCoilScheduleValue = isCopper ? undefined : scheduleRate('13A-b');
-  const lvCoilRate = resolveRate('13A', lvCoilScheduleValue);
-  recordErrorIfApplies(
-    lvCoilApplies,
-    lvCoilRate,
-    'LV Coil',
-    isCopper ? 'Copper LV coil rate requires confirmation of S.E. variant - see tender Schedule-A item 13A.' : undefined
-  );
+  // Copper prices at '13A-a' Rs 314/kg, for the reasons given on the HV coil above.
+  // Master rows are '13A(a)' copper and '13b(b)' aluminium - the lower-case 'b' in the
+  // aluminium code is how the data is stored, not a typo here; matching is case-insensitive
+  // but the character sequence must be exact.
+  const lvCoilScheduleValue = scheduleRate(isCopper ? '13A-a' : '13A-b');
+  const lvCoilRate = resolveRate(isCopper ? ['13A(a)', '13A'] : ['13b(b)', '13A'], lvCoilScheduleValue);
+  recordErrorIfApplies(lvCoilApplies, lvCoilRate, 'LV Coil');
   const lvCoilAmt = lvCoilApplies ? lvCoilWeight * (lvCoilRate ?? 0) : 0;
   internalItems.push({
     sr: srCounter++,
@@ -679,7 +842,10 @@ export function buildSingleJobEstimateData(
     ? Number(internalData.totWtLvReIns)
     : lvRiCount * (Number(internalData?.wtOfCoilLv) || 0);
   const reInsApplies = reInsWeight > 0;
-  const reInsRate = resolveRate('14', scheduleRate(isCopper ? '14-i' : '14-ii'));
+  const reInsRate = resolveRate(
+    isCopper ? ['14(ii)CU', '14'] : ['14(ii)AL', '14'],
+    scheduleRate(isCopper ? '14-i' : '14-ii')
+  );
   recordErrorIfApplies(reInsApplies, reInsRate, 'Re-insulation LV Coil');
   const reInsAmt = reInsApplies ? reInsWeight * (reInsRate ?? 0) : 0;
   internalItems.push({

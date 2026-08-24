@@ -530,6 +530,44 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: a comparison against a literal the producing code never emits
+
+Three instances this session, and they are the same defect:
+
+| consumer tests | producer emits | result |
+|---|---|---|
+| `lvCoilR !== 'DMG'` | `'DAM'` / `'OK'` / `'RI'` | guard always true — fabricated weights fired (F44) |
+| `sealType === 'B' \|\| 'Bolted' \|\| 'Y'` | `'BL'` / `'SL'` | always false — item 17 never charged (F53) |
+| `windingType.startsWith('CU')` | `'AL'` / `'CU'` — but blank fell to `'Aluminium'` | blank priced as aluminium, Rs 194/kg out (F52) |
+| `externalData.kv === '22'` | free text: `'22 KV'`, `'22kv'`, `' 22 '` | would have priced 22 KV at the 11 KV rate (F48) |
+
+**Why this class hides so well.** It type-checks — both sides are `string`. It runs — no
+exception, no warning. And critically, **the branch it wrongly selects is a real one**, so
+what comes out is a plausible number rather than a blank or a crash. There is no missing-data
+symptom to notice. `undefined !== 'DMG'` is `true`; `'SL' === 'B'` is `false`; either way some
+branch executes and produces a figure that looks like every other figure on the sheet.
+
+Two of the four were found only because a downstream total looked wrong to a human. One was
+found by reading. That ratio is the point: this class does not report itself.
+
+**The tell.** Any `===` / `!==` / `.startsWith()` against a string literal where the value
+originates in **form state, a `<select>`, or another module**. When producer and consumer sit
+in different files, nothing keeps them in step — not the compiler, not the tests, not the UI.
+A shared union type would; string does not.
+
+**Why `undefined` makes it worse.** Negative tests (`x !== 'N'`) treat an unset field as
+passing, so a field that was never filled in behaves like an affirmative. Positive tests
+(`x === 'Y'`) cannot do this — a value nobody chose can never be an affirmative. This is the
+same reasoning already recorded at F46; it generalises to every field of this shape.
+
+**The durable fix** is not to correct each literal. It is to make the producer and the
+consumer share one declaration: a union type plus a parse function per field, so an
+unrecognised value is a compile error at the producer and a `null` at the consumer.
+`classifyWindingMaterial` in SingleJobEstimateReport.tsx is the first instance of that shape.
+See the sweep results at O23.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
@@ -1862,6 +1900,134 @@ capacity defaults.
 
 **Action needed:** enter MSBT-112's external inspection. It will then estimate normally.
 No code change required.
+
+---
+
+### O23. String-literal comparison sweep — 513 sites, 2 live defects, 1 dead engine
+
+Run in response to the pattern note above. Method: every `===` / `!==` / `.startsWith()` /
+`.includes()` against a string literal on a dotted path in `src/`, then a per-field diff of
+the literals a CONSUMER tests against the literals any PRODUCER emits.
+
+    513   raw comparisons, 60 distinct trailing field names
+     30   fields where a consumer literal is never emitted by any producer
+      4   survived hand-checking (the other 26 were scan artefacts - typed unions
+          declared in the same file, values produced by code rather than forms,
+          or a producer my crude `field: 'X'` regex could not see)
+
+**Live, and priced money:**
+
+- **`sealType`** — F53. `SingleJobEstimateReport.tsx:611` and `EstimateGenerate.tsx:278` test
+  `'B' | 'Bolted' | 'Y'`. The form's select offers `['BL','SL']` and defaults to `'BL'`
+  (`ExternalInspection.tsx:1386,172,203`). None of the three tested values is producible, so
+  `stbIsBolted` is **always false** and item 17 "Sealed to Bolted" has printed qty `N`, amount
+  0, on every estimate ever issued.
+  **NOT YET FIXED, and must not be fixed by guessing.** The correct test depends on a domain
+  fact nobody has stated: does `sealType` record the transformer AS RECEIVED or AS DELIVERED?
+  Schedule-A sr 17 pays for *converting a sealed transformer into a bolted one*, so if the
+  field is as-received the test is `=== 'SL'` — the exact opposite of what the variable name
+  `stbIsBolted` assumes. Correcting the literal without settling this would swap a charge that
+  never fires for one that fires on the wrong population. Needs an operator answer and an
+  exposure count (how many jobs carry `'SL'`).
+
+- **`lvCoilR/Y/B !== 'DMG'`** — `EstimateGenerate.tsx:326`. The unfixed twin of F44. The form
+  emits `'DAM'`/`'OK'`/`'RI'`, so the guard is always true and the per-capacity fabricated
+  weights (24.30 / 15.54 / 35.00 / 12.00) still fire in this file — the same constants deleted
+  from SingleJobEstimateReport under F47 as having no origin in the tender.
+
+**Benign, but the same shape:** `data.repairType === 'OH'` at `AllotmentWidget.tsx:33` and
+`NewJob.tsx:1262`. `'OH'` is a **coreType** value; `repairType` is only ever `'OGP'` or `'GP'`.
+Both clauses are dead, and both sit beside a correct clause that does the work.
+
+**The larger thing the sweep turned up.** `EstimateGenerate.calculateJobItemDetails` is a
+SECOND estimate engine, ~330 lines, still carrying the pre-F46 shape at eleven sites:
+`x !== 'N' && x !== '0'` — "anything that is not N" — where `'0'` is a literal the form has
+never emitted and `undefined` matches neither exclusion. It has two callers:
+
+- `EstimateGenerate.tsx:1957` — the on-screen/printed multi-job grid. Passes inspection data.
+- `EstimateGenerate.tsx:705` — the **Excel export**. Calls it with **no external or internal
+  data at all**, so every flag reads `undefined`, every negative test passes, and the exported
+  spreadsheet charges every optional item on every job regardless of what was inspected.
+
+Every fix recorded as F46, F47 and F52 was applied to `buildSingleJobEstimateData` only. This
+engine did not receive any of them. Whether it should be repaired or deleted in favour of the
+single builder is a decision, not a bug fix, and is not taken here.
+
+**Verdict on "systematic fix or three more one-offs":** the count says one-offs for the two
+live defects (they need domain answers, not a refactor), and a separate decision on the second
+engine, which is where the real divergence lives. The systematic fix — shared union types with
+a parse function per field — is worth doing for the fields the estimate reads, and worthless
+for the other 26 candidates, which were never at risk.
+
+---
+
+### O24. Nobody can tell whether an inflated spreadsheet was ever sent anywhere
+
+The Excel export shipped item rows derived from **no inspection data at all** (F54). The
+fix is in. The exposure is not, and cannot be closed from the code.
+
+**Nothing records that the export was used.** No analytics, no `logEvent`, no audit
+collection, no `exports` document - the codebase contains no telemetry of any kind. There
+is no query that answers "how many were produced" or "for which MRs".
+
+**And the button is prominent.** Not behind a menu, a role, or a flag: one of four in the
+MR action bar, beside Print and Download Word, visible the moment an MR is selected, on a
+screen operators use routinely. The filename it writes - `Estimate_Report_MR_<mr>.xlsx` -
+is the shape of a file meant to be sent.
+
+**The specific risk.** An exported sheet showing 32,000 where the estimate says 10,000
+**looks like a legitimate itemised estimate**. Every row is a real master item at a real
+rate; the arithmetic within each row is correct; there is no blank, no error, no marker.
+Nothing in the document invites the question. If any of these reached a division office
+they read as an inflated claim - and the agency could not explain the discrepancy, because
+it did not know one existed.
+
+The one clue is internal and nobody had reason to look for it: **the sheet never reconciled
+against itself.** Its totals rows were always computed by `buildSingleJobEstimateData` from
+real inspection data, so the item column sums to more than the GRAND TOTAL printed beneath
+it. A division office querying the line items against the total would have sounded like an
+arithmetic complaint, not a software fault.
+
+**Only the agencies can answer this**, and the question has to be put in two parts, because
+the second is the one they will not think to volunteer:
+
+1. Have you ever used **Export Excel** on the estimate screen?
+2. Where did those files go - sent to a division office, used for reconciliation, or kept
+   locally?
+
+`scripts/excel-export-delta-console.js` (read-only) reproduces the old item-row sum from
+live data for three jobs per agency, so the size of the discrepancy can be quoted when
+asking. It does not depend on the deleted code: a dataless call reduces to a fixed table of
+quantities times the agency's master rates.
+
+---
+
+### O25. Overhauling per-kg quantities are invented, and were moved rather than fixed
+
+The new OH branch in `buildSingleJobEstimateData` (F55) carries this across verbatim from
+the deleted engine:
+
+    if (unit === 'KG') qty = (kva === '10' || kva === '16') ? 14 : kva === '25' ? 15.54 : 45.36;
+
+Two master rows are priced per kilogram - '3' tank replacement and '4' conservator tank
+replacement - and **no field anywhere records a tank weight**. So the old engine supplied
+one, banded by capacity, with no origin in the tender. It is the F47 shape exactly: numbers
+that produce a plausible line where the honest answer is that the measurement was never
+taken. 45.36 kg is applied to every capacity from 63 upward, which cannot be right for both
+a 63 KVA and a 500 KVA tank.
+
+**Carried, not endorsed.** A consolidation that silently reprices overhauling jobs is not a
+consolidation - the deletion had to change no figure, so the numbers moved with the logic.
+Fixing them is a separate, visible decision, and it is the same decision F47 already took
+for the CRGO coil constants: delete them and block on the missing measurement.
+
+Note this is the same gap as O22's tank-replacement entry, reached from the other side.
+There the tender prices main-tank replacement at Rs 54/kg and nothing captures a weight, so
+no line is produced at all. Here a line IS produced, from a weight nobody measured.
+
+**Before deciding, someone needs to say how often an overhauling job replaces a tank.** If
+it is rare, blocking costs almost nothing. If it is routine, a weight field is needed on
+the inspection before the line can be priced honestly.
 
 ---
 
@@ -3820,6 +3986,75 @@ is deferred, with variant rows deferred further since a row like HV bushing has 
 inherited value to show.
 
 ---
+
+### F54. The Excel export's item rows were computed from no inspection data
+
+`handleExportExcel` filled its item column from `calculateJobItemDetails(itemForJob, job)` -
+two arguments, where the function takes four. External and internal inspection data were
+simply not passed. Every optional item is gated by a test of the shape `x !== 'N' && x !==
+'0'`, and `undefined` matches neither exclusion, so **every optional item was charged on
+every job**. The quantity-driven items compound it: absent a field they fall back to a fixed
+default - HV bushing 3, LV metal parts 4, washer ring 6, HV/LV gaskets 7, HV metal parts 2,
+LV bushing 1, dismantling 1.
+
+Against the shipped CRGO default master that floor is Rs 5,069.80 at 25 and 63 KVA, on a job
+whose inspection found nothing wrong and whose correct estimate is Rs 2,061 of dismantling.
+At 100 and 200 KVA it is Rs 4,364.80 - **lower**, because the default master leaves those
+columns blank and the old engine's last resort was "the first non-null rate in any capacity
+column", so a 200 KVA job was priced off the 10 KVA cell. Live agency masters differ; the
+figures above are analytic, not measured. `scripts/excel-export-delta-console.js` (read-only)
+reproduces the sum from real data.
+
+**The totals rows were always right.** `calculateJobTotal` has always run through
+`buildSingleJobEstimateData` with real inspection data. So an exported sheet did not
+reconcile against itself - the item column summed to more than the GRAND TOTAL printed
+beneath it, and nothing in the document said which half to believe.
+
+Fixed by reading both halves from the one builder. Exposure is O24.
+
+### F55. Two estimate engines, and only one was ever fixed
+
+`EstimateGenerate.calculateJobItemDetails` - 366 lines - priced the same jobs as
+`buildSingleJobEstimateData` by its own rules, and received none of the fixes made there:
+
+- charged on `x !== 'N'`, so an unset field read as an affirmative (F46)
+- carried the fabricated per-capacity coil weights (F47)
+- ignored winding material entirely for Schedule-B, so every copper amorphous job took the
+  aluminium rate - 100 KVA copper is Rs 18,961 against the Rs 17,970 used, 200 KVA copper Rs
+  27,720 against Rs 10,148 (F52)
+- tested `lvCoilR !== 'DMG'` against a value the form has never emitted (F44)
+- matched items by `itemName.includes(...)` on a user-editable master label, so renaming a
+  master row changed pricing
+- fell back to the first non-null rate in any capacity column when a cell was blank
+
+Deleted. Both callers - the Excel export and the printed matrix - now read the single
+builder through `builderLineFor`.
+
+**Two gaps had to close first, and finding them is the argument for consolidating.** Neither
+was visible while the engines were separate:
+
+1. **Overhauling had no branch in the builder.** `CoreClass` has included `'OH'` and
+   `classifyCoreType` has returned it since the type was written, and nothing consumed it -
+   an OH job fell through to the CRGO section, which emits 29 fixed CRGO lines against a
+   5-row overhauling master. The comment above that section even reads "Itemised (CRGO /
+   OH)": the intent was recorded, the branch was not. Ported behaviour-for-behaviour, with
+   its invented per-kg weights flagged at O25 rather than fixed, so the deletion changed no
+   figure.
+2. **The amorphous labour line is indistinguishable by item code.** Schedule-B's Repairing
+   Charge and Labour Charge are both emitted with `itemCode: entry.sr`. Matching on the code
+   alone puts Repairing Charge on the capacity row and leaves the master's row '2' empty,
+   dropping labour out of the matrix. Resolved at the CONSUMER, by description - the
+   builder's `itemCode` is printed as "As Per AT Sr" on the single-job estimate and is not a
+   free variable.
+
+The coil rows needed the same treatment for the opposite reason: the master carries one row
+per material, the builder emits one line for the material used. `builderCodeForMasterRow`
+lands it on that row and returns null for the other, so the charge appears exactly once.
+
+**Why this is the entry that matters.** A spreadsheet whose item rows summed to more than
+its own total was possible only because two engines answered the same question and no screen
+ever showed both answers together. Consolidation is not tidying here; it is the thing that
+makes the contradiction impossible to restate.
 
 ## Recurring theme
 

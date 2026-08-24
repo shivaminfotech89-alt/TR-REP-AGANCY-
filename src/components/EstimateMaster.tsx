@@ -47,6 +47,36 @@ function inheritedScheduleRate(itemCode: string, kva: string): number | null {
   return typeof v === 'number' && v > 0 ? v : null;
 }
 
+/**
+ * Both tender rates for a row whose only variable is the winding material.
+ *
+ * Worth showing BOTH rather than a marker: since copper stopped blocking (AUDIT F52) each
+ * of these is a rate the estimate will actually charge, chosen by a field the operator
+ * fills in. "Varies by winding material" told the reader the cell had two answers without
+ * telling them either one - true, and useless for checking a bill.
+ *
+ * Rendered stacked, not side by side, and the reason is the grid rather than taste: this
+ * column auto-sizes to its widest cell, so one row carrying "163.00 AL / 357.00 CU" would
+ * widen all ten capacity columns for all 31 rows. Two short lines cost height on two rows
+ * instead of width on the whole table.
+ */
+function inheritedWindingPair(itemCode: string, kva: string): { al: number; cu: number } | null {
+  const v = variantAxisForMasterCode(itemCode);
+  if (!v || v.axis !== 'winding-material') return null;
+  const rateFor = (sr: string | undefined): number | null => {
+    if (!sr) return null;
+    const entry = SCHEDULE_A.find(i => i.sr === sr);
+    if (!entry) return null;
+    const r = entry.rates[bandForKva(Number(kva) || 0)];
+    return typeof r === 'number' && r > 0 ? r : null;
+  };
+  const al = rateFor(v.options.Aluminium);
+  const cu = rateFor(v.options.Copper);
+  // Both or neither. Showing one half of a pair labelled by material invites the reader to
+  // assume the other is absent from the tender rather than absent from this lookup.
+  return al !== null && cu !== null ? { al, cu } : null;
+}
+
 /** Short reason a variant row shows no inherited figure. Never blank - see AUDIT F50. */
 function variantMarker(itemCode: string): string | null {
   const v = variantAxisForMasterCode(itemCode);
@@ -1051,10 +1081,14 @@ export default function EstimateMaster() {
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
               <p className="text-[11px] text-slate-500 mt-1">
-                <span className="text-slate-400 italic font-mono">grey italic</span> = the UGVCL tender rate,
+                <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono">tinted</span> = the UGVCL tender rate,
                 used while the cell is blank - nothing is stored. Type to override for this agency;
                 <strong> clear a cell to go back to the tender rate</strong>. Once a cell holds a value,
                 a future change to the tender schedule no longer reaches it.
+                {' '}A cell showing <span className="font-mono">AL</span> and{' '}
+                <span className="font-mono">CU</span> has two tender rates; the estimate picks one
+                from the Winding Type on the internal inspection, and typing a rate here replaces
+                both.
               </p>
 
               {/*
@@ -1462,8 +1496,12 @@ export default function EstimateMaster() {
                               const stored = rateVal !== null && rateVal !== undefined
                                 && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
                               const inherited = stored ? null : inheritedScheduleRate(item.itemCode, kva);
-                              const marker = stored ? null : variantMarker(item.itemCode);
+                              const pair = stored || inherited !== null ? null : inheritedWindingPair(item.itemCode, kva);
+                              const marker = stored || pair ? null : variantMarker(item.itemCode);
                               const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                              const pairTitle = pair
+                                ? `From the UGVCL tender schedule. Aluminium ${fmt(pair.al)}, copper ${fmt(pair.cu)} - the estimate picks one using the Winding Type on the internal inspection. Nothing is stored for this cell. Type over it to override BOTH materials with a single rate.`
+                                : undefined;
 
                               if (isEditing) {
                                 return (
@@ -1481,18 +1519,18 @@ export default function EstimateMaster() {
                                     value={rateVal ?? ''}
                                     onChange={(e) => handleRateChange(sectionKey, idx, kva, e.target.value)}
                                     className={`w-20 px-1.5 py-1 text-right text-xs border rounded focus:ring-1 focus:ring-blue-500 font-mono font-medium ${
-                                      stored ? 'border-slate-300' : 'border-slate-200 bg-slate-50/60'
+                                      stored ? 'border-slate-300 text-slate-900 font-semibold' : 'border-sky-200 bg-sky-50 text-slate-600'
                                     }`}
-                                    placeholder={inherited !== null ? fmt(inherited) : '-'}
+                                    placeholder={inherited !== null ? fmt(inherited) : pair ? `${fmt(pair.al)}/${fmt(pair.cu)}` : '-'}
                                     title={inherited !== null
                                       ? `Tender rate ${fmt(inherited)} applies while this is blank. Type to override; clear to go back to it.`
-                                      : marker || undefined}
+                                      : pairTitle || marker || undefined}
                                   />
                                 );
                               }
                               if (stored) {
                                 return (
-                                  <span className="font-semibold text-slate-800 text-xs font-mono"
+                                  <span className="font-semibold text-slate-900 text-xs font-mono"
                                         title="Set by this agency - overrides the tender rate.">
                                     {fmt(Number(rateVal))}
                                   </span>
@@ -1500,9 +1538,40 @@ export default function EstimateMaster() {
                               }
                               if (inherited !== null) {
                                 return (
-                                  <span className="text-slate-400 italic text-xs font-mono"
+                                  /* TWO signals, and neither is legibility.
+                                     The figure was grey italic and too faint to read at a
+                                     glance, which defeated the point - an agency has to SEE
+                                     what it will be charged. It is now normal slate-600 at
+                                     normal weight; the cell carries a sky tint instead.
+                                     Tint is a property of the CELL, so the number stays fully
+                                     readable, and it scans column-wise - which part of the
+                                     grid is the agency's own is visible without reading any
+                                     individual figure.
+                                     WEIGHT is the second signal on purpose: colour alone must
+                                     never be the sole indicator (see GP_TEXT_CLASS in
+                                     jobDisplay) - it is invisible to a colour-blind operator
+                                     and to a photocopy, which is how these are read on the
+                                     floor. Overrides are semibold and near-black; inherited is
+                                     normal weight. That difference survives greyscale. */
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-xs font-mono"
                                         title="From the UGVCL tender schedule. Nothing is stored for this cell - the estimate uses this figure. Type over it to override.">
                                     {fmt(inherited)}
+                                  </span>
+                                );
+                              }
+                              if (pair) {
+                                return (
+                                  /* Same tint and weight as a single inherited figure - it is
+                                     the same kind of thing, a tender rate with nothing stored
+                                     over it. The material suffix carries the distinction, so
+                                     no third visual signal is introduced.
+                                     STACKED, not "163.00 AL / 357.00 CU" on one line: this
+                                     column sizes to its widest cell, and one wide row would
+                                     widen all ten capacity columns for all 31 rows. */
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-[11px] font-mono leading-tight"
+                                        title={pairTitle}>
+                                    <span className="block whitespace-nowrap">{fmt(pair.al)} AL</span>
+                                    <span className="block whitespace-nowrap">{fmt(pair.cu)} CU</span>
                                   </span>
                                 );
                               }

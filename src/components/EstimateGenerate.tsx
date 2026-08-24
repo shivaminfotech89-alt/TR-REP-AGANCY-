@@ -10,390 +10,36 @@ import {
   FileCheck2, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { defaultEstimateData, EstimateItem, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
-import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, getScrapItemCodeForCore, isGpJob } from '../lib/estimateCalc';
+import { defaultEstimateData, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
+import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, isGpJob } from '../lib/estimateCalc';
 import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { validateEstimateMaster } from '../lib/estimateMasterHealth';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
-import SingleJobEstimateReport from './SingleJobEstimateReport';
+import SingleJobEstimateReport, { classifyWindingMaterial } from './SingleJobEstimateReport';
+import { builderCodeForMasterRow } from '../lib/scheduleItemMap';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { paginateRows } from '../lib/pagination';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 
-// Helper function to calculate item rate, quantity, and amount for any core type
-export function calculateJobItemDetails(
-  item: EstimateItem, 
-  job: any,
-  externalData?: any,
-  internalData?: any
-): { qty: number; qtyDisplay: string; rate: number; amt: number } {
-  if (!item || !job) return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-  
-  const kva = String(job.capacityKva || '25').trim();
-  const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
-  const isOverhauling = coreType === 'OH' || coreType.includes('OVERHAUL');
-  const isAmorphousOrWound = coreType.includes('AMORPHOUS') || coreType.includes('AM') || coreType.includes('WOUND') || coreType.includes('WC');
-  const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap' || internalData?.condition === 'Scrap';
+// The second estimate engine that used to live here - `calculateJobItemDetails`, ~366
+// lines - has been DELETED (AUDIT F55). It priced the same jobs as
+// buildSingleJobEstimateData by different rules, and received none of the fixes applied
+// there: it still charged on `x !== 'N'` so an unset field read as an affirmative (F46),
+// still carried the fabricated per-capacity coil weights (F47), still ignored winding
+// material for Schedule-B so every copper amorphous job took the aluminium rate (F52),
+// still tested `lvCoilR !== 'DMG'` against a value the form never emits (F44), and fell
+// back to "the first non-null rate in any capacity column" when a cell was blank, pricing
+// a 200 KVA job off the 10 KVA rate.
+//
+// Its two callers - the Excel export and the printed matrix - now read from the single
+// builder via `builderLineFor`. Nothing should reintroduce a second path: the reason a
+// spreadsheet could show item rows summing to more than its own total was that two engines
+// answered the same question and nobody could see both answers at once.
 
-  const itemCode = (item.itemCode || '').trim();
-  const itemCodeLower = itemCode.toLowerCase();
-  const itemName = (item.itemName || '').toLowerCase();
-
-  // Determine rate: Prefer rates[kva] first, fallback to item.fixedRate
-  let rate = 0;
-  if (item.rates && item.rates[kva as keyof typeof item.rates] !== null && item.rates[kva as keyof typeof item.rates] !== undefined) {
-    rate = Number(item.rates[kva as keyof typeof item.rates]) || 0;
-  } else if (item.fixedRate !== undefined && item.fixedRate !== null && !isNaN(Number(item.fixedRate)) && Number(item.fixedRate) > 0) {
-    rate = Number(item.fixedRate);
-  } else if (item.rates) {
-    const nonNull = Object.values(item.rates).find(v => v !== null && !isNaN(Number(v)) && Number(v) > 0);
-    if (nonNull) rate = Number(nonNull);
-  }
-
-  if (isOverhauling) {
-    if (itemCodeLower === '7' || itemName.includes('overhauling of complete transformer') || itemName.includes('overhauling')) {
-      if (!isScrapJob) {
-        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-      }
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    if (rate > 0 && !isScrapJob) {
-      if (item.unit === 'Y') return { qty: 1, qtyDisplay: 'Y', rate, amt: rate };
-      if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Each Transformer') return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-      if (item.unit === 'KG') {
-        const kgQty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-        return { qty: kgQty, qtyDisplay: kgQty.toFixed(2), rate, amt: rate * kgQty };
-      }
-    }
-
-    return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-  }
-
-  if (isAmorphousOrWound) {
-    // Check capacity match
-    const is10Kva = (itemCodeLower === '1a' || itemName.startsWith('10 kva') || itemName.includes('10kva') || itemName.includes('10 kva')) && kva === '10';
-    const is16Kva = (itemCodeLower === '1b' || itemName.startsWith('16 kva') || itemName.includes('16kva') || itemName.includes('16 kva')) && kva === '16';
-    const is25Kva = (itemCodeLower === '1c' || itemName.startsWith('25 kva') || itemName.includes('25kva') || itemName.includes('25 kva')) && kva === '25';
-
-    const isVijayMake = (job.make || '').toLowerCase().includes('vijay');
-    const is63KvaVijay = (itemCodeLower === '1d-2' || (itemName.includes('63') && itemName.includes('vijay'))) && kva === '63' && isVijayMake;
-    const is63KvaStd = (itemCodeLower === '1d-1' || (itemName.includes('63') && !itemName.includes('vijay'))) && kva === '63' && !isVijayMake;
-    const is63KvaGeneric = (itemCodeLower === '1d' || (itemName.includes('63') && !itemName.includes('vijay') && !is63KvaStd)) && kva === '63';
-
-    const is100Kva = (itemCodeLower === '1e' || itemName.startsWith('100 kva') || itemName.includes('100kva') || itemName.includes('100 kva')) && kva === '100';
-    const is200Kva = (itemCodeLower === '1f' || itemName.startsWith('200 kva') || itemName.includes('200kva') || itemName.includes('200 kva')) && kva === '200';
-
-    const isLabourCharge = itemCodeLower === '2' || itemName.includes('labour charge') || itemName.includes('labor charge');
-    const isSealingScrap = itemCodeLower === '6' || itemName.includes('sealing of uneconomical') || itemName.includes('welding at six places');
-    const isScrapDismantling = itemCodeLower === '0' || itemCodeLower === '1s' || itemCodeLower === '1a-scrap' || itemName.includes('inspection & dismantling') || (itemName.includes('scrap') && (itemName.includes('dismantl') || itemName.includes('inspection') || itemName.includes('charges')));
-
-    // Default fallback rates from official UGVCL schedule if not set
-    if (rate === 0) {
-      if (isScrapDismantling) rate = 500;
-      else if (is10Kva) rate = 4927;
-      else if (is16Kva) rate = 5202;
-      else if (is25Kva) rate = 8395;
-      else if (is63KvaStd || is63KvaGeneric) rate = 13746;
-      else if (is63KvaVijay) rate = 16746;
-      else if (is100Kva) rate = 17970;
-      else if (is200Kva) rate = 10148;
-      else if (isLabourCharge) rate = 2345;
-      else if (isSealingScrap) rate = 189;
-      else if (itemCodeLower === '3' || itemCodeLower === '4') rate = 54;
-      else if (itemCodeLower === '5') rate = kva === '25' ? 1057 : kva === '63' ? 1256 : kva === '100' ? 1452 : 1057;
-    }
-
-    // Scrap Dismantling Charges (Rs. 500)
-    if (isScrapDismantling) {
-      if (isScrapJob) {
-        return { qty: 1, qtyDisplay: '1', rate: rate || 500, amt: rate || 500 };
-      }
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    // Sealing of uneconomical unit (Sr. 6)
-    if (isSealingScrap) {
-      if (isScrapJob) {
-        return { qty: 1, qtyDisplay: '1', rate: rate || 189, amt: rate || 189 };
-      }
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    if (isLabourCharge) {
-      if (!isScrapJob) {
-        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-      }
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    if (is10Kva || is16Kva || is25Kva || is63KvaVijay || is63KvaStd || is63KvaGeneric || is100Kva) {
-      if (!isScrapJob) {
-        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-      }
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    if (is200Kva) {
-      if (!isScrapJob) {
-        const qty = 3;
-        return { qty, qtyDisplay: '3', rate, amt: rate * qty };
-      }
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    // If it's a capacity-specific winding item (e.g. 10 KVA coil evaluated for 25 KVA job), skip it
-    const isAnyWindingItem = itemCodeLower.startsWith('1') || itemName.includes('winding') || itemName.includes('coil weight');
-    if (isAnyWindingItem) {
-      return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-    }
-
-    // Additional items (like Tank replacement per KG, Radiator Set, or custom QTY items)
-    if (rate > 0 && !isScrapJob) {
-      if (item.unit === 'Y') return { qty: 1, qtyDisplay: 'Y', rate, amt: rate };
-      if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Job' || item.unit === 'Set' || item.unit?.toLowerCase().includes('each') || item.unit?.toLowerCase().includes('per')) {
-        return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-      }
-      if (item.unit === 'KG') {
-        const kgQty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-        return { qty: kgQty, qtyDisplay: kgQty.toFixed(2), rate, amt: rate * kgQty };
-      }
-    }
-
-    return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-  }
-
-  // Standard CRGO Stacked Core - Evaluated with exact inspection data & Y/N matching
-  const isDismantling = itemCodeLower === '1a' || itemName.includes('dismentaling') || itemName.includes('dismantl');
-
-  // A scrap transformer bills exactly one flat line, resolved by the mapped scrap
-  // item code for its core type (shared helper - see lib/estimateCalc.ts). The old
-  // matching also caught '1a'/'dismantl', which in the CRGO schedule is Labour
-  // Charge at Rs 2,061 - not the scrap charge - and code '19', which no master
-  // defines. Both are retired.
-  if (isScrapJob) {
-    const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
-    if (scrapItemCode && itemCode === scrapItemCode) {
-      return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-    }
-    return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-  }
-
-  // 1. Name Plating (16)
-  if (itemCodeLower === '16' || itemName.includes('name plating')) {
-    const isYes = externalData?.namePlate !== 'N' && externalData?.namePlate !== '0' && externalData?.namePlate !== '-';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 2. Spray Painting (2b)
-  if (itemCodeLower === '2b' || itemName.includes('spray paint') || itemName.includes('outside paint')) {
-    const isYes = externalData?.outsidePaint !== 'N' && externalData?.outsidePaint !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 3. Conservator Tank (4)
-  if (itemCodeLower === '4' || itemName.includes('conservator tank')) {
-    const qty = Number(externalData?.damCtTank) || 0;
-    return { qty, qtyDisplay: qty > 0 ? qty.toString() : '0', rate, amt: qty * rate };
-  }
-
-  // 4. Radiator Replacement (21)
-  if (itemCodeLower === '21' || itemName.includes('radiator')) {
-    const qty = Number(externalData?.damRadNo) || 0;
-    return { qty, qtyDisplay: qty > 0 ? qty.toString() : '0', rate, amt: qty * rate };
-  }
-
-  // 5. Rod Gasket (1c)
-  if (itemCodeLower === '1c' || itemName.includes('rod gasket')) {
-    const qty = externalData?.hvLvRod !== undefined && externalData?.hvLvRod !== '' ? Number(externalData.hvLvRod) : 7;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 6. M/S Bolt Nuts (1e)
-  if (itemCodeLower === '1e' || itemName.includes('bolt nuts') || itemName.includes('nute bolt')) {
-    const isYes = externalData?.nuteBolt !== 'N' && externalData?.nuteBolt !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 7. Top Cover Gasket (1b)
-  if (itemCodeLower === '1b' || itemName.includes('top cover gasket')) {
-    const qty = externalData?.gasket !== undefined && externalData?.gasket !== '' ? Number(externalData.gasket) : (Number(kva) >= 63 ? 3 : 1);
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 8. Oil Guage Glass (5)
-  if (itemCodeLower === '5' || itemName.includes('oil guage') || itemName.includes('oil gauge') || itemName.includes('oil lev')) {
-    const isYes = externalData?.oilLevGls !== 'N' && externalData?.oilLevGls !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 9. Breather (6)
-  if (itemCodeLower === '6' || itemName.includes('breather')) {
-    const isYes = externalData?.breather !== 'N' && externalData?.breather !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 10. HV Bushing (8)
-  if (itemCodeLower === '8' || itemName.includes('hv bushing')) {
-    const qty = externalData?.hvSideHvb !== undefined && externalData?.hvSideHvb !== '' ? Number(externalData.hvSideHvb) : 3;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 11. HV Metal Parts (9A)
-  if (itemCodeLower === '9a' || itemName.includes('hv metal')) {
-    const qty = externalData?.hvSideHvm !== undefined && externalData?.hvSideHvm !== '' ? Number(externalData.hvSideHvm) : 2;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 12. HV Connectors (9B)
-  if (itemCodeLower === '9b' || itemName.includes('hv connector')) {
-    const qty = externalData?.hvSideHvCc !== undefined && externalData?.hvSideHvCc !== '' ? Number(externalData.hvSideHvCc) : 0;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 13. LV Bushing (10)
-  if (itemCodeLower === '10' || itemName.includes('lv bushing')) {
-    const qty = externalData?.lvSideLvb !== undefined && externalData?.lvSideLvb !== '' ? Number(externalData.lvSideLvb) : 1;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 14. LV Metal Parts (11A)
-  if (itemCodeLower === '11a' || itemName.includes('lv metal')) {
-    const qty = externalData?.lvSideLvm !== undefined && externalData?.lvSideLvm !== '' ? Number(externalData.lvSideLvm) : 4;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 15. LV Connectors (11B)
-  if (itemCodeLower === '11b' || itemName.includes('lv connector')) {
-    const qty = externalData?.lvSideLvCc !== undefined && externalData?.lvSideLvCc !== '' ? Number(externalData.lvSideLvCc) : 0;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 16. Sealed to Bolted (17)
-  if (itemCodeLower === '17' || itemName.includes('sealed to bolted')) {
-    const isBolted = externalData?.sealType === 'B' || externalData?.sealType === 'Bolted' || externalData?.sealType === 'Y';
-    return { qty: isBolted ? 1 : 0, qtyDisplay: isBolted ? 'Y' : 'N', rate, amt: isBolted ? rate : 0 };
-  }
-
-  // 17. Inside Painting (3)
-  if (itemCodeLower === '3' || itemName.includes('inside paint')) {
-    const isYes = internalData?.inPnt !== 'N' && internalData?.inPnt !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 18. Insulating Material (1d)
-  if (itemCodeLower === '1d' || itemName.includes('insulating material')) {
-    const isYes = internalData?.insula !== 'N' && internalData?.insula !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 19. Washer Ring (15)
-  if (itemCodeLower === '15' || itemName.includes('washer ring')) {
-    const qty = internalData?.wasring !== undefined && internalData?.wasring !== '' ? Number(internalData.wasring) : 6;
-    return { qty, qtyDisplay: qty.toString(), rate, amt: qty * rate };
-  }
-
-  // 20. HV Coil (12A)
-  if (itemCodeLower === '12a' || itemName.includes('hv coil') && !itemName.includes('labour')) {
-    let weight = 0;
-    if (internalData?.totWt && Number(internalData.totWt) > 0) {
-      weight = Number(internalData.totWt);
-    } else if (internalData?.wtOfCoil && internalData?.totCoil) {
-      weight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
-    } else {
-      weight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
-    }
-    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
-  }
-
-  // 21. LV Coil (13A)
-  if (itemCodeLower === '13a' || itemName.includes('lv coil') && !itemName.includes('labour') && !itemName.includes('re-insulation')) {
-    let weight = 0;
-    if (internalData?.totWtLv && Number(internalData.totWtLv) > 0) {
-      weight = Number(internalData.totWtLv);
-    }
-    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
-  }
-
-  // 22. Re-insulation LV Coil (14)
-  if (itemCodeLower === '14' || itemName.includes('re-insulation')) {
-    let weight = 0;
-    let lvWeight = Number(internalData?.totWtLv) || 0;
-    if (internalData?.lvCoilR !== 'DMG' || internalData?.lvCoilY !== 'DMG' || internalData?.lvCoilB !== 'DMG') {
-      if (lvWeight === 0) {
-        weight = Number(kva) === 63 ? 24.30 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 35.00 : 12.00));
-      }
-    }
-    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
-  }
-
-  // 23. Labour Charge (1a)
-  if (isDismantling) {
-    return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-  }
-
-  // 24. Cleaning dirty tank (2a)
-  if (itemCodeLower === '2a' || itemName.includes('cleaning dirty')) {
-    const isYes = externalData?.clnDrtyTank !== 'N' && externalData?.clnDrtyTank !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 25. Drying of active parts (1f)
-  if (itemCodeLower === '1f' || itemName.includes('drying of active')) {
-    const isYes = internalData?.dc !== 'N' && internalData?.dc !== '0' && externalData?.dryActPart !== 'N';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 26. Testing Charge (20)
-  if (itemCodeLower === '20' || itemName.includes('testing charge')) {
-    const isYes = internalData?.tstTrn !== 'N' && internalData?.tstTrn !== '0';
-    return { qty: isYes ? 1 : 0, qtyDisplay: isYes ? 'Y' : 'N', rate, amt: isYes ? rate : 0 };
-  }
-
-  // 27. Labour HV Coil (12C)
-  if (itemCodeLower === '12c' || (itemName.includes('labour') && itemName.includes('hv coil'))) {
-    let weight = 0;
-    if (internalData?.totWt && Number(internalData.totWt) > 0) {
-      weight = Number(internalData.totWt);
-    } else if (internalData?.wtOfCoil && internalData?.totCoil) {
-      weight = Number(internalData.wtOfCoil) * Number(internalData.totCoil);
-    } else {
-      weight = Number(kva) === 63 ? 47.00 : (Number(kva) === 25 ? 15.54 : (Number(kva) === 100 ? 55.00 : 14.00));
-    }
-    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
-  }
-
-  // 28. Labour LV Coil (13C)
-  if (itemCodeLower === '13c' || (itemName.includes('labour') && itemName.includes('lv coil'))) {
-    let weight = 0;
-    if (internalData?.totWtLv && Number(internalData.totWtLv) > 0) {
-      weight = Number(internalData.totWtLv);
-    }
-    return { qty: weight, qtyDisplay: weight.toFixed(2), rate, amt: weight * rate };
-  }
-
-  // Fallback for custom or unmapped items
-  if (rate > 0) {
-    if (item.unit === 'Y') return { qty: 1, qtyDisplay: 'Y', rate, amt: rate };
-    if (item.unit === 'N') return { qty: 0, qtyDisplay: 'N', rate, amt: 0 };
-    if (item.unit === 'QTY' || item.unit === 'No' || item.unit === 'Job' || item.unit === 'Set') {
-      return { qty: 1, qtyDisplay: '1', rate, amt: rate };
-    }
-    if (item.unit === 'KG') {
-      const kgQty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-      return { qty: kgQty, qtyDisplay: kgQty.toFixed(2), rate, amt: rate * kgQty };
-    }
-  }
-
-  return { qty: 0, qtyDisplay: '0', rate: 0, amt: 0 };
-}
-
-// Forwarding-letter job table pagination: fewer rows on page 1 since the recipient/ref
-// block eats vertical space; more room on continuation pages.
 const ROWS_FIRST_PAGE = 14;
 const ROWS_PER_PAGE = 22;
 
@@ -697,13 +343,22 @@ export default function EstimateGenerate() {
       ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
       : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData);
 
+    // ITEM ROWS COME FROM THE SAME BUILDER AS THE TOTALS ROWS BELOW.
+    //
+    // They used to come from `calculateJobItemDetails(itemForJob, job)` - called with no
+    // external and no internal inspection data at all. Every optional item is gated by a
+    // test of the shape `x !== 'N' && x !== '0'`, and `undefined` matches neither
+    // exclusion, so EVERY optional item was charged on EVERY job regardless of what was
+    // inspected. The totals rows underneath were already computed by
+    // buildSingleJobEstimateData with real inspection data, so an exported sheet did not
+    // reconcile against itself: the item column summed to more than the GRAND TOTAL
+    // printed beneath it. Nothing in the sheet said which half to believe.
+    //
+    // Reading both halves from one builder is what makes that impossible to recur.
     itemsList.forEach((item) => {
       const row = [item.itemCode, item.itemName];
       selectedJobsData.forEach((job) => {
-        const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
-        const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-        const { amt } = calculateJobItemDetails(itemForJob, job);
-        row.push(amt.toFixed(2));
+        row.push(Number(builderLineFor(item, job)?.amt ?? 0).toFixed(2));
       });
       wsData.push(row);
     });
@@ -820,6 +475,49 @@ export default function EstimateGenerate() {
   const calculateJobTotal = (job: any) => {
     const est = getJobFullEstimate(job);
     return est.baseTotal;
+  };
+
+  /**
+   * The estimate line a MASTER ROW should display for a given job, from the one builder.
+   *
+   * This replaces `calculateJobItemDetails`, a second ~366-line estimate engine that priced
+   * the same jobs by different rules and received none of the fixes applied to the builder
+   * (F46, F47, F52). Both of its callers - the Excel export and the printed matrix - now
+   * read from `buildSingleJobEstimateData`, which is what makes the two halves of a
+   * spreadsheet agree with each other (AUDIT F54, F55).
+   *
+   * Two mismatches between "master rows" and "builder lines" are resolved here rather than
+   * by changing what the builder emits, because the builder's `itemCode` is printed on the
+   * single-job estimate as "As Per AT Sr" and is not ours to renumber:
+   *
+   *  - COIL ROWS. The master carries one row per winding material ('12A(a)' copper,
+   *    '12A(b)' aluminium); the builder emits ONE line, coded '12A', for the material the
+   *    job actually used. builderCodeForMasterRow lands it on that material's row and
+   *    returns null for the other, so the charge appears exactly once.
+   *  - AMORPHOUS LABOUR. Schedule-B's two lines - Repairing Charge and Labour Charge - are
+   *    both emitted with `itemCode: entry.sr`, the capacity's code. Matching on the code
+   *    alone would put Repairing Charge on the capacity row correctly and then leave the
+   *    master's row '2' ("Labour charge per transformer") empty, dropping the labour amount
+   *    out of the matrix entirely. The description disambiguates them.
+   */
+  const estimateCache = new Map<string, any>();
+  const builderLineFor = (masterItem: any, job: any) => {
+    if (!estimateCache.has(job.id)) estimateCache.set(job.id, getJobFullEstimate(job));
+    const est = estimateCache.get(job.id);
+    const lines = [...est.physicalItems, ...est.internalItems, ...est.labourItems];
+    const masterCode = String(masterItem?.itemCode ?? '').trim();
+
+    const isLabourRow = masterCode === '2' && /labour/i.test(String(masterItem?.itemName ?? ''));
+    if (isLabourRow) {
+      const labour = lines.find((l: any) => l.desc === 'Labour Charge');
+      if (labour) return labour;
+    }
+
+    const material = classifyWindingMaterial(internalInspMap[job.id]?.windingType);
+    const code = builderCodeForMasterRow(masterCode, material);
+    if (!code) return undefined;
+    return lines.find((l: any) =>
+      String(l.itemCode ?? '').toLowerCase() === code.toLowerCase() && l.desc !== 'Labour Charge');
   };
 
   // Helper to evaluate a job against Clause 4.0 Circle Estimate Power Limit
@@ -1954,12 +1652,13 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                               {selectedJobsData.map(job => {
                                 const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
                                 const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-                                const { qtyDisplay, rate, amt } = calculateJobItemDetails(
-                                  itemForJob, 
-                                  job,
-                                  externalInspMap[job.id],
-                                  internalInspMap[job.id]
-                                );
+                                // Same builder as the totals rows below and as the Excel
+                                // export. The three sub-cells are unchanged; only where
+                                // their numbers come from has changed.
+                                const line = builderLineFor(itemForJob, job);
+                                const qtyDisplay = line?.qty ?? '0';
+                                const rate = Number(line?.rate ?? 0);
+                                const amt = Number(line?.amt ?? 0);
 
                                 return (
                                   <td key={job.id} className="p-0 border-r border-black">

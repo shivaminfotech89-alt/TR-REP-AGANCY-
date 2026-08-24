@@ -80,6 +80,18 @@ export const SCHEDULE_ITEM_MAP: ScheduleItemMapping[] = [
     srName: 'Testing of transformer',
     note: 'Master numbering runs one ahead of the schedule here.' },
 
+  // ---- coil rows: the MASTER already splits these by material, so each row is
+  // unambiguous and takes a fixed sr. The estimate used to ask for '12A' / '13A' / '14',
+  // which match no row at all, so the agency-override step was dead for all six (AUDIT
+  // F51). The master's codes are irregular - '13b(b)' lower-cases the 'b' that '13A(a)'
+  // capitalises - and they are reproduced here exactly as stored, not tidied.
+  { masterCode: '12A(a)',   masterName: 'HV Wdg. (Not Miss) -CU', sr: '12A-a', srName: 'HT coil: Copper per kg, without S.E.' },
+  { masterCode: '12A(b)',   masterName: 'HV Wdg. (Not Miss) -AL', sr: '12A-b', srName: 'HT coil: Aluminium per kg, without S.E.' },
+  { masterCode: '13A(a)',   masterName: 'LV Wdg. (Not Miss) -CU', sr: '13A-a', srName: 'LT coil: Copper per kg, without S.E.' },
+  { masterCode: '13b(b)',   masterName: 'LV Wdg. (Not Miss) -AL', sr: '13A-b', srName: 'LT coil: Aluminium per kg, without S.E.' },
+  { masterCode: '14(ii)CU', masterName: 'LV Wdg. Re-Insu.-CU',    sr: '14-i',  srName: 'Re-insulation of LV coils with existing conductor: Copper' },
+  { masterCode: '14(ii)AL', masterName: 'LV Wdg. Re-Insu.-AL',    sr: '14-ii', srName: 'Re-insulation of LV coils with existing conductor: Aluminium' },
+
   // ---- variant-dependent: the rate depends on the job, not on the item alone ----
   { masterCode: '21', masterName: 'Repl. Of Rediator',
     variants: { axis: 'capacity', options: { 'upto-100': '20', 'above-100': 'RADIATOR_ABOVE_100' },
@@ -89,15 +101,17 @@ export const SCHEDULE_ITEM_MAP: ScheduleItemMapping[] = [
     variants: { axis: 'kv-class', options: { '11': '8-A', '22': '8-B' },
       note: 'From externalData.kv. Anything other than 11 or 22 blocks rather than defaulting (F48).' } },
 
-  { masterCode: '12A', masterName: 'HV Coil',
-    variants: { axis: 'winding-material', options: { Aluminium: '12A-b', Copper: 'BLOCKED' },
-      note: "Without-S.E. variant - an agency fact, not derived (O20). Copper blocks: '12A-a' vs '12A-a1' is a Rs 50/kg swing the app cannot resolve. Originals-missing ('12B-*') is unreachable - nothing records it (O21)." } },
+  // The generic coil codes. No master row carries them - the split rows above do - but the
+  // estimate still falls back to them, so a master that predates the split keeps working.
+  { masterCode: '12A', masterName: 'HV Coil (generic fallback)',
+    variants: { axis: 'winding-material', options: { Aluminium: '12A-b', Copper: '12A-a' },
+      note: "Without-S.E. on BOTH materials - an agency fact, not derived (O20). Copper priced from 12A-a Rs 357 since F52; it previously blocked, which mixed a rate question with a scrap question that the circle-limit indicator already answers. Originals-missing ('12B-*') is unreachable - nothing records it (O21)." } },
 
-  { masterCode: '13A', masterName: 'LV Coil',
-    variants: { axis: 'winding-material', options: { Aluminium: '13A-b', Copper: 'BLOCKED' },
+  { masterCode: '13A', masterName: 'LV Coil (generic fallback)',
+    variants: { axis: 'winding-material', options: { Aluminium: '13A-b', Copper: '13A-a' },
       note: "As 12A. Originals-missing ('13B-*') likewise unreachable (O21)." } },
 
-  { masterCode: '14', masterName: 'Re-insulation LV Coil',
+  { masterCode: '14', masterName: 'Re-insulation LV Coil (generic fallback)',
     variants: { axis: 'winding-material', options: { Copper: '14-i', Aluminium: '14-ii' },
       note: 'Driven by coils marked RI; both variants reachable (F46).' } },
 
@@ -118,6 +132,41 @@ export const NOT_FROM_SCHEDULE_A: Record<string, string> = {
   '0': 'Scrap charge (Amorphous / Wound Core). As above.',
   '18': 'Repl. Of Tank. NOT PRICED AT ALL - schedule 18a exists (Rs 54/kg) but no line resolves it and no field captures a tank weight. See AUDIT O22.',
 };
+
+/**
+ * Master rows that exist once PER WINDING MATERIAL, and the single line the estimate
+ * builder emits for them.
+ *
+ * The builder produces one coil line per job, coded '12A' / '13A' / '14', because a job has
+ * one winding material. The master carries two rows, one per material. Anything rendering
+ * the master's rows against a job's estimate therefore needs to know which of the two rows
+ * the job's line belongs on - putting it on both would double it, and matching on the
+ * generic code alone would put it on neither.
+ */
+export const MATERIAL_SPECIFIC_MASTER_ROWS: Record<string, { material: 'Copper' | 'Aluminium'; builderCode: string }> = {
+  '12a(a)':   { material: 'Copper',    builderCode: '12A' },
+  '12a(b)':   { material: 'Aluminium', builderCode: '12A' },
+  '13a(a)':   { material: 'Copper',    builderCode: '13A' },
+  '13b(b)':   { material: 'Aluminium', builderCode: '13A' },
+  '14(ii)cu': { material: 'Copper',    builderCode: '14'  },
+  '14(ii)al': { material: 'Aluminium', builderCode: '14'  },
+};
+
+/**
+ * The builder line code a master row should read, or null if this row does not apply to
+ * this job. Null for the material that was not used, and null when the material is unknown -
+ * an unresolved material must not silently land the charge on one of the two rows.
+ */
+export function builderCodeForMasterRow(
+  masterCode: string,
+  material: 'Copper' | 'Aluminium' | null,
+): string | null {
+  const raw = String(masterCode ?? '').trim();
+  const split = MATERIAL_SPECIFIC_MASTER_ROWS[raw.toLowerCase()];
+  if (!split) return raw;
+  if (material === null) return null;
+  return split.material === material ? split.builderCode : null;
+}
 
 /** The single lookup. Returns the Schedule-A `sr` for an unambiguous item, else null. */
 export function scheduleSrForMasterCode(masterCode: string): string | null {
