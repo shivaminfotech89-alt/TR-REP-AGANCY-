@@ -1156,6 +1156,110 @@ Distinct from the "rule enforced at one call site" pattern: there, a rule was ap
 somewhere and not elsewhere. Here it is applied in one place and **deliberately overridden**
 in the only place that calls it.
 
+### O21. The "originals missing" coil rates are unreachable — no code path resolves 12B or 13B
+
+Schedule-A prices coil replacement twice over, on whether the transformer arrived with its
+original windings:
+
+| | present (12A / 13A) | **originals missing** (12B / 13B) | difference |
+|---|---|---|---|
+| HV Aluminium, w/o S.E. | 163 | **219** | +56/kg |
+| HV Copper, w/o S.E. | 357 | **519** | +162/kg |
+| LV Aluminium, w/o S.E. | 149 | **205** | +56/kg |
+| LV Copper, w/o S.E. | 314 | **491** | +177/kg |
+
+**The gap runs across BOTH windings and compounds on one job.** 13B prices LV
+missing-originals at 205 against 149 — the same +56/kg as HV — and Copper is larger still
+(+177/kg LV, +162/kg HV). A transformer arriving stripped is normally stripped of both, so
+a single job under-claims on the HV line and the LV line together.
+
+**Eight of the sixteen entries are dead.** `SingleJobEstimateReport` resolves `12A-b` and
+`13A-b` and nothing else; no code path can reach a `B` variant. A transformer arriving
+already stripped is priced as though its original conductor were present — an undercharge of
+56/kg on Aluminium and up to 177/kg on Copper.
+
+**Why the tender splits them, which decides where it is observed.** When the originals are
+present the old winding is reclaimable material and offsets the agency's cost; when they are
+missing the agency supplies everything. So the question is not "are the coils damaged" — it
+is **"did this unit arrive with its conductor"**, a fact about what was received, not about
+what the inspection found.
+
+**That places it at EXTERNAL inspection, not internal**, and nothing currently records it.
+The internal screen captures coil *state* (`OK`/`RI`/`DAM`) and weights, all of which
+presume coils exist to assess. A unit with no coils has nothing for those fields to describe,
+so the internal form cannot express the case even implicitly.
+
+**Is it knowable at external inspection?** Usually yes, and this is the part worth checking
+with the operator rather than assuming. A stripped unit is normally evident on receipt —
+open or missing top cover, no leads, drastically low weight — and the receiving agency has
+an obvious commercial interest in recording it at intake, because it is the difference
+between reclaimable material and material they must buy. Where it is *not* evident until the
+tank is opened, the observation belongs on the internal form instead, and the honest design
+records where it was established rather than assuming a stage.
+
+**Shape if it is ever built** (not built, and deliberately so until frequency is known):
+
+- one field, external inspection, alongside the other receipt observations — *"original
+  windings present"* Y/N, with the same affirmative-only treatment as F46 so an unset value
+  never silently selects the higher rate;
+- the estimate picks the `A` or `B` variant from it, on **both** windings, exactly as the
+  agency's S.E. fact selects the with/without axis (O20) and `windingType` selects the
+  material axis. Three independent axes, one already an input, one an agency constant, one
+  unrecorded;
+- **it must not default.** Selecting `B` by accident overcharges by up to 177/kg; selecting
+  `A` by accident undercharges by the same. Neither is a safe resting state, which argues for
+  blocking rather than defaulting when a coil line applies and the field is unanswered.
+
+**Not built.** Whether this happens often enough to be worth a field is a question about the
+work, not the code — and a field that is almost always the same answer will be clicked past,
+which is how `inPnt`'s default came to charge every uninspected job (F46).
+
+### O22. Twenty of fifty-one Schedule-A entries are unreachable — the full list
+
+Swept while the schedule was in view, so these are found once rather than one at a time over
+the next year. Of 51 entries, **31 are reachable** from `SingleJobEstimateReport` and **20
+are not**. Four groups, and they are not the same kind of problem:
+
+**A. Variant axes the app never selects — 14 entries.** All of `12A`/`12B`/`13A`/`13B`
+except the two now in use. These are the Copper, with-S.E. and originals-missing
+permutations. Covered by **O20** (S.E. is an agency constant, would become an input) and
+**O21** (originals-missing is unrecorded). Copper is *deliberately* unreachable: the code
+blocks rather than guessing when `windingType` says Copper, which is correct — a blocked
+estimate is better than a wrong one.
+
+**B. Items with no capture at all — 4 entries.**
+
+| sr | | |
+|---|---|---|
+| `4i` | Replacement of valve (gun metal brass), 3/4" | no field |
+| `4ii` | Replacement of valve (gun metal brass), 1 1/4" | no field |
+| `7` | Replacement of tap changing switch | no field |
+| `8-B` | Replacement of HT bushing porcelain, **22 KV** | see below |
+
+`8-B` is the interesting one: `8-A` (11 KV) IS reachable, so the app prices HT bushing
+replacement only at 11 KV. The external form captures `kv`, so the input **already exists** —
+nothing consumes it to choose the variant. That is the smallest of these to close and the
+most likely to be occurring silently, since a 22 KV unit would be priced at the 11 KV rate.
+
+**C. Duplicated or superseded — 1 entry.** `18a` "Tank replacement charge (per kg)" against
+`18b` which is reachable. Which is correct is a tender question, not a code one.
+
+**D. Whole-job alternatives — 1 entry.** `21` Overhauling of transformer. The app prices OH
+through the itemised path plus the Overhauling master section rather than as this single
+line. Whether that matches the tender's intent is worth confirming — an overhaul billed
+itemised and an overhaul billed at `21` are different claims for the same work.
+
+**None of these is a defect on its own.** An unreachable schedule entry is only a problem if
+the case it prices actually occurs — which is a question about the work, not the code. The
+value of the list is that the question can now be asked once per group instead of discovered
+one job at a time.
+
+**Method note:** the first sweep reported 26 unreachable and was wrong. It matched
+`scheduleRate('X')` literally and so missed `scheduleRate(isCopper ? '14-i' : '14-ii')` —
+six entries mis-reported as dead, including both re-insulation rates that F46 had just wired
+up. Corrected by parsing the whole argument expression. The same shape as the F41 truncation:
+a sweep complete against its own pattern, wrong about the domain.
+
 ### O20. "S.E." is undefined in this codebase, and the choice is now an agency fact
 
 Sixteen Schedule-A entries split on it — `12A`, `12B`, `13A`, `13B`, each Copper/Aluminium
