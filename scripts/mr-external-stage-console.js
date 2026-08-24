@@ -17,6 +17,14 @@
 const MR_NO = '';          // e.g. 'MSBT-12'. Leave empty to scan every incomplete MR.
 
 (async () => {
+  // Dates via the app's own helper - see AUDIT F58. `Number(v) || Date.parse(v)` silently
+  // yields NaN for a Firestore Timestamp, which is what `createdAt` has been since F38.
+  const toMs = window.__utils?.toMillis;
+  if (!toMs) {
+    console.error('window.__utils.toMillis is missing - update src/lib/firebase.ts, and run on a DEV build.');
+    console.error('Refusing to hand-roll a date parser; that is what produced a wrong date in F58.');
+    return;
+  }
   const db = window.__db, auth = window.__auth, fs = window.__fs;
   if (!db || !fs) { console.error('window.__db / window.__fs missing. Reload the tab.'); return; }
   const { collection, query, where, getDocs } = fs;
@@ -37,10 +45,8 @@ const MR_NO = '';          // e.g. 'MSBT-12'. Leave empty to scan every incomple
   ]);
 
   const when = v => {
-    if (v === undefined || v === null || v === '') return '(none)';
-    if (typeof v === 'object' && typeof v.seconds === 'number') return new Date(v.seconds * 1000).toISOString();
-    const n = Number(v) || Date.parse(v);
-    return isNaN(n) ? String(v) : new Date(n).toISOString();
+    const n = toMs(v);
+    return n === null ? '(none)' : new Date(n).toISOString();
   };
 
   // The list the SCREEN passes: External-type records only. isJobExternallyDone itself does

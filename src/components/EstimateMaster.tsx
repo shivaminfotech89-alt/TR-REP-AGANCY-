@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -23,6 +23,17 @@ import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
+
+type SectionKey = 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS';
+const SECTION_KEYS: SectionKey[] = ['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS'];
+/** Master section -> the agency document field it is stored in. */
+const SECTION_FIELD: Record<SectionKey, string> = {
+  CRGO: 'estimateMasterCRGO',
+  AMORPHOUS: 'estimateMasterAmorphous',
+  WOUND_CORE: 'estimateMasterWoundCore',
+  OVERHAULING: 'estimateMasterOverhauling',
+  CIRCLE_LIMITS: 'estimateMasterCircleLimits',
+};
 
 /**
  * What the ESTIMATE would charge for this item at this capacity when the master says
@@ -328,13 +339,15 @@ export default function EstimateMaster() {
 
   // Multi-agency Save Confirmation Modal
   const [pendingSaveSection, setPendingSaveSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS' | null>(null);
-  const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>('ALL');
+  // A non-admin cannot publish, so 'ALL' must not be their starting selection - it would
+  // pre-select a disabled card and leave no radio checked at all.
+  const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>(isSuperAdmin ? 'ALL' : 'SINGLE');
 
   // Full Sync Modal
   const [showFullSyncModal, setShowFullSyncModal] = useState(false);
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [applyTargets, setApplyTargets] = useState<string[]>([]);
-  const [applyCounts, setApplyCounts] = useState<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number> }> | null>(null);
+  const [applyCounts, setApplyCounts] = useState<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number>; sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> }> | null>(null);
   const [countingOverrides, setCountingOverrides] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
 
@@ -446,12 +459,38 @@ export default function EstimateMaster() {
    * is (re)loaded and after a successful save.
    */
   const [editedSections, setEditedSections] = useState<Record<string, boolean>>({});
-  const markEdited = (...sections: string[]) =>
-    setEditedSections(prev => {
+
+  /**
+   * Sections the operator has changed while this agency has been open, SURVIVING A SAVE.
+   *
+   * `editedSections` cannot serve this. The loader effect depends on `activeAgency`, and
+   * `updateAgency` replaces that object - so saving re-runs the effect, which clears
+   * `editedSections` by design ("a fresh load is not an edit"). That is right for
+   * publishPlanFor, which asks "is the screen ahead of storage"; after a save it is not.
+   *
+   * But "which sections did I change" is a different question, and the answer must outlive
+   * the save - the ordinary workflow is edit, Save All, then apply to the other agencies.
+   * Keyed on agency id so switching agencies resets it and switching back does not
+   * resurrect a stale set.
+   */
+  const touchedRef = useRef<{ agencyId: string | null; sections: Set<string> }>({ agencyId: null, sections: new Set() });
+  const noteTouched = (...sections: string[]) => {
+    const id = activeAgency?.id ?? null;
+    if (touchedRef.current.agencyId !== id) touchedRef.current = { agencyId: id, sections: new Set() };
+    sections.forEach(sec => touchedRef.current.sections.add(sec));
+  };
+  const touchedSections = (): SectionKey[] =>
+    (activeAgency?.id && touchedRef.current.agencyId === activeAgency.id)
+      ? SECTION_KEYS.filter(k => touchedRef.current.sections.has(k))
+      : [];
+  const markEdited = (...sections: string[]) => {
+    noteTouched(...sections);
+    return setEditedSections(prev => {
       const next = { ...prev };
       sections.forEach(sec => { next[sec] = true; });
       return next;
     });
+  };
 
   const setSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', newData: EstimateItem[]) => {
     markEdited(section);
@@ -960,7 +999,10 @@ export default function EstimateMaster() {
       // Save as global system default in Firestore and across all agencies
       await updateAllAgenciesEstimateMaster(updatePayload);
       setEditedSections(prev => ({ ...prev, [section]: false }));
-      setSyncSuccessMsg(`✓ Successfully published ${section} rates as the GLOBAL DEFAULT for all users & agencies!`);
+      // Says what it did. The old wording claimed "all users & agencies", which was never
+      // true for an agency holding its own section - getEstimateMasterForCore reads the
+      // agency before the baseline - and became plainly false once F56 removed the fan-out.
+      setSyncSuccessMsg(`✓ Published ${section} to the shared baseline. New agencies will inherit these rates; existing agencies keep their own.`);
 
       setEditingSection(null);
       setPendingSaveSection(null);
@@ -973,14 +1015,22 @@ export default function EstimateMaster() {
     }
   };
 
-  /** The five sections as they would be written - stored when untouched, screen when edited. */
-  const buildSectionPayload = () => ({
-    estimateMasterCRGO: publishPlanFor('CRGO').payload,
-    estimateMasterAmorphous: publishPlanFor('AMORPHOUS').payload,
-    estimateMasterWoundCore: publishPlanFor('WOUND_CORE').payload,
-    estimateMasterOverhauling: publishPlanFor('OVERHAULING').payload,
-    estimateMasterCircleLimits: publishPlanFor('CIRCLE_LIMITS').payload,
-  });
+  /**
+   * ONLY THE SECTIONS THE OPERATOR ACTUALLY CHANGED.
+   *
+   * This used to return all five unconditionally, so correcting six CRGO cells also
+   * replaced Overhauling and Circle Limits on every target - wholesale, because updateDoc
+   * replaces an array rather than merging it. The confirmation could not warn about it
+   * either: the cell count never visits a row the payload does not contain (AUDIT O31).
+   *
+   * Sending what was edited makes the blast radius equal to the intent. A section nobody
+   * touched is not in the payload at all, so it cannot be replaced by accident.
+   */
+  const buildSectionPayload = () => {
+    const out: Record<string, EstimateItem[] | undefined> = {};
+    touchedSections().forEach(sec => { out[SECTION_FIELD[sec]] = publishPlanFor(sec).payload; });
+    return out;
+  };
 
   /**
    * "Apply to my agencies" - owner-scoped, available to every user, no admin rights.
@@ -995,10 +1045,26 @@ export default function EstimateMaster() {
       alert('You only have one agency. There is nothing to apply this to.');
       return;
     }
-    // Same guard the publish path uses: never push a section that exists on screen only
-    // because a fallback resolved it. Sending four agencies a section this agency does not
-    // actually have stored is how one wrong card became four.
-    if (blockPublishIfFallbackResolved(['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING'])) return;
+    // REFUSE WHEN NOTHING WAS EDITED. Writing five sections of unchanged data to four
+    // agencies is not a no-op: it replaces each array with an equal-looking copy, stamps
+    // every target as edited, and converts any cell the source resolves-but-does-not-store
+    // into stored data on the targets. An action with nothing to do should say so.
+    const edited = touchedSections();
+    if (edited.length === 0) {
+      alert(
+        'Nothing to apply.\n\n'
+        + 'No section has been changed since this agency was opened, so there is nothing to '
+        + 'copy to your other agencies.\n\n'
+        + 'Edit the rates you want to propagate first, then use this button. Saving does not '
+        + 'clear what you have changed, so you can save first and apply afterwards.'
+      );
+      return;
+    }
+
+    // Same guard the publish path uses, over the edited sections only: never push a section
+    // that exists on screen only because a fallback resolved it. Sending four agencies a
+    // section this agency does not actually have stored is how one wrong card became four.
+    if (blockPublishIfFallbackResolved(edited)) return;
 
     setApplyTargets(others.map(a => a.id));
     setApplyCounts(null);
@@ -1968,13 +2034,23 @@ export default function EstimateMaster() {
                 </div>
               </div>
 
-              {/* Option 2: ALL Users & Agencies */}
+              {/* Option 2: the shared baseline.
+                  GATED, and shown DISABLED rather than hidden for a non-admin. It used to
+                  render for everyone, `saveScope` defaults to 'ALL' so it was even
+                  pre-selected, and handleConfirmSaveSection silently redirected a
+                  non-admin to the agency-only save. The operator picked "publish", pressed
+                  a button reading "Save as Default for All Users", and got an agency save
+                  with nothing to say the choice had been overridden - a control that
+                  accepts a choice and quietly does something else. Disabled-and-explained
+                  beats hidden: it answers "why can't I publish" instead of raising it. */}
               <div 
-                onClick={() => setSaveScope('ALL')}
-                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
-                  saveScope === 'ALL' 
-                    ? 'border-blue-600 bg-blue-50/50 shadow-xs' 
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
+                onClick={() => { if (isSuperAdmin) setSaveScope('ALL'); }}
+                className={`p-4 rounded-xl border-2 transition-all ${
+                  !isSuperAdmin
+                    ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
+                    : saveScope === 'ALL'
+                      ? 'border-blue-600 bg-blue-50/50 shadow-xs cursor-pointer'
+                      : 'border-slate-200 hover:border-slate-300 bg-white cursor-pointer'
                 }`}
               >
                 <div className="flex items-start justify-between">
@@ -1982,17 +2058,20 @@ export default function EstimateMaster() {
                     <input 
                       type="radio" 
                       name="saveScope" 
-                      checked={saveScope === 'ALL'} 
+                      checked={isSuperAdmin && saveScope === 'ALL'} 
+                      disabled={!isSuperAdmin}
                       onChange={() => setSaveScope('ALL')}
-                      className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300"
+                      className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300 disabled:opacity-50"
                     />
                     <div>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-slate-900">Publish as Global Default for ALL Users</span>
-                        <span className="text-[10px] uppercase font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">System Wide</span>
+                        <span className="text-sm font-bold text-slate-900">Publish to the shared baseline</span>
+                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
+                          isSuperAdmin ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'
+                        }`}>{isSuperAdmin ? 'New agencies' : 'Administrator only'}</span>
                       </div>
                       <p className="text-xs text-slate-500 mt-1">
-                        Updates the central cloud master so that all other users and new agencies will adopt these {pendingSaveSection} rates as their default.
+                        Updates the central default that <strong>newly created agencies</strong> inherit, and that any agency with no {pendingSaveSection} rates of its own resolves through. <strong>Existing agencies keep their own rates</strong> - this does not change them.
                       </p>
                       {/* Names WHAT is being sent, in rows. The screen shows normalised data -
                           default rows merged in, order and units rewritten - so "publish this
@@ -2058,7 +2137,7 @@ export default function EstimateMaster() {
                 ) : (
                   <>
                     <Check className="w-4 h-4 mr-1.5" />
-                    {saveScope === 'ALL' ? `Save as Default for All Users` : `Save for ${activeAgency.name}`}
+                    {isSuperAdmin && saveScope === 'ALL' ? `Publish to shared baseline` : `Save for ${activeAgency.name}`}
                   </>
                 )}
               </button>
@@ -2134,6 +2213,29 @@ export default function EstimateMaster() {
                             inherit the tender rate would be set to a fixed value.
                           </div>
                         )}
+                        {/* EVERY SECTION THIS WRITES, not only the one being edited.
+                            This action sends all five sections, so correcting CRGO also
+                            replaces Overhauling and Circle Limits wholesale. The cell count
+                            above cannot show that - it never visits a row the payload does
+                            not contain - so a section replaced with the same row count
+                            looked like no change at all (AUDIT O31). */}
+                        {c.sectionWrites && c.sectionWrites.length > 0 && (
+                          <div className="mt-1 pt-1 border-t border-slate-100 text-[10px] text-slate-500 leading-relaxed">
+                            <span className="font-semibold text-slate-600">Also writes:</span>{' '}
+                            {c.sectionWrites.map(w => {
+                              const label = w.field.replace('estimateMaster', '') || 'CRGO';
+                              const lost = w.removed > 0;
+                              return (
+                                <span key={w.field} className={lost ? 'text-rose-700 font-semibold' : ''}>
+                                  {label} ({w.rowsBefore}&rarr;{w.rowsAfter} rows
+                                  {w.removed > 0 ? `, ${w.removed} removed` : ''}
+                                  {w.added > 0 ? `, ${w.added} added` : ''}
+                                  ){'  '}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     </label>
                   );
@@ -2154,6 +2256,12 @@ export default function EstimateMaster() {
                     : total > 0
                       ? `This will update ${sel.map(c => c.name).join(', ')}, replacing ${lost.map(c => `${c.overrides} rate${c.overrides === 1 ? '' : 's'} customised in ${c.name}`).join(' and ')}.`
                       : `This will update ${sel.map(c => c.name).join(', ')}. No agency loses a rate it had customised.`}
+                  {sel.some(c => (c.sectionWrites || []).some(w => w.removed > 0)) && (
+                    <span className="block mt-1 text-rose-700 font-semibold">
+                      Some sections lose rows entirely - see the red entries above. Rows removed this
+                      way are not recoverable.
+                    </span>
+                  )}
                 </p>
               );
             })()}

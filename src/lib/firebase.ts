@@ -2,6 +2,10 @@ import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { initializeFirestore, getFirestore, collection, query, where, getDocs, doc, getDoc, writeBatch, updateDoc } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { formatDDMMYYYY, toMillis } from './utils';
+import { SCHEDULE_A, bandForKva } from './ugvclSchedule2020';
+import { scheduleSrForMasterCode, variantAxisForMasterCode } from './scheduleItemMap';
+import { defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData } from './estimateData';
 
 const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(
@@ -31,6 +35,25 @@ if (import.meta.env.DEV) {
   //   writeBatch  - backfill-condition.js, reverse-bulk-move.js (bulk, batched)
   //   updateDoc   - fix-woundcore-scrap-code.js (single document, single field)
   (window as any).__fs = { collection, query, where, getDocs, doc, getDoc, writeBatch, updateDoc };
+  // DATE FORMATTING, exposed for the same reason as the Firestore handles.
+  //
+  // A console script cannot import from src, so every diagnostic that printed a date
+  // hand-rolled one - and one of them hand-rolled `Number(x) || Date.parse(x)`, which
+  // silently mis-renders a Firestore Timestamp. formatDDMMYYYY already knew about
+  // Timestamps; the script reimplemented it badly instead of reaching for it, because
+  // there was no way to reach for it. There is now (AUDIT F58).
+  (window as any).__utils = { formatDDMMYYYY, toMillis };
+  // TENDER SCHEDULE, for diagnostics that compare stored rates against it.
+  //
+  // Same reason as __utils: a console script cannot import from src, and the alternative
+  // is a script carrying its own transcription of Schedule-A - a second copy of the tender,
+  // which is the defect class this audit exists to remove. One transcription, reachable.
+  (window as any).__schedule = { SCHEDULE_A, bandForKva, scheduleSrForMasterCode, variantAxisForMasterCode };
+  // SHIPPED SHELLS for the two sections that have no baseline in public_config. A
+  // diagnostic cannot otherwise tell "this agency stores the shell" from "this agency
+  // stores its own rates that happen to look like the shell" - which is the only handle
+  // left on whether a bulk write replaced a hand-maintained section (AUDIT O31).
+  (window as any).__defaults = { defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData };
 }
 
 export enum OperationType {

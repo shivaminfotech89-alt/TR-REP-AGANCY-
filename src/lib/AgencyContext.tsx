@@ -686,7 +686,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const countOverridesForApply = async (
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],
-  ): Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number> }>> => {
+  ): Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number>; sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> }>> => {
     const KVA_KEYS = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'];
     const num = (v: any): number | null =>
       (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
@@ -699,6 +699,31 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       let overrides = 0;
       let inheritingCellsFrozen = 0;
       const sections: Record<string, number> = {};
+
+      // EVERY SECTION THE WRITE TOUCHES, whether or not any cell differs.
+      //
+      // The cell count below iterates the INCOMING rows and looks each up in the target, so
+      // a row present in the target and absent from the payload is never visited and never
+      // counted. That made an entire section being replaced invisible whenever the values
+      // happened to match - and a section replaced wholesale with the same row count looked
+      // like no change at all (AUDIT O31). Rows added and removed are counted here, from
+      // both directions, and reported even when the count is zero: "this will also write
+      // Overhauling (5 rows)" is the sentence that was missing.
+      const sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> = [];
+      for (const [field, incoming] of Object.entries(payload)) {
+        if (!Array.isArray(incoming)) continue;
+        const existing: any[] = Array.isArray(stored[field]) ? stored[field] : [];
+        const codeOf = (it: any) => String(it?.itemCode ?? '').trim().toLowerCase();
+        const before = new Set(existing.map(codeOf).filter(Boolean));
+        const after = new Set(incoming.map(codeOf).filter(Boolean));
+        sectionWrites.push({
+          field,
+          rowsBefore: existing.length,
+          rowsAfter: incoming.length,
+          added: [...after].filter(c => !before.has(c)).length,
+          removed: [...before].filter(c => !after.has(c)).length,
+        });
+      }
 
       for (const [field, incoming] of Object.entries(payload)) {
         if (!Array.isArray(incoming)) continue;
@@ -721,7 +746,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         if (sectionCount > 0) sections[field] = sectionCount;
         overrides += sectionCount;
       }
-      results.push({ id, name: stored.name || id, overrides, inheritingCellsFrozen, sections });
+      results.push({ id, name: stored.name || id, overrides, inheritingCellsFrozen, sections, sectionWrites });
     }
     return results;
   };
@@ -746,11 +771,24 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     const targets = targetAgencyIds.filter(id => owned.has(id));
     if (targets.length === 0) return;
     try {
-      await Promise.all(targets.map(id => updateDoc(doc(db, 'agencies', id), payload as any)));
+      // STAMPED, like the per-agency save. Omitting it was an oversight, and a bulk write
+      // is the case where the stamp matters most - it is the one where nobody is looking at
+      // each agency as it changes. Without it, agencies rewritten seconds ago read as
+      // "never edited", which is an assertion rather than silence (AUDIT D5).
+      const stamp = {
+        estimateMasterEditedAt: serverTimestamp(),
+        estimateMasterEditedBy: auth.currentUser?.email || auth.currentUser?.uid || '',
+      };
+      await Promise.all(targets.map(id => updateDoc(doc(db, 'agencies', id), { ...payload, ...stamp } as any)));
       const targetSet = new Set(targets);
       setAgencies(prev => prev.map(a => a.id === undefined || !targetSet.has(a.id) ? a : ({
         ...a,
         ...payload,
+        // A local Date, not the serverTimestamp sentinel - that is a write instruction, not
+        // a value, and putting it in React state would render as an unparseable object
+        // until the next reload. The server's own timestamp replaces this on refetch.
+        estimateMasterEditedAt: new Date(),
+        estimateMasterEditedBy: auth.currentUser?.email || auth.currentUser?.uid || '',
         // Keep the raw-value shadow in step with the write, or the next health check and
         // the next override count both read a stale picture of what is stored.
         __storedMasters: {

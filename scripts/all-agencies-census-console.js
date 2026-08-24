@@ -14,6 +14,14 @@
 // HOW TO RUN: npm run dev, sign in as the super admin, reload the tab, paste in console.
 
 (async () => {
+  // Dates via the app's own helper - see AUDIT F58. `Number(v) || Date.parse(v)` silently
+  // yields NaN for a Firestore Timestamp, which is what `createdAt` has been since F38.
+  const toMs = window.__utils?.toMillis;
+  if (!toMs) {
+    console.error('window.__utils.toMillis is missing - update src/lib/firebase.ts, and run on a DEV build.');
+    console.error('Refusing to hand-roll a date parser; that is what produced a wrong date in F58.');
+    return;
+  }
   const db = window.__db, auth = window.__auth, fs = window.__fs;
   if (!db || !fs) { console.error('window.__db / window.__fs missing. Reload the tab.'); return; }
   const { collection, query, where, getDocs, doc, getDoc } = fs;
@@ -68,7 +76,7 @@
 
   const jobsByAgency = {};
   jobs.forEach(j => { (jobsByAgency[j.agencyId] ||= []).push(j); });
-  const ms = v => { const n = Number(v) || Date.parse(v); return isNaN(n) ? null : n; };
+  const ms = toMs;
 
   const rows = agencies.map(a => {
     const secs = {

@@ -2189,6 +2189,139 @@ approval? `paymentDeductions` exists on the payment record, which is where that 
 
 ---
 
+### O30. The Overhauling master has never been checked against the tender
+
+Left untouched during the typo correction, and the reason matters: **those rows were never
+validly checked, not checked and found correct.**
+
+`scripts/override-vs-schedule-console.js` scanned the Overhauling section using
+`SCHEDULE_ITEM_MAP`, which pairs **CRGO** master codes with Schedule-A sr values. The
+overhauling master reuses the same short codes for entirely different items, so the scan
+compared unrelated things and reported the mismatches as overrides:
+
+    OH '3' Tank replacement per kg (54)        vs sr '3' Inside painting of tank (156)
+    OH '5' Complete radiator replacement       vs sr '5' Oil level gauge glass (46)
+    OH '6' Sealing of uneconomical unit (189)  vs sr '6' Breather (309)
+
+Every one of those "overrides" was the script comparing a radiator to a gauge glass. This is
+the terminology hazard already recorded - **an item code means different things in different
+sections**, the same collision that put the scrap charge under four codes - reproduced by the
+tool written to find data errors. The script now scans CRGO only and says why in place, so
+the OH scan is not re-added as an oversight.
+
+**Which leaves the Overhauling master genuinely unaudited.** No mapping exists from its item
+codes to the tender, so nothing has ever compared its stored rates against anything. It could
+carry slips of exactly the kind found in the CRGO 100 kVA column and nobody would know.
+
+**One discrepancy is visible without a map and is unexplained.** The OH radiator rates sit
+close to, but not equal to, Schedule-A sr '20':
+
+    OH master:      1057    1256    1452
+    Schedule-A 20:  1052    1248    1446
+
+Five, eight and six rupees apart. Too close to be independent rates and too far to be equal -
+the shape of a transcription slip, or of a different tender revision, or of a deliberate
+overhauling premium. Which of those it is cannot be settled by inspection.
+
+**What this needs is an Overhauling-to-Schedule map**, the same shape as `SCHEDULE_ITEM_MAP`
+but for the OH section's five rows. That is a small piece of data and a domain question per
+row - and it is the only thing that would make the OH master checkable at all. Not built,
+because guessing the pairings is how the CRGO false positives were produced in the first
+place.
+
+---
+
+### O31. A five-section write to fix eight cells in one section, confirmed by a dialog that counted the wrong thing
+
+The hazard the fan-out was built with, firing on its first real use.
+
+**What happened.** Eight mistyped cells, all in CRGO, were corrected on one agency and
+applied to three others with "Apply to my agencies". `buildSectionPayload()` returns ALL
+FIVE sections from the source, and `updateDoc` replaces each array wholesale - so
+`estimateMasterOverhauling` and `estimateMasterCircleLimits` on the targets were overwritten
+with the source's, to fix eight cells that had nothing to do with either.
+
+**The confirmation dialog did not say so, and could not.** `countOverridesForApply` iterates
+the INCOMING items and looks each up in the target by item code. A row present in the target
+and absent from the payload is never visited, so it is never counted. The dialog reports
+**cells whose value changes**; it is blind to **rows that disappear**. For a section where
+the source is thinner than the target, the entire loss is silent.
+
+That is the same defect shape this audit keeps finding, in the safety mechanism itself: the
+count is real, the arithmetic is right, and it measures something narrower than what the
+reader takes it to mean.
+
+**Two guards that should have caught it did not:**
+
+- `blockPublishIfFallbackResolved` **exempts `CIRCLE_LIMITS` entirely**
+  (`.filter(sec => sec !== 'CIRCLE_LIMITS')`) and treats an empty Overhauling as normal -
+  correctly, since empty Overhauling IS the normal state. But "empty is normal" and "safe to
+  broadcast" are different claims. If the source stored nothing, `publishPlanFor` sends the
+  SCREEN content, which for an empty stored section is the resolved shipped shell - written
+  to every target as though it were data.
+- The dialog's per-section breakdown lists only sections with counted differences, so a
+  section being replaced wholesale with zero cell-level differences appears nowhere at all.
+
+**Whether anything was actually lost cannot be determined after the fact.** `updateDoc`
+replaced the arrays and the app keeps no history. `scripts/overhauling-after-fanout-console.js`
+narrows it - if every agency now holds an identical section equal to the shipped shell, the
+fallback was written as data; if agencies still differ, those were not overwritten - but the
+prior value is not recoverable either way. **The absence of a before-snapshot is the finding**,
+not a gap in the investigation.
+
+**What the fix needs to be**, when it is made:
+
+1. The count must report rows ADDED and REMOVED per section, not only cells changed.
+2. The dialog must name every section the write will touch, including ones with no
+   differences - "this will also replace Overhauling (5 rows) and Circle Limits (5 rows)" is
+   the sentence that was missing.
+3. Better still, the action should send only the sections the user edited. Fixing CRGO
+   should write CRGO. The five-section payload exists because it was modelled on the admin
+   publish, which has its own reasons for being wholesale.
+
+Recorded as an open item rather than fixed, because the fix changes what the action does and
+that wants deciding rather than assuming.
+
+---
+
+### O32. Changing a rate on another account's agencies: reachable, not exposed, and a product decision
+
+**There is no route in the app**, and correcting six mistyped cells across seven agencies on
+two accounts therefore took seven manual passes. Worth recording precisely what stands in the
+way, because it is less than it looks.
+
+**The permission already exists.** `firestore.rules:256` allows an agency update when
+`existing().ownerId == request.auth.uid || isSuperAdmin() || ...` - the super admin may write
+any agency document. Reads too: `allow get, list` includes `isSuperAdmin()`, and
+`AdminPanel.tsx:65` already calls `getDocs(collection(db, 'agencies'))` unfiltered, so every
+agency on every account is already enumerable by that account.
+
+**Only a client-side filter stands in the way.** `AgencyContext` loads
+`where('ownerId','==',uid)`, so every rate-writing path in the UI operates on a list that
+structurally cannot contain another user's agency - including
+`applyEstimateMasterToOwnAgencies`, which additionally filters its targets against that
+owned set. Nothing joins the admin's existing permission to the admin's existing list.
+
+**So it is reachable by console script today**, and one already exists in that shape:
+`scripts/seed-agencies-from-public-config.js` is write-capable, ships `MODE = 'dry-run'`, and
+writes agency sections; `scripts/all-agencies-census-console.js` already reads across owners
+successfully. Exposing it in the UI would be a small change.
+
+**NOT A TASK, and the reason is not technical.** An admin overwriting rates on accounts
+belonging to people who are not in the room is a materially different power from anything the
+app currently offers. Everything built this session assumed the actor owns what they are
+changing - the override count in "Apply to my agencies" exists so an operator can see what
+their own decision destroys. Pointed across accounts, that same dialog would be reporting
+what it destroys **for someone else**, to a person with no way to ask them.
+
+For a once-a-tender operation, a deliberate script with a dry run may be the right level of
+friction rather than a button. A button invites use; a script requires intent, leaves the
+diff on screen before it writes, and cannot be pressed by accident. That is a reasonable
+place for this power to live, and moving it needs a decision about the product rather than a
+fix to a defect.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test
@@ -2295,6 +2428,42 @@ that matches its CRGO section is harmless weight; one that has diverged is a sta
 would surface as different prices in the rare state above. `scripts/legacy-estimate-master-
 census-console.js` (read-only) answers which. When the data is eventually cleared from every
 document, the two reads go with it, and not before.
+
+---
+
+### D5. `estimateMasterEditedAt` cannot answer "where did this rate come from"
+
+Added this session so provenance questions could be answered. On its first use it answered
+nothing, and that is a property of the field rather than a bug in it. Stated here so the
+next person does not reach for it expecting more.
+
+**It cannot describe anything that predates it.** The stamp is written only when a master is
+saved (`EstimateMaster.tsx:880`). Every agency not saved since it shipped has no value at
+all - six of seven, on the first occasion it was consulted. And no future save can
+retroactively date a rate that was already there. Every question of the form "where did this
+rate come from" is about a value that predates the stamp, which is exactly the class of
+question it cannot reach.
+
+**The sharper half: it is stamped per AGENCY, not per cell.** Even going forward it records
+that *the master was saved*, by whom and when - never *which value changed*. An agency master
+holds roughly 310 CRGO cells; a save stamps one timestamp across all of them. So for "who set
+this rate and when" it is the wrong instrument entirely, not merely a young one. A recent
+stamp is not evidence that a given cell is recent; it is evidence that some cell might be.
+
+**What would answer it is per-cell provenance** - a stamp per rate, or an append-only change
+log. Nobody has asked for that, it is real weight on every save, and the question it answers
+has come up once. Recorded as the known alternative, not as a recommendation.
+
+**What the field IS good for**, and why it stays: the line under the master heading, *"Rates
+last edited <date> by <who>. Estimates produced before that date were priced from different
+rates."* That is a true and useful statement about the whole master, which is the granularity
+the field actually has.
+
+**Worked example, from the occasion that prompted this.** Seven agencies were found holding
+49.00 in CRGO `1b` at 100 kVA where Schedule-A `1b` holds 46 at `B100`. Six carried no stamp;
+one rendered an impossible date (F58). The value predates everything traceable, so no query
+can say whether it was a deliberate rate or a slip - only the person who set up the source
+master can. The field's silence was correct behaviour and still left the question open.
 
 ---
 
@@ -4357,6 +4526,60 @@ depending on data that had to be gone and checked:
 A census was run and returned zero itemised-branch bills on two agencies, but it could not
 cover an agency owned by another account. The structural argument is recorded in preference
 because it holds without that data.
+
+### F58. A diagnostic reimplemented a date helper that already existed, and got it wrong
+
+`scripts/rate-provenance-console.js` rendered one agency's `estimateMasterEditedAt` as
+**11/1/1972** - an impossible date, on a field written with `serverTimestamp()` days earlier.
+
+The script parsed dates with:
+
+    new Date(Number(v) || Date.parse(v))
+
+which handles numbers and ISO strings and **not a Firestore Timestamp**, the one shape that
+field actually has. This is the F23 class - a Timestamp meeting a reader that expects a
+number - but with an aggravating detail: **`formatDDMMYYYY` already handled Timestamps**
+(`lib/utils.ts:14-21`, both `.toDate()` and the plain `{seconds}` shape), and that branch was
+written EARLIER IN THIS SAME AUDIT for exactly this hazard. The fix existed, in this
+codebase, and was reimplemented badly instead of reused.
+
+**Why it was reimplemented is the part worth fixing.** A console script cannot import from
+`src`. There was no way to reach the helper, so every diagnostic that printed a date wrote
+its own parser. `src/lib/firebase.ts` already says the fix for a missing handle "belongs
+here, not in the script" - so `formatDDMMYYYY` is now on the dev handles as
+`window.__utils`, and the script refuses to run rather than falling back to a local parser
+if it is absent. Refusing is deliberate: a diagnostic that silently degrades to the broken
+path is worse than one that stops.
+
+**Three other scripts carried the same expression** - `agency-activity-console.js`,
+`all-agencies-census-console.js`, `mr-external-stage-console.js` - all reading `createdAt`,
+which since F38 is written with `serverTimestamp()`. All three are fixed.
+
+None of them was load-bearing, and that is worth separating from why it mattered: **a
+diagnostic that mis-renders a date is more dangerous than one that fails.** A failure is
+visibly a failure and gets investigated. A wrong date arrives formatted, plausible, and
+labelled as evidence - it gets acted on. That is what nearly happened here: an impossible
+1972 timestamp was one step away from being read as "this rate was set long ago, so it is
+probably deliberate", which would have been a conclusion drawn from a rendering bug.
+
+Two shared helpers now exist on the dev handles instead of being rewritten per script:
+`__utils.formatDDMMYYYY` for display and `__utils.toMillis` for comparison and sorting -
+`formatDDMMYYYY` returns a string, and the callers that need a NUMBER were the ones writing
+their own parser. Each script refuses to run if the handle is absent rather than falling
+back to a local one.
+
+**The pattern note this belongs under is the third one - surveying by proxy instead of
+reading the thing - applied to the DIAGNOSTIC rather than to the app.** A tool written to
+check the app's correctness is not exempt from the app's failure modes, and a wrong number
+from a diagnostic is more dangerous than one from a screen: it arrives labelled as evidence.
+The raw shape is now printed beside the formatted value (`editedAtRaw`) so a wrong-looking
+date can be diagnosed from the output instead of inferred.
+
+**Not explained, deliberately.** The specific value 11/1/1972 (~63,916,200,000 ms) does not
+correspond to any obvious misreading of a 2026 timestamp - a Timestamp object through that
+expression yields `Invalid Date`, not a date in 1972. So SUCHIT holds some third shape in
+that field, and what it is has not been established. Naming a mechanism without seeing the
+value would be inventing one.
 
 ## Recurring theme
 

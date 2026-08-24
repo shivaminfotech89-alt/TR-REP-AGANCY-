@@ -108,6 +108,38 @@ export function byNumericDesc(get: (row: any) => string | undefined) {
 
 /** Coerce a stored date value (ISO string, epoch ms, or Firestore Timestamp) to an ISO
  *  `yyyy-mm-dd` string, or '' if it cannot be. Storage/comparison shape - NOT display. */
+/**
+ * A date-ish value as epoch MILLISECONDS, or null when it is not a date.
+ *
+ * Exists because `formatDDMMYYYY` returns a rendered string, and several callers need a
+ * NUMBER - to sort, to take a min/max, to compare two records. Those callers were each
+ * writing `Number(v) || Date.parse(v)`, which silently fails on a Firestore Timestamp:
+ * `Number(timestamp)` is NaN and `Date.parse(timestamp)` parses "[object Object]", so the
+ * whole expression yields NaN and the value is dropped or mis-rendered (AUDIT F58).
+ *
+ * Accepts every shape a document read can produce: SDK Timestamp (`.toDate()`), the plain
+ * `{seconds}` shape, Date, epoch number, numeric string, and ISO string. Returns null
+ * rather than 0 or NaN, so "no date" cannot be mistaken for 1 January 1970.
+ */
+export function toMillis(v: any): number | null {
+  if (v === null || v === undefined || v === '') return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.getTime();
+  if (typeof v === 'object') {
+    if (typeof v.toDate === 'function') {
+      const d = v.toDate();
+      return d instanceof Date && !isNaN(d.getTime()) ? d.getTime() : null;
+    }
+    if (typeof v.seconds === 'number') return v.seconds * 1000;
+    return null;
+  }
+  if (typeof v === 'number') return isNaN(v) ? null : v;
+  const str = String(v).trim();
+  // A numeric string is epoch millis, not a date to parse - Date.parse('1700000000000')
+  // is NaN, which is how the old expression lost them.
+  const n = /^\d+$/.test(str) ? Number(str) : Date.parse(str);
+  return isNaN(n) ? null : n;
+}
+
 export function toIsoDateStr(dateVal: any): string {
   if (!dateVal) return '';
   if (typeof dateVal === 'string') return dateVal;
