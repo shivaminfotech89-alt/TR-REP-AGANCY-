@@ -339,9 +339,15 @@ export default function EstimateMaster() {
 
   // Multi-agency Save Confirmation Modal
   const [pendingSaveSection, setPendingSaveSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS' | null>(null);
-  // A non-admin cannot publish, so 'ALL' must not be their starting selection - it would
-  // pre-select a disabled card and leave no radio checked at all.
-  const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>(isSuperAdmin ? 'ALL' : 'SINGLE');
+  // SINGLE for everyone, admin included.
+  //
+  // 'ALL' used to be the default, which pre-selected the publishing option for the one
+  // account that can actually execute it - while the card beside it carried the
+  // "Recommended" badge. The badge and the default disagreed, and the disagreement favoured
+  // the wider blast radius. Publishing seeds the baseline every future agency inherits and
+  // cannot be undone by the actor on anyone else's behalf; that is a thing to choose, not
+  // a thing to arrive at by pressing Save without reading the modal.
+  const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>('SINGLE');
 
   // Full Sync Modal
   const [showFullSyncModal, setShowFullSyncModal] = useState(false);
