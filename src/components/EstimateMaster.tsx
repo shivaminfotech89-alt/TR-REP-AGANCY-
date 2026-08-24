@@ -17,10 +17,44 @@ import { auth } from '../lib/firebase';
 import { formatDDMMYYYY } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
 import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
+import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
+import { SCHEDULE_A, bandForKva } from '../lib/ugvclSchedule2020';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
+
+/**
+ * What the ESTIMATE would charge for this item at this capacity when the master says
+ * nothing - i.e. the tender rate the cell inherits.
+ *
+ * A blank cell is not a gap: resolveRate falls through to Schedule-A, so the job prices
+ * correctly from the tender. Showing that figure turns an empty cell from "unknown" into
+ * "inherited", which is the difference between an agency wondering whether something is
+ * missing and an agency seeing what it will be charged.
+ *
+ * Returns null for variant items - a row whose rate depends on the job (KV rating, winding
+ * material, capacity) has no single inherited value, and printing one would be a confident
+ * half-truth. Those render a marker instead.
+ */
+function inheritedScheduleRate(itemCode: string, kva: string): number | null {
+  if (variantAxisForMasterCode(itemCode)) return null;
+  const sr = scheduleSrForMasterCode(itemCode);
+  if (!sr) return null;
+  const entry = SCHEDULE_A.find(i => i.sr === sr);
+  if (!entry) return null;
+  const v = entry.rates[bandForKva(Number(kva) || 0)];
+  return typeof v === 'number' && v > 0 ? v : null;
+}
+
+/** Short reason a variant row shows no inherited figure. Never blank - see AUDIT F50. */
+function variantMarker(itemCode: string): string | null {
+  const v = variantAxisForMasterCode(itemCode);
+  if (!v) return null;
+  return v.axis === 'kv-class' ? 'Varies by KV rating'
+    : v.axis === 'winding-material' ? 'Varies by winding material'
+    : 'Varies by capacity';
+}
 
 function mergeDefaultRates(items: EstimateItem[]): EstimateItem[] {
   return items.map((item: any) => ({
@@ -1016,6 +1050,12 @@ export default function EstimateMaster() {
                 </span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+              <p className="text-[11px] text-slate-500 mt-1">
+                <span className="text-slate-400 italic font-mono">grey italic</span> = the UGVCL tender rate,
+                used while the cell is blank - nothing is stored. Type to override for this agency;
+                <strong> clear a cell to go back to the tender rate</strong>. Once a cell holds a value,
+                a future change to the tender schedule no longer reaches it.
+              </p>
 
               {/*
                 SECTION HEALTH LINE. Both checks that would have caught the misfiled
@@ -1418,24 +1458,64 @@ export default function EstimateMaster() {
                         const rateVal = item.rates?.[kva];
                         return (
                           <td key={kva} className="px-2.5 py-2.5 text-right font-mono text-slate-700 align-top">
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                step="0.01"
-                                value={rateVal ?? ''}
-                                onChange={(e) => handleRateChange(sectionKey, idx, kva, e.target.value)}
-                                className="w-20 px-1.5 py-1 text-right text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 font-mono font-medium"
-                                placeholder="-"
-                              />
-                            ) : (
-                              rateVal !== null && rateVal !== undefined && !isNaN(Number(rateVal)) && Number(rateVal) > 0 ? (
-                                <span className="font-semibold text-slate-800 text-xs font-mono">
-                                  {Number(rateVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                                </span>
-                              ) : (
-                                <span className="text-slate-300">-</span>
-                              )
-                            )}
+                            {(() => {
+                              const stored = rateVal !== null && rateVal !== undefined
+                                && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
+                              const inherited = stored ? null : inheritedScheduleRate(item.itemCode, kva);
+                              const marker = stored ? null : variantMarker(item.itemCode);
+                              const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+                              if (isEditing) {
+                                return (
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    /* VALUE stays the STORED figure, never the inherited one. An
+                                       inherited number shown as the input's value would make opening
+                                       edit mode and pressing Save convert every inherited cell into
+                                       an override without anyone touching it - a resolved display
+                                       becoming stored data through an ordinary save, which is the
+                                       F27 mechanism, and it would freeze the whole grid against
+                                       future tender changes in one click. It is the PLACEHOLDER, so
+                                       an untouched cell still saves as null. */
+                                    value={rateVal ?? ''}
+                                    onChange={(e) => handleRateChange(sectionKey, idx, kva, e.target.value)}
+                                    className={`w-20 px-1.5 py-1 text-right text-xs border rounded focus:ring-1 focus:ring-blue-500 font-mono font-medium ${
+                                      stored ? 'border-slate-300' : 'border-slate-200 bg-slate-50/60'
+                                    }`}
+                                    placeholder={inherited !== null ? fmt(inherited) : '-'}
+                                    title={inherited !== null
+                                      ? `Tender rate ${fmt(inherited)} applies while this is blank. Type to override; clear to go back to it.`
+                                      : marker || undefined}
+                                  />
+                                );
+                              }
+                              if (stored) {
+                                return (
+                                  <span className="font-semibold text-slate-800 text-xs font-mono"
+                                        title="Set by this agency - overrides the tender rate.">
+                                    {fmt(Number(rateVal))}
+                                  </span>
+                                );
+                              }
+                              if (inherited !== null) {
+                                return (
+                                  <span className="text-slate-400 italic text-xs font-mono"
+                                        title="From the UGVCL tender schedule. Nothing is stored for this cell - the estimate uses this figure. Type over it to override.">
+                                    {fmt(inherited)}
+                                  </span>
+                                );
+                              }
+                              if (marker) {
+                                return (
+                                  <span className="text-[9px] text-amber-700/80 italic leading-tight"
+                                        title="This item's tender rate depends on the job, so there is no single figure to show here - the estimate selects it per job.">
+                                    {marker}
+                                  </span>
+                                );
+                              }
+                              return <span className="text-slate-300">-</span>;
+                            })()}
                           </td>
                         );
                       })}

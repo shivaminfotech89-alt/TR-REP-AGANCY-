@@ -4,6 +4,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
 import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
+import { scheduleSrForMasterCode } from '../lib/scheduleItemMap';
 import { resolveScrapCharge } from '../lib/estimateCalc';
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
@@ -326,6 +327,24 @@ export function buildSingleJobEstimateData(
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: no internal inspection data - quantities cannot be derived.` });
   }
 
+  /**
+   * THE SINGLE SOURCE for an unambiguous line's Schedule-A rate.
+   *
+   * Call sites name only their MASTER item code; the pairing lives in
+   * lib/scheduleItemMap.ts. Previously each site carried both codes, so the mapping existed
+   * only as 28 scattered literals and could not be reviewed - which is how item '8' priced
+   * every HV bushing at 11 KV unnoticed (AUDIT F48).
+   *
+   * Throws for a code the table does not know. A silent undefined would fall through to
+   * "no rate found", naming the wrong cause: the rate is configured, the MAPPING is missing.
+   * Variant items are absent from the table's `sr` and keep selecting at their call site.
+   */
+  const scheduleRateFor = (masterCode: string): number | undefined => {
+    const sr = scheduleSrForMasterCode(masterCode);
+    if (!sr) throw new Error(`No Schedule-A mapping for master item code "${masterCode}" - add it to SCHEDULE_ITEM_MAP or record it in NOT_FROM_SCHEDULE_A.`);
+    return scheduleRate(sr);
+  };
+
   const scheduleRate = (sr: string): number | undefined => {
     const entry = SCHEDULE_A.find(i => i.sr === sr);
     return entry?.rates[band];
@@ -373,7 +392,7 @@ export function buildSingleJobEstimateData(
   // and applied once, in ten places that needed it.
   const npApplies = externalData?.namePlate === 'Y';
   const npQtyStr = npApplies ? 'Y' : 'N';
-  const npRate = resolveRate('16', scheduleRate('16'));
+  const npRate = resolveRate('16', scheduleRateFor('16'));
   recordErrorIfApplies(npApplies, npRate, 'Name Plating');
   const npAmt = npApplies ? (npRate ?? 0) : 0;
   physicalItems.push({ sr: srCounter++, itemCode: '16', desc: 'Name Plating', unit: 'NO', qty: npQtyStr, numQty: npApplies ? 1 : 0, rate: npRate, amt: npAmt });
@@ -381,7 +400,7 @@ export function buildSingleJobEstimateData(
   // 2. Spray painting
   const spApplies = externalData?.outsidePaint === 'Y';
   const spQtyStr = spApplies ? 'Y' : 'N';
-  const spRate = resolveRate('2b', scheduleRate('2b'));
+  const spRate = resolveRate('2b', scheduleRateFor('2b'));
   recordErrorIfApplies(spApplies, spRate, 'Spray painting');
   const spAmt = spApplies ? (spRate ?? 0) : 0;
   physicalItems.push({ sr: srCounter++, itemCode: '2b', desc: 'Spray painting', unit: 'NO', qty: spQtyStr, numQty: spApplies ? 1 : 0, rate: spRate, amt: spAmt });
@@ -389,7 +408,7 @@ export function buildSingleJobEstimateData(
   // 3. Conservator Tank Replacement (Schedule-A sr '18b' - app's own code '4' doesn't match)
   const ctQty = Number(externalData?.damCtTank) || 0;
   const ctApplies = ctQty > 0;
-  const ctRate = resolveRate('4', scheduleRate('18b'));
+  const ctRate = resolveRate('4', scheduleRateFor('4'));
   recordErrorIfApplies(ctApplies, ctRate, 'Conservator Tank Replacement');
   physicalItems.push({ sr: srCounter++, itemCode: '4', desc: 'Conservator Tank Replacement', unit: 'KG', qty: ctQty > 0 ? ctQty.toString() : '0', numQty: ctQty, rate: ctRate, amt: ctApplies ? ctQty * (ctRate ?? 0) : 0 });
 
@@ -406,14 +425,14 @@ export function buildSingleJobEstimateData(
   // 5. Rod Gasket
   const rodQty = externalData?.hvLvRod !== undefined && externalData?.hvLvRod !== '' ? Number(externalData.hvLvRod) : 7;
   const rodApplies = rodQty > 0;
-  const rodRate = resolveRate('1c', scheduleRate('1c'));
+  const rodRate = resolveRate('1c', scheduleRateFor('1c'));
   recordErrorIfApplies(rodApplies, rodRate, 'Rod Gasket');
   physicalItems.push({ sr: srCounter++, itemCode: '1c', desc: 'Rod Gasket', unit: 'ROD', qty: rodQty.toString(), numQty: rodQty, rate: rodRate, amt: rodApplies ? rodQty * (rodRate ?? 0) : 0 });
 
   // 6. M/S Bolt Nuts
   const bnApplies = externalData?.nuteBolt === 'Y';
   const bnQtyStr = bnApplies ? 'Y' : 'N';
-  const bnRate = resolveRate('1e', scheduleRate('1e'));
+  const bnRate = resolveRate('1e', scheduleRateFor('1e'));
   recordErrorIfApplies(bnApplies, bnRate, 'M/S Bolt Nuts');
   const bnAmt = bnApplies ? (bnRate ?? 0) : 0;
   physicalItems.push({ sr: srCounter++, itemCode: '1e', desc: 'M/S Bolt Nuts', unit: 'JOB', qty: bnQtyStr, numQty: bnApplies ? 1 : 0, rate: bnRate, amt: bnAmt });
@@ -421,14 +440,14 @@ export function buildSingleJobEstimateData(
   // 7. Top Cover Gasket
   const gaskQty = externalData?.gasket !== undefined && externalData?.gasket !== '' ? Number(externalData.gasket) : (Number(kva) >= 63 ? 3 : 1);
   const gaskApplies = gaskQty > 0;
-  const gaskRate = resolveRate('1b', scheduleRate('1b'));
+  const gaskRate = resolveRate('1b', scheduleRateFor('1b'));
   recordErrorIfApplies(gaskApplies, gaskRate, 'Top Cover Gasket');
   physicalItems.push({ sr: srCounter++, itemCode: '1b', desc: 'Top Cover Gasket', unit: 'NO', qty: gaskQty.toString(), numQty: gaskQty, rate: gaskRate, amt: gaskApplies ? gaskQty * (gaskRate ?? 0) : 0 });
 
   // 8. Oil Guage Glass
   const oggApplies = externalData?.oilLevGls === 'Y';
   const oggQtyStr = oggApplies ? 'Y' : 'N';
-  const oggRate = resolveRate('5', scheduleRate('5'));
+  const oggRate = resolveRate('5', scheduleRateFor('5'));
   recordErrorIfApplies(oggApplies, oggRate, 'Oil Guage Glass');
   const oggAmt = oggApplies ? (oggRate ?? 0) : 0;
   physicalItems.push({ sr: srCounter++, itemCode: '5', desc: 'Oil Guage Glass', unit: 'NO', qty: oggQtyStr, numQty: oggApplies ? 1 : 0, rate: oggRate, amt: oggAmt });
@@ -436,60 +455,83 @@ export function buildSingleJobEstimateData(
   // 9. Breather
   const brApplies = externalData?.breather === 'Y';
   const brQtyStr = brApplies ? 'Y' : 'N';
-  const brRate = resolveRate('6', scheduleRate('6'));
+  const brRate = resolveRate('6', scheduleRateFor('6'));
   recordErrorIfApplies(brApplies, brRate, 'Breather');
   const brAmt = brApplies ? (brRate ?? 0) : 0;
   physicalItems.push({ sr: srCounter++, itemCode: '6', desc: 'Breather', unit: 'NO', qty: brQtyStr, numQty: brApplies ? 1 : 0, rate: brRate, amt: brAmt });
 
-  // 10. HV Bushing (Schedule-A sr '8-A', 11kV). The job data model has no voltage-class
-  // field, so 11kV is assumed here - matching the 11kV assumption made everywhere else
-  // in this app (job metadata, the KV column). A 22kV job would need sr '8-B' (Rs 265);
-  // that needs a voltage field on the job to select it, which is a separate change.
+  // 10. HV Bushing - '8-A' at 11 KV (Rs 176) or '8-B' at 22 KV (Rs 265), selected from the
+  // recorded KV rating (AUDIT F48).
+  //
+  // It used to hardcode '8-A', with a comment saying "the job data model has no
+  // voltage-class field, so 11kV is assumed". The field exists - it is on the EXTERNAL
+  // INSPECTION record, not the job, and `externalData.kv` is already in scope three lines
+  // below where the assumption was made. Whoever wrote that looked at the job model, found
+  // nothing, and stopped one object short. A 22 KV bushing was priced at the 11 KV rate,
+  // silently, for Rs 89 less per bushing.
+  //
+  // NO DEFAULT EITHER WAY. Falling back to 11 KV is what hid this; falling back to 22 KV
+  // would overcharge. An unreadable KV rating blocks and names the field, as a missing
+  // measurement does anywhere else - the rate is configured, the observation is not.
   const hvbQty = externalData?.hvSideHvb !== undefined && externalData?.hvSideHvb !== '' ? Number(externalData.hvSideHvb) : 3;
   const hvbApplies = hvbQty > 0;
-  const hvbRate = resolveRate('8', scheduleRate('8-A'));
-  recordErrorIfApplies(hvbApplies, hvbRate, 'HV Bushing');
+  // Free-text field, so normalise before matching: '22 KV', '22kv', ' 22 ' are the same
+  // answer. A strict === '22' would have priced every one of those at 11 KV.
+  const kvRaw = String(externalData?.kv ?? '').trim();
+  const kvNorm = kvRaw.toLowerCase().replace(/kv$/, '').trim();
+  const kvClass = kvNorm === '11' ? '11' : kvNorm === '22' ? '22' : null;
+  const hvbScheduleSr = kvClass === '22' ? '8-B' : '8-A';
+  const hvbRate = kvClass ? resolveRate('8', scheduleRate(hvbScheduleSr)) : null;
+  if (hvbApplies && !kvClass) {
+    rateErrors.push({
+      kind: 'missing-input',
+      message: `${jobLabel}: HV bushing cannot be priced - the KV Rating on the external inspection reads ${kvRaw ? `"${kvRaw}"` : '(blank)'}, and Schedule-A prices HT bushing porcelain at 11 KV ('8-A') and 22 KV ('8-B') only.`,
+    });
+  }
+  // Only reached when the class resolved; an unresolved class already blocked above, and
+  // reporting "no rate found" as well would name the wrong cause.
+  if (kvClass) recordErrorIfApplies(hvbApplies, hvbRate, 'HV Bushing');
   physicalItems.push({ sr: srCounter++, itemCode: '8', desc: 'HV Bushing', unit: 'NO', qty: hvbQty.toString(), numQty: hvbQty, rate: hvbRate, amt: hvbApplies ? hvbQty * (hvbRate ?? 0) : 0 });
 
   // 11. HV Metal Parts
   const hvmQty = externalData?.hvSideHvm !== undefined && externalData?.hvSideHvm !== '' ? Number(externalData.hvSideHvm) : 2;
   const hvmApplies = hvmQty > 0;
-  const hvmRate = resolveRate('9A', scheduleRate('9A'));
+  const hvmRate = resolveRate('9A', scheduleRateFor('9A'));
   recordErrorIfApplies(hvmApplies, hvmRate, 'HV Metal Parts');
   physicalItems.push({ sr: srCounter++, itemCode: '9A', desc: 'HV Metal Parts', unit: 'NO', qty: hvmQty.toString(), numQty: hvmQty, rate: hvmRate, amt: hvmApplies ? hvmQty * (hvmRate ?? 0) : 0 });
 
   // 12. HV Connectors
   const hvcQty = externalData?.hvSideHvCc !== undefined && externalData?.hvSideHvCc !== '' ? Number(externalData.hvSideHvCc) : 0;
   const hvcApplies = hvcQty > 0;
-  const hvcRate = resolveRate('9B', scheduleRate('9B'));
+  const hvcRate = resolveRate('9B', scheduleRateFor('9B'));
   recordErrorIfApplies(hvcApplies, hvcRate, 'HV Connectors');
   physicalItems.push({ sr: srCounter++, itemCode: '9B', desc: 'HV Connectors', unit: 'NO', qty: hvcQty.toString(), numQty: hvcQty, rate: hvcRate, amt: hvcApplies ? hvcQty * (hvcRate ?? 0) : 0 });
 
   // 13. LV Bushing
   const lvbQty = externalData?.lvSideLvb !== undefined && externalData?.lvSideLvb !== '' ? Number(externalData.lvSideLvb) : 1;
   const lvbApplies = lvbQty > 0;
-  const lvbRate = resolveRate('10', scheduleRate('10'));
+  const lvbRate = resolveRate('10', scheduleRateFor('10'));
   recordErrorIfApplies(lvbApplies, lvbRate, 'LV Bushing');
   physicalItems.push({ sr: srCounter++, itemCode: '10', desc: 'LV Bushing', unit: 'NO', qty: lvbQty.toString(), numQty: lvbQty, rate: lvbRate, amt: lvbApplies ? lvbQty * (lvbRate ?? 0) : 0 });
 
   // 14. LV Metal Parts
   const lvmQty = externalData?.lvSideLvm !== undefined && externalData?.lvSideLvm !== '' ? Number(externalData.lvSideLvm) : 4;
   const lvmApplies = lvmQty > 0;
-  const lvmRate = resolveRate('11A', scheduleRate('11A'));
+  const lvmRate = resolveRate('11A', scheduleRateFor('11A'));
   recordErrorIfApplies(lvmApplies, lvmRate, 'LV Metal Parts');
   physicalItems.push({ sr: srCounter++, itemCode: '11A', desc: 'LV Metal Parts', unit: 'NO', qty: lvmQty.toString(), numQty: lvmQty, rate: lvmRate, amt: lvmApplies ? lvmQty * (lvmRate ?? 0) : 0 });
 
   // 15. LV Connectors
   const lvcQty = externalData?.lvSideLvCc !== undefined && externalData?.lvSideLvCc !== '' ? Number(externalData.lvSideLvCc) : 0;
   const lvcApplies = lvcQty > 0;
-  const lvcRate = resolveRate('11B', scheduleRate('11B'));
+  const lvcRate = resolveRate('11B', scheduleRateFor('11B'));
   recordErrorIfApplies(lvcApplies, lvcRate, 'LV Connectors');
   physicalItems.push({ sr: srCounter++, itemCode: '11B', desc: 'LV Connectors', unit: 'NO', qty: lvcQty.toString(), numQty: lvcQty, rate: lvcRate, amt: lvcApplies ? lvcQty * (lvcRate ?? 0) : 0 });
 
   // 16. Sealed to Bolted
   const stbIsBolted = (externalData?.sealType === 'B' || externalData?.sealType === 'Bolted' || externalData?.sealType === 'Y');
   const stbQtyStr = stbIsBolted ? 'Y' : 'N';
-  const stbRate = resolveRate('17', scheduleRate('17'));
+  const stbRate = resolveRate('17', scheduleRateFor('17'));
   recordErrorIfApplies(stbIsBolted, stbRate, 'Sealed to Bolted');
   const stbAmt = stbIsBolted ? (stbRate ?? 0) : 0;
   physicalItems.push({ sr: srCounter++, itemCode: '17', desc: 'Sealed to Bolted', unit: 'NO', qty: stbQtyStr, numQty: stbIsBolted ? 1 : 0, rate: stbRate, amt: stbAmt });
@@ -501,7 +543,7 @@ export function buildSingleJobEstimateData(
   // 17. Inside Painting
   const ipApplies = internalData?.inPnt === 'Y';
   const ipQtyStr = ipApplies ? 'Y' : 'N';
-  const ipRate = resolveRate('3', scheduleRate('3'));
+  const ipRate = resolveRate('3', scheduleRateFor('3'));
   recordErrorIfApplies(ipApplies, ipRate, 'Inside Painting');
   const ipAmt = ipApplies ? (ipRate ?? 0) : 0;
   internalItems.push({ sr: srCounter++, itemCode: '3', desc: 'Inside Painting', unit: 'NO', qty: ipQtyStr, numQty: ipApplies ? 1 : 0, rate: ipRate, amt: ipAmt });
@@ -509,7 +551,7 @@ export function buildSingleJobEstimateData(
   // 18. Insulating Material
   const insApplies = internalData?.insula === 'Y';
   const insQtyStr = insApplies ? 'Y' : 'N';
-  const insRate = resolveRate('1d', scheduleRate('1d'));
+  const insRate = resolveRate('1d', scheduleRateFor('1d'));
   recordErrorIfApplies(insApplies, insRate, 'Insulating Material');
   const insAmt = insApplies ? (insRate ?? 0) : 0;
   internalItems.push({ sr: srCounter++, itemCode: '1d', desc: 'Insulating Material', unit: 'JOB', qty: insQtyStr, numQty: insApplies ? 1 : 0, rate: insRate, amt: insAmt });
@@ -517,7 +559,7 @@ export function buildSingleJobEstimateData(
   // 19. Washer Ring
   const wrQty = internalData?.wasring !== undefined && internalData?.wasring !== '' ? Number(internalData.wasring) : 6;
   const wrApplies = wrQty > 0;
-  const wrRate = resolveRate('15', scheduleRate('15'));
+  const wrRate = resolveRate('15', scheduleRateFor('15'));
   recordErrorIfApplies(wrApplies, wrRate, 'Washer Ring');
   internalItems.push({ sr: srCounter++, itemCode: '15', desc: 'Washer Ring', unit: 'NO', qty: wrQty.toString(), numQty: wrQty, rate: wrRate, amt: wrApplies ? wrQty * (wrRate ?? 0) : 0 });
 
@@ -656,14 +698,14 @@ export function buildSingleJobEstimateData(
   const labourItems: SingleEstimateLineItem[] = [];
 
   // 23. Labour Charge (Basic Dismantling / DC) - 100% Mandatory
-  const dcRate = resolveRate('1a', scheduleRate('1a'));
+  const dcRate = resolveRate('1a', scheduleRateFor('1a'));
   recordErrorIfApplies(true, dcRate, 'Labour Charge');
   labourItems.push({ sr: srCounter++, itemCode: '1a', desc: 'Labour Charge', unit: 'JOB', qty: '1', numQty: 1, rate: dcRate, amt: dcRate ?? 0 });
 
   // 24. Cleaning dirty tank
   const cdtApplies = externalData?.clnDrtyTank === 'Y';
   const cdtQtyStr = cdtApplies ? 'Y' : 'N';
-  const cdtRate = resolveRate('2a', scheduleRate('2a'));
+  const cdtRate = resolveRate('2a', scheduleRateFor('2a'));
   recordErrorIfApplies(cdtApplies, cdtRate, 'Cleaning dirty tank');
   const cdtAmt = cdtApplies ? (cdtRate ?? 0) : 0;
   labourItems.push({ sr: srCounter++, itemCode: '2a', desc: 'Cleaning dirty tank', unit: 'NO', qty: cdtQtyStr, numQty: cdtApplies ? 1 : 0, rate: cdtRate, amt: cdtAmt });
@@ -673,7 +715,7 @@ export function buildSingleJobEstimateData(
   // external `dryActPart`. Affirmative on EITHER charges; neither being 'Y' does not.
   const dryApplies = internalData?.dc === 'Y' || externalData?.dryActPart === 'Y';
   const dryQtyStr = dryApplies ? 'Y' : 'N';
-  const dryRate = resolveRate('1f', scheduleRate('1f'));
+  const dryRate = resolveRate('1f', scheduleRateFor('1f'));
   recordErrorIfApplies(dryApplies, dryRate, 'Drying of active parts');
   const dryAmt = dryApplies ? (dryRate ?? 0) : 0;
   labourItems.push({ sr: srCounter++, itemCode: '1f', desc: 'Drying of active parts', unit: 'JOB', qty: dryQtyStr, numQty: dryApplies ? 1 : 0, rate: dryRate, amt: dryAmt });
@@ -685,7 +727,7 @@ export function buildSingleJobEstimateData(
   // 27. Testing Charge (Schedule-A sr '19' "Testing of transformer" - app's own code '20' doesn't match)
   const testApplies = internalData?.tstTrn === 'Y';
   const testQtyStr = testApplies ? 'Y' : 'N';
-  const testRate = resolveRate('20', scheduleRate('19'));
+  const testRate = resolveRate('20', scheduleRateFor('20'));
   recordErrorIfApplies(testApplies, testRate, 'Testing Charge');
   const testAmt = testApplies ? (testRate ?? 0) : 0;
   labourItems.push({ sr: srCounter++, itemCode: '20', desc: 'Testing Charge', unit: 'NO', qty: testQtyStr, numQty: testApplies ? 1 : 0, rate: testRate, amt: testAmt });
