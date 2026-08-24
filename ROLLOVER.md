@@ -101,6 +101,28 @@ free number. It is a heads-up, not a task.
 
 ---
 
+## If the tender's RATES changed, not just its dates
+
+A new AT number does not by itself change any price. Rates live in the estimate master, and
+**a rate change does not arrive with a software update** — once your master holds a rate for
+an item, that is the rate used, and the built-in tender schedule is no longer consulted for
+it.
+
+So if the new tender changes any item rate:
+
+1. Update the shared default first — Estimate Master, edit the rates, then **Publish as
+   Default for All Users**. This writes the central copy every agency starts from.
+2. **Each agency must then reload from it.** Publishing does not silently rewrite an agency
+   that already has its own rates; that is deliberate, so nobody's customised rates are
+   overwritten behind their back.
+3. Check one estimate afterwards and compare it against the tender before sending anything.
+
+**If you skip this: estimates keep using last tender's rates and look completely normal.**
+There is no warning, because an out-of-date rate is indistinguishable from a current one.
+
+If the tender's rates did **not** change — only its number and dates — there is nothing to
+do here.
+
 ## After either one — a quick check
 
 Book nothing for real yet. Open **New Job** and look at the job number it

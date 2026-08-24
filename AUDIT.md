@@ -377,6 +377,90 @@ next one not, and no signal either way.
 
 ---
 
+## Reference: where an estimate's numbers come from, in precedence order
+
+One authoritative answer, so this does not have to be re-traced. **Every figure on a CRGO or
+OH estimate is either the agency's, the tender's, or absent-and-blocking. No step invents a
+rate.**
+
+### A. Which list is consulted — `getEstimateMasterForCore(agency, coreType)`
+
+1. `agency.estimateMasterCRGO` (or `…Amorphous` / `…WoundCore` / `…Overhauling`) if non-empty
+2. `public_config.estimateMaster<Section>` if non-empty
+3. `agency.estimateMaster` — legacy CRGO field — if non-empty
+4. `public_config.estimateMaster` if non-empty
+5. the shipped `defaultEstimateData`
+
+`withMissingDefaults` then **appends** any shipped-default item whose code the chosen list
+lacks, so the list can be a mixture of sources.
+
+### B. The rate for one line — `resolveRate(code, scheduleValue)`
+
+1. `masterList.find(itemCode === code)?.rates[kva]` — **used only if `> 0`**
+2. `SCHEDULE_A.find(sr === …)?.rates[bandForKva(kva)]` — **used only if `> 0`**
+3. otherwise **`null`**
+
+### C. What a `null` rate does — `recordErrorIfApplies`
+
+- Line **applies** → a `missing-rate` error that BLOCKS the estimate and names the item
+- Line does **not** apply → contributes 0; the blank rate cell is harmless
+
+### The band above 100 kVA cannot express a per-capacity rate
+
+`bandForKva` maps **200, 315 and 500 to one band**, `B_ABOVE_100`. Schedule-A holds a single
+number there, so those three capacities are priced identically for every item.
+
+Of 51 Schedule-A entries, 34 use `flat()` (one rate at every capacity) and 17 are banded.
+**Eleven of the seventeen differ between `B100` and `B_ABOVE_100`** — 1c, 1d, 1e, 1f, 2b, 3,
+7, 10, 11A, 11B, 20, 21 — so the band boundary is real and carries genuine tender data.
+What it cannot carry is a difference *within* the band.
+
+**Consequence: a capacity the tender never priced is still priced.** 315 kVA resolves to
+`B_ABOVE_100` and gets 200 kVA's number for every item. There is no null to fall through and
+nothing blocks. If the tender prices 200 and 500 differently, or omits 315, the schedule as
+modelled cannot say so — the number returned is structurally indistinguishable from a real
+one.
+
+That is a **model** limitation rather than a missing value: no amount of data entry into
+`SCHEDULE_A` as typed can express it, because the band has one slot.
+
+### Ownership: once a master holds a rate, Schedule-A stops being reachable for it
+
+Step B tries the agency master first and only falls to Schedule-A when the master's value is
+absent or zero. So **the more complete an agency's master, the less of the tender is
+consulted** — and for any item the master prices, a change to Schedule-A in code no longer
+reaches that agency at all.
+
+**That is the correct trade for a product sold per agency**: each agency owns its rates and
+can edit them without a deployment, which is the whole point of having a master. But it must
+be stated, because it inverts an assumption people carry: updating the schedule in code is
+NOT how a tender rate change reaches agencies once their masters are populated.
+
+**A new tender schedule therefore requires:** updating the published default
+(`public_config/estimate_master`), then each agency reloading from it. Two deliberate steps
+by a person, not one deployment. Recorded in ROLLOVER.md as part of what happens when a
+tender changes.
+
+### Two properties worth remembering
+
+**A zero in the master means "not set", not "free".** Both steps test `> 0`, so entering 0
+does not price something at zero — it falls through to Schedule-A.
+
+**A master with no rate for a capacity is the NORMAL case, not a gap.** `bandForKva` maps
+200/315/500 to `B_ABOVE_100`, which Schedule-A populates for every item (34 of 62 via
+`flat()`, the rest explicitly). An agency that has never entered a 200 kVA rate is priced
+from the tender, correctly. This is emphatically NOT the fabricated-quantity pattern: that
+invents a **quantity** with no source, whereas this takes a **rate** from the tender
+document itself.
+
+### Amorphous and CRGO Wound Core do not use any of the above
+
+They return early and take one fixed rate plus a labour line from the hardcoded `SCHEDULE_B`
+table, keyed on capacity and winding material. The estimate master is consulted for exactly
+one thing on those core types: the scrap row.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
@@ -1071,6 +1155,35 @@ of that function would be most likely to make.
 Distinct from the "rule enforced at one call site" pattern: there, a rule was applied
 somewhere and not elsewhere. Here it is applied in one place and **deliberately overridden**
 in the only place that calls it.
+
+### O20. "S.E." is undefined in this codebase, and the choice is now an agency fact
+
+Sixteen Schedule-A entries split on it — `12A`, `12B`, `13A`, `13B`, each Copper/Aluminium
+x with/without — and the rate difference is Rs 50/kg on Aluminium, Rs 50/kg on Copper.
+
+**Nothing in the app defines what it means.** The transcribed schedule carries only the
+label *"with S.E."* / *"without S.E."*. There is no field, no selector and no stored value on
+either inspection screen, and no comment anywhere states it. The likeliest reading in
+transformer winding is **Super Enamelled** conductor — a coating grade on the winding wire —
+but that is domain inference, not something this codebase or the transcribed schedule
+confirms, and it should be checked against the tender text before anyone relies on it.
+
+**It is now an AGENCY FACT, not a derived one.** The operator confirmed these agencies do
+not use S.E. conductor, so both windings take the without-S.E. variant (F47). That is a
+statement about how this business works, recorded in code because there is nowhere else to
+record it — not a rule read off the tender, and not something the app can check.
+
+**If an agency ever does use S.E. conductor, this becomes an INPUT rather than a constant.**
+The shape already exists: `isCopper` selects the material axis from `internalData.windingType`
+and blocks rather than guesses where it cannot tell. An S.E. flag would work the same way and
+feed both windings from one observation. Until then, hardcoding is honest — the alternative
+is a field nobody can answer.
+
+**What made the old value hard to see:** it was defended on the ground that it matched
+estimates already issued to and accepted by UGVCL. That is consistency with prior output,
+not evidence about the tender. **A figure appearing on an accepted document means the
+customer did not object, not that it was right** — and where the same code produced every
+one of those documents, agreement between them is not corroboration.
 
 ### O18. An AT's "Closed" status promises an enforcement that does not exist
 
@@ -3431,6 +3544,36 @@ since nothing was at risk. Firestore error codes are translated rather than show
 `permission-denied` tells an operator nothing they can act on. The rethrow is **kept**, so
 callers' `finally` blocks still clear their submitting state and any caller wanting to
 handle the error itself still can — this adds a floor, it does not take over.
+
+### F47. HV coil priced at the with-S.E. rate; corrected to without
+
+`SingleJobEstimateReport` resolved Schedule-A **`12A-b1`** — Aluminium **with** S.E.,
+Rs 213/kg — for the HV winding, while the LV winding resolved **`13A-b`** — Aluminium
+**without** S.E., Rs 149/kg. With S.E. on one side and without on the other, from one
+inspection, with no input distinguishing them.
+
+The agency confirmed they do not use super-enamelled conductor, so both windings take the
+without-S.E. variant. HV is now `12A-b`, **Rs 163/kg**. LV was already correct and is
+unchanged — but its comment now states the same reason, so the two sites carry one
+justification instead of one being explained and the other silently agreeing.
+
+**Rs 50/kg overcharged on every HV coil kilogram**, on jobs where the agency master had no
+`12A` rate of its own. Measured by `scripts/hv-coil-se-exposure-console.js`, which separates
+issued from unissued and — importantly — separates lines whose **weight** was also
+fabricated by the old per-capacity constant (F46). Those were wrong twice over, and
+correcting the rate does not make an invented quantity right; they need re-inspecting, not
+recomputing.
+
+**The reasoning that kept it, and why it was wrong:** the comment recorded that `12A-b1` was
+chosen because it matched the rate the app already produced on estimates issued to and
+accepted by UGVCL, and said explicitly it was kept "for consistency with those, not because
+the rule is confirmed". Honest about its own uncertainty — and still the wrong test.
+**Agreement between documents produced by the same code is not corroboration**, and
+acceptance by a customer is not verification. See O20.
+
+Copper remains blocked rather than guessed on both windings. The agency fact settles the
+S.E. axis; it says nothing about the material axis, and conflating them would have been the
+same error in a new place.
 
 ---
 

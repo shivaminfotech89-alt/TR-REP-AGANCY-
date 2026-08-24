@@ -359,7 +359,19 @@ export function buildSingleJobEstimateData(
   let srCounter = 1;
 
   // 1. Name Plating
-  const npApplies = !(externalData?.namePlate === 'N' || externalData?.namePlate === '0' || externalData?.namePlate === '-');
+  // CHARGES ON AN EXPLICIT 'Y' ONLY (AUDIT F46).
+  //
+  // The test was `!(v === 'N' || v === '0')` - "anything that is not N". That charged on
+  // '-' (not applicable), on 'TBR', and on an UNSET field, because `undefined` matches
+  // neither exclusion. '-' is the default an unsaved internal inspection carries, so a job
+  // nobody had internally inspected was charged Inside Painting, Insulating Material and
+  // every other flag on the row. That population overlaps exactly with the inspections lost
+  // in the silent-denial window (F45).
+  //
+  // Charging on the affirmative is the only shape that cannot do this: a value nobody chose
+  // can never be an affirmative. `namePlate` alone already excluded '-' - the rule was known
+  // and applied once, in ten places that needed it.
+  const npApplies = externalData?.namePlate === 'Y';
   const npQtyStr = npApplies ? 'Y' : 'N';
   const npRate = resolveRate('16', scheduleRate('16'));
   recordErrorIfApplies(npApplies, npRate, 'Name Plating');
@@ -367,7 +379,7 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '16', desc: 'Name Plating', unit: 'NO', qty: npQtyStr, numQty: npApplies ? 1 : 0, rate: npRate, amt: npAmt });
 
   // 2. Spray painting
-  const spApplies = !(externalData?.outsidePaint === 'N' || externalData?.outsidePaint === '0');
+  const spApplies = externalData?.outsidePaint === 'Y';
   const spQtyStr = spApplies ? 'Y' : 'N';
   const spRate = resolveRate('2b', scheduleRate('2b'));
   recordErrorIfApplies(spApplies, spRate, 'Spray painting');
@@ -399,7 +411,7 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '1c', desc: 'Rod Gasket', unit: 'ROD', qty: rodQty.toString(), numQty: rodQty, rate: rodRate, amt: rodApplies ? rodQty * (rodRate ?? 0) : 0 });
 
   // 6. M/S Bolt Nuts
-  const bnApplies = !(externalData?.nuteBolt === 'N' || externalData?.nuteBolt === '0');
+  const bnApplies = externalData?.nuteBolt === 'Y';
   const bnQtyStr = bnApplies ? 'Y' : 'N';
   const bnRate = resolveRate('1e', scheduleRate('1e'));
   recordErrorIfApplies(bnApplies, bnRate, 'M/S Bolt Nuts');
@@ -414,7 +426,7 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '1b', desc: 'Top Cover Gasket', unit: 'NO', qty: gaskQty.toString(), numQty: gaskQty, rate: gaskRate, amt: gaskApplies ? gaskQty * (gaskRate ?? 0) : 0 });
 
   // 8. Oil Guage Glass
-  const oggApplies = !(externalData?.oilLevGls === 'N' || externalData?.oilLevGls === '0');
+  const oggApplies = externalData?.oilLevGls === 'Y';
   const oggQtyStr = oggApplies ? 'Y' : 'N';
   const oggRate = resolveRate('5', scheduleRate('5'));
   recordErrorIfApplies(oggApplies, oggRate, 'Oil Guage Glass');
@@ -422,7 +434,7 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '5', desc: 'Oil Guage Glass', unit: 'NO', qty: oggQtyStr, numQty: oggApplies ? 1 : 0, rate: oggRate, amt: oggAmt });
 
   // 9. Breather
-  const brApplies = !(externalData?.breather === 'N' || externalData?.breather === '0');
+  const brApplies = externalData?.breather === 'Y';
   const brQtyStr = brApplies ? 'Y' : 'N';
   const brRate = resolveRate('6', scheduleRate('6'));
   recordErrorIfApplies(brApplies, brRate, 'Breather');
@@ -487,7 +499,7 @@ export function buildSingleJobEstimateData(
   const internalItems: SingleEstimateLineItem[] = [];
 
   // 17. Inside Painting
-  const ipApplies = !(internalData?.inPnt === 'N' || internalData?.inPnt === '0');
+  const ipApplies = internalData?.inPnt === 'Y';
   const ipQtyStr = ipApplies ? 'Y' : 'N';
   const ipRate = resolveRate('3', scheduleRate('3'));
   recordErrorIfApplies(ipApplies, ipRate, 'Inside Painting');
@@ -495,7 +507,7 @@ export function buildSingleJobEstimateData(
   internalItems.push({ sr: srCounter++, itemCode: '3', desc: 'Inside Painting', unit: 'NO', qty: ipQtyStr, numQty: ipApplies ? 1 : 0, rate: ipRate, amt: ipAmt });
 
   // 18. Insulating Material
-  const insApplies = !(internalData?.insula === 'N' || internalData?.insula === '0');
+  const insApplies = internalData?.insula === 'Y';
   const insQtyStr = insApplies ? 'Y' : 'N';
   const insRate = resolveRate('1d', scheduleRate('1d'));
   recordErrorIfApplies(insApplies, insRate, 'Insulating Material');
@@ -532,13 +544,20 @@ export function buildSingleJobEstimateData(
   if (hasInternalData && hvDamagedCoils > 0 && hvCoilWeight === 0) {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: ${hvDamagedCoils} HV coil(s) marked damaged but no per-coil weight ("Wt of Coil") was recorded, so the HV coil charge cannot be calculated.` });
   }
-  // S.E.-variant status is UNCONFIRMED against the tender for either winding. The
-  // Aluminium value below (Schedule-A '12A-b1', "with S.E.") matches the rate this
-  // app already used before this change, on estimates already issued to and accepted
-  // by UGVCL - kept for consistency with those, not because the rule is confirmed.
-  // Copper has no such precedent ('12A-a' w/o S.E. = Rs 357 vs '12A-a1' w/ S.E. = Rs
-  // 407 - a real Rs 2,350 swing on a 47kg coil), so it is blocked rather than guessed.
-  const hvCoilScheduleValue = isCopper ? undefined : scheduleRate('12A-b1');
+  // WITHOUT S.E. - '12A-b', Rs 163/kg. An AGENCY FACT, confirmed by the operator: these
+  // agencies do not use super-enamelled conductor when rewinding, so the without-S.E.
+  // variant is the applicable one on both windings (AUDIT O20, F47).
+  //
+  // Supersedes the previous reasoning, which is worth stating because it was wrong in an
+  // instructive way: '12A-b1' (with S.E., Rs 213/kg) was kept because it matched the rate
+  // the app already produced on estimates issued to and accepted by UGVCL. That is
+  // consistency with prior output, not evidence about the tender - a figure being on an
+  // accepted document says the customer did not object, not that it was right. It
+  // overcharged HV coil work by Rs 50/kg.
+  //
+  // Copper stays blocked rather than guessed: '12A-a' w/o S.E. Rs 357 against '12A-a1'
+  // w/ S.E. Rs 407. The agency fact resolves the S.E. axis, not the material axis.
+  const hvCoilScheduleValue = isCopper ? undefined : scheduleRate('12A-b');
   const hvCoilRate = resolveRate('12A', hvCoilScheduleValue);
   recordErrorIfApplies(
     hvCoilApplies,
@@ -571,8 +590,13 @@ export function buildSingleJobEstimateData(
   if (hasInternalData && (lvDamCount > 0 || lvRiCount > 0) && !(Number(internalData?.wtOfCoilLv) > 0)) {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: LV coils marked ${lvDamCount ? `${lvDamCount} damaged` : ''}${lvDamCount && lvRiCount ? ' and ' : ''}${lvRiCount ? `${lvRiCount} for re-insulation` : ''}, but no per-coil weight ("Wt of Coil LV") was recorded, so the LV charge cannot be calculated.` });
   }
-  // Same S.E. caveat as HV Coil above. Aluminium (Schedule-A '13A-b', "without S.E.")
-  // matches the rate already used before this change; Copper is blocked, not guessed.
+  // WITHOUT S.E. - '13A-b', Rs 149/kg. Same agency fact as the HV coil above: these
+  // agencies do not use super-enamelled conductor, so both windings take the without-S.E.
+  // variant. This side was already correct; the reason is stated here too so the two
+  // sites carry the same justification rather than one being explained and the other
+  // silently agreeing with it.
+  //
+  // Copper blocked, not guessed: '13A-a' Rs 314 against '13A-a1' Rs 364.
   const lvCoilScheduleValue = isCopper ? undefined : scheduleRate('13A-b');
   const lvCoilRate = resolveRate('13A', lvCoilScheduleValue);
   recordErrorIfApplies(
@@ -637,7 +661,7 @@ export function buildSingleJobEstimateData(
   labourItems.push({ sr: srCounter++, itemCode: '1a', desc: 'Labour Charge', unit: 'JOB', qty: '1', numQty: 1, rate: dcRate, amt: dcRate ?? 0 });
 
   // 24. Cleaning dirty tank
-  const cdtApplies = !(externalData?.clnDrtyTank === 'N' || externalData?.clnDrtyTank === '0');
+  const cdtApplies = externalData?.clnDrtyTank === 'Y';
   const cdtQtyStr = cdtApplies ? 'Y' : 'N';
   const cdtRate = resolveRate('2a', scheduleRate('2a'));
   recordErrorIfApplies(cdtApplies, cdtRate, 'Cleaning dirty tank');
@@ -645,7 +669,9 @@ export function buildSingleJobEstimateData(
   labourItems.push({ sr: srCounter++, itemCode: '2a', desc: 'Cleaning dirty tank', unit: 'NO', qty: cdtQtyStr, numQty: cdtApplies ? 1 : 0, rate: cdtRate, amt: cdtAmt });
 
   // 25. Drying of active parts
-  const dryApplies = !(internalData?.dc === 'N' || internalData?.dc === '0' || externalData?.dryActPart === 'N');
+  // Two fields, either of which can authorise drying: the internal `dc` flag or the
+  // external `dryActPart`. Affirmative on EITHER charges; neither being 'Y' does not.
+  const dryApplies = internalData?.dc === 'Y' || externalData?.dryActPart === 'Y';
   const dryQtyStr = dryApplies ? 'Y' : 'N';
   const dryRate = resolveRate('1f', scheduleRate('1f'));
   recordErrorIfApplies(dryApplies, dryRate, 'Drying of active parts');
@@ -657,7 +683,7 @@ export function buildSingleJobEstimateData(
   // charge. Appending a scrap line to a repair estimate was the bug, not the fix.)
 
   // 27. Testing Charge (Schedule-A sr '19' "Testing of transformer" - app's own code '20' doesn't match)
-  const testApplies = !(internalData?.tstTrn === 'N' || internalData?.tstTrn === '0');
+  const testApplies = internalData?.tstTrn === 'Y';
   const testQtyStr = testApplies ? 'Y' : 'N';
   const testRate = resolveRate('20', scheduleRate('19'));
   recordErrorIfApplies(testApplies, testRate, 'Testing Charge');

@@ -169,7 +169,14 @@ export default function InternalInspection() {
           totWtLv: recomputedTotWtLv,
           totWtLvReIns: recomputedTotWtLvReIns,
           wasring: existingInsp.data.wasring || '6',
-          inPnt: existingInsp.data.inPnt || '-',
+          // 'N', not '-'. Every sibling flag on this row defaults to 'Y' or 'N'; only this
+          // one defaulted to '-', which the selector offers FIRST, so it was what an
+          // untouched form carried. Combined with the old "anything not N charges" test
+          // that made Inside Painting the one item billed by default on a job nobody had
+          // inspected. Charging is now affirmative-only (F46), so the default no longer
+          // decides money - but a default that means "not applicable" is still the wrong
+          // resting state for a field whose real answer is yes or no.
+          inPnt: existingInsp.data.inPnt || 'N',
           tstTrn: existingInsp.data.tstTrn || 'Y',
           dc: existingInsp.data.dc || 'Y',
           insula: existingInsp.data.insula || 'Y',
@@ -193,7 +200,7 @@ export default function InternalInspection() {
           totWtLv: '',
           totWtLvReIns: '',
           wasring: '6',
-          inPnt: '-',
+          inPnt: 'N',
           tstTrn: 'Y',
           dc: 'Y',
           insula: 'Y'
@@ -1523,7 +1530,7 @@ export default function InternalInspection() {
                           {renderInputField(job.id, 'wasring', 'text', 'w-12')}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center">
-                          {renderSelectField(job.id, 'inPnt', ['-', 'Y', 'N'], 'w-12')}
+                          {renderSelectField(job.id, 'inPnt', ['Y', 'N', '-'], 'w-12')}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center">
                           {renderSelectField(job.id, 'tstTrn', ['Y', 'N', '-'], 'w-12')}
