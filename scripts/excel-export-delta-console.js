@@ -25,6 +25,12 @@
 // default to 0, conservator tank and radiator read damage counts (absent -> 0), and
 // Sealed-to-Bolted never fired at all (see AUDIT O23 / F53).
 
+// PERMISSION NOTE (AUDIT F59): jobs and inspections are listable only when the QUERY
+// carries `where('ownerId','==',uid)` - firestore.rules allows a list when
+// `resource.data.ownerId == request.auth.uid || isSuperAdmin()`, and an agencyId filter
+// does not establish ownership. Querying per agency worked only on the admin account,
+// where isSuperAdmin() short-circuits the rule. Read once by ownerId, group in memory.
+
 (async () => {
   const { collection, query, where, getDocs } = window.__fs;
   const db = window.__db, uid = window.__auth.currentUser?.uid;
@@ -40,6 +46,14 @@
   const rows = [];
   agencies.forEach(a => rows.push({ id: a.id, ...a.data() }));
 
+  // Read once by ownerId, group by agency in memory - see the permission note above.
+  const allJobsSnap = await getDocs(query(collection(db, 'jobs'), where('ownerId', '==', uid)));
+  const jobsByAgency = {};
+  allJobsSnap.forEach(d => {
+    const j = { id: d.id, ...d.data() };
+    (jobsByAgency[j.agencyId] ||= []).push(j);
+  });
+
   for (const ag of rows) {
     // estimateMasterCRGO is the live section. The legacy `estimateMaster` mirror is only a
     // fallback, and is on its way out (AUDIT O26) - reading it first would have made this
@@ -49,9 +63,7 @@
       : (ag.estimateMaster || []);
     if (!master.length) { console.log(`${ag.agencyName || ag.id}: no CRGO estimate master, skipped`); continue; }
 
-    const jobsSnap = await getDocs(query(collection(db, 'jobs'), where('agencyId', '==', ag.id)));
-    const jobs = [];
-    jobsSnap.forEach(j => jobs.push({ id: j.id, ...j.data() }));
+    const jobs = jobsByAgency[ag.id] || [];
     const crgo = jobs.filter(j => !/AMORPH|WOUND|WC|OH|OVERHAUL/i.test(String(j.coreType || 'CRGO'))
                                   && j.status !== 'Scrap' && j.condition !== 'Scrap');
 

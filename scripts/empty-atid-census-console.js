@@ -57,22 +57,77 @@
   console.log('=== AT NUMBERS AS TYPED (the join-key question) ===');
   Object.entries(spellings).forEach(([k, ids]) =>
     console.log(`  "${k}"  -  ${ids.length} record(s)`));
-  const norm = s => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+
+  /**
+   * A DELIBERATELY GENEROUS tender key, for DETECTION only.
+   *
+   * The first version stripped non-alphanumerics and compared - which cannot see that
+   * "AT2026-27" and "2026_27" are one tender, because the "AT" prefix survives and the
+   * year widths differ. Comparing near-strings for a mistyping problem needs a comparison
+   * that tolerates the mistyping.
+   *
+   * This pulls out the DIGIT GROUPS, reduces each to its last two digits, and joins them -
+   * so AT2026-27 / 2026_27 / 2026-27 / AT 26-27 all become "26-27", and 24-25 stays "24-25".
+   * A single unseparated run is split on the assumption that a 6-digit run is YYYYYY and an
+   * 8-digit run is YYYYYYYY.
+   *
+   * WHY GENEROUS IS RIGHT HERE AND WRONG AS A KEY. As a join key this heuristic is
+   * dangerous: any rule strong enough to merge the real duplicates can merge two tenders
+   * that genuinely differ, and a wrong merge silently prices jobs from another tender's
+   * rates. As a DETECTOR it is exactly right - a false positive costs a glance, a false
+   * negative leaves a fragmented tender undetected. Over-group, and let a human split.
+   */
+  const tenderKey = (raw) => {
+    const s = String(raw ?? '').toUpperCase();
+    let groups = s.match(/\d+/g) || [];
+    if (groups.length === 1 && groups[0].length >= 4 && groups[0].length % 2 === 0) {
+      const g = groups[0];
+      groups = g.length === 4 ? [g.slice(0, 2), g.slice(2)]
+             : g.length === 6 ? [g.slice(0, 4), g.slice(4)]
+             : [g.slice(0, 4), g.slice(4)];
+    }
+    const key = groups.map(g => g.slice(-2)).join('-');
+    return key || s.replace(/[^A-Z0-9]/g, '') || '(blank)';
+  };
+
   const collapsed = {};
-  Object.keys(spellings).forEach(k => { (collapsed[norm(k)] ||= []).push(k); });
+  Object.keys(spellings).forEach(k => { (collapsed[tenderKey(k)] ||= []).push(k); });
+  console.log('\n  Grouped by inferred tender:');
+  Object.entries(collapsed).forEach(([key, spelt]) => {
+    const records = spelt.reduce((n, s) => n + spellings[s].length, 0);
+    console.log(`    ${key}  -  ${records} record(s), ${spelt.length} spelling(s): ${spelt.map(x => `"${x}"`).join(', ')}`);
+  });
   const variants = Object.entries(collapsed).filter(([, v]) => v.length > 1);
   console.log(variants.length
-    ? `  ${variants.length} tender(s) spelled more than one way: ` +
-      variants.map(([, v]) => v.map(x => `"${x}"`).join(' / ')).join('; ')
-    : '  No tender is spelled two ways today. That is luck, not a constraint.');
+    ? `\n  ${variants.length} tender(s) appear to be spelled more than one way. Free text has ` +
+      'ALREADY fragmented - this is the current state, not a risk to design against.'
+    : '\n  No tender appears to be spelled two ways ON THIS ACCOUNT. Check the other accounts ' +
+      'before concluding anything: a tender fragmented across owners looks clean from either side.');
 
   let grandMissing = 0, grandIssued = 0, grandDerivable = 0, grandTotal = 0;
   const undecidable = [];
 
+  // ONE QUERY, FILTERED BY ownerId, THEN GROUPED IN MEMORY.
+  //
+  // This used to query `where('agencyId','==',ag.id)` per agency, which fails for a
+  // non-admin. `firestore.rules:240` allows a jobs list only when
+  // `resource.data.ownerId == request.auth.uid || isSuperAdmin()`, and Firestore requires
+  // the QUERY to carry the filter the rule depends on - an agencyId filter does not
+  // establish ownership, so the read is refused.
+  //
+  // It worked on the admin account for the worst possible reason: `isSuperAdmin()` short-
+  // circuits the rule, so the missing filter was invisible to the person who wrote it. A
+  // diagnostic authored under elevated permission encodes that permission silently, and
+  // then fails for everyone else. Every census script written this week has the same bug.
+  const jobSnap = await getDocs(query(collection(db, 'jobs'), where('ownerId', '==', uid)));
+  const jobsByAgency = {};
+  jobSnap.forEach(d => {
+    const j = { id: d.id, ...d.data() };
+    (jobsByAgency[j.agencyId] ||= []).push(j);
+  });
+
   for (const ag of agencies) {
-    const jSnap = await getDocs(query(collection(db, 'jobs'), where('agencyId', '==', ag.id)));
-    const jobs = [];
-    jSnap.forEach(d => jobs.push({ id: d.id, ...d.data() }));
+    const jobs = jobsByAgency[ag.id] || [];
     const agAts = ats.filter(a => a.agencyId === ag.id);
 
     const missing = jobs.filter(j => !j.atId || String(j.atId).trim() === '');

@@ -24,6 +24,12 @@
 // falling back to Schedule-A 18b (Rs 54/kg) exactly as resolveRate does. That is enough to
 // answer "was anything claimed", which is the decision this is for.
 
+// PERMISSION NOTE (AUDIT F59): jobs and inspections are listable only when the QUERY
+// carries `where('ownerId','==',uid)` - firestore.rules allows a list when
+// `resource.data.ownerId == request.auth.uid || isSuperAdmin()`, and an agencyId filter
+// does not establish ownership. Querying per agency worked only on the admin account,
+// where isSuperAdmin() short-circuits the rule. Read once by ownerId, group in memory.
+
 (async () => {
   const { collection, query, where, getDocs } = window.__fs;
   const db = window.__db, uid = window.__auth.currentUser?.uid;
@@ -37,18 +43,24 @@
 
   let grandFlagged = 0, grandIssued = 0, grandValue = 0;
 
-  for (const ag of agencies) {
-    const jobsSnap = await getDocs(query(collection(db, 'jobs'), where('agencyId', '==', ag.id)));
-    const jobs = [];
-    jobsSnap.forEach(d => jobs.push({ id: d.id, ...d.data() }));
+  // Read once by ownerId, then group by agency in memory - see the permission note above.
+  const jobsSnap = await getDocs(query(collection(db, 'jobs'), where('ownerId', '==', uid)));
+  const jobsByAgency = {};
+  jobsSnap.forEach(d => {
+    const j = { id: d.id, ...d.data() };
+    (jobsByAgency[j.agencyId] ||= []).push(j);
+  });
 
-    // external inspections, keyed by job
-    const inspSnap = await getDocs(query(collection(db, 'inspections'), where('agencyId', '==', ag.id)));
-    const ext = {};
-    inspSnap.forEach(d => {
-      const v = d.data();
-      if (String(v.type || '').toLowerCase() === 'external' && v.jobId) ext[v.jobId] = v.data || v;
-    });
+  // external inspections, keyed by job
+  const inspSnap = await getDocs(query(collection(db, 'inspections'), where('ownerId', '==', uid)));
+  const ext = {};
+  inspSnap.forEach(d => {
+    const v = d.data();
+    if (String(v.type || '').toLowerCase() === 'external' && v.jobId) ext[v.jobId] = v.data || v;
+  });
+
+  for (const ag of agencies) {
+    const jobs = jobsByAgency[ag.id] || [];
 
     // the agency's own rate for item '4', per capacity, else Schedule-A
     const master = ag.estimateMasterCRGO || [];

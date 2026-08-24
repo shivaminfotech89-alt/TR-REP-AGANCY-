@@ -4581,6 +4581,48 @@ expression yields `Invalid Date`, not a date in 1972. So SUCHIT holds some third
 that field, and what it is has not been established. Naming a mechanism without seeing the
 value would be inventing one.
 
+### F59. Diagnostics written under elevated permission, and a mistyping check that compared exact strings
+
+Two defects in the census scripts, found when they were first run as a NON-admin.
+
+**1. The queries omitted the filter the rules require.** Four scripts written this week
+queried `where('agencyId','==',ag.id)` on `jobs` and `inspections`. `firestore.rules:240`
+allows a list only when `resource.data.ownerId == request.auth.uid || isSuperAdmin()`, and
+Firestore requires the QUERY to carry the filter the rule depends on - an agencyId filter
+does not establish ownership, so the read is refused.
+
+**They worked on the admin account for the worst possible reason.** `isSuperAdmin()`
+short-circuits the rule, so the missing filter was invisible to the person who wrote them.
+Every earlier script in `/scripts` gets this right - `allotment-coverage`, `blast-radius`,
+`scrap-identity`, `backfill-condition` all pass `where('ownerId','==',uid)` alongside the
+agency filter. The regression is entirely in the ones authored this week.
+
+**A diagnostic written under elevated permission encodes that permission silently**, and
+then fails for everyone else - or worse, half-succeeds and reports a partial census as a
+complete one. The fix is one query per collection filtered by `ownerId`, grouped by agency
+in memory: fewer reads, no composite-index question, and it cannot silently widen.
+
+**2. The mistyping check compared strings that had been mistyped.** The AT-number variant
+detector normalised with `toLowerCase().replace(/[^a-z0-9]/g,'')` and grouped. That cannot
+see that `"AT2026-27"` and `"2026_27"` are one tender: the `AT` prefix survives and the year
+widths differ, so they land in different groups. It reported "no tender is spelled two ways"
+across six records spelling one tender at least three ways.
+
+Comparing near-strings for a mistyping problem needs a comparison that tolerates the
+mistyping. It now extracts digit GROUPS, reduces each to its last two digits and joins -
+`AT2026-27` / `2026_27` / `2026-27` / `AT 26-27` all become `26-27`, `24-25` stays `24-25`.
+
+**The same heuristic is right here and wrong as a join key**, which is the point worth
+keeping. As a key it is dangerous: any rule strong enough to merge the real duplicates can
+merge two tenders that genuinely differ, and a wrong merge prices jobs from another tender's
+rates, silently. As a DETECTOR it is correct: a false positive costs a glance, a false
+negative leaves a fragmented tender undetected. Over-group, and let a human split.
+
+**What it established.** Six AT records across two accounts carry five spellings, of which at
+least three are the 2026-27 tender. Free text as a join key has ALREADY fragmented - the
+current state, not a risk to design against. That settled the AT-keyed master design in
+favour of admin-issued tender keys (see O33).
+
 ## Recurring theme
 
 Every entry above is one of two shapes:
