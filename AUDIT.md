@@ -651,6 +651,19 @@ later "corrected" back on the assumption that GP was the intended default.
 
 ## OPEN
 
+> ### DATA RESET, 2026-08-25
+> All records existing at this date are test data and are being wiped before launch,
+> agencies included. Items that were purely about those records are closed in place, marked
+> **NOT APPLICABLE**, and say so at the top of the entry: C1, C2, C3, O24, A1, and the
+> stored half of O8.
+>
+> **Closing a record does not close its cause.** Where a data item existed because of a code
+> defect, the banner names the code item that survives - C1 points at O2, O8 points at O7.
+> A clean database with a real customer re-creates every one of those unless the code
+> changes. The ranked list of what remains is in `LAUNCH-BLOCKERS.md`.
+
+
+
 ### O1. GP lookup can match the wrong transformer — highest severity
 
 `NewJob.tsx:261-268` loads `pastJobs` with `where('ownerId', '==', uid)` only — **no
@@ -760,6 +773,14 @@ catches the resulting duplicate either way, so it can be sequenced after the que
 above are settled.
 
 ### C1. Existing job-number collisions needing manual renumbering
+
+> **CLOSED — NOT APPLICABLE.** Every record named here is test data and is being wiped
+> before launch. The renumbering never needs doing.
+>
+> **The code defect is NOT closed with it.** O2 (job numbers are not uniquely allocated)
+> is what produced these collisions and is untouched, so a clean database will produce
+> them again. Read O2, not this.
+
 
 Confirmed by `scripts/duplicate-jobno-console.js`: 37 jobs scanned, 3 duplicated
 numbers, **0 legitimate GP repeats, 3 true collisions**. Each fails the
@@ -960,6 +981,14 @@ relied on for reconciliation.
 
 ### C2. MSBT-12 (MR 1) — submitted estimate routed the approval to the wrong authority
 
+> **CLOSED — NOT APPLICABLE.** MSBT-12 is test data and is being wiped. There is no
+> approval to re-route and no division office to correct.
+>
+> Kept as a worked example: it is the clearest record of how a wrong estimate total
+> silently changes WHICH AUTHORITY approves a job, which is a consequence of a pricing
+> error that no pricing test would catch.
+
+
 The only estimate actually submitted among the 26 mispriced jobs.
 `estimateSentDate` **2026-08-15**.
 
@@ -982,6 +1011,15 @@ higher sanction the correct figure requires. Withdrawal alone is not sufficient 
 the original routing decision was made on the wrong basis.
 
 ### C3. MSBT-12 (MR 1) — GP job charged AND collected. Remedy: REFUND
+
+> **CLOSED — NOT APPLICABLE, and the code defect IS fixed.** MSBT-12 is test data and is
+> being wiped; no money changed hands and no refund is owed.
+>
+> The underlying defect is fixed in code: `jobsForBillType` filters `isGpJob` before any
+> branch (`BillingSystem.tsx:238`), and `EstimateGenerate` filters it at `:217`, `:532`.
+> A GP job can no longer be estimated or billed. The three-figure discrepancy recorded
+> below is likewise moot — the document it describes will not exist.
+
 
 **A repair under guarantee was billed and the money was taken.** A GP job carries no
 charge: the agency repairs it free, which is what the guarantee means. Nothing in
@@ -1130,6 +1168,13 @@ indistinguishable from a non-UGVCL agency that never noticed it. So affected age
 flagged for confirmation, never cleared automatically.
 
 ### O8. `agencyStateCode` was seeded '24' — asserting an unverified registration
+
+> **PARTIALLY CLOSED.** The agencies carrying the wrong seeded value are test data and are
+> being wiped, so nothing stored needs correcting.
+>
+> **THE SEEDING CODE IS UNCHANGED** (`AgencySettings.tsx:146-158`), so the first real
+> customer is seeded exactly the same way. See O7, which is the live half.
+
 
 Seeded alongside the DISCOM identity (O7), but a different kind of wrong: `discomStateCode`
 `24` is true of **every** option in the DISCOM select — all four are Gujarat entities — so
@@ -1928,6 +1973,9 @@ repurposed than removed.
 
 ### A1. MSBT-112 — blocked pending external inspection (action, not a defect)
 
+> **CLOSED — NOT APPLICABLE.** MSBT-112 is test data and is being wiped.
+
+
 Now blocks with *"no external inspection data - quantities cannot be derived"*. This is
 the F2 rule working as designed: the job has no External inspection record, so its
 quantities cannot be derived and the estimate refuses rather than falling back to
@@ -1997,6 +2045,14 @@ for the other 26 candidates, which were never at risk.
 ---
 
 ### O24. Nobody can tell whether an inflated spreadsheet was ever sent anywhere
+
+> **CLOSED — NOT APPLICABLE, and the code defect IS fixed.** Every sheet that could have
+> been exported came from test data being wiped before launch, so nothing wrong is in
+> anyone's hands and the agencies do not need asking.
+>
+> The defect itself was fixed in F54: the export's item rows now come from the same
+> builder as its totals, so a sheet cannot disagree with itself again.
+
 
 The Excel export shipped item rows derived from **no inspection data at all** (F54). The
 fix is in. The exposure is not, and cannot be closed from the code.
