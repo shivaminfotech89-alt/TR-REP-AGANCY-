@@ -41,7 +41,12 @@
   agencies.forEach(a => rows.push({ id: a.id, ...a.data() }));
 
   for (const ag of rows) {
-    const master = ag.estimateMaster || [];
+    // estimateMasterCRGO is the live section. The legacy `estimateMaster` mirror is only a
+    // fallback, and is on its way out (AUDIT O26) - reading it first would have made this
+    // script depend on a field nothing else reads.
+    const master = (ag.estimateMasterCRGO && ag.estimateMasterCRGO.length > 0)
+      ? ag.estimateMasterCRGO
+      : (ag.estimateMaster || []);
     if (!master.length) { console.log(`${ag.agencyName || ag.id}: no CRGO estimate master, skipped`); continue; }
 
     const jobsSnap = await getDocs(query(collection(db, 'jobs'), where('agencyId', '==', ag.id)));

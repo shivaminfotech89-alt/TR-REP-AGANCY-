@@ -286,6 +286,22 @@ export function getEstimateMasterForCore(
   if (globalDef?.estimateMasterCRGO && globalDef.estimateMasterCRGO.length > 0) {
     return withMissingDefaults(globalDef.estimateMasterCRGO, defaultEstimateData);
   }
+  // STEPS 3 AND 4 ARE UNREACHABLE TODAY. DO NOT DELETE THEM AS DEAD CODE.
+  //
+  // `estimateMaster` is the pre-sections CRGO field. Nothing writes it any more (AUDIT D4)
+  // and no agency needs it, because step 1 or step 2 always answers first: every agency is
+  // created with `estimateMasterCRGO`, and `public_config` holds a CRGO section that step 2
+  // finds. So these two lines cannot currently be reached.
+  //
+  // They stay because "cannot currently be reached" is a statement about DATA, not about
+  // code. They become live the moment BOTH are true: an agency's own CRGO section is empty,
+  // AND public_config's CRGO section is empty or failed to load. In that state an agency
+  // that has never been migrated still prices from its own stored card instead of falling
+  // to the shipped defaults, which is a different set of rates.
+  //
+  // Removing them is a behaviour change in a path no test covers, for no benefit - the
+  // stored data is inert either way now that nothing refreshes it. When the field is
+  // eventually cleared from every document, these go with it, and not before.
   if (agency?.estimateMaster && agency.estimateMaster.length > 0) {
     return withMissingDefaults(agency.estimateMaster, defaultEstimateData);
   }
@@ -329,6 +345,14 @@ interface AgencyContextType {
     estimateMasterCircleLimits?: EstimateItem[];
     estimateMaster?: EstimateItem[];
   }) => Promise<void>;
+  countOverridesForApply: (
+    payload: Record<string, EstimateItem[] | undefined>,
+    targetAgencyIds: string[],
+  ) => Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number> }>>;
+  applyEstimateMasterToOwnAgencies: (
+    payload: Record<string, EstimateItem[] | undefined>,
+    targetAgencyIds: string[],
+  ) => Promise<void>;
   saveGlobalDefaultEstimateMaster: (payload: {
     estimateMasterCRGO?: EstimateItem[];
     estimateMasterAmorphous?: EstimateItem[];
@@ -620,21 +644,126 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       };
       localStorage.setItem('cached_global_estimate_master', JSON.stringify(cachedGlobalDefaultEstimateMaster));
 
-      // Also update all current agencies in database so they reflect the new default immediately
-      if (agencies.length > 0) {
-        const updatePromises = agencies.map(async (agency) => {
-          const ref = doc(db, 'agencies', agency.id);
-          await updateDoc(ref, payload);
-        });
-        await Promise.all(updatePromises);
-
-        setAgencies(prev => prev.map(a => ({
-          ...a,
-          ...payload
-        })));
-      }
+      // NO FAN-OUT HERE ANY MORE - see applyEstimateMasterToOwnAgencies below.
+      //
+      // This used to also loop the caller's agencies and updateDoc each one, which made one
+      // button do two things with very different reach: writing public_config seeds every
+      // future agency for every user and cannot be undone by the actor for anyone else,
+      // while writing your own agencies is owner-scoped and repeatable. Naming one of those
+      // two is how someone publishes a baseline meaning to update their own agencies.
+      //
+      // Splitting them also exposes an effect the bundle hid: `getEstimateMasterForCore`
+      // checks `agency.estimateMasterCRGO` BEFORE `globalDef.estimateMasterCRGO`, so
+      // publishing never changed the prices of an agency that has its own CRGO section. The
+      // fan-out was doing the entire visible half of this button's job.
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, 'public_config');
+      throw err;
+    }
+  };
+
+  /**
+   * What applying `payload` to the caller's OTHER agencies would destroy, counted from a
+   * FRESH read of each target document.
+   *
+   * WHY IT RE-READS RATHER THAN USING `agencies`. The in-memory copy is from page load. A
+   * confirmation dialog is a safety claim, and a claim that was true when the page loaded
+   * and false when the button was pressed is worse than no claim - another tab, another
+   * session, or an edit made twenty minutes ago all falsify it silently. Four documents is
+   * nothing against saying a true number.
+   *
+   * WHAT COUNTS AS AN OVERRIDE. A target cell holding a non-null value that differs from
+   * what the source would write. A null target cell is INHERITING - it resolves through
+   * Schedule-A at estimate time and loses nothing it had chosen. An equal value changes
+   * nothing. A non-null target against a null source counts too: the cell stops being a
+   * fixed rate and reverts to inheriting, which is just as much a decision undone.
+   *
+   * The read is deliberately of the RAW document, never of the enriched context object.
+   * Enrichment fills every empty section from public_config or the shipped defaults, so an
+   * agency storing nothing would report hundreds of overrides about to be destroyed - the
+   * same trap the F27 health check fell into.
+   */
+  const countOverridesForApply = async (
+    payload: Record<string, EstimateItem[] | undefined>,
+    targetAgencyIds: string[],
+  ): Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number> }>> => {
+    const KVA_KEYS = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'];
+    const num = (v: any): number | null =>
+      (v === null || v === undefined || v === '' || isNaN(Number(v))) ? null : Number(v);
+
+    const results = [];
+    for (const id of targetAgencyIds) {
+      const snap = await getDoc(doc(db, 'agencies', id));
+      if (!snap.exists()) continue;
+      const stored: any = snap.data();
+      let overrides = 0;
+      let inheritingCellsFrozen = 0;
+      const sections: Record<string, number> = {};
+
+      for (const [field, incoming] of Object.entries(payload)) {
+        if (!Array.isArray(incoming)) continue;
+        const existing: any[] = Array.isArray(stored[field]) ? stored[field] : [];
+        if (existing.length === 0) continue;   // nothing stored: nothing to lose
+        const byCode = new Map<string, any>();
+        existing.forEach(it => byCode.set(String(it?.itemCode ?? '').trim().toLowerCase(), it));
+
+        let sectionCount = 0;
+        for (const item of incoming) {
+          const target = byCode.get(String(item?.itemCode ?? '').trim().toLowerCase());
+          if (!target) continue;               // row absent from the target: nothing to lose
+          for (const k of KVA_KEYS) {
+            const was = num(target.rates?.[k]);
+            const will = num((item as any).rates?.[k]);
+            if (was === null && will !== null) inheritingCellsFrozen++;
+            else if (was !== null && was !== will) sectionCount++;
+          }
+        }
+        if (sectionCount > 0) sections[field] = sectionCount;
+        overrides += sectionCount;
+      }
+      results.push({ id, name: stored.name || id, overrides, inheritingCellsFrozen, sections });
+    }
+    return results;
+  };
+
+  /**
+   * Apply an estimate-master payload to the signed-in user's OWN agencies.
+   *
+   * NOT PRIVILEGED, and it does not need to be. `firestore.rules:256` allows an agencies
+   * update when `existing().ownerId == request.auth.uid`, and `isValidAgency` does not
+   * inspect the estimateMaster* fields at all - so this passes the rules exactly as they
+   * are written. Nothing here touches public_config or system_config, which is the only
+   * part of the old combined action that ever required admin rights.
+   */
+  const applyEstimateMasterToOwnAgencies = async (
+    payload: Record<string, EstimateItem[] | undefined>,
+    targetAgencyIds: string[],
+  ) => {
+    if (!auth.currentUser) throw new Error('Not signed in.');
+    const owned = new Set(agencies.map(a => a.id));
+    // The rules would refuse a foreign id anyway; refusing here means the failure names
+    // itself instead of arriving as a permission error from four parallel writes.
+    const targets = targetAgencyIds.filter(id => owned.has(id));
+    if (targets.length === 0) return;
+    try {
+      await Promise.all(targets.map(id => updateDoc(doc(db, 'agencies', id), payload as any)));
+      const targetSet = new Set(targets);
+      setAgencies(prev => prev.map(a => a.id === undefined || !targetSet.has(a.id) ? a : ({
+        ...a,
+        ...payload,
+        // Keep the raw-value shadow in step with the write, or the next health check and
+        // the next override count both read a stale picture of what is stored.
+        __storedMasters: {
+          ...((a as any).__storedMasters || {}),
+          ...(payload.estimateMasterCRGO ? { CRGO: payload.estimateMasterCRGO } : {}),
+          ...(payload.estimateMasterAmorphous ? { AMORPHOUS: payload.estimateMasterAmorphous } : {}),
+          ...(payload.estimateMasterWoundCore ? { WOUND_CORE: payload.estimateMasterWoundCore } : {}),
+          ...(payload.estimateMasterOverhauling ? { OVERHAULING: payload.estimateMasterOverhauling } : {}),
+          ...(payload.estimateMasterCircleLimits ? { CIRCLE_LIMITS: payload.estimateMasterCircleLimits } : {}),
+        },
+      } as any)));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'agencies');
       throw err;
     }
   };
@@ -677,7 +806,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
       const newAgency = { 
         estimateMasterCRGO: defaultCRGO,
-        estimateMaster: defaultCRGO,
+        // No `estimateMaster` mirror - a new agency has no legacy to support, and being
+        // born with an unread duplicate is how every existing agency acquired one. D4.
         estimateMasterAmorphous: defaultAmorphous,
         estimateMasterWoundCore: defaultWoundCore,
         estimateMasterOverhauling: defaultOverhauling,
@@ -1019,7 +1149,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       loading, isSuperAdmin, globalDefaultEstimateMaster,
       globalConfigError, globalConfigLoaded, dismissGlobalConfigError,
       addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
-      saveGlobalDefaultEstimateMaster, addAtMaster, updateAtMaster,
+      saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
+      addAtMaster, updateAtMaster,
       getNextJobNoInfo, incrementJobNoCounter, syncCountersState
     }}>
       {children}

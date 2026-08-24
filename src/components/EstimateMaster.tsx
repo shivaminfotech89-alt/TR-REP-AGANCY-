@@ -300,6 +300,8 @@ export default function EstimateMaster() {
     updateAgency, 
     updateAllAgenciesEstimateMaster, 
     saveGlobalDefaultEstimateMaster,
+    countOverridesForApply,
+    applyEstimateMasterToOwnAgencies,
     globalDefaultEstimateMaster,
     globalConfigError,
     dismissGlobalConfigError
@@ -330,6 +332,10 @@ export default function EstimateMaster() {
 
   // Full Sync Modal
   const [showFullSyncModal, setShowFullSyncModal] = useState(false);
+  const [showApplyModal, setShowApplyModal] = useState(false);
+  const [applyTargets, setApplyTargets] = useState<string[]>([]);
+  const [applyCounts, setApplyCounts] = useState<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number> }> | null>(null);
+  const [countingOverrides, setCountingOverrides] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -660,7 +666,9 @@ export default function EstimateMaster() {
       const updatePayload: any = {};
       if (section === 'CRGO') {
         updatePayload.estimateMasterCRGO = crgoData;
-        updatePayload.estimateMaster = crgoData; // Legacy support
+        // No `estimateMaster` mirror. It is the pre-sections CRGO field, nothing reads
+        // it on any reachable path, and writing it kept a shadow copy correct only by
+        // remembering to do so at five separate call sites. See AUDIT D4.
       } else if (section === 'AMORPHOUS') {
         updatePayload.estimateMasterAmorphous = amorphousData;
       } else if (section === 'WOUND_CORE') {
@@ -899,7 +907,9 @@ export default function EstimateMaster() {
     try {
       const payload = {
         estimateMasterCRGO: crgoData,
-        estimateMaster: crgoData,
+        // No `estimateMaster` mirror. It is the pre-sections CRGO field, nothing reads
+        // it on any reachable path, and writing it kept a shadow copy correct only by
+        // remembering to do so at five separate call sites. See AUDIT D4.
         estimateMasterAmorphous: amorphousData,
         estimateMasterWoundCore: woundCoreData,
         estimateMasterOverhauling: overhaulingData,
@@ -934,7 +944,9 @@ export default function EstimateMaster() {
       const updatePayload: any = {};
       if (section === 'CRGO') {
         updatePayload.estimateMasterCRGO = plan.payload;
-        updatePayload.estimateMaster = plan.payload;
+        // No `estimateMaster` mirror. It is the pre-sections CRGO field, nothing reads
+        // it on any reachable path, and writing it kept a shadow copy correct only by
+        // remembering to do so at five separate call sites. See AUDIT D4.
       } else if (section === 'AMORPHOUS') {
         updatePayload.estimateMasterAmorphous = plan.payload;
       } else if (section === 'WOUND_CORE') {
@@ -961,6 +973,64 @@ export default function EstimateMaster() {
     }
   };
 
+  /** The five sections as they would be written - stored when untouched, screen when edited. */
+  const buildSectionPayload = () => ({
+    estimateMasterCRGO: publishPlanFor('CRGO').payload,
+    estimateMasterAmorphous: publishPlanFor('AMORPHOUS').payload,
+    estimateMasterWoundCore: publishPlanFor('WOUND_CORE').payload,
+    estimateMasterOverhauling: publishPlanFor('OVERHAULING').payload,
+    estimateMasterCircleLimits: publishPlanFor('CIRCLE_LIMITS').payload,
+  });
+
+  /**
+   * "Apply to my agencies" - owner-scoped, available to every user, no admin rights.
+   *
+   * The count is fetched BEFORE the modal can be confirmed, and from fresh reads, because
+   * the whole purpose of the dialog is to say what this destroys. A dialog that cannot yet
+   * say it must not offer the button.
+   */
+  const openApplyToMyAgencies = async () => {
+    const others = agencies.filter(a => a.id !== activeAgency?.id);
+    if (others.length === 0) {
+      alert('You only have one agency. There is nothing to apply this to.');
+      return;
+    }
+    // Same guard the publish path uses: never push a section that exists on screen only
+    // because a fallback resolved it. Sending four agencies a section this agency does not
+    // actually have stored is how one wrong card became four.
+    if (blockPublishIfFallbackResolved(['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING'])) return;
+
+    setApplyTargets(others.map(a => a.id));
+    setApplyCounts(null);
+    setShowApplyModal(true);
+    setCountingOverrides(true);
+    try {
+      setApplyCounts(await countOverridesForApply(buildSectionPayload(), others.map(a => a.id)));
+    } catch (err) {
+      console.error(err);
+      setShowApplyModal(false);
+      alert('Could not read the other agencies to check what this would overwrite. Nothing was changed.');
+    } finally {
+      setCountingOverrides(false);
+    }
+  };
+
+  const handleApplyToMyAgencies = async () => {
+    setIsSaving(true);
+    try {
+      await applyEstimateMasterToOwnAgencies(buildSectionPayload(), applyTargets);
+      setShowApplyModal(false);
+      const names = agencies.filter(a => applyTargets.includes(a.id)).map(a => a.name).join(', ');
+      setSyncSuccessMsg(`✓ Rates from ${activeAgency.name} applied to ${names}.`);
+      setTimeout(() => setSyncSuccessMsg(null), 6000);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to apply rates to your other agencies.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   // Execute full sync of all sections across all agencies and save as global default for all users (Admin only)
   const handleExecuteFullSync = async () => {
     if (!isSuperAdmin) {
@@ -979,7 +1049,9 @@ export default function EstimateMaster() {
       const pCrgo = publishPlanFor('CRGO');
       const fullPayload = {
         estimateMasterCRGO: pCrgo.payload,
-        estimateMaster: pCrgo.payload,
+        // No `estimateMaster` mirror. It is the pre-sections CRGO field, nothing reads
+        // it on any reachable path, and writing it kept a shadow copy correct only by
+        // remembering to do so at five separate call sites. See AUDIT D4.
         estimateMasterAmorphous: publishPlanFor('AMORPHOUS').payload,
         estimateMasterWoundCore: publishPlanFor('WOUND_CORE').payload,
         estimateMasterOverhauling: publishPlanFor('OVERHAULING').payload,
@@ -988,7 +1060,9 @@ export default function EstimateMaster() {
 
       await saveGlobalDefaultEstimateMaster(fullPayload);
       setShowFullSyncModal(false);
-      setSyncSuccessMsg(`✓ Successfully published all CRGO, Amorphous, Wound Core, Overhauling & Circle Limits rates as the SYSTEM DEFAULT for ALL users and agencies!`);
+      // Says what it did, not what it sounds like it did. The old wording claimed "ALL
+      // users and agencies", which was never true for an agency holding its own sections.
+      setSyncSuccessMsg(`✓ Published all five sections to the shared baseline. New agencies will inherit these rates; existing agencies keep their own. Use "Apply to my agencies" to update yours.`);
       setTimeout(() => {
         setSyncSuccessMsg(null);
       }, 6000);
@@ -1732,15 +1806,33 @@ export default function EstimateMaster() {
             <Save className="w-3.5 h-3.5 mr-1.5" /> 
             Save All for {activeAgency.name}
           </button>
+          {/* TWO BUTTONS, TWO BLAST RADII.
+              One control used to do both: write public_config AND loop the caller's own
+              agencies. Applying rates to agencies you own is reversible by you; seeding
+              public_config changes the default every future agency inherits, for every
+              user, and cannot be undone by you on their behalf. Naming one of those two
+              is how someone publishes a baseline meaning to update their own agencies. */}
+          {agencies.length > 1 && (
+            <button
+              type="button"
+              onClick={openApplyToMyAgencies}
+              disabled={isSaving}
+              className="flex items-center px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 shadow-2xs transition-colors disabled:opacity-50"
+              title={`Copy these rates from ${activeAgency.name} into your other agencies. You will see what it replaces before anything is written.`}
+            >
+              <Building2 className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
+              Apply to my agencies
+            </button>
+          )}
           {isSuperAdmin && (
-            <button 
+            <button
               type="button"
               onClick={() => setShowFullSyncModal(true)}
               className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors"
-              title="Admin Only: Publish all entered rates as system default for all users & agencies"
+              title="Admin only: write these rates into public_config, the baseline every new agency inherits. Does NOT change your own agencies - use 'Apply to my agencies' for that."
             >
-              <Crown className="w-3.5 h-3.5 mr-1.5 text-purple-600" /> 
-              Publish as Default for All Users
+              <Crown className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+              Publish as shared default
             </button>
           )}
           <div className="flex items-center space-x-1.5 border-l border-slate-200 pl-2">
@@ -1976,6 +2068,114 @@ export default function EstimateMaster() {
       )}
 
       {/* Full Sync Modal */}
+      {showApplyModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in zoom-in-95">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-sky-50 text-sky-600 rounded-xl border border-sky-100">
+                  <Building2 className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">Apply to my agencies</h3>
+                  <p className="text-xs text-slate-500">
+                    Copy all five sections from <span className="font-semibold text-slate-700">{activeAgency.name}</span> into the agencies you select.
+                  </p>
+                </div>
+              </div>
+              <button onClick={() => setShowApplyModal(false)} disabled={isSaving}
+                      className="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {countingOverrides && (
+              <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Reading each agency to check what this would replace…
+              </div>
+            )}
+
+            {/* The counts come from a FRESH read, not from what is in memory - see
+                countOverridesForApply. A confirmation is a claim, and a claim that was true
+                at page load and false at click time is worse than no claim at all. */}
+            {!countingOverrides && applyCounts && (
+              <div className="border border-slate-300 rounded-xl divide-y divide-slate-200 bg-white max-h-64 overflow-y-auto">
+                {applyCounts.map(c => {
+                  const checked = applyTargets.includes(c.id);
+                  return (
+                    <label key={c.id} className={`flex items-start gap-3 p-3 cursor-pointer ${checked ? '' : 'opacity-50'}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(e) => setApplyTargets(prev =>
+                          e.target.checked ? [...prev, c.id] : prev.filter(x => x !== c.id))}
+                        className="mt-0.5 w-4 h-4 accent-sky-600"
+                      />
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-slate-800">{c.name}</div>
+                        {c.overrides > 0 ? (
+                          <div className="text-[11px] text-amber-700 font-semibold">
+                            {c.overrides} customised rate{c.overrides === 1 ? '' : 's'} would be replaced
+                            {Object.keys(c.sections).length > 0 && (
+                              <span className="font-normal text-amber-700/80">
+                                {' '}({Object.entries(c.sections)
+                                  .map(([f, n]) => `${n} ${f.replace('estimateMaster', '') || 'CRGO'}`)
+                                  .join(', ')})
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-[11px] text-slate-500">No customised rates would be lost.</div>
+                        )}
+                        {c.inheritingCellsFrozen > 0 && (
+                          <div className="text-[11px] text-slate-500 mt-0.5">
+                            {c.inheritingCellsFrozen} cell{c.inheritingCellsFrozen === 1 ? '' : 's'} that currently
+                            inherit the tender rate would be set to a fixed value.
+                          </div>
+                        )}
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+
+            {!countingOverrides && applyCounts && (() => {
+              const sel = applyCounts.filter(c => applyTargets.includes(c.id));
+              const lost = sel.filter(c => c.overrides > 0);
+              const total = lost.reduce((a, c) => a + c.overrides, 0);
+              return (
+                <p className={`text-xs p-3 rounded-lg border font-medium ${
+                  total > 0 ? 'bg-amber-50 border-amber-200 text-amber-900'
+                            : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                  {sel.length === 0
+                    ? 'No agencies selected - nothing will be written.'
+                    : total > 0
+                      ? `This will update ${sel.map(c => c.name).join(', ')}, replacing ${lost.map(c => `${c.overrides} rate${c.overrides === 1 ? '' : 's'} customised in ${c.name}`).join(' and ')}.`
+                      : `This will update ${sel.map(c => c.name).join(', ')}. No agency loses a rate it had customised.`}
+                </p>
+              );
+            })()}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button onClick={() => setShowApplyModal(false)} disabled={isSaving}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg">
+                Cancel
+              </button>
+              <button
+                onClick={handleApplyToMyAgencies}
+                disabled={isSaving || countingOverrides || !applyCounts || applyTargets.length === 0}
+                className="flex items-center px-4 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-700 rounded-lg disabled:opacity-50"
+              >
+                {isSaving ? <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <Check className="w-3.5 h-3.5 mr-1.5" />}
+                Apply to {applyTargets.length} agenc{applyTargets.length === 1 ? 'y' : 'ies'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showFullSyncModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95">
@@ -1986,10 +2186,10 @@ export default function EstimateMaster() {
                 </div>
                 <div>
                   <h3 className="text-lg font-bold text-slate-900">
-                    Save Default Price Rates
+                    Publish as shared default
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Set current entered rates as default for all users and all agencies
+                    Sets the baseline every NEW agency inherits. Does not change existing agencies.
                   </p>
                 </div>
               </div>
@@ -2004,7 +2204,8 @@ export default function EstimateMaster() {
 
             <div className="space-y-3 text-xs text-slate-600">
               <p className="bg-blue-50/70 p-3 rounded-lg border border-blue-100 text-blue-950 font-medium">
-                This will save all rates (CRGO, Amorphous, Wound Core, Overhauling & Circle Limits) from <span className="font-bold text-blue-900">{activeAgency.name}</span> into the global database so that <strong>every user and every agency</strong> uses these rates by default.
+                This writes all five sections from <span className="font-bold text-blue-900">{activeAgency.name}</span> into the shared baseline (<code className="text-[10px]">public_config</code>). Every <strong>newly created</strong> agency inherits it, and any agency whose own section is empty resolves through it.
+                {' '}<strong>It does not change agencies that already have their own rates</strong> — including yours. To update your own agencies, use <span className="font-semibold">Apply to my agencies</span>.
               </p>
 
               {/* Per section, in rows, which version is being sent. The counts below are

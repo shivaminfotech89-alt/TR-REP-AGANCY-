@@ -2104,6 +2104,42 @@ changes deferred for the same reason — one form change, once, not several smal
 
 ---
 
+### D4. The legacy `estimateMaster` field: writes stopped, reads kept
+
+`estimateMaster` is the pre-sections CRGO field. Five paths mirrored `estimateMasterCRGO`
+into it - `EstimateMaster.tsx` at 663, 902, 937 and 982, and `AgencyContext.addAgency` at
+680, which meant every agency was BORN with a duplicate. All five now stop.
+
+**Nothing reads it on any reachable path.** `getEstimateMasterForCore` resolves
+`agency.estimateMasterCRGO` -> `globalDef.estimateMasterCRGO` -> `agency.estimateMaster` ->
+`globalDef.estimateMaster`, so the legacy field sits behind public_config's CRGO section,
+which exists. The CRGO editor loader has the same order. The two readers in
+`EstimateGenerate` (344, 1645) are on `selectedJobsData.length === 0` branches, and
+`handleExportExcel` returns early on exactly that condition - dead code.
+
+**THE READS STAY, DELIBERATELY.** Three reasons, in order of weight:
+
+1. "Unreachable" here is a claim about DATA, not about code. Steps 3 and 4 become live if an
+   agency's CRGO section is empty AND public_config's is empty or failed to load. That state
+   cannot occur today; it is not prevented by anything structural.
+2. Removing a read is a behaviour change in a path no test covers, and the change would be
+   invisible until the rare state occurred - which is the failure mode this whole audit is
+   about.
+3. There is no benefit. The stored data is inert once nothing refreshes it. Deleting the
+   reads buys tidiness and risks a silent reprice.
+
+The read site now carries a comment saying all of this, because the next reader will
+correctly identify it as unreachable and incorrectly conclude it is safe to delete.
+
+**Not a cleanup item.** The field is finished as a moving part the moment the writes stop.
+Clearing the stored data is a separate decision that needs the census first - a duplicate
+that matches its CRGO section is harmless weight; one that has diverged is a stale card that
+would surface as different prices in the rare state above. `scripts/legacy-estimate-master-
+census-console.js` (read-only) answers which. When the data is eventually cleared from every
+document, the two reads go with it, and not before.
+
+---
+
 ## FIXED
 
 ### F1. Estimates priced off capacity defaults, not inspection data
@@ -4055,6 +4091,64 @@ lands it on that row and returns null for the other, so the charge appears exact
 its own total was possible only because two engines answered the same question and no screen
 ever showed both answers together. Consolidation is not tidying here; it is the thing that
 makes the contradiction impossible to restate.
+
+### F56. One button, two blast radii — split, and the override count that makes it safe
+
+`saveGlobalDefaultEstimateMaster` did two things and named one. It wrote `public_config`
+(and its `system_config` mirror), and then looped `agencies` calling `updateDoc` on each.
+The button said "Publish as Default for All Users".
+
+The two halves are not the same kind of act. Writing `public_config` seeds every future
+agency for every user and cannot be undone by the actor on anyone else's behalf. Writing
+your own agencies is owner-scoped and repeatable. A single control offering both is how
+someone publishes a baseline meaning to update their own agencies.
+
+**The gate was on the wrong half.** `agencies` is loaded as
+`where('ownerId','==',auth.currentUser.uid)` (AgencyContext:478), so the fan-out only ever
+touched the caller's OWN agencies, even for the admin. Nothing about it was privileged.
+`firestore.rules:256` allows an agencies update when `existing().ownerId == request.auth.uid`,
+and `isValidAgency` does not inspect the `estimateMaster*` fields at all - so the owner-scoped
+half passes the rules exactly as written. No rules change, no privilege change.
+
+Now:
+
+- **"Apply to my agencies"** - every user, `applyEstimateMasterToOwnAgencies`, owner-scoped,
+  no `public_config` write.
+- **"Publish as shared default"** - admin only, `public_config` only, no fan-out.
+
+**Splitting exposed an effect the bundle had been hiding.** `getEstimateMasterForCore`
+checks `agency.estimateMasterCRGO` BEFORE `globalDef.estimateMasterCRGO`, so publishing
+never changed the prices of an agency that has its own CRGO section - which is every agency,
+since `addAgency` seeds them all. The fan-out was doing the entire visible half of that
+button's job, and the label credited the publish for it. The modal text and the success
+message both claimed "ALL users and agencies"; both now say what actually happens.
+
+**The override count.** Applying A's master to B replaces B's section arrays wholesale -
+`updateDoc` does not deep-merge - so any rate B had customised is gone. `countOverridesForApply`
+states the loss before the write:
+
+> This will update AARATI TRANSFORMER and DRISHIV, replacing 6 rates customised in AARATI
+> TRANSFORMER and 2 rates customised in DRISHIV.
+
+Three decisions inside it worth keeping:
+
+1. **It re-reads each target document** rather than using the `agencies` state. The state is
+   from page load; a confirmation is a safety claim, and a claim that was true at load and
+   false at click is worse than no claim. Four `getDoc` calls.
+2. **It reads the RAW document, never the enriched context object.** Enrichment fills every
+   empty section from `public_config` or the shipped defaults, so an agency storing nothing
+   would report hundreds of overrides about to be destroyed - the F27 trap exactly.
+3. **An override is a non-null target cell whose value differs from what the source writes.**
+   A null cell is inheriting and loses nothing. A non-null target against a null source
+   counts, because reverting a fixed rate to inheriting is equally a decision undone.
+   Cells going the other way - null target, non-null source - are reported separately and
+   quietly: not a loss, but they stop tracking future tender changes, which is the F27
+   mechanism applied wholesale rather than per cell.
+
+The payload comes from `publishPlanFor` (stored when untouched, screen state when edited)
+behind `blockPublishIfFallbackResolved`, so a section that exists on screen only because a
+fallback resolved it cannot be pushed to four agencies at once. That is precisely how one
+wrong Wound Core card became four.
 
 ## Recurring theme
 
