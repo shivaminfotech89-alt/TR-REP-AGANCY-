@@ -67,6 +67,37 @@ const TARGETS = [
       : { value: null, from: 'UNRESOLVED - would block' };
   };
 
+  // THE SHARED BASELINE FIRST.
+  //
+  // Agencies and public_config are corrected by different actions - a per-agency save and a
+  // publish - and only the second reaches the baseline. Reporting agencies alone answers
+  // "are the agencies fixed" and leaves "did the publish land" open, which is the question
+  // that actually decides whether a new agency inherits the typos.
+  const { doc, getDoc } = window.__fs;
+  const pubSnap = await getDoc(doc(db, 'public_config', 'estimate_master'));
+  console.log('\n=== public_config/estimate_master (the shared baseline) ===');
+  if (!pubSnap.exists()) {
+    console.log('  Document does not exist - new agencies fall through to the shipped defaults.');
+  } else {
+    const pub = pubSnap.data();
+    const pubCrgo = Array.isArray(pub.estimateMasterCRGO) ? pub.estimateMasterCRGO : [];
+    console.log(`  CRGO section : ${pubCrgo.length ? pubCrgo.length + ' items' : '(absent)'}`);
+    console.log(`  last written : ${window.__utils?.formatDDMMYYYY?.(pub.updatedAt) ?? '(unknown)'} by ${pub.updatedBy || '(not recorded)'}`);
+    console.table(TARGETS.slice(0, 8).map(([code, kva, tender]) => {
+      const row = pubCrgo.find(i => String(i?.itemCode ?? '').trim().toLowerCase() === code.toLowerCase());
+      const v = row ? num(row.rates?.[kva]) : null;
+      return {
+        cell: `${code} @ ${kva} kVA`,
+        baseline: !row ? '(row absent)' : v === null ? 'INHERITING' : v.toFixed(2),
+        tender,
+        verdict: !row ? 'row missing from baseline'
+               : v === null ? 'cleared - new agencies inherit the tender rate'
+               : v === tender ? 'holds the tender value (stored, not inherited)'
+               : `STILL WRONG - holds ${v}, publish has not landed`,
+      };
+    }));
+  }
+
   const snap = await getDocs(query(collection(db, 'agencies'), where('ownerId', '==', uid)));
   const agencies = [];
   snap.forEach(d => agencies.push({ id: d.id, ...d.data() }));
