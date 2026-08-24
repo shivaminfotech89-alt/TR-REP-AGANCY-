@@ -2357,6 +2357,63 @@ fix to a defect.
 
 ---
 
+### O33. The MR delete path: MR-scoped, orphans inspections, and no guard on issued documents
+
+`MrLedger.handleDeleteEntireMr` (`:411`) is the only real deletion in the app -
+`deleteDoc` is imported in `AdminPanel.tsx` and `MrLedger.tsx` and never called in either.
+It does this and nothing else:
+
+    const batch = writeBatch(db);
+    for (const j of deleteConfirmMr.jobs) batch.delete(doc(db, 'jobs', j.id));
+    await batch.commit();
+
+Three gaps, worst last.
+
+**1. IT IS MR-SCOPED.** There is no way to delete one transformer. Deleting an MR deletes
+every job on it, so a scratch record sharing an MR with real work takes the real work with
+it. The operator's intent ("remove this test row") has no expression in the UI.
+
+**2. IT ORPHANS INSPECTIONS, SILENTLY AND UNCOUNTED.** `inspections` is the only collection
+storing a `jobId`, and nothing deletes them. Both inspection screens and `TestingReport`
+write there, so a deleted job leaves its external and internal records behind, keyed to a
+document id that no longer resolves. `oilTransactions` keys on `mrNo` rather than `jobId`
+and is stranded by a different route.
+
+The confirmation says *"This will permanently delete all N transformer record(s) associated
+with this MR"* - it names the jobs and not the inspections, and gives no count of what it
+leaves. That is the O31 shape again: a dialog describing part of what a write does.
+
+An orphan is not immediately dangerous - the maps that index inspections by `jobId` simply
+never look the orphan up, and Firestore does not reuse document ids. The cost is the one
+this audit keeps meeting: **a stored record asserting a relationship that no longer holds**,
+which every later census has to recognise and explain.
+
+**3. NO GUARD ON ISSUED DOCUMENTS - and this is the one that matters.** The batch deletes
+regardless of `billNo`, `estimateSentDate`, `paymentStatus` or `issuedByAgencyId`. An MR
+whose bill has been sent and paid can be deleted in two clicks, leaving the bill referenced
+by nothing.
+
+**C3's refund depends on exactly those records surviving.** MSBT-12 / MR 1 carries BILL/1,
+`paidAmount` 6,680, and a refund owed to the division. Deleting that MR would remove the
+only evidence of what was billed, to whom, and by which agency - `issuedByAgencyId` was
+added in O14 precisely so an issued document's supplier could not be lost, and it lives on
+the job document that this path deletes. The remedy would survive only in this file.
+
+**What a fix needs**, in order of value:
+
+1. Refuse to delete any MR carrying an issued document - bill number, estimate sent date, or
+   recorded payment - and say which job blocks it. This is a few lines and closes the only
+   irreversible case.
+2. Count and name the inspections in the confirmation, and delete them in the same batch.
+3. Per-job deletion, so removing a scratch row does not require removing its MR.
+
+**Not built.** Deletion is the one operation with no undo, and building cascade deletion
+against live data to tidy a handful of records is the wrong trade - see the five undated
+AARATI jobs, where backfilling one field is reversible and deletes nothing. Recorded so the
+gaps are known before someone reaches for the button, not after.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test
