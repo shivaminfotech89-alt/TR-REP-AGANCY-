@@ -2031,6 +2031,164 @@ the inspection before the line can be priced honestly.
 
 ---
 
+### O26. One weight constant serving unrelated items — three copies, four rows
+
+`(kva === '10' || kva === '16') ? 14 : kva === '25' ? 15.54 : 45.36` appears verbatim in
+THREE files:
+
+    src/components/SingleJobEstimateReport.tsx:500   OH branch (ported under F55)
+    src/components/BillingSystem.tsx:574             job-total function
+    src/components/Reports.tsx:148                   job-total function
+
+Each applies it to every master row whose `unit` is `'KG'`. In the shipped masters that is
+four rows: **Tank replacement (`3`)** and **Conservator tank replacement (`4`)**, in the
+Amorphous master and again in the Overhauling master.
+
+**So at 63 kVA and above, 45.36 kg is simultaneously the weight of a main tank and the
+weight of a conservator tank.** Those are not comparable objects - a conservator is a small
+drum mounted on top of a tank an order of magnitude larger. The number cannot be right for
+both, and is almost certainly right for neither.
+
+**This is a different defect from a constant with no source, and the difference matters.**
+F47 dealt with invented numbers - someone needed a figure, had none, and wrote one. This is
+a figure REUSED across items that have nothing to do with each other, which means the second
+author knew a constant was already there and reached for it instead of for a measurement.
+A wrong number that is copied is harder to find than a wrong number that is written, because
+each new site looks like it is following an established convention.
+
+**Scope, stated exactly** (an earlier draft of this entry said seven items including the
+radiator; both were wrong and the record should not carry them):
+
+- **Four rows, not seven.** Only `unit: 'KG'` rows are reached. Live agency masters could
+  add more - a census would settle it - but the shipped masters have four.
+- **The radiator is NOT among them.** `Complete Radiator replacement` is `unit: 'QTY'`, so
+  it takes the QTY branch. In the estimate builder, CRGO item `21` is
+  `Number(externalData?.damRadNo)` x `scheduleRate('20')`, emitted as `unit: 'NO'` - a count
+  times a per-unit rate, with no weight constant anywhere in its path. It is correct and out
+  of scope. Its only fault is in the OH branch, where it charges qty 1 regardless of
+  `damRadNo`, which is a gating fault, not a weight fault.
+
+**A related fault in the same two functions**, recorded here because it is the same root
+cause - quantity inferred from a `unit` LABEL instead of read from a measurement. The CRGO
+coil rows are `unit: 'QTY'` in the master while being priced per kilogram by the builder, so
+`BillingSystem` and `Reports` give them **qty = 1**: a 47 kg HV coil contributes
+1 x Rs 163 = Rs 163 to those totals instead of Rs 7,661.
+
+**Also noted, not fixed:** those two functions read `item.rates[kva]`, where the master's
+`B_ABOVE_100` is one slot shared by 200, 315 and 500 kVA. Radiator replacement at 500 kVA is
+Rs 2,630.06 against the 200 kVA figure of Rs 1,971.69, so a 500 kVA radiator under-prices by
+**Rs 658.37 per radiator** there. That is the band-model limitation already on record, not
+this entry's problem - but if 500 kVA radiator work ever occurs, the band model needs
+revisiting rather than a local patch.
+
+`BillingSystem` and `Reports` are two further estimate engines of the shape deleted in F55,
+neither of which reads any inspection data. What their totals feed has not yet been traced.
+
+---
+
+### O27. The conservator tank line: a real defect that has never produced a wrong document
+
+**The defect.** `damCtTank` is an integer COUNT of damaged conservator tanks -
+`renderIntegerField`, `Math.round`, default `'0'`, printed as a bare number. Estimate item
+`4` prices at Schedule-A `18b`, **Rs 54 PER KILOGRAM**. Two code paths get it wrong in
+opposite directions:
+
+- `buildSingleJobEstimateData` (CRGO) uses the count directly as a weight:
+  `qty: ctQty, unit: 'KG'`. A flagged conservator bills **1 x 54 = Rs 54**, where a real one
+  weighs tens of kilograms. An under-charge of roughly two orders of magnitude.
+- The OH branch and the two job-total functions ignore the count and substitute the O26
+  constant: **45.36 x 54 = Rs 2,449** of weight nobody measured.
+
+**It has produced no wrong document.** Census across both agencies: **0 jobs with
+`damCtTank` > 0**. Nothing has ever been flagged, so nothing has ever been claimed on this
+line. The defect is real; the exposure is nil.
+
+**Which is why nothing was built.** A weight-capture popup was designed and withdrawn. Adding
+a field, a modal and a stored value to serve a line nobody claims would be adding a
+maintained surface for no work - the same instinct that produced the constants in the first
+place. `scripts/conservator-line-census-console.js` (read-only) re-answers this at any time.
+
+**WHAT TO DO IF ONE IS EVER FLAGGED.** The count must not be multiplied by a weight
+constant, and must not be used AS a weight. A real weight is needed. Until a field exists to
+hold one, the line must **block with a named error** rather than price - so the first
+conservator ever flagged refuses to produce an estimate instead of silently claiming either
+Rs 54 or Rs 2,449 of fiction. That block is the whole fix; the field only becomes worth
+building when a second one is flagged.
+
+### O28. Tank damage is a scrap decision, not a priced line
+
+A damaged main tank means the transformer is **declared scrap** - it does not work properly
+and replacing a tank is not viable. So there is nothing to price and nothing to capture, and
+the OH tank section proposed during O26/O27 was withdrawn before it was built.
+
+**The routing already exists.** `condition === 'Scrap'` on the internal inspection
+(`InternalInspection.tsx:418, 537-562`) sets `status: 'Scrap'` and `condition: 'Scrap'`, and
+the estimate short-circuits to the single inspection-and-dismantling line.
+
+**What does NOT exist is the reason.** External inspection has no main-tank damage field at
+all - `clnDrtyTank` is a Y/N flag for CLEANING a dirty tank, and `damCtTank` is the
+conservator count. And the printed internal sheet asserts a single hardcoded reason for
+every scrap job on it:
+
+    NOTE : JOB NO 14 & 22 FOUND HEAVILY DAMAGED WITH CORE & LT, HENCE PROPOSED FOR SCRAP ONLY
+
+A tank-damaged unit is declared scrap and then printed as core-and-LT damaged. That is a
+document asserting something nobody derived, which is the recurring theme of this audit -
+but it is a change to a printed sheet and has not been proposed.
+
+---
+
+### O29. The DISCOM's approved amount is captured, displayed, and never read by the bill
+
+**The app already knows the answer and does not consult it.** This is the 8-B shape (F48),
+where the HV bushing priced every transformer at the 11 KV rate while `externalData.kv` sat
+three lines below the assumption. Naming the category matters: the fix is wiring, not new
+capability.
+
+**What exists.** `approvedAmount` is a real field on the job, written at
+`EstimateGenerate.tsx:685` and `:701`. It has its own input (`:2474`), defaults to the
+estimate total but is freely editable (`:664`), and the Approved Estimates table renders the
+divergence explicitly when the two differ (`:2247`):
+
+    Rs 1,84,200            <- approvedAmount
+    Est: Rs 1,92,650       <- shown only when it differs
+
+Someone built UI specifically for the case where UGVCL approves a figure other than the one
+submitted. The app expresses that case fully.
+
+**What does not exist.** `BillingSystem` contains **zero** references to `approvedAmount`. It
+also deliberately ignores the stored `estimateAmount`, recomputing instead (see the note at
+`:2976`). So when an approval differs from an estimate, the bill claims a THIRD figure -
+independently recomputed from today's master - matching neither the approval nor the
+estimate. Nothing on the invoice indicates this.
+
+**Why this is now structural rather than incidental.** Before F57 the bill and the estimate
+were two engines drifting, and a mismatch could be blamed on that. After F57 they agree by
+construction, so any difference from the approved figure is no longer noise - it is the app
+declining to claim what the DISCOM authorised.
+
+**THE QUESTION, and it is a tender question, not a code one:** should the bill follow the
+approved amount when one is recorded? The instinct on the operator side is yes - the DISCOM
+approved a figure and the claim should match it - but that needs confirming with the
+agencies, because the alternative reading is defensible: the approval authorises the work,
+and the bill claims what the work actually came to.
+
+Three outcomes:
+
+- *UGVCL never approves a revised figure* -> `approvedAmount` is decorative, and the entry
+  closes as documentation.
+- *They do, and the bill follows the approval* -> `calculateJobTotal` should return
+  `approvedAmount` when present and fall back to the computed total otherwise. Bills issued
+  to date have then been claiming un-approved figures.
+- *They do, and the bill follows the work* -> the field stays a record of what the DISCOM
+  said, and the invoice should probably show it beside the claim so the difference is
+  visible rather than silent.
+
+**Worth asking alongside it:** has a bill ever been queried or short-paid for not matching an
+approval? `paymentDeductions` exists on the payment record, which is where that would show.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test
@@ -4149,6 +4307,56 @@ The payload comes from `publishPlanFor` (stored when untouched, screen state whe
 behind `blockPublishIfFallbackResolved`, so a section that exists on screen only because a
 fallback resolved it cannot be pushed to four agencies at once. That is precisely how one
 wrong Wound Core card became four.
+
+### F57. The third implementation of one calculation - and the last
+
+`BillingSystem.calculateJobTotal` and `Reports.calculateJobEstimate` each walked the estimate
+master applying quantity rules of their own, reading **no inspection data at all**. The
+Reports copy was verbatim. With `buildSingleJobEstimateData` that made three implementations
+of one question, and this one produced **the invoice** - the document with a GSTIN on it that
+gets paid.
+
+Four divergences, running in both directions at once:
+
+| | these two | the builder |
+|---|---|---|
+| inspection data | none read | external + internal |
+| `unit === 'Y'` | qty 1 **always** | charged on a recorded `'Y'` (F46) |
+| coil rows | `unit: 'QTY'` -> **qty 1**, so a 47 kg HV coil billed Rs 163 instead of Rs 7,661 | weight x per-kg rate |
+| `unit === 'KG'` | invented 14 / 15.54 / **45.36** (O26) | blocks - no weight is recorded |
+| bushings, metal parts | hardcoded by item code | read from the inspection |
+
+They do not cancel. A coil rewind under-billed by thousands; a job needing almost nothing
+over-billed. **Every fix this session landed in the builder and none of them here** - F44,
+F46, F47, F52, the conservator block. That is the same evidence that retired the estimate
+engine in F55, and the same conclusion.
+
+**Both files already carried a comment asserting these paths could not drift apart.**
+BillingSystem: *"there is one Schedule-B reader in this codebase and this is not it."*
+Reports: *"the same resolution the estimate and the bill use, so these three can't drift
+apart."* They had already drifted. **A comment describing an intention reads exactly like a
+comment describing a property**, and only one of those survives the next edit. Both files had
+converted their scrap and fixed-rate branches on precisely this argument and left the
+itemised branch - the path most jobs take - untouched.
+
+Both now call `getJobFullEstimate(...).baseTotal`, matching the Amorphous branch ten lines
+above in the same function. `baseTotal` and not `finalAmount`, so the caller's AT uplift stays
+the only one. `Reports` reads `inspections` directly rather than building a fourth place that
+decides what an inspection is.
+
+**NO ISSUED BILL CHANGES - by construction, not by census.** Two independent reasons, neither
+depending on data that had to be gone and checked:
+
+1. `jobsForBillType` filters `isGpJob` **before** any branch is reached
+   (`BillingSystem.tsx:238`), so `calculateJobTotal` is never called for a GP job in the
+   billing path. A GP job's bill cannot be affected whatever it contains.
+2. Stored `billAmount` and `billTotalMrAmount` are written once at send time and never
+   recomputed. Changing the function changes what a FUTURE bill computes; it does not rewrite
+   a document already sent.
+
+A census was run and returned zero itemised-branch bills on two agencies, but it could not
+cover an agency owned by another account. The structural argument is recorded in preference
+because it holds without that data.
 
 ## Recurring theme
 

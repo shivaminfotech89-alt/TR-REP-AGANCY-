@@ -30,10 +30,10 @@ import {
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
-import { resolveScrapCharge, getScrapItemCodeForCore } from '../lib/estimateCalc';
+import { resolveScrapCharge, getScrapItemCodeForCore, getJobFullEstimate } from '../lib/estimateCalc';
 
 export default function Reports() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -126,31 +126,30 @@ export default function Reports() {
         return Math.round(scrapCharge.rate ?? 0);
       }
 
-      // Repairable: the scrap item is excluded by mapped code, never by itemName.
-      const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
-      let jobTotal = 0;
-
-      jobMasterData.forEach(item => {
-        if (scrapItemCode && (item.itemCode || '').trim() === scrapItemCode) return;
-        const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
-        const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
-        let qty = 0;
-
-        if (rate > 0) {
-          if (item.unit === 'Y') qty = 1;
-          else if (item.unit === 'QTY') {
-            qty = 1;
-            if (item.itemCode === '1c') qty = 7;
-            if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-            if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-            if (item.itemCode === '15') qty = 6;
-          } else if (item.unit === 'KG') {
-            qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-          }
-          jobTotal += rate * qty;
-        }
-      });
-      return Math.round(jobTotal);
+      // Repairable: THE SAME BUILDER the estimate and the bill use.
+      //
+      // This was a verbatim copy of the item loop in BillingSystem - the third and second
+      // implementations of one calculation, retired together in AUDIT F57. It read no
+      // inspection data, charged every `unit: 'Y'` item regardless of what was found,
+      // billed a 47 kg coil as qty 1 because the master labels coil rows 'QTY', and
+      // substituted an invented per-capacity weight on every 'KG' row.
+      //
+      // The scrap branch immediately above already routed through the shared helper, with
+      // a comment saying these three must not drift apart. They had already drifted; the
+      // comment was describing an intention, not a property.
+      //
+      // Reads `inspections` directly - this file has no externalInspMap/internalInspMap,
+      // and building one here would be a fourth place that decides what an inspection is.
+      const ext = inspections.find(i => i.jobId === job.id && i.type === 'External');
+      const int = inspections.find(i => i.jobId === job.id && i.type === 'Internal');
+      const est = getJobFullEstimate(
+        job,
+        ext?.data ?? ext,
+        int?.data ?? int,
+        activeAgency,
+        activeAtMaster
+      );
+      return Math.round(est.baseTotal);
     } catch {
       return 0;
     }

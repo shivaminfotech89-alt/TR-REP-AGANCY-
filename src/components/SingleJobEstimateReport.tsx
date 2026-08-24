@@ -495,10 +495,23 @@ export function buildSingleJobEstimateData(
         if (unit === 'Y') { qty = 1; qtyDisplay = 'Y'; }
         else if (unit === 'QTY' || unit === 'No' || unit === 'Each Transformer') { qty = 1; qtyDisplay = '1'; }
         else if (unit === 'KG') {
-          // O25: no weight field exists for tank or conservator replacement, so the old
-          // engine invented one per capacity. Carried over verbatim, not endorsed.
-          qty = (kva === '10' || kva === '16') ? 14 : kva === '25' ? 15.54 : 45.36;
-          qtyDisplay = qty.toFixed(2);
+          // WAS: `qty = (kva === '10' || kva === '16') ? 14 : kva === '25' ? 15.54 : 45.36`
+          //
+          // The same constant served the main tank AND the conservator tank - two objects an
+          // order of magnitude apart - so it could not be right for both, and was almost
+          // certainly right for neither (AUDIT O26). At 63 kVA and above it charged
+          // 45.36 x Rs 54 = Rs 2,449 per row, twice, on every overhauling job.
+          //
+          // A damaged main tank means the unit is DECLARED SCRAP, not re-tanked - the
+          // internal inspection already routes that (O28) - so there is no replacement to
+          // price. And no field anywhere records a conservator weight (O27). Blocks rather
+          // than guesses, and names which field is missing.
+          qty = 0;
+          qtyDisplay = '0';
+          rateErrors.push({
+            kind: 'missing-input',
+            message: `${jobLabel}: "${mItem?.itemName || code}" is priced per KILOGRAM and no weight is recorded for it. A damaged main tank means the transformer is declared scrap rather than re-tanked, so if this line is genuinely needed the weight must be measured first - it must never be assumed from the capacity.`,
+          });
         }
       }
       if (isOverhaulLine) recordErrorIfApplies(true, rate, mItem?.itemName || 'Overhauling');
@@ -567,11 +580,34 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '2b', desc: 'Spray painting', unit: 'NO', qty: spQtyStr, numQty: spApplies ? 1 : 0, rate: spRate, amt: spAmt });
 
   // 3. Conservator Tank Replacement (Schedule-A sr '18b' - app's own code '4' doesn't match)
+  //
+  // A COUNT CANNOT PRICE A PER-KILOGRAM ITEM. `damCtTank` is an integer count of damaged
+  // conservator tanks - renderIntegerField, Math.round, default '0'. Schedule-A 18b is
+  // Rs 54 PER KG. The app has had two different wrong answers for the same observation:
+  // here the count went straight through as a weight, so a flagged conservator billed
+  // 1 x 54 = Rs 54 against a real one weighing tens of kilograms; in the OH branch and in
+  // the BillingSystem/Reports totals the count was ignored and 45.36 kg substituted, for
+  // Rs 2,449 of weight nobody measured (AUDIT O26, O27).
+  //
+  // Neither is defensible, so this blocks instead. No field records a conservator weight,
+  // and until one does the honest output is a named refusal rather than a plausible number.
+  //
+  // EMPTY BLAST RADIUS: the census found 0 jobs with damCtTank > 0 across both agencies, so
+  // this changes no existing estimate. That is precisely why it is worth doing now - the
+  // first conservator ever flagged refuses to price instead of silently claiming a figure
+  // nobody could check.
   const ctQty = Number(externalData?.damCtTank) || 0;
   const ctApplies = ctQty > 0;
   const ctRate = resolveRate('4', scheduleRateFor('4'));
-  recordErrorIfApplies(ctApplies, ctRate, 'Conservator Tank Replacement');
-  physicalItems.push({ sr: srCounter++, itemCode: '4', desc: 'Conservator Tank Replacement', unit: 'KG', qty: ctQty > 0 ? ctQty.toString() : '0', numQty: ctQty, rate: ctRate, amt: ctApplies ? ctQty * (ctRate ?? 0) : 0 });
+  if (ctApplies) {
+    rateErrors.push({
+      kind: 'missing-input',
+      message: `${jobLabel}: ${ctQty} damaged conservator tank(s) flagged on the external inspection, but Schedule-A 18b prices conservator replacement per KILOGRAM (Rs ${(ctRate ?? 54).toFixed(2)}/kg) and no conservator weight is recorded anywhere. The "DAM. CT. TANK" column is a count, not a weight, so it cannot price this line.`,
+    });
+  }
+  // qty 0 / amt 0 while blocked - the line still prints, so the reader can see the item was
+  // considered and refused rather than silently omitted.
+  physicalItems.push({ sr: srCounter++, itemCode: '4', desc: 'Conservator Tank Replacement', unit: 'KG', qty: '0', numQty: 0, rate: ctRate, amt: 0 });
 
   // 4. Radiator Replacement (Schedule-A sr '20' - app's own code '21' doesn't match).
   // Above 100 KVA the schedule is capacity-specific, not banded - 315 KVA isn't in the

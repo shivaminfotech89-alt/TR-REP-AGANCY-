@@ -551,34 +551,42 @@ export default function BillingSystem() {
       return est.baseTotal * (1 + atPct / 100);
     }
 
-    // Repairable path - CRGO and Overhauling, UNCHANGED. The scrap item is identified by
-    // its mapped code only - no itemName substring matching - and excluded here so a
-    // repair bill can never pick up the scrap charge.
-    const scrapItemCode = getScrapItemCodeForCore(job.coreType || 'CRGO');
-    let jobTotal = 0;
-    jobMasterData.forEach(item => {
-      if (scrapItemCode && (item.itemCode || '').trim() === scrapItemCode) return;
-      const rawRate = item.rates[kva as keyof typeof item.rates] || 0;
-      const rate = typeof rawRate === 'string' ? parseFloat(rawRate) : Number(rawRate);
-      let qty = 0;
-
-      if (rate > 0) {
-        if (item.unit === 'Y') qty = 1;
-        else if (item.unit === 'QTY') {
-          qty = 1;
-          if (item.itemCode === '1c') qty = 7;
-          if (item.itemCode === '8' || item.itemCode === '9A' || item.itemCode === '9B') qty = 3;
-          if (item.itemCode === '10' || item.itemCode === '11A' || item.itemCode === '11B') qty = 4;
-          if (item.itemCode === '15') qty = 6;
-        } else if (item.unit === 'KG') {
-          qty = kva === '10' || kva === '16' ? 14 : kva === '25' ? 15.54 : 45.36;
-        }
-      }
-      if (item.unit === 'N') qty = 0;
-      jobTotal += (qty * rate);
-    });
-
-    return jobTotal * (1 + atPct / 100);
+    // Repairable path - CRGO and Overhauling. THE SAME BUILDER as the two branches above.
+    //
+    // This was the third parallel implementation of one calculation (AUDIT F57), and the
+    // last one. It walked the master applying quantity rules of its own invention and read
+    // NO inspection data at all, so it and the estimate answered the same question
+    // differently, in both directions at once:
+    //
+    //   - `unit === 'Y'` charged qty 1 ALWAYS, so every optional item was billed regardless
+    //     of what the inspection found. F46 fixed that in the estimate; it never arrived
+    //     here.
+    //   - the coil rows are `unit: 'QTY'` in the master while being priced per KILOGRAM, so
+    //     a 47 kg HV coil billed as 1 x Rs 163 = Rs 163 instead of Rs 7,661.
+    //   - `unit === 'KG'` substituted an invented per-capacity weight (14 / 15.54 / 45.36),
+    //     the same constant standing in for a main tank AND a conservator tank (O26).
+    //   - bushing and metal-part counts were hardcoded by item code rather than read from
+    //     the external inspection.
+    //
+    // Those do not cancel: a coil rewind under-billed by thousands while a job needing
+    // almost nothing over-billed. Every fix this session - F44, F46, F47, F52, the
+    // conservator block - landed in the builder and none of them here, which is exactly the
+    // argument that retired the estimate engine in F55.
+    //
+    // The file had already made this argument for two of its three branches: see the note
+    // above the scrap short-circuit, "there is one Schedule-B reader in this codebase and
+    // this is not it". This is the third.
+    //
+    // baseTotal, not finalAmount: pre-AT, so the single uplift below stays the only one -
+    // identical to what the Amorphous branch does ten lines up.
+    const est = getJobFullEstimate(
+      job,
+      externalInspMap[job.id],
+      internalInspMap[job.id],
+      activeAgency,
+      activeAtMaster
+    );
+    return est.baseTotal * (1 + atPct / 100);
   };
 
   // Named, blocking errors for any selected scrap job whose flat charge cannot be
