@@ -2817,6 +2817,102 @@ what the entity's identifiers already encode.
 
 ---
 
+### F71. Three effects in one commit, and two absences dressed as facts
+
+**The report:** "the prefix is still not appearing in the job number box." What the box
+actually contained was **`JOB-1`** — not empty, not a bare number, but a plausible-looking
+value that was wrong in both halves, produced by three faults firing in the same tick.
+
+**THE EFFECT ORDERING.** Three effects are declared in `NewJob.tsx` and all run in the same
+commit, in declaration order:
+
+    310  division-init      setCommonData({ division: 'DEESA' })   <- queued, not applied
+    332  suggest-into-blank reads commonData.division === 'SABARMATI'   <- STALE
+    379  pastJobs fetch     setPastJobsLoading(true), then fetches       <- HAS NOT RUN YET
+
+The suggestion effect read state that another effect in the same commit was about to set,
+and state that a third had not yet begun to load. Neither is a race in the concurrency
+sense — it is deterministic and reproduces every time.
+
+**THE OUTPUT SUPPRESSED ITS OWN CORRECTION.** The effect carries `⚠ ONLY BLANKS`, so a row
+the operator has typed into is never touched. Having written `JOB-1` into a blank row, the
+row was no longer blank — so when the division settled and again when the jobs arrived, the
+effect re-ran and skipped it both times. The guard that protects the operator's typing
+protected the app's own bad first guess just as well.
+
+**This cost nothing only because no counter moves.** The same shape with a write is the
+reservation bug exactly: an effect that runs before its inputs are ready, whose output then
+prevents the correction. F60 was this with an allocator behind it. Keep effects out of the
+job-number path (see the ⚠ above the one effect that remains).
+
+---
+
+**TWO ABSENCES INTERPRETED AS FACTS**, found together, the same mistake at two scales.
+
+**1. `getJobNoPrefix` returned the string `'JOB'` when nothing was configured.**
+
+It made the missing-prefix case *undetectable*: `if (!prefix)` never fires, because `'JOB'`
+is truthy. Every caller inherited that. And it shipped a plausible wrong value rather than
+failing, so an unconfigured division produced `JOB-1` in a job-number box, with nothing
+anywhere saying that no prefix was set.
+
+Now returns `string | null`, and an empty or whitespace-only configured value is normalised
+to null too — a settings field opened and cleared read as configured otherwise, which is the
+same fault one layer in.
+
+**2. `pastJobsLoading` started `false`.**
+
+Between mount and the fetch effect running, it reads "not loading" — which any consumer
+takes as "loaded", with `pastJobs` still `[]`. The saved-jobs maximum computed as 0 and the
+suggestion said `SU-1`: one past nothing, wrong by the agency's entire history.
+
+Replaced by `pastJobsLoaded`, which starts false and is only ever set true by the read
+completing, so "not yet known" and "known to be empty" cannot be confused. It is also reset
+when the agency changes — the previous agency's jobs are not an answer about this one.
+
+**3. `division` was hardcoded to `'SABARMATI'`.**
+
+On live data most agencies do not have it: SUCHIT and UPENDRA are DEESA only, AARATI is GNR
+only. Now initialised to `''` — the honest value for "not loaded yet" — and set from
+`availableDivisions` by the effect that already existed. A default that is wrong for most
+agencies is not a default.
+
+---
+
+**THE COMPILER CAUGHT NOTHING.** Changing the return type from `string` to `string | null`
+produced **zero** `tsc` errors, across seven call sites, two of which composed the value
+straight into a job number.
+
+`tsconfig.json` sets no `strict` and therefore no `strictNullChecks`, so `string | null` is
+assignable to `string`, `null + '-'` is a legal expression yielding `"null-"`, and
+`` `${null}` `` is legal too. Every call site had to be audited by hand.
+
+Second time in this audit a green check has been worth materially less than it looked: the
+first was `@types/react` being absent while `tsc --noEmit` was cited as evidence across a
+whole session. The lesson is the same one, and it is not "add the flag" — turning on
+`strictNullChecks` here is a large, separate change. It is that **`tsc --noEmit` passing on
+this repo is not evidence that a null cannot reach a string.**
+
+What the seven call sites needed:
+
+| site | before | after |
+|---|---|---|
+| `setupGapForPrefix` | `if (info.prefix === 'JOB')` | `if (!info.prefix)` — **this was the trigger for the whole dialog**; changing the sentinel without it would have made the setup gap undetectable, reintroducing the exact fault the change was fixing |
+| save prefix check ×2 | `startsWith(info.prefix + '-')` → `"null-"` | `setupGapForPrefix` moved **above** the composition |
+| `rowJobNoPrefix` | declared `: string` | `: string \| null`, plus `rowHasNoPrefix` for the UI |
+| `predictNextJobNo` | `{ prefix: 'JOB', … }` | `{ prefix: null, … }` |
+| `MrLedger` add-unit | already `if (prefix)` | unchanged — the only site that was correct |
+| `suggestNextJobNo` | `if (!prefix) return ''` (dead) | now live |
+
+**Still outstanding, same shape, not changed:** `availableDivisions` falls back to the
+literal `['SABARMATI', 'GANDHINAGAR', 'AHMEDABAD']` when an agency has no prefixes at all.
+An agency mid-setup is offered three divisions it does not have, and the new message then
+reads "No prefix configured for SABARMATI" — naming a division that is not real. Flagged
+rather than changed: emptying it leaves the division dropdown blank, which is a product
+decision.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test

@@ -244,6 +244,19 @@ export default function NewJob() {
   // Past jobs cache across ALL user data / ATs for instant global lookup
   const [pastJobs, setPastJobs] = useState<any[]>([]);
   const [pastJobsLoading, setPastJobsLoading] = useState(false);
+  /**
+   * HAVE THE SAVED JOBS ACTUALLY ARRIVED? A fact, not the absence of one.
+   *
+   * `pastJobsLoading` starts false and only becomes true once the fetch effect runs, so
+   * between mount and that first effect it reads "not loading" - which any consumer takes
+   * as "loaded", with `pastJobs` still []. A suggestion computed in that window said
+   * "SU-1": one number past nothing, wrong by the agency's entire history (AUDIT F71).
+   *
+   * Same shape as the 'JOB' sentinel it was found alongside: an ABSENCE interpreted as a
+   * FACT. This flag starts false and is only ever set true by the read completing, so
+   * "not yet known" and "known to be empty" cannot be confused.
+   */
+  const [pastJobsLoaded, setPastJobsLoaded] = useState(false);
   const [showPastPickerRowIndex, setShowPastPickerRowIndex] = useState<number | null>(null);
   // More than one past job matched the value typed - the operator must choose which
   // physical transformer this is. Never auto-applied: job numbers are not uniquely
@@ -277,7 +290,19 @@ export default function NewJob() {
     dateOfIssue: new Date().toISOString().split('T')[0],
     type: 'Distribution',
     repairType: 'OGP', // OGP, GP
-    division: 'SABARMATI',
+    /**
+     * NOT KNOWN YET - deliberately empty, not a literal (AUDIT F71).
+     *
+     * This was hardcoded to 'SABARMATI'. Most agencies do not have that division: SUCHIT
+     * and UPENDRA are DEESA only, AARATI is GNR only. The effect below corrects it to the
+     * agency's first configured division, but everything that ran in the same commit read
+     * the literal first - which is how the job-number box came to be filled with a prefix
+     * that does not exist anywhere in this agency's settings.
+     *
+     * Empty is the honest value for "the agency has not loaded yet", and every consumer
+     * already guards on it. A default that is wrong for most agencies is not a default.
+     */
+    division: '',
   });
 
   const [transformers, setTransformers] = useState<TransformerEntry[]>([
@@ -331,6 +356,10 @@ export default function NewJob() {
    */
   useEffect(() => {
     if (commonData.repairType !== 'OGP' || !activeAgency || !commonData.division) return;
+    // ⚠ ONLY FOR A DIVISION THIS AGENCY ACTUALLY HAS. Three effects run in one commit and
+    // this one used to read a division another was about to set, so it suggested against
+    // the hardcoded default - which most agencies have no prefix for (AUDIT F71).
+    if (!availableDivisions.includes(commonData.division)) return;
     setTransformers(prev => {
       if (!prev.some(t => !String(t.jobNo || '').trim())) return prev;   // nothing blank
       const next = [...prev];
@@ -347,11 +376,14 @@ export default function NewJob() {
     commonData.division,
     commonData.repairType,
     activeAgency?.id,
-    // THE SAVED JOBS, not the counter (see suggestNextJobNo). `pastJobsLoading` is the
-    // important one: the first pass runs while the read is in flight and fills nothing, and
-    // this is what brings the effect back once the jobs are actually known.
-    pastJobsLoading,
+    // THE SAVED JOBS, not the counter (see suggestNextJobNo). `pastJobsLoaded` is the
+    // important one: every pass before the read completes fills nothing, and this is what
+    // brings the effect back once the jobs are actually known.
+    pastJobsLoaded,
     pastJobs.length,
+    // The division settling from its initial value is a separate wake-up: the first pass
+    // can run against a division this agency has no prefix for.
+    availableDivisions.length,
   ]);
 
   // ⚠ NO OTHER EFFECT MAY WRITE A JOB NUMBER (AUDIT F60, F70).
@@ -379,6 +411,10 @@ export default function NewJob() {
   useEffect(() => {
     if (auth.currentUser && activeAgency) {
       const loadPastJobs = async () => {
+        // Not loaded UNTIL THIS AGENCY'S jobs are in hand - the previous agency's are not
+        // an answer about this one, and a suggestion drawn from them would be worse than
+        // no suggestion.
+        setPastJobsLoaded(false);
         setPastJobsLoading(true);
         try {
           const q = query(
@@ -390,6 +426,7 @@ export default function NewJob() {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           list.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
           setPastJobs(list);
+          setPastJobsLoaded(true);
         } catch (err) {
           console.error('Error loading past jobs for GP lookup:', err);
         } finally {
@@ -498,8 +535,13 @@ export default function NewJob() {
     }
 
     // Prefix only - this is checking whether one is CONFIGURED, not drawing a number.
+    //
+    // Tested against null, not against the string 'JOB'. That comparison was this dialog's
+    // trigger, so changing the sentinel without changing it here would have left the setup
+    // gap silently undetectable - the same failure the sentinel caused in the first place,
+    // reintroduced by the fix for it (AUDIT F71).
     const info = getJobNoPrefix(commonData.division, coreType);
-    if (info.prefix === 'JOB') {
+    if (!info.prefix) {
       const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
       setSetupGap({
         title: 'No job number prefix configured',
@@ -893,7 +935,7 @@ export default function NewJob() {
    */
   const suggestNextJobNo = (coreType: string, rows: TransformerEntry[]): string => {
     if (commonData.repairType !== 'OGP' || !activeAgency) return '';
-    if (pastJobsLoading) return '';
+    if (!pastJobsLoaded) return '';
     const { prefix } = getJobNoPrefix(commonData.division, coreType || 'CRGO');
     if (!prefix) return '';
 
@@ -928,8 +970,12 @@ export default function NewJob() {
    * deliberately or by accident, and the save-time prefix check is what catches an edited
    * one - so that check is live, not the dead branch a fixed addon would have made it.
    */
-  const rowJobNoPrefix = (coreType: string): string =>
+  const rowJobNoPrefix = (coreType: string): string | null =>
     getJobNoPrefix(commonData.division, coreType || 'CRGO').prefix;
+
+  /** True when this row's division and core type have no prefix configured. */
+  const rowHasNoPrefix = (coreType: string): boolean =>
+    commonData.repairType === 'OGP' && Boolean(activeAgency) && !rowJobNoPrefix(coreType);
 
   const addTransformer = () => {
     const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
@@ -1058,19 +1104,19 @@ export default function NewJob() {
       for (const t of transformers) {
         // WHAT THIS CATCHES NOW: an EMPTY number. The prefix half is all but unreachable -
         // it is derived from the same division and core type it is checked against, so it
-        // cannot disagree unless a restored draft carries a number from another division.
-        // Kept for that case and as a backstop, but the message must lead with the empty
-        // one, which is the case an operator will actually meet.
+        // cannot disagree unless a restored draft carries a number from another division,
+        // or the operator edits the prefix inside the box. Kept for both, and for the empty
+        // number, which is the case an operator will actually meet.
+        //
+        // setupGapForPrefix FIRST, before the prefix is used for anything. With no prefix
+        // configured, `info.prefix` is null and `info.prefix + '-'` composes the string
+        // "null-", so every row would be refused with a message naming a prefix that does
+        // not exist - a complaint about the job number for a fault in agency settings.
+        if (setupGapForPrefix(t.coreType)) return;
         const info = getJobNoPrefix(commonData.division, t.coreType);
         if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
-          // Diagnose the REAL cause before reporting. 'JOB' is the fallback prefix
-          // returned when there is no AT master or no prefix configured for this
-          // division + core type, so the old message ("expected prefix JOB-") named the
-          // job number - the one thing that is not wrong - and sent the operator
-          // hunting through job numbers for a problem in agency settings.
-          if (setupGapForPrefix(t.coreType)) return;
           const err = !String(t.jobNo || '').trim()
-            ? `A transformer has no job number. Every unit needs the number the division wrote on the MR - type it after the "${info.prefix}-" shown beside the box.`
+            ? `A transformer has no job number. Every unit needs the number the division wrote on the MR - the box already starts with "${info.prefix}-", so only the number is missing.`
             : `Job number "${t.jobNo}" does not belong to ${commonData.division} / ${t.coreType || 'CRGO'}, which uses "${info.prefix}-". Check the division and core type on this row against the MR.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
@@ -1177,13 +1223,13 @@ export default function NewJob() {
       // Check OGP prefix validation
       if (commonData.repairType === 'OGP') {
         for (const t of transformers) {
-          // Same test as the pre-save one above - see the note there for what it can still
-          // catch now that the prefix is derived rather than typed.
+          // Same test and the SAME ORDERING as the pre-save check above: the setup gap is
+          // tested before the prefix is composed into anything.
+          if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
           const info = getJobNoPrefix(commonData.division, t.coreType);
           if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
-            if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
             const err = !String(t.jobNo || '').trim()
-              ? `A transformer has no job number. Every unit needs the number the division wrote on the MR - type it after the "${info.prefix}-" shown beside the box.`
+              ? `A transformer has no job number. Every unit needs the number the division wrote on the MR - the box already starts with "${info.prefix}-", so only the number is missing.`
               : `Job number "${t.jobNo}" does not belong to ${commonData.division} / ${t.coreType || 'CRGO'}, which uses "${info.prefix}-". Check the division and core type on this row against the MR.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
@@ -2121,7 +2167,9 @@ export default function NewJob() {
                         placeholder={
                           commonData.repairType === 'GP'
                             ? 'Type the original job number'
-                            : `${rowJobNoPrefix(t.coreType || 'CRGO')}-  (number from the MR)`
+                            : rowJobNoPrefix(t.coreType || 'CRGO')
+                              ? `${rowJobNoPrefix(t.coreType || 'CRGO')}-  (number from the MR)`
+                              : 'no prefix configured'
                         }
                         value={t.jobNo}
                         onChange={(e) => {
@@ -2180,6 +2228,33 @@ export default function NewJob() {
                             : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
                         }`}
                       />
+
+                      {/* NO PREFIX CONFIGURED - say so, do not invent a number.
+                          This is the case the 'JOB' sentinel hid: getJobNoPrefix returned
+                          a plausible string, the box filled with "JOB-1", and nothing
+                          anywhere said that the division had no prefix (AUDIT F71).
+                          Inline rather than a modal - the operator may be filling other
+                          fields, and the save-time SetupGapDialog still blocks with the
+                          same route if they get that far without fixing it. */}
+                      {rowHasNoPrefix(t.coreType || 'CRGO') && (
+                        <div className="mt-1 flex items-start gap-1.5 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
+                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
+                          <span>
+                            No prefix configured for{' '}
+                            <strong>{commonData.division || 'this division'} / {t.coreType || 'CRGO'}</strong>.
+                            Job numbers cannot be suggested until one is set.{' '}
+                            <Link
+                              to={activeAtMaster
+                                ? `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(t.coreType || 'CRGO')}`
+                                : '/agency-settings?section=at'}
+                              onClick={saveIntakeDraft}
+                              className="font-bold underline hover:text-amber-950"
+                            >
+                              {activeAtMaster ? 'Configure prefixes' : 'Set up an AT'}
+                            </Link>
+                          </span>
+                        </div>
+                      )}
 
                       {/* GP SUGGESTION DROPDOWN - partial, case-insensitive, anywhere in
                           the string; agency-scoped pastJobs, most recent first. */}

@@ -434,8 +434,8 @@ interface AgencyContextType {
   addAtMaster: (atData: Omit<AtMaster, 'id' | 'ownerId'>) => Promise<{ id: string; seed: AtSeedReport } | undefined>;
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
 
-  predictNextJobNo: (division: string, coreType?: string, repairType?: string, atMasterId?: string) => { prefix: string, nextNum: number, counterKey: string };
-  getJobNoPrefix: (division: string, coreType?: string, atMasterId?: string) => { prefix: string; counterKey: string };
+  predictNextJobNo: (division: string, coreType?: string, repairType?: string, atMasterId?: string) => { prefix: string | null, nextNum: number, counterKey: string };
+  getJobNoPrefix: (division: string, coreType?: string, atMasterId?: string) => { prefix: string | null; counterKey: string };
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
 }
 
@@ -1166,6 +1166,18 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * The prefix and counter key for a division/core type. NO NUMBER: nothing allocates
    * one - see the note above predictNextJobNo (AUDIT F70).
    *
+   * ⚠ `prefix` IS null WHEN NOTHING IS CONFIGURED. It used to be the string 'JOB'.
+   *
+   * That sentinel caused two separate faults at once (AUDIT F71). It made the
+   * missing-prefix case UNDETECTABLE - `if (!prefix)` never fired, because 'JOB' is
+   * truthy - and it shipped a plausible wrong value in place of failing, so an
+   * unconfigured division produced "JOB-1" in a job-number box rather than a message
+   * saying no prefix was set up. An absence dressed as a fact.
+   *
+   * null cannot be concatenated into a job number by accident and cannot pass a truthiness
+   * check, so every caller has to decide what to do when there is no prefix. The one place
+   * that still WANTS a display string builds its own; nothing reconstructs the sentinel.
+   *
    * Split out of `getNextJobNoInfo` because composing a number from a client-side snapshot
    * is what let two operators draw the same one (AUDIT O2). Prefix resolution is pure and
    * stays synchronous; the number now comes from a transaction.
@@ -1183,24 +1195,27 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         : activeAgency.prefixes || {};
 
     const divPrefixInfo = currentPrefixes[division];
-    let prefix = 'JOB';
+    let prefix: string | null = null;
     const typeUpper = (coreType || 'CRGO').trim().toUpperCase();
 
     if (typeof divPrefixInfo === 'string') {
       prefix = divPrefixInfo;
     } else if (divPrefixInfo && typeof divPrefixInfo === 'object') {
       if (typeUpper === 'OH') {
-        prefix = (divPrefixInfo as any)['OH'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+        prefix = (divPrefixInfo as any)['OH'] || (divPrefixInfo as any)['CRGO'] || null;
       } else if (typeUpper.includes('AMORPHOUS') || typeUpper.includes('AM')) {
-        prefix = (divPrefixInfo as any)['Amorphous'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+        prefix = (divPrefixInfo as any)['Amorphous'] || (divPrefixInfo as any)['CRGO'] || null;
       } else if (typeUpper.includes('WOUND') || typeUpper.includes('WC')) {
-        prefix = (divPrefixInfo as any)['Wound Core'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+        prefix = (divPrefixInfo as any)['Wound Core'] || (divPrefixInfo as any)['CRGO'] || null;
       } else {
-        prefix = (divPrefixInfo as any)['CRGO'] || (divPrefixInfo as any)[coreType] || 'JOB';
+        prefix = (divPrefixInfo as any)['CRGO'] || (divPrefixInfo as any)[coreType] || null;
       }
     } else if (divPrefixInfo) {
       prefix = String(divPrefixInfo);
     }
+    // An empty or whitespace-only string is not a prefix either - a settings field that was
+    // opened and cleared reads as configured otherwise, which is the same fault one layer in.
+    if (typeof prefix === 'string' && !prefix.trim()) prefix = null;
     return { prefix, counterKey: getCounterKey(division, coreType) };
   };
 
@@ -1247,7 +1262,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     _repairType: string = 'OGP',
     atMasterId?: string,
   ) => {
-    if (!activeAgency) return { prefix: 'JOB', nextNum: 1, counterKey: 'JOB' };
+    if (!activeAgency) return { prefix: null, nextNum: 1, counterKey: 'JOB' };
 
     // ONE PREFIX RESOLVER, not two. This function used to carry its own copy of
     // getJobNoPrefix's division/core-type resolution - the same string-matching cascade,
