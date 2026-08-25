@@ -225,6 +225,28 @@ and diagnostic fixes.
 
 ---
 
+## The reset is partial, not total — 2026-08-25
+
+The current AT is live and generating estimates. It, its agency, its divisions, prefixes,
+allotments and counters, and every job referencing it, all stay. Only debris goes.
+
+`scripts/reset-classification-console.js` (read-only) sorts the records into keep / candidate
+and reports the overlaps. Three things it establishes that decide whether a partial reset is
+safe at all:
+
+- **MIXED MRs.** The only delete path in the app is MR-scoped (O33). If a job you are keeping
+  shares an MR with one you are removing, the UI cannot separate them - deleting that MR
+  takes both. Those MRs must be left alone, or the individual job documents deleted directly,
+  which the app cannot do.
+- **ORPHANED INSPECTIONS.** Nothing deletes an inspection when its job goes. They are inert -
+  no map ever looks up a missing id - but every later census has to recognise them.
+- **GUARANTEE HISTORY.** A GP claim matches a transformer against its previous repair. Deleting
+  a predecessor silently turns a valid guarantee claim into a normal chargeable repair.
+
+Two things that need no action: allotment consumption is counted live from jobs rather than
+stored, so it self-corrects; and `lastJobNumbers` is never rewound, so numbering continues
+past the gap and cannot reuse a number.
+
 ## The one to check before anything else
 
 **Does the data reset include `public_config`?** If it does not, item 28 means the first real
