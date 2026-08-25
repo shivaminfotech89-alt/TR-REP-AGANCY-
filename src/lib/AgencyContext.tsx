@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
-import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -229,6 +229,38 @@ export function getCounterKey(division: string, coreType: string = 'CRGO'): stri
   }
 }
 
+/**
+ * THE HIGH-WATER MARK OF A SET OF JOB NUMBERS, per counter key.
+ *
+ * ONE PARSING RULE, used by every screen that saves job numbers (AUDIT F70). The counter is
+ * no longer an allocator - it records the highest number actually written - so how a number
+ * is read back off the field is now load-bearing, and a second copy of "split on the last
+ * dash and parse the tail" that drifted would let a screen quietly stop advancing it.
+ *
+ * Callers APPLY the result inside whatever transaction they own, advancing only upward.
+ * NewJob does it inside the transaction that writes the jobs; MrLedger in its own after the
+ * batch. Deliberately not merged into one applier: NewJob's atomicity with the job writes
+ * is worth more than sharing five lines.
+ */
+export function highWaterJobNos(
+  rows: { jobNo?: string | null; coreType?: string | null }[],
+  division: string,
+): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const r of rows) {
+    const raw = String(r.jobNo ?? '').trim();
+    if (!raw) continue;
+    // The tail after the LAST dash - prefixes themselves may contain one ("21 IS", "OH-A").
+    const dash = raw.lastIndexOf('-');
+    if (dash < 0) continue;
+    const num = parseInt(raw.slice(dash + 1), 10);
+    if (!Number.isFinite(num) || num <= 0) continue;
+    const key = getCounterKey(division, r.coreType || 'CRGO');
+    if (!out[key] || num > out[key]) out[key] = num;
+  }
+  return out;
+}
+
 export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType: string = 'CRGO'): number {
   if (!at) return 4;
   const type = (coreType || 'CRGO').trim().toUpperCase();
@@ -402,10 +434,8 @@ interface AgencyContextType {
   addAtMaster: (atData: Omit<AtMaster, 'id' | 'ownerId'>) => Promise<{ id: string; seed: AtSeedReport } | undefined>;
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
 
-  predictNextJobNo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
+  predictNextJobNo: (division: string, coreType?: string, repairType?: string, atMasterId?: string) => { prefix: string, nextNum: number, counterKey: string };
   getJobNoPrefix: (division: string, coreType?: string, atMasterId?: string) => { prefix: string; counterKey: string };
-  reserveJobNos: (division: string, coreType?: string, count?: number, atMasterId?: string) => Promise<string[]>;
-  incrementJobNoCounter: (counterKey: string, count: number) => Promise<void>;
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
 }
 
@@ -1189,60 +1219,23 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * RESERVE job numbers atomically. Returns the composed numbers, in order.
+   * ⚠ THE ALLOCATOR IS DELETED. Nothing in this app draws a job number (AUDIT F70).
    *
-   * The counter is advanced INSIDE the transaction, so two operators cannot draw the same
-   * number: Firestore retries the loser, which then reads the advanced value.
+   * `reserveJobNos` advanced a counter inside a transaction and handed back numbers, and
+   * `incrementJobNoCounter` did the same by counter key. Both are gone rather than left
+   * unused, because an unused allocator is an invitation: five separate fixes went into
+   * guarding the calls to it, and the sixth would have been written by whoever found it
+   * sitting here looking useful.
    *
-   * A RESERVATION IS PERMANENT. There is no expiry and nothing reclaims an abandoned
-   * number, because the app cannot know whether the operator has already written it on the
-   * transformer - and handing a marked number to someone else is the exact failure this
-   * prevents. An abandoned number is burned, and a gap in the sequence is correct: the job
-   * number is the agency's internal reference, and the counter is already never rewound
-   * when a job is deleted.
+   * Job numbers come from the division on the MR. The operator types them, the app suggests
+   * the next one via `predictNextJobNo` (which READS and never writes), and the counter is
+   * advanced at save to the highest number actually recorded - by the screen doing the
+   * saving, sharing one parsing rule in `highWaterJobNos`.
+   *
+   * If a future requirement really does need app-allocated numbers, write it deliberately
+   * and read AUDIT F70 first - the failure was never in the guards.
    */
-  const reserveJobNos = async (
-    division: string,
-    coreType: string = 'CRGO',
-    count: number = 1,
-    atMasterId?: string,
-  ): Promise<string[]> => {
-    if (count <= 0) return [];
-    const target = jobNoCounterTarget(atMasterId);
-    const { prefix, counterKey } = getJobNoPrefix(division, coreType, atMasterId);
-    if (!target) throw new Error('No agency is selected, so a job number cannot be reserved.');
 
-    const allocated = await runTransaction(db, async (transaction) => {
-      const snap = await transaction.get(target.ref);
-      const counters: Record<string, number> = { ...((snap.data() as any)?.lastJobNumbers || {}) };
-      // CRGO is counted under either `${div}_CRGO` or a bare `${div}` key - same fallback
-      // the seeding uses, so the two cannot disagree about where CRGO's sequence lives.
-      const bare = division;
-      const current = Math.max(
-        Number(counters[counterKey] ?? 0) || 0,
-        counterKey.endsWith('_CRGO') ? (Number(counters[bare] ?? 0) || 0) : 0,
-      );
-      const nums: number[] = [];
-      for (let i = 1; i <= count; i++) nums.push(current + i);
-      counters[counterKey] = current + count;
-      if (counterKey.endsWith('_CRGO')) counters[bare] = current + count;
-      transaction.update(target.ref, { lastJobNumbers: counters });
-      return nums;
-    });
-
-    // Local mirror so the next reservation in the same session does not re-read a stale
-    // context value. The transaction is authoritative either way.
-    if (target.isAtMaster) {
-      setAtMasters(prev => prev.map(a => a.id === target.id
-        ? { ...a, lastJobNumbers: { ...(a.lastJobNumbers || {}), [counterKey]: allocated[allocated.length - 1] } }
-        : a));
-    } else {
-      setAgencies(prev => prev.map(a => a.id === target.id
-        ? { ...a, lastJobNumbers: { ...(a.lastJobNumbers || {}), [counterKey]: allocated[allocated.length - 1] } }
-        : a));
-    }
-    return allocated.map(n => `${prefix}-${n}`);
-  };
 
   /**
    * PREDICTS the next job number from the CONTEXT SNAPSHOT. It does not allocate.
@@ -1257,50 +1250,33 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * Never use this to fill a job-number field. The number in that field is written on the
    * transformer, so it must come from a reservation.
    */
-  const predictNextJobNo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
+  const predictNextJobNo = (
+    division: string,
+    coreType: string = 'CRGO',
+    _repairType: string = 'OGP',
+    atMasterId?: string,
+  ) => {
     if (!activeAgency) return { prefix: 'JOB', nextNum: 1, counterKey: 'JOB' };
-    
-    const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
-        ? activeAtMaster.prefixes 
-        : activeAgency.prefixes || {};
-        
-    const divPrefixInfo = currentPrefixes[division];
-    let prefix = 'JOB';
-    const typeUpper = (coreType || 'CRGO').trim().toUpperCase();
 
-    if (typeof divPrefixInfo === 'string') {
-      prefix = divPrefixInfo;
-    } else if (divPrefixInfo && typeof divPrefixInfo === 'object') {
-      if (typeUpper === 'OH') {
-        prefix = (divPrefixInfo as any)['OH'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
-      } else if (typeUpper.includes('AMORPHOUS') || typeUpper.includes('AM')) {
-        prefix = (divPrefixInfo as any)['Amorphous'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
-      } else if (typeUpper.includes('WOUND') || typeUpper.includes('WC')) {
-        prefix = (divPrefixInfo as any)['Wound Core'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
-      } else {
-        prefix = (divPrefixInfo as any)['CRGO'] || (divPrefixInfo as any)[coreType] || 'JOB';
-      }
-    } else if (divPrefixInfo) {
-      prefix = String(divPrefixInfo);
-    }
-    
-    let lastNum = 0;
-    const counterKey = getCounterKey(division, coreType);
-    
-    if (activeAtMaster && activeAtMaster.lastJobNumbers) {
-      if (activeAtMaster.lastJobNumbers[counterKey] !== undefined) {
-        lastNum = activeAtMaster.lastJobNumbers[counterKey];
-      } else if (typeUpper.includes('CRGO') && activeAtMaster.lastJobNumbers[division] !== undefined) {
-        lastNum = activeAtMaster.lastJobNumbers[division];
-      }
-    } else if (activeAgency && activeAgency.lastJobNumbers) {
-      if (activeAgency.lastJobNumbers[counterKey] !== undefined) {
-        lastNum = activeAgency.lastJobNumbers[counterKey];
-      } else if (typeUpper.includes('CRGO') && activeAgency.lastJobNumbers[division] !== undefined) {
-        lastNum = activeAgency.lastJobNumbers[division];
-      }
-    }
-    
+    // ONE PREFIX RESOLVER, not two. This function used to carry its own copy of
+    // getJobNoPrefix's division/core-type resolution - the same string-matching cascade,
+    // written out twice, which is the parallel-implementation shape this audit has now hit
+    // in estimates, in job numbering and here. Delegated, so a change to how a prefix is
+    // chosen cannot apply to the number that is issued but not to the one that is shown.
+    const { prefix, counterKey } = getJobNoPrefix(division, coreType, atMasterId);
+
+    // WHICH COUNTER TO READ. An MR belongs to the tender it was issued under, so a caller
+    // adding to an existing MR passes that AT explicitly rather than taking the session's
+    // (AUDIT F66). Falls back to the active AT, then the agency, for callers with no
+    // particular AT in mind.
+    const source = atMasterId ? atMasters.find(a => a.id === atMasterId) : activeAtMaster;
+    const counters = (source?.lastJobNumbers) || (source ? {} : activeAgency.lastJobNumbers) || {};
+
+    // CRGO is counted under either `<div>_CRGO` or a bare `<div>` - the same fallback pair
+    // reserveJobNos reads the MAX of, so a prediction cannot sit below a real number.
+    const bare = counterKey.endsWith('_CRGO') ? Number(counters[division] ?? 0) || 0 : 0;
+    const lastNum = Math.max(Number(counters[counterKey] ?? 0) || 0, bare);
+
     return { prefix, nextNum: lastNum + 1, counterKey };
   };
 
@@ -1309,39 +1285,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * `activeAtMaster` alone; the read branches on `activeAtMaster.lastJobNumbers` as well.
    * They must be changed together. AUDIT.md A6.
    */
-  const incrementJobNoCounter = async (counterKey: string, count: number) => {
-    try {
-      if (activeAtMaster) {
-        const atRef = doc(db, 'atMasters', activeAtMaster.id);
-        let updatedLastJobNumbers: Record<string, number> = {};
-        await runTransaction(db, async (transaction) => {
-          const atDoc = await transaction.get(atRef);
-          if (!atDoc.exists()) throw new Error("Active AT Master document not found");
-          const data = atDoc.data() as AtMaster;
-          const currentLastNum = (data.lastJobNumbers && data.lastJobNumbers[counterKey]) || 0;
-          updatedLastJobNumbers = { ...(data.lastJobNumbers || {}), [counterKey]: currentLastNum + count };
-          transaction.update(atRef, { lastJobNumbers: updatedLastJobNumbers });
-        });
-        setAtMasters(prev => prev.map(a => a.id === activeAtMaster.id ? { ...a, lastJobNumbers: updatedLastJobNumbers } : a));
-      } else if (activeAgency) {
-        const agencyRef = doc(db, 'agencies', activeAgency.id);
-        let updatedLastJobNumbers: Record<string, number> = {};
-        await runTransaction(db, async (transaction) => {
-          const agDoc = await transaction.get(agencyRef);
-          if (!agDoc.exists()) throw new Error("Active Agency document not found");
-          const data = agDoc.data() as Agency;
-          const currentLastNum = (data.lastJobNumbers && data.lastJobNumbers[counterKey]) || 0;
-          updatedLastJobNumbers = { ...(data.lastJobNumbers || {}), [counterKey]: currentLastNum + count };
-          transaction.update(agencyRef, { lastJobNumbers: updatedLastJobNumbers });
-        });
-        setAgencies(prev => prev.map(a => a.id === activeAgency.id ? { ...a, lastJobNumbers: updatedLastJobNumbers } : a));
-      }
-    } catch (err) {
-      handleFirestoreError(err, OperationType.UPDATE, activeAtMaster ? 'atMasters' : 'agencies');
-      throw err;
-    }
-  };
-
   const syncCountersState = (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => {
     if (isAtMaster) {
       setAtMasters(prev => prev.map(a => a.id === id ? { ...a, lastJobNumbers: newCounters } : a));
@@ -1359,7 +1302,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
       saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
-      predictNextJobNo, getJobNoPrefix, reserveJobNos, incrementJobNoCounter, syncCountersState
+      predictNextJobNo, getJobNoPrefix, syncCountersState
     }}>
       {children}
     </AgencyContext.Provider>

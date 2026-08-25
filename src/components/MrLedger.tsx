@@ -8,10 +8,11 @@ import {
   updateDoc, 
   deleteDoc, 
   setDoc,
-  writeBatch 
+  writeBatch,
+  runTransaction
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, highWaterJobNos } from '../lib/AgencyContext';
 import { 
   Loader2, 
   Search, 
@@ -98,9 +99,8 @@ const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', 
 const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair'];
 
 export default function MrLedger() {
-  const { activeAgency, activeAtMaster, atMasters, reserveJobNos } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, predictNextJobNo } = useAgency();
   /** True while a job number is being reserved - disables the Add button. */
-  const [addingTransformer, setAddingTransformer] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -249,23 +249,26 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
   };
 
   // Add new transformer row to editing MR
-  const handleAddTransformerToMr = async () => {
+  const handleAddTransformerToMr = () => {
     if (!editingMr) return;
 
     const lastJob = editingMr.jobs[editingMr.jobs.length - 1];
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
 
-    // RESERVED from the MR'S OWN AT, not composed from a snapshot (AUDIT F66).
+    // SUGGESTED from the MR'S OWN AT, not drawn from it (AUDIT F66, F70).
     //
-    // This used to read the counter, then scan the MR's existing jobs for a higher number
-    // and add one - the same client-side high-water pattern O2 was about, on a screen the
-    // original trace never reached. Worse than NewJob's old behaviour: nothing here ever
-    // wrote `lastJobNumbers` back, so a number issued from this screen left the counter
-    // untouched and the next intake reissued it. The scan was load-bearing precisely
-    // because the counter was stale by construction.
+    // A transformer added to MR 1563 belongs to the tender MR 1563 was issued under, so the
+    // prediction reads that AT's counter rather than whichever AT the session has selected
+    // - which is why atForEditingMr must resolve before anything is suggested, and why an
+    // MR that disagrees with itself about its AT is refused rather than guessed at.
     //
-    // GP reuses the original number from the previous repair and draws nothing.
+    // NOTHING IS RESERVED. This row is held in memory until the operator presses Save, so
+    // reserving here burned a number every time someone opened the dialog, added a row and
+    // thought better of it. The counter advances at save, to the highest number actually
+    // written, exactly as intake does.
+    //
+    // GP reuses the original number from the previous repair and is suggested nothing.
     let nextJobNo = '';
     if (activeAgency && editingMr.repairType !== 'GP') {
       const at = atForEditingMr();
@@ -273,19 +276,18 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
         setNotification({ type: 'error', message: at.error });
         return;
       }
-      try {
-        setAddingTransformer(true);
-        [nextJobNo] = await reserveJobNos(editingMr.division, coreType, 1, at.atId);
-      } catch (err) {
-        console.error('Could not reserve a job number:', err);
-        setNotification({
-          type: 'error',
-          message: 'Could not reserve a job number for this transformer. Check the connection and try again - nothing was added.',
-        });
-        return;
-      } finally {
-        setAddingTransformer(false);
-      }
+      const info = predictNextJobNo(editingMr.division, coreType, editingMr.repairType, at.atId);
+      // Step past every number already on this MR, saved rows and unsaved ones alike, so
+      // adding three transformers suggests three consecutive numbers rather than one number
+      // three times. The counter has not moved for the rows sitting in this dialog.
+      const head = `${(info.prefix || '').toUpperCase()}-`;
+      const onThisMr = editingMr.jobs
+        .map(j => String(j.jobNo || '').trim().toUpperCase())
+        .filter(v => head.length > 1 && v.startsWith(head))
+        .map(v => Number(v.slice(head.length)))
+        .filter(n => Number.isFinite(n) && n > 0);
+      const next = Math.max(Number(info.nextNum) || 1, ...onThisMr.map(n => n + 1));
+      nextJobNo = `${info.prefix}-${next}`;
     }
 
     setEditingMr(prev => {
@@ -449,6 +451,48 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
       }
 
       await batch.commit();
+
+      // ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (AUDIT F70).
+      //
+      // This screen never wrote `lastJobNumbers` at all. It did not have to while adding a
+      // unit RESERVED its number - the reservation moved the counter before the row existed.
+      // Now that nothing is reserved, this is the only thing that moves it, and without it a
+      // number saved here would be handed straight back to the next intake as a suggestion.
+      //
+      // Separate from the batch because advancing needs a read, and a writeBatch cannot read.
+      // Not atomic with the job writes, and that is survivable in a way the reverse is not:
+      // if this fails the counter is merely stale, the next suggestion repeats a number, and
+      // the duplicate check refuses it at save with the conflict named. A counter advanced
+      // for jobs that never saved would silently skip numbers the division has allotted.
+      if (editingMr.repairType !== 'GP') {
+        const at = atForEditingMr();
+        if (!('error' in at)) {
+          const highWater = highWaterJobNos(editingMr.jobs, editingMr.division);
+          if (Object.keys(highWater).length > 0) {
+            try {
+              const atRef = doc(db, 'atMasters', at.atId);
+              await runTransaction(db, async (tx) => {
+                const snap = await tx.get(atRef);
+                if (!snap.exists()) return;
+                const counters: Record<string, number> = { ...((snap.data() as any)?.lastJobNumbers || {}) };
+                let changed = false;
+                for (const [key, num] of Object.entries(highWater)) {
+                  if (num > (Number(counters[key]) || 0)) { counters[key] = num; changed = true; }
+                  // CRGO lives under `<div>_CRGO` and a bare `<div>`; both move together or
+                  // the pair disagrees about where the sequence is - see reserveJobNos.
+                  if (key.endsWith('_CRGO') && num > (Number(counters[editingMr.division]) || 0)) {
+                    counters[editingMr.division] = num; changed = true;
+                  }
+                }
+                if (changed) tx.update(atRef, { lastJobNumbers: counters });
+              });
+            } catch (counterErr) {
+              // Reported, never fatal - the jobs are already saved and are the record.
+              console.error('MR saved, but the job-number counter could not be advanced:', counterErr);
+            }
+          }
+        }
+      }
 
       setNotification({
         type: 'success',
@@ -921,16 +965,15 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     </h4>
                   </div>
                   
+                  {/* No spinner: adding a unit is synchronous and cannot fail now that it
+                      asks the counter for nothing (AUDIT F70). */}
                   <button
                     type="button"
                     onClick={handleAddTransformerToMr}
-                    disabled={addingTransformer}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
+                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                   >
-                    {addingTransformer
-                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      : <Plus className="w-3.5 h-3.5" />}
-                    <span>{addingTransformer ? 'Reserving job number…' : 'Add Unit to this MR'}</span>
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Unit to this MR</span>
                   </button>
                 </div>
 

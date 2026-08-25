@@ -2,34 +2,38 @@
 //
 // READ-ONLY.   node scripts/admin/read-counters.js
 //
-// THE COUNTER CHECK
-// -----------------
-// The reservation work (AUDIT F60, F67) has never executed. It typechecks; that says the
-// shapes are right and nothing about the logic. The one thing that will say whether a row
-// draws ONE number or two is watching the counter across a single deliberate action:
+// WHAT A COUNTER IS NOW
+// ---------------------
+// A HIGH-WATER MARK, not an allocator. Nothing in the app draws a job number: the operator
+// types what the division put on the MR, and the counter advances at SAVE to the highest
+// number actually recorded (AUDIT F70). So the question this script answers has changed.
 //
-//   1. node scripts/admin/read-counters.js          <- before
-//   2. In the app: open New Job and type a serial number into the first row
-//   3. node scripts/admin/read-counters.js          <- after
+// It used to be "did one keystroke draw exactly one number" - a test of reservation guards
+// that no longer exist. It is now simply: what is the app going to SUGGEST next, and did a
+// save move the mark.
 //
-// EXPECTED, for one row: one number issued.
+// THE TEST THAT MATTERS
+// ---------------------
+//   1. node scripts/admin/read-counters.js --save
+//   2. In the app: open New Job, type into it, flip core type and division as much as you
+//      like, then NAVIGATE AWAY WITHOUT SAVING
+//   3. node scripts/admin/read-counters.js --diff
 //
-//   an EXISTING key +2      a reservation fired twice - the in-flight guard is not holding
-//   nothing moved           the trigger did not fire at all
-//   two keys moved          normal for CRGO: reserveJobNos writes `<div>` and `<div>_CRGO`
-//                           together, so one allocation shows as two keys
-//   a key CREATED           also normal, and not a jump. An AT predating addAtMaster's
-//                           seeding fix can be missing its bare `<div>` key; reserveJobNos
-//                           reads the MAX of the pair and writes both, so it is created in
-//                           step rather than restarting the sequence at 1. The delta looks
-//                           large because absent reads as zero - it is not an increment.
+//   EXPECTED: NOTHING MOVED. Not one number, however much was typed or flipped. An intake
+//   that is abandoned costs the allotment nothing - that is the whole point of F70, and
+//   this is the check that proves it.
 //
-// And the form-open test, which is what F67 was for:
+// And the save side:
 //
-//   1. read      2. open New Job and navigate away WITHOUT typing      3. read
-//   EXPECTED: nothing moves. A number burned here would be one drawn before the operator
-//   could possibly have marked a transformer, which is what makes no-reclaim defensible.
+//   1. read      2. save an MR with job numbers      3. read
+//   EXPECTED: each counter touched lands on the HIGHEST number in what was saved. Not
+//   "+1 per row" - a save of SU-40, SU-41, SU-42 puts DEESA_CRGO at 42 whatever it held
+//   before, and a save of numbers BELOW the mark moves nothing, because it only advances.
+//   Two keys moving is normal for CRGO: `<div>` and `<div>_CRGO` are written together.
 //
+// A key CREATED is also normal and is not a jump - absent reads as zero, so a bare `<div>`
+// key appearing at 42 is one write, not forty-two.
+
 // Pass --save to write a snapshot, then --diff to compare against it:
 //
 //   node scripts/admin/read-counters.js --save
@@ -80,21 +84,21 @@ if (mode === 'save') {
 
   // A KEY THAT DID NOT EXIST IS NOT A KEY THAT JUMPED.
   //
-  // The first version knew only "delta must be 1". When reserveJobNos CREATED the bare
-  // `<div>` key alongside `<div>_CRGO` - which it does deliberately - the diff read absent
-  // as 0, reported 0 -> 11 as a jump of eleven, and printed a warning at the exact moment
-  // the code was working correctly.
+  // The first version knew only "delta must be 1" - a rule taken from the allocator, which
+  // is gone. It read an absent bare `<div>` key as 0, reported 0 -> 11 as a jump of eleven,
+  // and warned at the exact moment the code was working correctly.
   //
-  // Third time in this audit a check has reported confidently outside its own model: an
-  // exact-string comparison that could not detect mistyping, a sweep truncated before the
-  // judgement, and this. A diagnostic that flags a failure while the code works is worse
-  // than no diagnostic - it costs the investigation that follows.
+  // Under the high-water model there is NO expected delta at all: a save of five rows
+  // numbered 40-44 moves the counter by however far it was behind 44. So this no longer
+  // judges the size of a move. It reports what moved and leaves the reading to whoever ran
+  // it - which is the honest output for a mark that tracks data rather than issuing it.
   const bareOf = k => k.replace(/_CRGO$/, '');
   const wasPresent = k => k in before.counters;
 
   if (moved.length === 0) {
     console.log('  NOTHING MOVED.');
-    console.log('  Correct for the form-open test. If you typed a serial, the trigger did not fire.');
+    console.log('  Correct for ANY amount of unsaved intake - typing, flipping core type or');
+    console.log('  division, adding and removing rows. Only a save moves a counter (F70).');
   } else {
     console.table(moved.map(r => ({ ...r, note: wasPresent(r.counter) ? '' : 'key created' })));
     console.log('');
@@ -125,16 +129,14 @@ if (mode === 'save') {
         : `    key CREATED at ${r.after}.`);
     });
 
-    const overrun = moved.filter(r => wasPresent(r.counter) && r.delta > 1);
     console.log('');
-    if (overrun.length === 0) {
-      console.log('  VERDICT: no existing counter advanced by more than 1. For a single row that');
-      console.log('  means one number was issued and the in-flight guard held.');
-    } else {
-      console.log('  VERDICT: a counter that already existed advanced by more than 1:');
-      overrun.forEach(r => console.log(`    ${r.counter}: +${r.delta}`));
-      console.log('  If you added ONE row, a reservation fired more than once.');
-    }
+    console.log('  These are HIGH-WATER MARKS. A counter now sits at the highest job number');
+    console.log('  recorded against it, so the size of a move says how far behind the mark');
+    console.log('  was - not how many numbers were issued. If you saved an MR, each counter');
+    console.log('  above should equal the largest number on that MR.');
+    console.log('');
+    console.log('  ⚠ IF YOU DID NOT SAVE, nothing should have moved at all. A move without a');
+    console.log('  save means something is writing lastJobNumbers outside the save path.');
   }
 } else {
   const rows = Object.entries(current).sort(([a], [b]) => a.localeCompare(b))

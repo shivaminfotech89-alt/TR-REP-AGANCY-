@@ -32,7 +32,7 @@ import {
   Tag,
   Scale
 } from 'lucide-react';
-import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { useAgency, highWaterJobNos, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
@@ -1432,26 +1432,16 @@ export default function NewJob() {
         const maxJobNoMap: Record<string, number> = {};
         const jobEntries: { ref: any; data: any }[] = [];
 
+        // ONE PARSING RULE, shared with MrLedger (F70). The number is whatever the operator
+        // typed, so how it is read back off the field decides whether the counter advances -
+        // and a second copy that drifted would let one screen quietly stop advancing it.
+        // GP reuses the original number from a previous repair and never moves a counter.
+        if (commonData.repairType !== 'GP') {
+          Object.assign(maxJobNoMap, highWaterJobNos(transformers, commonData.division));
+        }
+
         for (const t of transformers) {
           if (!t.jobNo) continue;
-
-          // Only update sequence counter for OGP repairs. GP warranty repairs reuse the original Job Number from 1st repair.
-          if (commonData.repairType !== 'GP') {
-            // counterKey only - the NUMBER is whatever the operator typed. This reads it
-            // back off the field rather than trusting anything the app issued, because the
-            // app no longer issues anything (F70).
-            const counterKey = getJobNoPrefix(commonData.division, t.coreType).counterKey;
-
-            const parts = t.jobNo.split('-');
-            if (parts.length > 1) {
-              const num = parseInt(parts[parts.length - 1], 10);
-              if (!isNaN(num)) {
-                if (!maxJobNoMap[counterKey] || num > maxJobNoMap[counterKey]) {
-                  maxJobNoMap[counterKey] = num;
-                }
-              }
-            }
-          }
 
           const newJobRef = doc(collection(db, 'jobs'));
             // Previous AT & GP Warranty Metadata (Computed directly from row's Last Repaired Date & Agency GP Validation setting)
@@ -1532,9 +1522,17 @@ export default function NewJob() {
         let hasCounterChange = false;
 
         for (const [counterKey, maxNum] of Object.entries(maxJobNoMap)) {
-          const currentLast = currentCounters[counterKey] || 0;
+          const currentLast = Number(currentCounters[counterKey]) || 0;
           if (maxNum > currentLast) {
             nextCounters[counterKey] = maxNum;
+            hasCounterChange = true;
+          }
+          // CRGO lives under `<div>_CRGO` and a bare `<div>`, and both must move together or
+          // the pair disagrees about where the sequence is. predictNextJobNo reads the MAX
+          // of them, so a stale half is not wrong today - it is one refactor away from being
+          // wrong, and MrLedger's advance keeps them in step for the same reason.
+          if (counterKey.endsWith('_CRGO') && maxNum > (Number(currentCounters[commonData.division]) || 0)) {
+            nextCounters[commonData.division] = maxNum;
             hasCounterChange = true;
           }
         }
