@@ -203,12 +203,67 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, reserveJobNos, syncCountersState } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, reserveJobNos, syncCountersState } = useAgency();
   // Which row is waiting on a reservation, and the last failure. The number field shows
   // a spinner rather than a provisional value: a provisional number is exactly what gets
   // written on a transformer (AUDIT F60).
-  const [reservingRow, setReservingRow] = useState<number | null>(null);
+  /**
+   * Rows with a reservation IN FLIGHT, and rows whose last attempt FAILED - both keyed on
+   * `rowKey`, never on index, because a splice moves every index (AUDIT F63).
+   *
+   * In-flight is what stops fast typing from firing a second reservation before the first
+   * returns: the trigger is a keystroke, and `jobNo` stays empty until the transaction
+   * lands.
+   */
+  const [reservingKeys, setReservingKeys] = useState<Set<string>>(new Set());
+  const [reserveFailedKeys, setReserveFailedKeys] = useState<Set<string>>(new Set());
   const [reserveError, setReserveError] = useState<string | null>(null);
+
+  const markReserving = (key: string, on: boolean) =>
+    setReservingKeys(prev => {
+      const next = new Set(prev);
+      if (on) next.add(key); else next.delete(key);
+      return next;
+    });
+  const markFailed = (key: string, on: boolean) =>
+    setReserveFailedKeys(prev => {
+      const next = new Set(prev);
+      if (on) next.add(key); else next.delete(key);
+      return next;
+    });
+
+  /**
+   * FIRST MEANINGFUL ENTRY - the fields that mean the transformer is in front of you.
+   *
+   * `serialNo` and `make` come off the nameplate and start empty, so entry in either is
+   * unambiguous. `capacityKva` is pre-filled with a default, so there is no "first entry" -
+   * only a change, which is still a deliberate act on a real unit. `coreType` is excluded:
+   * it is pre-filled too and already runs the reserve-or-prompt path, so counting it here
+   * would double-fire.
+   *
+   * Reserving at this moment rather than at form open is what makes the no-reclaim rule
+   * defensible: a number is only drawn once the operator could plausibly write it on metal
+   * (AUDIT F67). Opening the screen and leaving burns nothing.
+   */
+  const RESERVE_TRIGGER_FIELDS: StringRowField[] = ['serialNo', 'make', 'capacityKva'];
+
+  /** Draw this row's number, once. Safe to call on every keystroke. */
+  const reserveForRow = async (rowKey: string, coreType: string) => {
+    if (!activeAgency || commonData.repairType === 'GP') return;
+    if (reservingKeys.has(rowKey)) return;
+    markReserving(rowKey, true);
+    markFailed(rowKey, false);
+    try {
+      const [jobNo] = await reserveJobNos(commonData.division, coreType, 1);
+      setTransformers(prev => prev.map(t => (t.rowKey === rowKey && !String(t.jobNo || '').trim())
+        ? { ...t, jobNo } : t));
+    } catch (err) {
+      console.error('Could not reserve a job number:', err);
+      markFailed(rowKey, true);
+    } finally {
+      markReserving(rowKey, false);
+    }
+  };
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -357,7 +412,7 @@ export default function NewJob() {
   >(null);
 
   const [renumberPrompt, setRenumberPrompt] = useState<
-    { field: 'division' | 'coreType'; label: string; rows: { index: number; from: string; fromLabel: string; to: string }[] } | null
+    { field: 'division' | 'coreType'; label: string; division: string; rows: { index: number; from: string; fromLabel: string; to: string; coreType: string }[] } | null
   >(null);
 
   /** Reserve numbers for rows that have none. Rows that hold one are left alone. */
@@ -416,43 +471,40 @@ export default function NewJob() {
 
     if (numbered.length === 0) return;
 
-    // Rows that already hold a number: reserve what the replacement WOULD be and offer it.
-    // Reserved to show, and burned if declined - the number on screen has to be the number
-    // that gets assigned, or the prompt reintroduces the very gap it exists to close. A
-    // burned number is a gap in the sequence, which is already normal here.
-    try {
-      const offers: { index: number; from: string; fromLabel: string; to: string }[] = [];
-      const byKey: Record<string, { coreType: string; rows: { index: number; from: string; fromLabel: string }[] }> = {};
-      numbered.forEach(({ t, index }) => {
-        const { counterKey } = getJobNoPrefix(division, t.coreType);
-        // Where the EXISTING number came from - the division and core type in force when it
-        // was reserved, not the new ones. The operator may not remember which division they
-        // picked two rows ago, and the number may already be on metal.
-        (byKey[counterKey] ||= { coreType: t.coreType, rows: [] }).rows.push({
-          index, from: t.jobNo,
-          fromLabel: `${commonData.division || '-'} / ${t.coreType || 'CRGO'}`,
-        });
-      });
-      for (const { coreType, rows } of Object.values(byKey)) {
-        const nums = await reserveJobNos(division, coreType, rows.length);
-        rows.forEach((r, i) => offers.push({ index: r.index, from: r.from, fromLabel: r.fromLabel, to: nums[i] }));
-      }
-      setRenumberPrompt({
-        field: name === 'division' ? 'division' : 'coreType',
-        label: name === 'division' ? `division ${commonData.division || '-'} to ${value}` : `repair type to ${value}`,
-        rows: offers.sort((x, y) => x.index - y.index),
-      });
-    } catch (err) {
-      console.error('Could not reserve replacement job numbers:', err);
-      setReserveError('Could not reserve replacement job numbers. The existing numbers are unchanged.');
-    }
+    // Rows that already hold a number: PREDICT the replacement and offer it. Nothing is
+    // reserved here (AUDIT F68).
+    //
+    // The prompt used to reserve before showing, so the number on screen was guaranteed to
+    // be the number assigned. That guarantee cost a burned number every time an operator
+    // flipped a dropdown to check something - certain and frequent - to close a window of
+    // milliseconds that is rare and, since F62, already handled: a collision produces a
+    // refused save with an offer, not a duplicate.
+    //
+    // So the offer is a prediction, reserved on accept, with one retry if the reservation
+    // comes back different from what was shown.
+    const offers = numbered.map(({ t, index }) => ({
+      index,
+      from: t.jobNo,
+      fromLabel: `${commonData.division || '-'} / ${t.coreType || 'CRGO'}`,
+      to: (() => {
+        const info = predictNextJobNo(division, t.coreType, repairType);
+        return `${info.prefix}-${info.nextNum}`;
+      })(),
+      coreType: t.coreType || 'CRGO',
+    }));
+    setRenumberPrompt({
+      field: name === 'division' ? 'division' : 'coreType',
+      label: name === 'division' ? `division ${commonData.division || '-'} to ${value}` : `repair type to ${value}`,
+      division,
+      rows: offers.sort((x, y) => x.index - y.index),
+    });
   };
 
   /**
-   * Apply the offered replacements. The numbers are already reserved, so this only writes
-   * them into the form - it does NOT save. The operator presses Save again, which is
-   * deliberate: they have just been told to walk to four transformers with chalk, and a
-   * save that fires under them would commit the record before the metal matches it.
+   * Apply the offered replacements. The numbers are already reserved (the refusal path
+   * reserves before offering - see F62), so this only writes them into the form. It does
+   * NOT save: the operator has just been told to walk to several transformers with chalk,
+   * and a save firing under them would commit the record before the metal matches it.
    */
   const applyRefusalOffer = () => {
     if (!refusalPrompt) return;
@@ -465,12 +517,59 @@ export default function NewJob() {
     );
   };
 
-  const applyRenumber = () => {
-    if (!renumberPrompt) return;
-    const map: Record<number, string> = {};
-    renumberPrompt.rows.forEach(r => { map[r.index] = r.to; });
-    setTransformers(prev => prev.map((t, i) => map[i] ? { ...t, jobNo: map[i] } : t));
-    setRenumberPrompt(null);
+  /** True while the renumber offer is being turned into real reservations. */
+  const [applyingRenumber, setApplyingRenumber] = useState(false);
+
+  /**
+   * RESERVE ON ACCEPT. The numbers shown were predictions (F68), so this is where they
+   * become real - and where they may come back different, because another operator can
+   * have taken one in between.
+   *
+   * ONE RETRY, not a silent renumber: if what is reserved differs from what was offered,
+   * the prompt re-renders with the actual numbers and says so. The operator confirms
+   * against the number they will write on the tank, never against one that has moved.
+   */
+  const applyRenumber = async () => {
+    if (!renumberPrompt || applyingRenumber) return;
+    setApplyingRenumber(true);
+    try {
+      // Grouped by counter key so a mixed-core prompt draws contiguously from each sequence.
+      const byKey: Record<string, { coreType: string; rows: typeof renumberPrompt.rows }> = {};
+      renumberPrompt.rows.forEach(r => {
+        const { counterKey } = getJobNoPrefix(renumberPrompt.division, r.coreType);
+        (byKey[counterKey] ||= { coreType: r.coreType, rows: [] }).rows.push(r);
+      });
+
+      const assigned: Record<number, string> = {};
+      for (const { coreType, rows } of Object.values(byKey)) {
+        const nums = await reserveJobNos(renumberPrompt.division, coreType, rows.length);
+        rows.forEach((r, i) => { assigned[r.index] = nums[i]; });
+      }
+
+      const moved = renumberPrompt.rows.filter(r => assigned[r.index] !== r.to);
+      if (moved.length > 0) {
+        // Someone took one of the offered numbers first. Show what was actually reserved
+        // rather than applying it - these are the numbers going onto metal.
+        setRenumberPrompt({
+          ...renumberPrompt,
+          rows: renumberPrompt.rows.map(r => ({ ...r, to: assigned[r.index] })),
+        });
+        setModalAlertMessage(
+          moved.length === 1
+            ? `${moved[0].to} was taken while you were deciding. The number now reserved is ${assigned[moved[0].index]} - check it and confirm again.`
+            : `${moved.length} of the offered numbers were taken while you were deciding. The numbers now reserved are shown - check them and confirm again.`
+        );
+        return;
+      }
+
+      setTransformers(prev => prev.map((t, i) => assigned[i] ? { ...t, jobNo: assigned[i] } : t));
+      setRenumberPrompt(null);
+    } catch (err) {
+      console.error('Could not reserve the replacement job numbers:', err);
+      setReserveError('Could not reserve the replacement job numbers. The existing numbers are unchanged.');
+    } finally {
+      setApplyingRenumber(false);
+    }
   };
 
 
@@ -856,6 +955,21 @@ export default function NewJob() {
     const newTransformers = [...transformers];
     newTransformers[index][field] = value;
 
+    // FIRST MEANINGFUL ENTRY draws the row's number. Fired here, in the change HANDLER,
+    // rather than off the value - so a programmatic write cannot reserve. `applyPastJobToRow`
+    // fills serial, make and capacity from a past job through setTransformers directly, and
+    // must not draw a number: a GP row reuses the original (AUDIT F67).
+    const row = newTransformers[index];
+    if (
+      RESERVE_TRIGGER_FIELDS.includes(field) &&
+      commonData.repairType !== 'GP' &&
+      row.rowKey &&
+      !String(row.jobNo || '').trim() &&
+      String(value ?? '').trim()
+    ) {
+      void reserveForRow(row.rowKey, row.coreType || 'CRGO');
+    }
+
     // Changing the Job No on a GP row that is linked to a DIFFERENT number drops the
     // linkage, so the row cannot keep one transformer's make/serial/kVA/delivery date
     // under another's job number. Clearing it also re-arms the lookup, which
@@ -898,20 +1012,21 @@ export default function NewJob() {
             setReserveError('Could not reserve a job number for the new core type. The row is unnumbered.');
           });
       } else {
-        // Reserved to show, burned if declined - the offered number must be the assigned one.
-        reserveJobNos(commonData.division, value, 1)
-          .then(([to]) => setRenumberPrompt({
-            field: 'coreType',
-            label: `core type to ${value}`,
-            rows: [{
-              index, from: existing, to,
-              fromLabel: `${commonData.division || '-'} / ${transformers[index]?.coreType || 'CRGO'}`,
-            }],
-          }))
-          .catch(err => {
-            console.error('Could not reserve a replacement job number:', err);
-            setReserveError('Could not reserve a replacement job number. The existing number is unchanged.');
-          });
+        // PREDICTED, not reserved - see the division branch and F68. Reserving here burned a
+        // number every time an operator changed a core type to look at the difference.
+        const info = predictNextJobNo(commonData.division, value, commonData.repairType);
+        setRenumberPrompt({
+          field: 'coreType',
+          label: `core type to ${value}`,
+          division: commonData.division,
+          rows: [{
+            index,
+            from: existing,
+            to: `${info.prefix}-${info.nextNum}`,
+            fromLabel: `${commonData.division || '-'} / ${transformers[index]?.coreType || 'CRGO'}`,
+            coreType: value,
+          }],
+        });
       }
       return;
     }
@@ -931,14 +1046,11 @@ export default function NewJob() {
     let nextJobNo = '';
     if (commonData.repairType === 'OGP' && activeAgency) {
       try {
-        setReservingRow(transformers.length);
         [nextJobNo] = await reserveJobNos(commonData.division, lastCoreType, 1);
       } catch (err) {
         console.error('Could not reserve a job number:', err);
         setReserveError('Could not reserve a job number. Check the connection and try again - nothing was added.');
         return;
-      } finally {
-        setReservingRow(null);
       }
     }
 
@@ -969,14 +1081,11 @@ export default function NewJob() {
     let nextJobNo = '';
     if (commonData.repairType === 'OGP') {
       try {
-        setReservingRow(index + 1);
         [nextJobNo] = await reserveJobNos(commonData.division, source.coreType, 1);
       } catch (err) {
         console.error('Could not reserve a job number:', err);
         setReserveError('Could not reserve a job number. Check the connection and try again - nothing was added.');
         return;
-      } finally {
-        setReservingRow(null);
       }
     }
 
@@ -2215,10 +2324,23 @@ export default function NewJob() {
                       )}
                     </label>
                     <div className="relative">
+                      {/* PLACEHOLDER, NOT A PROVISIONAL NUMBER (AUDIT F67).
+                          The number goes on the transformer, so anything shown here that
+                          looks like one is a commitment. Until the operator starts entering
+                          the unit, the field says what will happen rather than showing a
+                          figure that might change. */}
                       <input
                         required
                         type="text"
                         autoComplete="off"
+                        disabled={Boolean(t.rowKey && reservingKeys.has(t.rowKey))}
+                        placeholder={
+                          commonData.repairType === 'GP'
+                            ? 'Type the original job number'
+                            : t.rowKey && reservingKeys.has(t.rowKey)
+                              ? 'Reserving…'
+                              : 'assigned when you start entering this transformer'
+                        }
                         value={t.jobNo}
                         onChange={(e) => {
                           const val = e.target.value;
@@ -2261,8 +2383,26 @@ export default function NewJob() {
                             ? 'border-amber-300 focus:ring-amber-500 focus:border-amber-500 text-amber-950'
                             : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
                         }`}
-                        placeholder={commonData.repairType === 'GP' ? 'Type original Job No (any prefix)' : 'e.g. 21 IS-48'}
                       />
+
+                      {/* INLINE RETRY, not a modal (AUDIT F67).
+                          The reservation fires on a keystroke, so the operator is mid-typing
+                          in the field next to this one. A dialog over the field they are
+                          using is the wrong interruption; the modal is kept for Add,
+                          Duplicate and Auto Job Nos, where there is nothing else on screen. */}
+                      {t.rowKey && reserveFailedKeys.has(t.rowKey) && !String(t.jobNo || '').trim() && (
+                        <div className="mt-1 flex items-center gap-1.5 text-[10px] text-rose-700">
+                          <AlertCircle className="w-3 h-3 shrink-0" />
+                          <span>No job number could be reserved.</span>
+                          <button
+                            type="button"
+                            onClick={() => t.rowKey && reserveForRow(t.rowKey, t.coreType || 'CRGO')}
+                            className="font-bold underline hover:text-rose-900 cursor-pointer"
+                          >
+                            Get number
+                          </button>
+                        </div>
+                      )}
 
                       {/* GP SUGGESTION DROPDOWN - partial, case-insensitive, anywhere in
                           the string; agency-scoped pastJobs, most recent first. */}

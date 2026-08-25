@@ -5306,6 +5306,76 @@ this was found: searching for `getNextJobNoInfo` finds callers of a function; se
 `${prefix}-${n}`, a tail parse and a counter read finds ALLOCATION. A defect defined by its
 shape has to be swept for by shape, or the sweep only finds the instances that share a name.
 
+### F67. A job number is drawn on first meaningful entry, not on form open
+
+F60 made numbers reserved rather than computed, and left one question open: WHEN. Reserving
+when the form opened would have burned a number on every visit to the New Job screen -
+including opening it to look and navigating away - because the operator has entered nothing
+at that point and cannot have marked anything.
+
+That mattered because the no-reclaim rule rests on exactly this: a reservation is permanent
+BECAUSE the app cannot know whether the number is already on metal. Drawing one before the
+operator could plausibly have written it makes the rule indefensible - burning numbers for
+screens nobody used.
+
+**A number is now drawn on the first meaningful entry in a row**: `serialNo`, `make` or
+`capacityKva`. The first two come off the nameplate and start empty, so entry in either is
+unambiguous evidence the transformer is in front of the operator. `capacityKva` is pre-filled
+with a default, so there is no "first entry" - only a change, which is still a deliberate act
+on a real unit, and excluding it would leave the commonest case (a 63 kVA unit, the default)
+relying on serial or make alone. `coreType` is excluded: pre-filled too, and it already runs
+the reserve-or-prompt path, so counting it would double-fire.
+
+**The trigger is on the change HANDLER, not the value.** `applyPastJobToRow` fills serial,
+make and capacity from a past job through `setTransformers` directly - a programmatic write
+that must not draw a number, because a GP row reuses the original. Watching the value would
+have reserved on it; watching the handler cannot.
+
+**Until then the field shows a placeholder, never a provisional number** - *"assigned when
+you start entering this transformer"*. Anything in that box that looks like a number is a
+commitment, because that is what gets chalked on the tank.
+
+**It also removed the need for the initialisation effect entirely.** The first row used to
+have no number because numbering hung off three user actions and the row exists before any
+of them - and the division arrives pre-selected, by `setCommonData` rather than a change
+event, so nothing fired. The answer was not to restore an effect that writes; it was to
+reserve when the operator starts entering the transformer, which the first row reaches by
+the same path as every other.
+
+**Failure is inline, not modal.** The reservation fires on a keystroke, so the operator is
+typing in the field beside it; a dialog over that field is the wrong interruption. The row
+shows *"No job number could be reserved - Get number"* and keeps working. The modal stays
+for Add, Duplicate and Auto Job Nos, where there is nothing else on screen to look at.
+
+**`reservingKeys` and `reserveFailedKeys` are keyed on `rowKey`, never on index** (F63) - a
+splice moves every index, and the in-flight marker is what stops fast typing from firing a
+second reservation before the first returns.
+
+### F68. The renumber prompt predicts; the refusal prompt reserves
+
+Two prompts offer a replacement number, and they now behave differently on purpose.
+
+**The renumber prompt - shown when a division or core type changes - PREDICTS.** It used to
+reserve before showing, so the number on screen was guaranteed to be the number assigned.
+That guarantee cost a burned number every time an operator flipped a dropdown to look at
+something. Weighed against each other: eager reservation burns a number certainly and
+frequently; a prediction opens a window of milliseconds in which another operator can take
+the offered number, which is rare and - since F62 - already handled, because a collision
+produces a refused save carrying an offer rather than a duplicate.
+
+So it predicts, and **reserves on accept, with ONE RETRY**. If what comes back differs from
+what was shown, the prompt re-renders with the numbers actually reserved and says so:
+
+    PLN1-45 was taken while you were deciding. The number now reserved is PLN1-46 -
+    check it and confirm again.
+
+Never a silent renumber. The operator confirms against the number they will write on the
+tank, never against one that has moved underneath them.
+
+**The refusal prompt still reserves before showing**, and the asymmetry is deliberate. It
+appears only after a save has already been refused - the operator is not exploring, they are
+correcting, and a second refusal in the same breath would be a loop rather than an offer.
+
 ## Recurring theme
 
 Every entry above is one of two shapes:
