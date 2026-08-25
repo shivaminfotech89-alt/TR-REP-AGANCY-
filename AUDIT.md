@@ -2753,6 +2753,70 @@ is a product question nobody has been asked.
 
 ---
 
+### O35. The wrong-agency check already exists, one layer down, in the prefix
+
+**Not built.** A field capturing what the division wrote on the MR — `mrAddressedTo`, an
+agency-name classifier over the owner's agencies, a stopword list, a scoring function —
+was designed, built, and removed before it shipped. The reason it was removed is worth
+more than the feature was.
+
+**Every job number carries its agency in its prefix.** `SU-45` is SUCHIT's, `PLN1-45` is
+UPENDRA's, `AAGNR-45` is AARATI's. An MR booked under the wrong agency shows up as a
+prefix that does not belong there. No new field, no free-text transcription to tune a
+matcher against, no classifier to maintain — the fact is already in the data, and it is
+in the one piece of data that gets written onto the physical transformer.
+
+The proposed field would have re-collected, in free text and unreliably, information the
+system already held structurally.
+
+**Where the check is a tautology.** `getJobNoPrefix` (`AgencyContext.tsx:1157`) reads
+`sourceAt.prefixes`, falling back to `activeAgency.prefixes`. Both belong to the agency
+being booked into. So an AUTO-GENERATED number is always internally consistent — it is
+derived from the very thing it would be compared against. Checking it would prove only
+that assignment works. **The wrong-agency case cannot arise in the app on this path at
+all.** It arises on the division's paper, which is theirs to correct.
+
+**Where it is not, and is already enforced.** The job-number field is editable — the
+error text says "or use auto-generate". Both OGP save paths (`NewJob.tsx:1224`, `:1339`)
+refuse a number that does not start with the active agency's own prefix. So an operator
+copying numbers off an MR the division agreed with a SIBLING agency is refused today.
+That is the whole feature, shipped, predating the audit.
+
+**Two gaps in it.**
+
+1. **The refusal names the prefix, not the agency.** `Invalid Job Number prefix for OGP
+   job "SU-45". Expected prefix starting with "PLN1-"` reads as a formatting complaint.
+   The operator retypes `PLN1-45` and books under the wrong agency with a number that
+   belongs to nobody — the exact outcome the check existed to prevent, reached by
+   obeying it. The missing sentence is *"SU- is SUCHIT's prefix; you are booking into
+   UPENDRA"*, and every input for it is already loaded at that line.
+
+2. **GP jobs are not prefix-checked at all.** The guarantee branch validates that a
+   number was entered and a previous delivery date exists; it never looks at the prefix.
+   Arguably right, since the number is historic — but it is the unguarded door, and it
+   adjoins O1 (GP lookup matching the wrong transformer).
+
+**A precondition that does not hold.** `scripts/admin/prefix-distinctness.js` checks what
+the whole argument rests on: that a prefix identifies exactly one agency. It does, except
+
+    owner nzPCcm3p:  SUCHIT   DEESA/OH -> "OH21 IS"
+                     UPENDRA  DEESA/OH -> "OH21 IS"
+
+For overhauling jobs in DEESA the prefix identifies nothing, the save check passes either
+way, and both agencies can issue `OH21 IS-5` to two different transformers. Whether the
+division genuinely issued the same OH prefix twice or someone copied a settings page is a
+question for the operator. **DATA, not code** — but the code's guarantee is only as good
+as it.
+
+**The pattern.** Third time in this audit that a proposed feature turned out to duplicate
+an existing mechanism rather than add one: three estimate engines (F41), two job-number
+allocators (F68), and now a wrong-agency check that already existed in the prefix. The
+common shape is a fact the system holds STRUCTURALLY being re-collected as free text,
+where it is weaker. Before adding a field that records something about an entity, check
+what the entity's identifiers already encode.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test
