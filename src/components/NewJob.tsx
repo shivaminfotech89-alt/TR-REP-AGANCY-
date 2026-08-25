@@ -203,134 +203,39 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, reserveJobNos, syncCountersState } = useAgency();
-  // Which row is waiting on a reservation, and the last failure. The number field shows
-  // a spinner rather than a provisional value: a provisional number is exactly what gets
-  // written on a transformer (AUDIT F60).
-  /**
-   * Rows with a reservation IN FLIGHT, and rows whose last attempt FAILED - both keyed on
-   * `rowKey`, never on index, because a splice moves every index (AUDIT F63).
-   *
-   * In-flight is what stops fast typing from firing a second reservation before the first
-   * returns: the trigger is a keystroke, and `jobNo` stays empty until the transaction
-   * lands.
-   */
-  const [reservingKeys, setReservingKeys] = useState<Set<string>>(new Set());
-  const [reserveFailedKeys, setReserveFailedKeys] = useState<Set<string>>(new Set());
-  const [reserveError, setReserveError] = useState<string | null>(null);
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState } = useAgency();
 
   /**
-   * THE GUARD IS A REF, NOT THE STATE. The state exists only to render the spinner.
+   * INTAKE RECORDS JOB NUMBERS. IT DOES NOT ALLOCATE THEM.
    *
-   * `reservingKeys.has(...)` is a read of a value that React has not committed yet: two
-   * keystrokes in the same tick both see an empty set and both reserve. A ref updates
-   * synchronously, so the second call sees the first.
+   * The MR arrives from the division with its job numbers already agreed, and the operator
+   * types what is on the paper. So nothing in this form draws from a counter: the number in
+   * the box is the operator's, the app only suggests the next one as a convenience when a
+   * row is created, and changing any other field never alters it.
+   *
+   * THE COUNTER ADVANCES AT SAVE, to the highest number actually used (see the
+   * reconciliation block in the save transaction). Everything before save is free - open
+   * the form, type, flip dropdowns, abandon it, and nothing has been consumed.
+   *
+   * WHAT WAS HERE, AND WHY IT IS GONE
+   * ---------------------------------
+   * A reservation system: reserveForRows as a single guarded entry point, a per-row
+   * in-flight ref, a per-sequence serialising lock, a spinner, a failure modal, a renumber
+   * prompt with a retry path, and a refusal path that pre-reserved replacements. Four fixes
+   * went into it (F65, F69, and two more) and a core-type flip still burned numbers -
+   * five across three sequences on one unsaved row, traced in AUDIT F70.
+   *
+   * The instrumentation showed no unguarded path: every guard held and every number came
+   * from a deliberate operator action. The allocation itself was the defect. Numbers are
+   * agreed with the division and finite, so drawing one before the operator has committed
+   * to anything spends allotment to look at a dropdown - and no-reclaim means flipping back
+   * did not return the number, it drew another.
+   *
+   * ⚠ DO NOT REINTRODUCE ALLOCATION DURING INTAKE. Every guard above it has to be correct
+   * under React's batching, timing and double-invocation; the fifth attempt would have
+   * looked as correct as the previous four. There is nothing to guard when nothing is drawn.
    */
-  const reservingRef = useRef<Set<string>>(new Set());
 
-  /**
-   * A LOCK PER SEQUENCE, on top of the per-row one.
-   *
-   * The row guard stops one row drawing twice. It does not stop two rows drawing from the
-   * same counter at the same moment - and a number changing under an operator mid-entry is
-   * not a tidiness problem: it is how a repairer came to miss a serial and produce wrong
-   * estimates.
-   *
-   * Reservations for a counter key are therefore SERIALISED rather than dropped. Every row
-   * still gets a number; they are simply issued one at a time per sequence, so an
-   * in-progress draw always completes before the next reads the counter.
-   */
-  const sequenceLocks = useRef<Map<string, Promise<unknown>>>(new Map());
-
-  const withSequenceLock = <T,>(counterKey: string, work: () => Promise<T>): Promise<T> => {
-    const prior = sequenceLocks.current.get(counterKey) ?? Promise.resolve();
-    const next = prior.catch(() => {}).then(work);
-    // Held even on failure, so a rejected draw cannot leave the sequence permanently locked.
-    sequenceLocks.current.set(counterKey, next.catch(() => {}));
-    return next;
-  };
-
-  const markReserving = (keys: string[], on: boolean) => {
-    keys.forEach(k => { if (on) reservingRef.current.add(k); else reservingRef.current.delete(k); });
-    setReservingKeys(new Set(reservingRef.current));
-  };
-  const markFailed = (keys: string[], on: boolean) =>
-    setReserveFailedKeys(prev => {
-      const next = new Set(prev);
-      keys.forEach(k => { if (on) next.add(k); else next.delete(k); });
-      return next;
-    });
-
-  /**
-   * FIRST MEANINGFUL ENTRY - the fields that mean the transformer is in front of you.
-   *
-   * `serialNo` and `make` come off the nameplate and start empty, so entry in either is
-   * unambiguous. `capacityKva` is pre-filled with a default, so there is no "first entry" -
-   * only a change, which is still a deliberate act on a real unit. `coreType` is excluded:
-   * pre-filled too, and it already runs the reserve-or-prompt path.
-   */
-  const RESERVE_TRIGGER_FIELDS: StringRowField[] = ['serialNo', 'make', 'capacityKva'];
-
-  /**
-   * THE ONE PLACE A ROW DRAWS ITS NUMBER. Every path goes through here (AUDIT F69).
-   *
-   * Takes a batch, because a division change numbers every unnumbered row at once and each
-   * counter key wants a single transaction to stay contiguous. Rows already in flight are
-   * dropped before anything is reserved - that check is what makes it safe to call on a
-   * keystroke, and routing every caller through it is what stops a second call site
-   * reaching past the guard.
-   */
-  const reserveForRows = async (
-    rows: { rowKey: string; coreType: string }[],
-    division: string,
-  ) => {
-    // ⚠ TEMPORARY INSTRUMENTATION - remove with the trace in reserveJobNos.
-    console.log('%c[reserveForRows] ENTER', 'background:#1e3a8a;color:#fff;padding:2px 6px',
-      { division, rows: rows.map(r => `${r.rowKey?.slice(0, 8)}/${r.coreType}`),
-        inFlight: [...reservingRef.current].map(k => k.slice(0, 8)) });
-    console.log(new Error('reserveForRows caller — stack').stack);
-
-    if (!activeAgency || !division || commonData.repairType === 'GP') {
-      console.log('[reserveForRows] SKIP - no agency / no division / GP'); return;
-    }
-    const eligible = rows.filter(r => r.rowKey && !reservingRef.current.has(r.rowKey));
-    if (eligible.length === 0) {
-      console.log('[reserveForRows] SKIP - every row already in flight (guard held)'); return;
-    }
-    console.log(`[reserveForRows] PROCEEDING with ${eligible.length} of ${rows.length} row(s)`);
-
-    const keys = eligible.map(r => r.rowKey);
-    markReserving(keys, true);
-    markFailed(keys, false);
-    try {
-      const byCounter: Record<string, { coreType: string; rowKeys: string[] }> = {};
-      eligible.forEach(r => {
-        const { counterKey } = getJobNoPrefix(division, r.coreType);
-        (byCounter[counterKey] ||= { coreType: r.coreType, rowKeys: [] }).rowKeys.push(r.rowKey);
-      });
-
-      const assigned: Record<string, string> = {};
-      for (const [counterKey, { coreType, rowKeys }] of Object.entries(byCounter)) {
-        const nums = await withSequenceLock(counterKey,
-          () => reserveJobNos(division, coreType, rowKeys.length));
-        rowKeys.forEach((k, i) => { assigned[k] = nums[i]; });
-      }
-      // Keyed on rowKey, so a splice between firing and landing cannot put a number on the
-      // wrong transformer (F63). Only fills a row still without one.
-      setTransformers(prev => prev.map(t =>
-        (t.rowKey && assigned[t.rowKey] && !String(t.jobNo || '').trim())
-          ? { ...t, jobNo: assigned[t.rowKey] } : t));
-    } catch (err) {
-      console.error('Could not reserve job number(s):', err);
-      markFailed(keys, true);
-    } finally {
-      markReserving(keys, false);
-    }
-  };
-
-  /** Single-row convenience over reserveForRows. */
-  const reserveForRow = (rowKey: string, coreType: string) =>
-    reserveForRows([{ rowKey, coreType }], commonData.division);
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -409,21 +314,17 @@ export default function NewJob() {
     }
   }, [availableDivisions, activeAgency, activeAtMaster]);
 
-  // Fill any blank / placeholder job numbers once agency & division context are ready.
-  // Only touches rows the user (or GP auto-fill) hasn't already set a real job number on.
+  // ⚠ NO EFFECT MAY WRITE A JOB NUMBER. There is nothing here on purpose (AUDIT F60, F70).
   //
-  // THE AUTO-NUMBERING EFFECT THAT USED TO SIT HERE IS DELETED (AUDIT F60).
+  // An auto-numbering effect used to sit at this spot. It numbered every blank row whenever
+  // division, repair type or the transformers array changed - and it depended on
+  // `transformers`, so it re-ran on its own output. Harmless while numbering was a pure
+  // client-side computation; once a number was drawn from a shared counter it burned one
+  // per re-run, and React's development double-invocation burned one on every mount.
   //
-  // It assigned a number to every unnumbered row whenever division, repair type or the
-  // transformers array changed - and it depended on `transformers`, so it re-ran on its own
-  // output. That was harmless while numbering was a pure client-side computation. Once a
-  // number is RESERVED by advancing a shared counter, an effect that writes and re-runs on
-  // its own result burns numbers, and React's development double-invocation burns one on
-  // every mount.
-  //
-  // Numbering is now driven by the three user actions that actually create the need for a
-  // number: adding a row, duplicating a row, and choosing a division. Handlers run once per
-  // action, so there is nothing to guard against.
+  // Job numbers now come from exactly one source: the operator's keyboard, pre-filled with
+  // a suggestion when a row is created. Every write to `jobNo` is in a handler, on an act
+  // the operator performed.
 
 
   // Past jobs for the GP lookup: across all AT masters of the CURRENT AGENCY.
@@ -460,181 +361,36 @@ export default function NewJob() {
   }, [auth.currentUser, activeAgency?.id]);
 
   /**
-   * RENUMBERING IS OFFERED, NEVER APPLIED.
+   * A DIVISION OR CORE-TYPE CHANGE NEVER TOUCHES A JOB NUMBER.
    *
-   * Both branches of this handler used to rewrite job numbers in place - a division change
-   * did `t.jobNo.replace(oldPrefix + '-', newPrefix + '-')`, keeping the NUMERIC TAIL from
-   * the old division's counter. Two faults in one line, and neither needed concurrency to
-   * fire: the number is written on the transformer at intake, so rewriting it leaves the
-   * tank marked one thing and the record saying another; and the retained tail comes from a
-   * sequence the new division does not own, so it could collide immediately (AUDIT F61).
+   * The renumber prompt that used to live here is gone, along with the reservation it
+   * accepted into. It existed because the app allocated numbers, so moving a row to another
+   * sequence meant its number was wrong and had to be replaced. Intake no longer allocates:
+   * the number is what the division put on the MR and what the operator typed, and it is
+   * not the app's to change because a dropdown moved.
    *
-   * A row that already HOLDS a number is now never rewritten silently. The operator is
-   * shown what the new number would be and has to say that they will re-mark the unit.
-   * A row with no number yet reserves freely - nothing has been written on anything.
+   * The prompt was also the thing actually burning numbers (AUDIT F70). Its accept button
+   * drew from the counter, so an operator comparing core types spent a number per flip and
+   * flipping back drew another rather than returning the first.
+   *
+   * A number that genuinely does not belong to the chosen division or core type is caught
+   * at save by the prefix check, which names the mismatch and refuses. That is the right
+   * place for it: it tests what is about to be recorded rather than second-guessing an
+   * operator mid-entry.
    */
-  /** Rows refused at save because their number is taken, with a reserved replacement. */
+
+  /** Rows refused at save because their number is already used, so the operator can fix them. */
   const [refusalPrompt, setRefusalPrompt] = useState<
-    { rows: { index: number; from: string; fromLabel: string; to: string }[] } | null
+    { rows: { index: number; from: string; fromLabel: string }[] } | null
   >(null);
-
-  const [renumberPrompt, setRenumberPrompt] = useState<
-    { field: 'division' | 'coreType'; label: string; division: string; rows: { index: number; from: string; fromLabel: string; to: string; coreType: string }[] } | null
-  >(null);
-
-  /** Reserve numbers for rows that have none. Rows that hold one are left alone. */
-  /**
-   * Number every row that has none. A thin wrapper over reserveForRows, which owns the
-   * in-flight guard - this used to call reserveJobNos directly and reach past it, so
-   * flipping a division twice with unnumbered rows burned a set of numbers each time
-   * (AUDIT F69).
-   *
-   * ONE CALLER, and it must stay that way: the save path, where a row still blank at save
-   * genuinely needs a number. It was also called on every division change, which is one of
-   * the paths that burned numbers on a dropdown flip - see the note in the core-type branch
-   * of handleTransformerChange. Do not call it from a change handler.
-   */
-  const numberUnnumberedRows = async (division: string, repairType: string) => {
-    if (repairType === 'GP') return;
-    const pending = transformers
-      .filter(t => t.rowKey && !String(t.jobNo || '').trim())
-      .map(t => ({ rowKey: t.rowKey, coreType: t.coreType || 'CRGO' }));
-    if (pending.length === 0) return;
-    await reserveForRows(pending, division);
-  };
 
   const handleCommonChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setCommonData(prev => ({ ...prev, [name]: value }));
-
-    // A GP row's job number is the ORIGINAL number from the previous repair. Nothing
-    // may regenerate or re-prefix it - not a division change, not a core-type change,
-    // not the Auto Job Nos button. It is set ONLY by the operator typing it, by picking
-    // a suggestion, or by the disambiguation chooser.
-    if (commonData.repairType === 'GP' && (name === 'division' || name === 'repairType')) {
-      return;
-    }
-    if (!activeAgency) return;
-    if (name !== 'division' && name !== 'repairType') return;
-
-    const division = name === 'division' ? value : commonData.division;
-    const repairType = name === 'repairType' ? value : commonData.repairType;
-    if (repairType === 'GP') return;
-
-    const numbered = transformers
-      .map((t, index) => ({ t, index }))
-      .filter(({ t }) => String(t.jobNo || '').trim());
-
-    // A DIVISION CHANGE RESERVES NOTHING EITHER, for the same reason as core type above.
-    // This used to number every blank row on the way past ("nothing has been marked, so
-    // it is free") - but a blank row is blank because the operator has not described a
-    // transformer yet, and flipping between divisions to compare them drew a set of
-    // numbers on each flip. Blank rows draw when a serial, make or capacity is typed.
-    if (numbered.length === 0) return;
-
-    // Rows that already hold a number: PREDICT the replacement and offer it. Nothing is
-    // reserved here (AUDIT F68).
-    //
-    // The prompt used to reserve before showing, so the number on screen was guaranteed to
-    // be the number assigned. That guarantee cost a burned number every time an operator
-    // flipped a dropdown to check something - certain and frequent - to close a window of
-    // milliseconds that is rare and, since F62, already handled: a collision produces a
-    // refused save with an offer, not a duplicate.
-    //
-    // So the offer is a prediction, reserved on accept, with one retry if the reservation
-    // comes back different from what was shown.
-    const offers = numbered.map(({ t, index }) => ({
-      index,
-      from: t.jobNo,
-      fromLabel: `${commonData.division || '-'} / ${t.coreType || 'CRGO'}`,
-      to: (() => {
-        const info = predictNextJobNo(division, t.coreType, repairType);
-        return `${info.prefix}-${info.nextNum}`;
-      })(),
-      coreType: t.coreType || 'CRGO',
-    }));
-    setRenumberPrompt({
-      field: name === 'division' ? 'division' : 'coreType',
-      label: name === 'division' ? `division ${commonData.division || '-'} to ${value}` : `repair type to ${value}`,
-      division,
-      rows: offers.sort((x, y) => x.index - y.index),
-    });
+    // Nothing else. Division and repair type change the form's context; job numbers are
+    // the operator's and are left exactly as typed.
   };
 
-  /**
-   * Apply the offered replacements. The numbers are already reserved (the refusal path
-   * reserves before offering - see F62), so this only writes them into the form. It does
-   * NOT save: the operator has just been told to walk to several transformers with chalk,
-   * and a save firing under them would commit the record before the metal matches it.
-   */
-  const applyRefusalOffer = () => {
-    if (!refusalPrompt) return;
-    const map: Record<number, string> = {};
-    refusalPrompt.rows.forEach(r => { map[r.index] = r.to; });
-    setTransformers(prev => prev.map((t, i) => map[i] ? { ...t, jobNo: map[i] } : t));
-    setRefusalPrompt(null);
-    setModalAlertMessage(
-      `Job number${refusalPrompt.rows.length === 1 ? '' : 's'} updated. Re-mark ${refusalPrompt.rows.length === 1 ? 'the transformer' : 'the transformers'} and press Save to record the intake.`
-    );
-  };
-
-  /** True while the renumber offer is being turned into real reservations. */
-  const [applyingRenumber, setApplyingRenumber] = useState(false);
-
-  /**
-   * RESERVE ON ACCEPT. The numbers shown were predictions (F68), so this is where they
-   * become real - and where they may come back different, because another operator can
-   * have taken one in between.
-   *
-   * ONE RETRY, not a silent renumber: if what is reserved differs from what was offered,
-   * the prompt re-renders with the actual numbers and says so. The operator confirms
-   * against the number they will write on the tank, never against one that has moved.
-   */
-  const applyRenumber = async () => {
-    if (!renumberPrompt || applyingRenumber) return;
-    setApplyingRenumber(true);
-    try {
-      // Grouped by counter key so a mixed-core prompt draws contiguously from each sequence.
-      const byKey: Record<string, { coreType: string; rows: typeof renumberPrompt.rows }> = {};
-      renumberPrompt.rows.forEach(r => {
-        const { counterKey } = getJobNoPrefix(renumberPrompt.division, r.coreType);
-        (byKey[counterKey] ||= { coreType: r.coreType, rows: [] }).rows.push(r);
-      });
-
-      const assigned: Record<number, string> = {};
-      for (const [counterKey, { coreType, rows }] of Object.entries(byKey)) {
-        // Same sequence lock as reserveForRows - accepting a renumber draws from the same
-        // counter a row-entry reservation draws from, and the two must not interleave.
-        const nums = await withSequenceLock(counterKey,
-          () => reserveJobNos(renumberPrompt.division, coreType, rows.length));
-        rows.forEach((r, i) => { assigned[r.index] = nums[i]; });
-      }
-
-      const moved = renumberPrompt.rows.filter(r => assigned[r.index] !== r.to);
-      if (moved.length > 0) {
-        // Someone took one of the offered numbers first. Show what was actually reserved
-        // rather than applying it - these are the numbers going onto metal.
-        setRenumberPrompt({
-          ...renumberPrompt,
-          rows: renumberPrompt.rows.map(r => ({ ...r, to: assigned[r.index] })),
-        });
-        setModalAlertMessage(
-          moved.length === 1
-            ? `${moved[0].to} was taken while you were deciding. The number now reserved is ${assigned[moved[0].index]} - check it and confirm again.`
-            : `${moved.length} of the offered numbers were taken while you were deciding. The numbers now reserved are shown - check them and confirm again.`
-        );
-        return;
-      }
-
-      setTransformers(prev => prev.map((t, i) => assigned[i] ? { ...t, jobNo: assigned[i] } : t));
-      setRenumberPrompt(null);
-    } catch (err) {
-      console.error('Could not reserve the replacement job numbers:', err);
-      setReserveError('Could not reserve the replacement job numbers. The existing numbers are unchanged.');
-    } finally {
-      setApplyingRenumber(false);
-    }
-  };
 
 
   /** A fresh, empty transformer row. */
@@ -862,8 +618,9 @@ export default function NewJob() {
     setTransformers(prev => {
       const updated = [...prev];
       updated[index] = {
-        // Same row, emptied - the key is deliberately preserved. A cleared row that
-        // already drew a number keeps it: reservations are never released (F60).
+        // Same row, emptied - the key is deliberately preserved. Clearing the number is
+        // free now that nothing was drawn to produce it: retyping or re-suggesting costs
+        // the sequence nothing (F70).
         rowKey: updated[index].rowKey,
         jobNo: '',
         capacityKva: '',
@@ -1016,30 +773,15 @@ export default function NewJob() {
    * id). Narrowed to the string-valued keys, which is what every caller actually passes.
    */
   const handleTransformerChange = <K extends StringRowField>(index: number, field: K, value: TransformerEntry[K]) => {
-    // ⚠ TEMPORARY INSTRUMENTATION - remove with the trace in reserveJobNos.
-    console.log('%c[ROW CHANGE]', 'background:#78350f;color:#fff;padding:2px 6px',
-      `row ${index} · ${field} = "${value}"`,
-      { jobNoBefore: transformers[index]?.jobNo || '(blank)',
-        coreTypeBefore: transformers[index]?.coreType,
-        rowKey: transformers[index]?.rowKey?.slice(0, 8), repairType: commonData.repairType });
-
     const newTransformers = [...transformers];
     newTransformers[index][field] = value;
 
-    // FIRST MEANINGFUL ENTRY draws the row's number. Fired here, in the change HANDLER,
-    // rather than off the value - so a programmatic write cannot reserve. `applyPastJobToRow`
-    // fills serial, make and capacity from a past job through setTransformers directly, and
-    // must not draw a number: a GP row reuses the original (AUDIT F67).
-    const row = newTransformers[index];
-    if (
-      RESERVE_TRIGGER_FIELDS.includes(field) &&
-      commonData.repairType !== 'GP' &&
-      row.rowKey &&
-      !String(row.jobNo || '').trim() &&
-      String(value ?? '').trim()
-    ) {
-      void reserveForRow(row.rowKey, row.coreType || 'CRGO');
-    }
+    // NO FIELD CHANGE DRAWS A JOB NUMBER, and none rewrites one.
+    //
+    // A first-meaningful-entry trigger used to fire here: typing a serial, make or capacity
+    // reserved the row's number. It is gone with the rest of intake-time allocation (F70).
+    // The operator types the number from the MR, or accepts the suggestion the row was
+    // created with; nothing else in this handler touches jobNo.
 
     // Changing the Job No on a GP row that is linked to a DIFFERENT number drops the
     // linkage, so the row cannot keep one transformer's make/serial/kVA/delivery date
@@ -1064,88 +806,56 @@ export default function NewJob() {
         newTransformers[index] = { ...row, gpSource: undefined, gpLookupMissFor: undefined };
       }
     }
-    
-    // CORE TYPE CHANGES WHICH SEQUENCE THE ROW DRAWS FROM, so it cannot renumber silently
-    // - same reasoning as the division change (AUDIT F61). A row with no number yet takes
-    // one freely; a row that holds one is offered a replacement and the operator has to
-    // say they will re-mark the transformer.
-    //
-    // NEVER for GP: core type is part of counterKey, so this used to recompute the number
-    // and wipe an original number the operator had typed.
-    // ⚠ A CORE-TYPE CHANGE RESERVES NOTHING. EVER. Do not add a reservation to either
-    // branch below, under any guard.
-    //
-    // Three fixes were made here, each closing the previous one's hole, and each time a
-    // flip still burned numbers: reserve-then-guard (F65), one guarded entry point (F69),
-    // then a per-sequence serialising lock. The last one still drew four numbers across
-    // three counters on a single unsaved row. The lock was not the problem; reserving on a
-    // dropdown change was. Every guard has to be correct under React's batching, timing
-    // and double-invocation, and the fourth attempt would have been the fourth to look
-    // correct. Removing the call removes the whole class - there is no longer anything to
-    // serialise, guard, or get wrong.
-    //
-    // A dropdown flip is not first-meaningful-entry. An operator changing core type to see
-    // what a job would cost has entered nothing about a transformer and has marked no
-    // metal. The number is drawn when a serial, make or capacity is typed
-    // (RESERVE_TRIGGER_FIELDS) and at no other time.
-    //
-    // NEVER for GP: core type is part of counterKey, so this used to recompute the number
-    // and wipe an original number the operator had typed.
-    if (field === 'coreType' && activeAgency && commonData.repairType !== 'GP') {
-      const existing = String(newTransformers[index].jobNo || '').trim();
-      setTransformers(newTransformers);
-      if (existing) {
-        // PREDICTED, not reserved (F68). Reserved only if the operator accepts the prompt
-        // and says they will re-mark the transformer - by then the number is a commitment.
-        const info = predictNextJobNo(commonData.division, value, commonData.repairType);
-        setRenumberPrompt({
-          field: 'coreType',
-          label: `core type to ${value}`,
-          division: commonData.division,
-          rows: [{
-            index,
-            from: existing,
-            to: `${info.prefix}-${info.nextNum}`,
-            fromLabel: `${commonData.division || '-'} / ${transformers[index]?.coreType || 'CRGO'}`,
-            coreType: value,
-          }],
-        });
-      }
-      // No number yet: the core type changes and the row stays blank. Nothing drawn.
-      return;
-    }
-    
+
+    // ⚠ CORE TYPE IS JUST A FIELD NOW. It changes which sequence the number OUGHT to come
+    // from, and the save-time prefix check is where that is tested - but it does not draw a
+    // number, does not rewrite one, and does not prompt. Four fixes were made at this exact
+    // spot (F61, F65, F69, F70) and every one of them still burned numbers on a flip.
+    // Do not put an allocation back here under any guard.
     setTransformers(newTransformers);
   };
 
-  const addTransformer = async () => {
+
+  /**
+   * THE SUGGESTION. A convenience, never a commitment.
+   *
+   * Predicted from the counter, not drawn from it - `predictNextJobNo` reads, and nothing
+   * here writes. The operator is free to overwrite it with whatever the MR says, and if
+   * they abandon the form nothing has been consumed.
+   *
+   * It steps past any number already typed into the form under the same prefix, so adding
+   * three rows suggests three consecutive numbers rather than the same one three times.
+   */
+  const suggestNextJobNo = (coreType: string, rows: TransformerEntry[]): string => {
+    if (commonData.repairType !== 'OGP' || !activeAgency) return '';
+    const info = predictNextJobNo(commonData.division, coreType || 'CRGO', commonData.repairType);
+    if (!info?.prefix) return '';
+    const head = `${info.prefix.toUpperCase()}-`;
+    const usedHere = rows
+      .map(t => String(t.jobNo || '').trim().toUpperCase())
+      .filter(v => v.startsWith(head))
+      .map(v => Number(v.slice(head.length)))
+      .filter(n => Number.isFinite(n) && n > 0);
+    const next = Math.max(Number(info.nextNum) || 1, ...usedHere.map(n => n + 1));
+    return `${info.prefix}-${next}`;
+  };
+
+  const addTransformer = () => {
     const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
     const lastKva = transformers.length > 0 ? transformers[transformers.length - 1].capacityKva : '63';
     const lastStar = transformers.length > 0 ? (transformers[transformers.length - 1].starRating || '3 Star & other') : '3 Star & other';
 
-    // RESERVED, not computed. The number is written on the transformer at intake, so it is
-    // a commitment the moment the operator sees it - it cannot be recomputed at save
-    // (AUDIT O2, F60). The in-form high-water scan that used to live here is gone: the
-    // counter itself is the high-water mark now that every assignment advances it.
-    let nextJobNo = '';
-    if (commonData.repairType === 'OGP' && activeAgency) {
-      try {
-        [nextJobNo] = await reserveJobNos(commonData.division, lastCoreType, 1);
-      } catch (err) {
-        console.error('Could not reserve a job number:', err);
-        setReserveError('Could not reserve a job number. Check the connection and try again - nothing was added.');
-        return;
-      }
-    }
-
+    // SUGGESTED, not reserved. This used to await reserveJobNos and could fail with a
+    // modal; adding a row is now synchronous and cannot fail, because it asks the counter
+    // for nothing (F70).
     setTransformers([
-      ...transformers, 
-      { 
+      ...transformers,
+      {
         rowKey: newRowKey(),
-        jobNo: nextJobNo, 
-        capacityKva: lastKva, 
-        make: '', 
-        serialNo: '', 
+        jobNo: suggestNextJobNo(lastCoreType, transformers),
+        capacityKva: lastKva,
+        make: '',
+        serialNo: '',
         coreType: lastCoreType,
         starRating: lastStar,
         ratingLevel: lastStar,
@@ -1157,26 +867,15 @@ export default function NewJob() {
     ]);
   };
 
-  const duplicateTransformer = async (index: number) => {
+  const duplicateTransformer = (index: number) => {
     const source = transformers[index];
 
-    // Reserved, exactly as addTransformer - a duplicated row is a new transformer and
-    // draws its own number. Never copies the source's.
-    let nextJobNo = '';
-    if (commonData.repairType === 'OGP') {
-      try {
-        [nextJobNo] = await reserveJobNos(commonData.division, source.coreType, 1);
-      } catch (err) {
-        console.error('Could not reserve a job number:', err);
-        setReserveError('Could not reserve a job number. Check the connection and try again - nothing was added.');
-        return;
-      }
-    }
-
+    // A duplicated row is a different transformer, so it never copies the source's number -
+    // it gets its own suggestion, stepped past everything already in the form.
     const newEntry: TransformerEntry = {
       ...source,
       rowKey: newRowKey(),
-      jobNo: nextJobNo,
+      jobNo: suggestNextJobNo(source.coreType, transformers),
       serialNo: '',
       autoFilledFrom: undefined
     };
@@ -1186,6 +885,7 @@ export default function NewJob() {
     setTransformers(next);
   };
 
+
   const removeTransformer = (index: number) => {
     if (transformers.length === 1) return;
     const newTransformers = [...transformers];
@@ -1193,7 +893,7 @@ export default function NewJob() {
     setTransformers(newTransformers);
   };
 
-  const handleAutoFillEmptyJobNos = async () => {
+  const handleAutoFillEmptyJobNos = () => {
     if (!activeAgency) {
       setErrorMsg("Please configure and select an agency in Settings first.");
       return;
@@ -1204,15 +904,22 @@ export default function NewJob() {
       setModalAlertMessage(err);
       return;
     }
-    
-    // BULK RESERVE, blank rows only.
+
+    // FILLS BLANK ROWS WITH SUGGESTIONS. Nothing is reserved (F70), so this is undoable by
+    // simply typing over it, and abandoning the form costs nothing.
     //
-    // The skip-if-numbered rule was already here and is the important half: a row that
-    // holds a number may have that number written on the transformer, so this must never
-    // replace one. What changes is where the numbers come from - the client-side
-    // high-water scan is gone, and each blank row draws from the shared counter inside a
-    // transaction (AUDIT F60).
-    await numberUnnumberedRows(commonData.division, commonData.repairType);
+    // The skip-if-numbered rule is the important half and predates all of this: a row that
+    // already holds a number may have it written on the transformer, so this must never
+    // replace one.
+    setTransformers(prev => {
+      const next = [...prev];
+      for (let i = 0; i < next.length; i++) {
+        if (String(next[i].jobNo || '').trim()) continue;
+        // Passing `next` so each fill sees the ones before it and the numbers run on.
+        next[i] = { ...next[i], jobNo: suggestNextJobNo(next[i].coreType || 'CRGO', next) };
+      }
+      return next;
+    });
   };
 
   // Derived Totals
@@ -1538,31 +1245,22 @@ export default function NewJob() {
           return;
         }
 
-        // Reserve the replacements BEFORE showing them. An offer of an unreserved number
-        // can be taken by the time it is clicked, which is the defect the reservation
-        // design exists to close (F60).
-        try {
-          const byKey: Record<string, { coreType: string; rows: typeof clashRows }> = {};
-          clashRows.forEach(c => {
-            const coreType = transformers[c.index].coreType || 'CRGO';
-            const { counterKey } = getJobNoPrefix(commonData.division, coreType);
-            (byKey[counterKey] ||= { coreType, rows: [] }).rows.push(c);
-          });
-          const offers: { index: number; from: string; fromLabel: string; to: string }[] = [];
-          for (const { coreType, rows } of Object.values(byKey)) {
-            const nums = await reserveJobNos(commonData.division, coreType, rows.length);
-            rows.forEach((c, i) => offers.push({
+        // NAME THE CONFLICT, DO NOT REPLACE IT. This used to reserve a fresh number for each
+        // clashing row and offer it - which meant a refused save spent numbers, and the
+        // offered number was the app's guess rather than anything the division had agreed.
+        //
+        // The number is on the MR. If it collides with a job already in this agency, either
+        // the operator mistyped it or the division has reissued a number, and both are
+        // resolved by looking at the paper - not by taking the next one off a counter (F70).
+        setRefusalPrompt({
+          rows: clashRows
+            .map(c => ({
               index: c.index,
               from: c.jobNo,
               fromLabel: c.existing.map(describe).join('; '),
-              to: nums[i],
-            }));
-          }
-          setRefusalPrompt({ rows: offers.sort((x, y) => x.index - y.index) });
-        } catch (err) {
-          console.error('Could not reserve replacement job numbers:', err);
-          setReserveError('Some job numbers are already in use, and replacements could not be reserved. Nothing was saved.');
-        }
+            }))
+            .sort((x, y) => x.index - y.index),
+        });
         setLoading(false);
         return;
       }
@@ -1739,7 +1437,9 @@ export default function NewJob() {
 
           // Only update sequence counter for OGP repairs. GP warranty repairs reuse the original Job Number from 1st repair.
           if (commonData.repairType !== 'GP') {
-            // counterKey only - the number itself was reserved when the row was created.
+            // counterKey only - the NUMBER is whatever the operator typed. This reads it
+            // back off the field rather than trusting anything the app issued, because the
+            // app no longer issues anything (F70).
             const counterKey = getJobNoPrefix(commonData.division, t.coreType).counterKey;
 
             const parts = t.jobNo.split('-');
@@ -1817,16 +1517,17 @@ export default function NewJob() {
           createdJobsList.push({ id: newJobRef.id, ...jobData });
         }
 
-        // RECONCILIATION, NOT ALLOCATION - and it is no longer how numbers are issued.
+        // ⚠ THIS IS THE ONLY PLACE THE COUNTER MOVES. Nothing before save touches it.
         //
-        // Every number now comes from `reserveJobNos`, which advances the counter inside
-        // its own transaction before the operator ever sees the number (AUDIT F60). This
-        // block survives for the one case reservation does not cover: the job-number field
-        // is editable, and a hand-typed number higher than the counter must still push it
-        // forward or the next reservation would reissue it.
+        // The counter is a HIGH-WATER MARK of numbers actually recorded, not an allocator:
+        // it advances to the highest number the saved rows carry, inside the same
+        // transaction that writes them. So a form that is opened, typed into and abandoned
+        // costs nothing, and the suggestion the next intake sees is derived from real jobs
+        // rather than from numbers someone drew and walked away from (AUDIT F70).
         //
-        // It only ever advances - `maxNum > currentLast` - so it cannot rewind the counter
-        // below a number that was reserved and then burned.
+        // It only ever advances - `maxNum > currentLast` - so an intake saved with numbers
+        // below the mark (a backdated MR, a gap being filled) cannot rewind it and hand the
+        // same numbers out again as suggestions.
         const nextCounters = { ...currentCounters };
         let hasCounterChange = false;
 
@@ -1872,12 +1573,11 @@ export default function NewJob() {
   return (
     <div className="w-full max-w-full overflow-x-hidden space-y-4 pb-24 sm:pb-16 print:m-0 print:p-0">
       
-      {/* REFUSAL OFFER - a rejected save comes with replacements, not just a complaint.
-          Every clashing row is offered at once: an operator refused on four rows re-marks
-          four transformers and clicks once, rather than meeting this dialog four times and
-          editing numbers by hand between each (AUDIT F62).
-          Cancel changes nothing - the numbers stay, nothing is written, and the operator
-          can edit by hand if they prefer. This is an offer, not a gate. */}
+      {/* DUPLICATE JOB NUMBER - names the conflict, does not resolve it.
+          The number came off the MR, so a clash means either a mistype or a number the
+          division has issued twice, and both are settled by looking at the paper. The
+          dialog used to offer a reserved replacement; that spent a number on every refused
+          save and put the app's guess where the division's number belongs (AUDIT F70). */}
       {refusalPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-xl w-full border border-rose-200 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
@@ -1909,134 +1609,30 @@ export default function NewJob() {
                   <div className="text-[11px] text-slate-600 mt-0.5 pl-3 border-l-2 border-slate-200">
                     {r.fromLabel}
                   </div>
-                  <div className="flex items-baseline gap-2 mt-2">
-                    <span className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Next free</span>
-                    <span className="font-mono font-black text-slate-900 text-lg">{r.to}</span>
-                  </div>
                 </div>
               ))}
             </div>
 
             <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <strong>
-                {refusalPrompt.rows.length === 1
-                  ? 'Re-mark the transformer with the new number before saving.'
-                  : 'Re-mark each transformer with its new number before saving.'}
-              </strong>{' '}
-              The number on the tank and the number in this record have to match - nothing
-              downstream can reconcile them if they differ.
+              <strong>Check the MR.</strong> These numbers are the division&rsquo;s, not this
+              app&rsquo;s - so either one was typed wrongly, or the division has issued a number
+              that is already on a transformer here. Correct the entry, or take it up with the
+              division before saving.
             </p>
 
-            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+            <div className="flex justify-end mt-4">
               <button
                 type="button"
                 onClick={() => setRefusalPrompt(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300"
+                className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg"
               >
-                Cancel - leave the numbers as they are
-              </button>
-              <button
-                type="button"
-                onClick={applyRefusalOffer}
-                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm"
-              >
-                {refusalPrompt.rows.length === 1
-                  ? `Re-mark this transformer as ${refusalPrompt.rows[0].to}`
-                  : `Re-mark all ${refusalPrompt.rows.length} transformers`}
+                Close and fix the numbers
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* RENUMBER PROMPT - offer, never apply (AUDIT F61).
-          The number is written on the transformer at intake, so changing the division or
-          core type of a row that already holds one cannot rewrite it silently: the tank
-          would say one thing and the record another, and the marking is the half this app
-          cannot correct. The replacement is already RESERVED, so the number shown is the
-          number assigned - and if the operator declines, it is burned, which is a gap in
-          the sequence and costs nothing. */}
-      {renumberPrompt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-amber-200 animate-in fade-in zoom-in duration-150">
-            <div className="flex items-center gap-3 mb-3 text-amber-700">
-              <div className="bg-amber-100 p-2.5 rounded-xl shrink-0">
-                <AlertTriangle className="w-6 h-6" />
-              </div>
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  {renumberPrompt.rows.length === 1 ? 'This transformer needs a new job number' : 'These transformers need new job numbers'}
-                </h3>
-                <p className="text-xs text-amber-700 font-medium">
-                  Changing the {renumberPrompt.label} moves {renumberPrompt.rows.length === 1 ? 'it' : 'them'} to a different number sequence.
-                </p>
-              </div>
-            </div>
-
-            <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 my-4">
-              {renumberPrompt.rows.map(r => (
-                <div key={r.index} className="p-3">
-                  <div className="text-[11px] uppercase tracking-widest text-slate-400 font-bold mb-1">
-                    Transformer #{r.index + 1}
-                  </div>
-                  <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="font-mono font-bold text-slate-500 line-through">{r.from}</span>
-                    <span className="text-slate-400">&rarr;</span>
-                    <span className="font-mono font-black text-slate-900 text-lg">{r.to}</span>
-                  </div>
-                  <div className="text-[11px] text-slate-500 mt-0.5">
-                    <span className="font-mono">{r.from}</span> came from <strong>{r.fromLabel}</strong>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <strong>If you have already written the old number on the transformer, it must be
-              re-marked before you continue.</strong> The job number on the tank and the number in
-              this record have to match - nothing downstream can reconcile them if they differ.
-            </p>
-
-            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
-              <button
-                type="button"
-                onClick={() => setRenumberPrompt(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300"
-              >
-                Cancel - keep {renumberPrompt.rows.length === 1 ? renumberPrompt.rows[0].from : 'the existing numbers'}
-              </button>
-              <button
-                type="button"
-                onClick={applyRenumber}
-                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm"
-              >
-                {renumberPrompt.rows.length === 1
-                  ? `Re-mark this transformer as ${renumberPrompt.rows[0].to}`
-                  : `Re-mark all ${renumberPrompt.rows.length} transformers`}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* RESERVATION FAILURE - a job number could not be drawn. Nothing was issued. */}
-      {reserveError && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200">
-            <div className="flex items-center gap-3 mb-3 text-rose-600">
-              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0"><AlertCircle className="w-6 h-6" /></div>
-              <h3 className="text-base font-bold text-slate-900">Job number not issued</h3>
-            </div>
-            <p className="text-sm text-slate-700 whitespace-pre-line">{reserveError}</p>
-            <div className="flex justify-end mt-4">
-              <button type="button" onClick={() => setReserveError(null)}
-                      className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg">
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ERROR MODAL */}
       {errorMsg && (
@@ -2408,22 +2004,18 @@ export default function NewJob() {
                       )}
                     </label>
                     <div className="relative">
-                      {/* PLACEHOLDER, NOT A PROVISIONAL NUMBER (AUDIT F67).
-                          The number goes on the transformer, so anything shown here that
-                          looks like one is a commitment. Until the operator starts entering
-                          the unit, the field says what will happen rather than showing a
-                          figure that might change. */}
+                      {/* THE OPERATOR'S FIELD. Pre-filled with a suggestion when the row is
+                          created, and theirs to overwrite with whatever the MR says. It is
+                          never disabled and never changes underneath them: no reservation
+                          is in flight because intake reserves nothing (AUDIT F70). */}
                       <input
                         required
                         type="text"
                         autoComplete="off"
-                        disabled={Boolean(t.rowKey && reservingKeys.has(t.rowKey))}
                         placeholder={
                           commonData.repairType === 'GP'
                             ? 'Type the original job number'
-                            : t.rowKey && reservingKeys.has(t.rowKey)
-                              ? 'Reserving…'
-                              : 'assigned when you start entering this transformer'
+                            : 'Job number from the MR'
                         }
                         value={t.jobNo}
                         onChange={(e) => {
@@ -2468,25 +2060,6 @@ export default function NewJob() {
                             : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
                         }`}
                       />
-
-                      {/* INLINE RETRY, not a modal (AUDIT F67).
-                          The reservation fires on a keystroke, so the operator is mid-typing
-                          in the field next to this one. A dialog over the field they are
-                          using is the wrong interruption; the modal is kept for Add,
-                          Duplicate and Auto Job Nos, where there is nothing else on screen. */}
-                      {t.rowKey && reserveFailedKeys.has(t.rowKey) && !String(t.jobNo || '').trim() && (
-                        <div className="mt-1 flex items-center gap-1.5 text-[10px] text-rose-700">
-                          <AlertCircle className="w-3 h-3 shrink-0" />
-                          <span>No job number could be reserved.</span>
-                          <button
-                            type="button"
-                            onClick={() => t.rowKey && reserveForRow(t.rowKey, t.coreType || 'CRGO')}
-                            className="font-bold underline hover:text-rose-900 cursor-pointer"
-                          >
-                            Get number
-                          </button>
-                        </div>
-                      )}
 
                       {/* GP SUGGESTION DROPDOWN - partial, case-insensitive, anywhere in
                           the string; agency-scoped pastJobs, most recent first. */}

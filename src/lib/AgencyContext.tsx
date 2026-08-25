@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
 import { 
@@ -1136,9 +1136,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * `AgencySettings` seeds them at creation, but nothing ADVANCES it while an AT is active
    * and nothing reads it in that state. It is not kept in step, deliberately.
    */
-  /** ⚠ TEMPORARY — sequence counter for the reserveJobNos instrumentation. Remove with it. */
-  const reserveCallSeq = useRef(0);
-
   const jobNoCounterTarget = (atMasterId?: string): { ref: any; isAtMaster: boolean; id: string } | null => {
     // An EXPLICIT AT wins over the session's. MrLedger adds a transformer to an MR issued
     // under some tender, and that job belongs to THAT tender - it consumes its allotment
@@ -1210,29 +1207,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     count: number = 1,
     atMasterId?: string,
   ): Promise<string[]> => {
-    // ⚠ TEMPORARY INSTRUMENTATION — REMOVE ONCE THE BURNING PATH IS IDENTIFIED.
-    //
-    // Four fixes have been aimed at call sites found by READING the code, and numbers are
-    // still being drawn on a dropdown flip. The stack is printed HERE, inside the
-    // allocator, rather than at the call sites, precisely because the call sites are what
-    // has been guessed wrong four times: whatever calls this appears in the trace whether
-    // or not it was in the list.
-    //
-    // Sequential call ids so the console shows how many fired and in what order, even
-    // where React batches and the timestamps collapse.
-    reserveCallSeq.current += 1;
-    const __seq = reserveCallSeq.current;
-    console.log(
-      `%c[RESERVE #${__seq}] division=${division} coreType=${coreType} count=${count}` +
-      ` atMasterId=${atMasterId ?? '(active)'}`,
-      'background:#7f1d1d;color:#fff;padding:2px 6px;border-radius:3px;font-weight:bold',
-    );
-    console.log(new Error(`reserveJobNos call #${__seq} — stack`).stack);
-
-    if (count <= 0) { console.log(`[RESERVE #${__seq}] count<=0, returning without allocating`); return []; }
+    if (count <= 0) return [];
     const target = jobNoCounterTarget(atMasterId);
     const { prefix, counterKey } = getJobNoPrefix(division, coreType, atMasterId);
-    console.log(`[RESERVE #${__seq}] -> counterKey=${counterKey} prefix=${prefix} target=${target ? (target.isAtMaster ? 'AT ' : 'AGENCY ') + target.id : 'NONE'}`);
     if (!target) throw new Error('No agency is selected, so a job number cannot be reserved.');
 
     const allocated = await runTransaction(db, async (transaction) => {
@@ -1264,12 +1241,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         ? { ...a, lastJobNumbers: { ...(a.lastJobNumbers || {}), [counterKey]: allocated[allocated.length - 1] } }
         : a));
     }
-    const __out = allocated.map(n => `${prefix}-${n}`);
-    console.log(
-      `%c[RESERVE #${__seq}] ALLOCATED ${counterKey}: ${__out.join(', ')}`,
-      'background:#065f46;color:#fff;padding:2px 6px;border-radius:3px;font-weight:bold',
-    );
-    return __out;
+    return allocated.map(n => `${prefix}-${n}`);
   };
 
   /**
