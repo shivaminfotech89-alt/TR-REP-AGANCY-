@@ -1272,9 +1272,13 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * PAIRED PRECONDITION - see the note on getNextJobNoInfo above. This branches on
-   * `activeAtMaster` alone; the read branches on `activeAtMaster.lastJobNumbers` as well.
-   * They must be changed together. AUDIT.md A6.
+   * Mirror a counter map the SAVE has already written into context state, so the next
+   * suggestion in the same session does not read a stale value. It writes nothing to
+   * Firestore - the caller's transaction has already committed.
+   *
+   * (The paired-precondition note that used to sit here belonged to incrementJobNoCounter,
+   * which is deleted. This function has no such pairing: the caller tells it which document
+   * was written.)
    */
   const syncCountersState = (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => {
     if (isAtMaster) {
