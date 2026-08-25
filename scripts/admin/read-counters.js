@@ -113,8 +113,8 @@ if (mode === 'save') {
       console.log(`    ${crgo.delta} number(s) issued  (${crgo.before} -> ${crgo.after})`);
       if (!wasPresent(bare.counter)) {
         console.log(`    bare key CREATED at ${bare.after} - it did not exist on this AT.`);
-        console.log('    reserveJobNos writes both and reads the MAX of them, so a missing bare');
-        console.log('    key is repaired in step rather than restarting the sequence at 1.');
+        console.log('    the save writes both and the prediction reads the MAX of them, so a');
+        console.log('    missing bare key is repaired in step, not restarted at 1.');
       } else if (bare.delta !== crgo.delta) {
         console.log(`    bare key moved by ${bare.delta} against ${crgo.delta} issued - THEY DISAGREE.`);
       } else {

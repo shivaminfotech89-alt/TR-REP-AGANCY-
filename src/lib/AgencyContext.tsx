@@ -997,7 +997,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       // silently restarted at 1. The cause is that the read and the write test different
       // things: getNextJobNoInfo branches on `activeAtMaster && activeAtMaster.lastJobNumbers`
       // - and `{}` is TRUTHY - so the populated `activeAgency.lastJobNumbers` in its
-      // `else if` was never reached, while incrementJobNoCounter branches on
+      // `else if` was never reached, while the counter-writer of the day branched on
       // `activeAtMaster` alone. An agency that had been numbering off its own counters
       // returned to 1 the moment its first AT existed, producing duplicate job numbers
       // immediately (AUDIT O2/C1). That sits on the path the agency form now recommends
@@ -1033,7 +1033,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       //     highest number in that intake - it reconciles, it does not allocate;
       //   - it writes only when an AT or agency doc resolved, so jobs saved with no active
       //     AT advanced nothing;
-      //   - `incrementJobNoCounter` looks like the allocator and has zero call sites (A2).
+      //   - a second counter-writer looked like the allocator and had zero call sites (A2).
+      // (Both writers are since deleted - the save path is the only one left - but the gaps
+      // this seeding covers are in the DATA those writers left behind, so it still applies.)
       // Seeding from the cache would inherit every one of those gaps, and the failure is
       // the precise one this exists to prevent. So: the max of BOTH - actual job numbers
       // and every stored counter - which can never be lower than either alone.
@@ -1135,31 +1137,14 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * PAIRED PRECONDITION - read this together with incrementJobNoCounter below.
-   *
-   * These two functions decide WHICH DOCUMENT holds the counter, and they test different
-   * things to decide it:
-   *
-   *     getNextJobNoInfo      if (activeAtMaster && activeAtMaster.lastJobNumbers)
-   *     incrementJobNoCounter if (activeAtMaster)
-   *
-   * They agree today only because an AT is never left with an empty `lastJobNumbers`
-   * (addAtMaster seeds the first AT from the agency; later ATs start their own series and
-   * are incremented into existence). Change EITHER test alone and they disagree for a
-   * newly created AT: the number issued comes from one document and the increment lands on
-   * the other, so job 1 is numbered from the agency and job 2 from the AT - duplicate job
-   * numbers, one job later and quieter than the bug the seeding fixed.
-   *
-   * If this needs changing, change both, and check what happens on the FIRST job of a new
-   * AT specifically. See AUDIT.md A6.
-   */
-  /**
    * THE ONE TEST for which document owns the job-number counters.
    *
-   * `getNextJobNoInfo` used to branch on `activeAtMaster && activeAtMaster.lastJobNumbers`
-   * while `incrementJobNoCounter` branched on `activeAtMaster` alone - a read and a write
-   * disagreeing about the same field, held together only by an AT never being left with an
-   * empty counter map (AUDIT A6). They now share this, so they cannot drift.
+   * The prediction and the allocator once branched differently on the same field - one on
+   * `activeAtMaster && activeAtMaster.lastJobNumbers`, the other on `activeAtMaster` alone
+   * - a read and a write disagreeing, held together only by an AT never being left with an
+   * empty counter map (AUDIT A6). Both now come through here. The allocator is since gone
+   * entirely (F70); this remains the single answer to which document holds a counter, for
+   * the prediction that suggests numbers and for the save that advances them.
    *
    * THE AT'S COUNTER IS AUTHORITATIVE whenever an AT is active. The agency's exists for the
    * no-AT case and is legacy: `EditAgencyForm` backfills its keys to 0 so they exist, and
@@ -1178,7 +1163,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * The prefix and counter key for a division/core type. NO NUMBER - see reserveJobNos.
+   * The prefix and counter key for a division/core type. NO NUMBER: nothing allocates
+   * one - see the note above predictNextJobNo (AUDIT F70).
    *
    * Split out of `getNextJobNoInfo` because composing a number from a client-side snapshot
    * is what let two operators draw the same one (AUDIT O2). Prefix resolution is pure and
@@ -1238,17 +1224,22 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
 
   /**
-   * PREDICTS the next job number from the CONTEXT SNAPSHOT. It does not allocate.
+   * PREDICTS the next job number. READS ONLY - it writes nothing, anywhere.
    *
-   * Renamed from `getNextJobNoInfo`, which is how it came to be used as an allocator: a
-   * function whose name says "next job no" sitting beside the real allocator is how someone
-   * wires up the wrong one. Its only legitimate caller is the renumber prompt, which shows
-   * the operator what a replacement WOULD be before they accept - a prediction that
-   * `reserveJobNos` then makes real, and which may differ if another operator got there
-   * first (AUDIT F60, F64).
+   * This is now the ONLY source of a number the app puts in front of an operator, and it is
+   * a SUGGESTION: New Job pre-fills a new row with it, MrLedger pre-fills a unit added to
+   * an MR, and in both cases the operator overwrites it with whatever the division wrote on
+   * the paper. Filling a job-number field from this is correct and expected - the opposite
+   * of what the comment here used to say, back when a field could only be filled from a
+   * reservation (AUDIT F70).
    *
-   * Never use this to fill a job-number field. The number in that field is written on the
-   * transformer, so it must come from a reservation.
+   * Because it only reads, two operators can be shown the same number. That is accepted:
+   * the duplicate check refuses the second at save and names the conflicting job, so the
+   * loser edits one field. The alternative cost a number on every dropdown flip.
+   *
+   * Renamed from `getNextJobNoInfo`, which is how it once came to be used as an allocator -
+   * a function whose name says "next job no" sitting beside a real allocator is how someone
+   * wires up the wrong one (AUDIT F64). There is no allocator beside it now.
    */
   const predictNextJobNo = (
     division: string,
@@ -1273,7 +1264,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     const counters = (source?.lastJobNumbers) || (source ? {} : activeAgency.lastJobNumbers) || {};
 
     // CRGO is counted under either `<div>_CRGO` or a bare `<div>` - the same fallback pair
-    // reserveJobNos reads the MAX of, so a prediction cannot sit below a real number.
+    // the save advances together, so a prediction cannot sit below a real number.
     const bare = counterKey.endsWith('_CRGO') ? Number(counters[division] ?? 0) || 0 : 0;
     const lastNum = Math.max(Number(counters[counterKey] ?? 0) || 0, bare);
 

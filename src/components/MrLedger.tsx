@@ -100,7 +100,6 @@ const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatch
 
 export default function MrLedger() {
   const { activeAgency, activeAtMaster, atMasters, predictNextJobNo } = useAgency();
-  /** True while a job number is being reserved - disables the Add button. */
   const [loading, setLoading] = useState(true);
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -479,7 +478,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 for (const [key, num] of Object.entries(highWater)) {
                   if (num > (Number(counters[key]) || 0)) { counters[key] = num; changed = true; }
                   // CRGO lives under `<div>_CRGO` and a bare `<div>`; both move together or
-                  // the pair disagrees about where the sequence is - see reserveJobNos.
+                  // the pair disagrees about where the sequence is. NewJob's save does the same.
                   if (key.endsWith('_CRGO') && num > (Number(counters[editingMr.division]) || 0)) {
                     counters[editingMr.division] = num; changed = true;
                   }
