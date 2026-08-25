@@ -891,45 +891,16 @@ export default function NewJob() {
   };
 
   /**
-   * THE PREFIX IS DERIVED, NEVER TYPED AND NEVER STORED SEPARATELY.
+   * THE PREFIX FOR A ROW - a function of the division and that row's core type, and the
+   * same resolution the save uses to pick a counter.
    *
-   * It is a function of the division and the row's core type - the same function the save
-   * uses to pick a counter - so it cannot disagree with the sequence the number belongs to,
-   * and the operator cannot mistype it. It is rendered as a fixed addon beside the input,
-   * not inside it.
-   *
-   * A consequence worth stating: the OGP save-time prefix check can no longer fail, because
-   * the prefix is derived from the same two fields it would be validated against. That is
-   * the structural version of the check, not the loss of one (AUDIT O35).
+   * It is PRE-FILLED into the job-number box rather than shown beside it, so the operator
+   * reads one complete number the way it appears on the MR. That means it can be edited,
+   * deliberately or by accident, and the save-time prefix check is what catches an edited
+   * one - so that check is live, not the dead branch a fixed addon would have made it.
    */
   const rowJobNoPrefix = (coreType: string): string =>
     getJobNoPrefix(commonData.division, coreType || 'CRGO').prefix;
-
-  /**
-   * The part the operator owns: everything after the derived prefix.
-   *
-   * Falls back to the WHOLE stored value when it does not carry the current prefix - a row
-   * restored from a draft under a different division, say. Showing the operator a value
-   * that is not what will be saved is worse than showing an odd-looking one.
-   */
-  const jobNoTail = (jobNo: string, prefix: string): string => {
-    const raw = String(jobNo || '');
-    const head = `${prefix}-`;
-    return raw.toUpperCase().startsWith(head.toUpperCase()) ? raw.slice(head.length) : raw;
-  };
-
-  /**
-   * Write the operator's number back, re-composed with the derived prefix.
-   *
-   * Digits only. The prefix is not in this box, so a typed letter here is a slip rather than
-   * a prefix the operator meant - and letting one through would produce a number that the
-   * save's tail parser reads as NaN, silently failing to advance the counter (F70).
-   */
-  const handleJobNoTailChange = (index: number, tail: string) => {
-    const cleaned = tail.replace(/[^0-9]/g, '');
-    const prefix = rowJobNoPrefix(transformers[index]?.coreType || 'CRGO');
-    handleTransformerChange(index, 'jobNo', cleaned ? `${prefix}-${cleaned}` : '');
-  };
 
   const addTransformer = () => {
     const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
@@ -2102,85 +2073,84 @@ export default function NewJob() {
                       )}
                     </label>
                     <div className="relative">
-                      {/* THE JOB NUMBER FIELD, IN TWO HALVES.
-                          The PREFIX is derived from the division and this row's core type
-                          and rendered as a fixed addon - it cannot be typed, mistyped, or
-                          left behind when a dropdown moves. The NUMBER is the operator's,
-                          pre-filled with the next free one and freely editable.
-                          Nothing here reserves; the counter moves at save (AUDIT F70).
+                      {/* ONE BOX, HOLDING THE WHOLE NUMBER.
+                          The prefix is already in it - pre-filled from the division and the
+                          row's core type - so nobody types it by hand, but it is not
+                          visually separated: the operator reads and edits "SU-27" as one
+                          thing, which is how it appears on the MR and on the tank.
 
-                          GP keeps ONE free-text box: its number is the original from a
-                          previous repair and may carry any prefix, including one from an
-                          AT that no longer exists. Splitting it would force that history
-                          through today's prefix. */}
-                      {commonData.repairType === 'GP' ? (
-                        <input
-                          required
-                          type="text"
-                          autoComplete="off"
-                          placeholder="Type the original job number"
-                          value={t.jobNo}
-                          onChange={(e) => {
-                            const val = e.target.value;
-                            handleTransformerChange(index, 'jobNo', val);
-                            // GP: NEVER auto-apply while typing. Do not reinstate this as
-                            // a "convenience" - it was removed deliberately.
-                            //
-                            // The old onChange auto-applied on an exact single match and
-                            // popped the disambiguation modal on multiple, both mid-
-                            // keystroke. Two problems. First it fights the operator: a
-                            // partial number can exactly equal a shorter real job number
-                            // on the way to a longer one, so passing through "MSBT-1" en
-                            // route to "MSBT-12" silently overwrote make, serial, kVA and
-                            // prevDeliveryDate with the wrong transformer's - and
-                            // prevDeliveryDate is what the guarantee window is measured
-                            // from. Second, a modal opening on a keystroke is an
-                            // interruption the operator did not ask for.
-                            //
-                            // Selection is explicit: pick from the suggestion list, or get
-                            // the manual date panel when nothing matches. The blur lookup
-                            // and the save-time safety net cover typing a full number and
-                            // moving on without clicking.
-                            //
-                            // Any prefix is accepted - a unit repaired under an earlier AT
-                            // may carry a completely different one.
+                          The prefix is therefore EDITABLE, and the save-time check is what
+                          catches an edited one. That is the trade against a fixed addon,
+                          which made a wrong prefix unconstructible but split a single
+                          identifier into two controls.
+
+                          Nothing here reserves; the counter moves at save (AUDIT F70). */}
+                      <input
+                        required
+                        type="text"
+                        autoComplete="off"
+                        placeholder={
+                          commonData.repairType === 'GP'
+                            ? 'Type the original job number'
+                            : `${rowJobNoPrefix(t.coreType || 'CRGO')}-  (number from the MR)`
+                        }
+                        value={t.jobNo}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          handleTransformerChange(index, 'jobNo', val);
+                          // GP: NEVER auto-apply while typing. Do not reinstate this as
+                          // a "convenience" - it was removed deliberately.
+                          //
+                          // The old onChange auto-applied on an exact single match and
+                          // popped the disambiguation modal on multiple, both mid-
+                          // keystroke. Two problems. First it fights the operator: a
+                          // partial number can exactly equal a shorter real job number
+                          // on the way to a longer one, so passing through "MSBT-1" en
+                          // route to "MSBT-12" silently overwrote make, serial, kVA and
+                          // prevDeliveryDate with the wrong transformer's - and
+                          // prevDeliveryDate is what the guarantee window is measured
+                          // from. Second, a modal opening on a keystroke is an
+                          // interruption the operator did not ask for.
+                          //
+                          // Selection is explicit: pick from the suggestion list, or get
+                          // the manual date panel when nothing matches. The blur lookup
+                          // and the save-time safety net cover typing a full number and
+                          // moving on without clicking.
+                          //
+                          // Any prefix is accepted - a unit repaired under an earlier AT
+                          // may carry a completely different one.
+                          if (commonData.repairType === 'GP') {
                             setJobNoSuggestFor(val.trim() ? index : null);
-                          }}
-                          onFocus={() => { if (t.jobNo.trim()) setJobNoSuggestFor(index); }}
-                          onBlur={() => {
-                            // Delay so a click on a suggestion registers before the list closes.
-                            setTimeout(() => setJobNoSuggestFor(cur => (cur === index ? null : cur)), 150);
-                            handleJobNoBlur(index, t.jobNo);
-                          }}
-                          className="w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border rounded-lg focus:ring-1 bg-white border-amber-300 focus:ring-amber-500 focus:border-amber-500 text-amber-950"
-                        />
-                      ) : (() => {
-                        const prefix = rowJobNoPrefix(t.coreType || 'CRGO');
-                        return (
-                          <div className="flex items-stretch rounded-lg border border-slate-200 bg-white focus-within:ring-1 focus-within:ring-blue-500 focus-within:border-blue-500 overflow-hidden">
-                            {/* Not an input, and not disabled - a disabled input reads as
-                                "broken" and still invites a click. This is a label. */}
-                            <span
-                              title={`Prefix for ${commonData.division} / ${t.coreType || 'CRGO'} - set in Agency Settings, not here`}
-                              className="shrink-0 select-none px-2 sm:px-2.5 flex items-center bg-slate-100 border-r border-slate-200 text-xs sm:text-sm font-mono font-bold text-slate-500"
-                            >
-                              {prefix}-
-                            </span>
-                            <input
-                              required
-                              type="text"
-                              inputMode="numeric"
-                              autoComplete="off"
-                              placeholder="number"
-                              aria-label={`Job number for transformer ${index + 1}, prefix ${prefix}`}
-                              value={jobNoTail(t.jobNo, prefix)}
-                              onChange={(e) => handleJobNoTailChange(index, e.target.value)}
-                              onBlur={() => handleJobNoBlur(index, t.jobNo)}
-                              className="w-full min-w-0 px-2 sm:px-3 py-2 text-xs sm:text-sm font-mono font-bold bg-transparent text-slate-900 outline-none"
-                            />
-                          </div>
-                        );
-                      })()}
+                          }
+                        }}
+                        onFocus={(e) => {
+                          if (commonData.repairType === 'GP') {
+                            if (t.jobNo.trim()) setJobNoSuggestFor(index);
+                            return;
+                          }
+                          // CURSOR AFTER THE PREFIX. The operator is here to change the
+                          // number, not the "SU-", so focus selects the digits: type and
+                          // they are replaced, or press End and edit. Selecting the whole
+                          // value would make the first keystroke wipe the prefix too, which
+                          // is the mistake this field is meant to prevent.
+                          const head = `${rowJobNoPrefix(t.coreType || 'CRGO')}-`;
+                          if (t.jobNo.toUpperCase().startsWith(head.toUpperCase())) {
+                            const el = e.currentTarget;
+                            const len = t.jobNo.length;
+                            requestAnimationFrame(() => el.setSelectionRange(head.length, len));
+                          }
+                        }}
+                        onBlur={() => {
+                          // Delay so a click on a suggestion registers before the list closes.
+                          setTimeout(() => setJobNoSuggestFor(cur => (cur === index ? null : cur)), 150);
+                          handleJobNoBlur(index, t.jobNo);
+                        }}
+                        className={`w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border rounded-lg focus:ring-1 bg-white ${
+                          commonData.repairType === 'GP'
+                            ? 'border-amber-300 focus:ring-amber-500 focus:border-amber-500 text-amber-950'
+                            : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
+                        }`}
+                      />
 
                       {/* GP SUGGESTION DROPDOWN - partial, case-insensitive, anywhere in
                           the string; agency-scoped pastJobs, most recent first. */}
