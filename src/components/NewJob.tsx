@@ -228,6 +228,28 @@ export default function NewJob() {
    */
   const reservingRef = useRef<Set<string>>(new Set());
 
+  /**
+   * A LOCK PER SEQUENCE, on top of the per-row one.
+   *
+   * The row guard stops one row drawing twice. It does not stop two rows drawing from the
+   * same counter at the same moment - and a number changing under an operator mid-entry is
+   * not a tidiness problem: it is how a repairer came to miss a serial and produce wrong
+   * estimates.
+   *
+   * Reservations for a counter key are therefore SERIALISED rather than dropped. Every row
+   * still gets a number; they are simply issued one at a time per sequence, so an
+   * in-progress draw always completes before the next reads the counter.
+   */
+  const sequenceLocks = useRef<Map<string, Promise<unknown>>>(new Map());
+
+  const withSequenceLock = <T,>(counterKey: string, work: () => Promise<T>): Promise<T> => {
+    const prior = sequenceLocks.current.get(counterKey) ?? Promise.resolve();
+    const next = prior.catch(() => {}).then(work);
+    // Held even on failure, so a rejected draw cannot leave the sequence permanently locked.
+    sequenceLocks.current.set(counterKey, next.catch(() => {}));
+    return next;
+  };
+
   const markReserving = (keys: string[], on: boolean) => {
     keys.forEach(k => { if (on) reservingRef.current.add(k); else reservingRef.current.delete(k); });
     setReservingKeys(new Set(reservingRef.current));
@@ -277,8 +299,9 @@ export default function NewJob() {
       });
 
       const assigned: Record<string, string> = {};
-      for (const { coreType, rowKeys } of Object.values(byCounter)) {
-        const nums = await reserveJobNos(division, coreType, rowKeys.length);
+      for (const [counterKey, { coreType, rowKeys }] of Object.entries(byCounter)) {
+        const nums = await withSequenceLock(counterKey,
+          () => reserveJobNos(division, coreType, rowKeys.length));
         rowKeys.forEach((k, i) => { assigned[k] = nums[i]; });
       }
       // Keyed on rowKey, so a splice between firing and landing cannot put a number on the
@@ -561,8 +584,11 @@ export default function NewJob() {
       });
 
       const assigned: Record<number, string> = {};
-      for (const { coreType, rows } of Object.values(byKey)) {
-        const nums = await reserveJobNos(renumberPrompt.division, coreType, rows.length);
+      for (const [counterKey, { coreType, rows }] of Object.entries(byKey)) {
+        // Same sequence lock as reserveForRows - accepting a renumber draws from the same
+        // counter a row-entry reservation draws from, and the two must not interleave.
+        const nums = await withSequenceLock(counterKey,
+          () => reserveJobNos(renumberPrompt.division, coreType, rows.length));
         rows.forEach((r, i) => { assigned[r.index] = nums[i]; });
       }
 
