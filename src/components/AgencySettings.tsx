@@ -1,6 +1,7 @@
 import { AtSettings } from './AtSettings';
 import React, { useState, useRef } from 'react';
 import { useAgency } from '../lib/AgencyContext';
+import { gstinScopeError } from '../lib/utils';
 import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
@@ -81,6 +82,16 @@ export default function AgencySettings() {
 
   const handleAddAgency = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    // SCOPE LIMIT - the creation form collects GSTIN optionally, so it is checked here too.
+    // The authoritative enforcement is at save in EditAgencyForm and again in
+    // missingForTaxInvoice, so an agency that acquired a non-Gujarat GSTIN by any route
+    // still cannot issue an invoice. See D6.
+    const scopeError = gstinScopeError(gstin);
+    if (scopeError) {
+      alert(scopeError);
+      return;
+    }
 
     const validation = validateDivisionPrefixes(divisions);
     if (!validation.isValid) {

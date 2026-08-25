@@ -199,6 +199,50 @@ export function stateCodeFromGstin(gstin?: string | null): string {
   return /^\d{2}/.test(g) ? g.slice(0, 2) : '';
 }
 
+/**
+ * THE APP'S SUPPORTED REGISTRATION STATE, and it is a SCOPE LIMIT rather than a defect.
+ *
+ * `DISCOM_OPTIONS` offers four entities and all four are Gujarat (state code 24), behind a
+ * required select - so the customer base this app is built for is Gujarat agencies working
+ * for Gujarat DISCOMs. `discomState` and `discomStateCode` are seeded from that fact.
+ *
+ * The scope decision was therefore already made and encoded; it was just made SILENTLY, and
+ * the one place it surfaced was a tax invoice. An out-of-state agency could sign up, work
+ * for weeks, and receive an invoice printing `Supplier State Code 27` and `Buyer State Code
+ * 24` while charging CGST+SGST - an inter-state supply taxed as intra-state, on a document
+ * carrying the evidence it is wrong (AUDIT O9).
+ *
+ * Refusing the registration makes an existing decision honest. It is NOT a substitute for
+ * an IGST path, which stays on the list unbuilt - see D6.
+ */
+export const SUPPORTED_GSTIN_STATE_CODE = '24';
+
+/**
+ * Why this GSTIN cannot be used, or null if it can. Empty is allowed - GSTIN is optional
+ * until a tax invoice needs it, and `missingForTaxInvoice` blocks there.
+ *
+ * THE MESSAGE IS THE POINT. "Invalid GSTIN" would be a dead end that teaches the prospect
+ * nothing and teaches us nothing about whether we want their business. This names what is
+ * refused, why, and asks them to make contact - so a wrong assumption about scope corrects
+ * itself at signup, before any paper is issued, rather than at a division office months in.
+ */
+export function gstinScopeError(gstin?: string | null): string | null {
+  const g = String(gstin ?? '').trim();
+  if (!g) return null;
+  const code = stateCodeFromGstin(g);
+  if (!code) {
+    return `This GSTIN does not begin with a two-digit state code, so the registration state cannot be read from it. A GSTIN looks like 24ABCDE1234F1Z5.`;
+  }
+  if (code !== SUPPORTED_GSTIN_STATE_CODE) {
+    return `This app currently supports agencies registered in Gujarat - a GSTIN beginning ${SUPPORTED_GSTIN_STATE_CODE} - working for Gujarat DISCOMs. Yours begins ${code}.
+
+An agency registered outside Gujarat supplying a Gujarat DISCOM is an inter-state supply and must be billed IGST, which this app does not yet produce. Issuing a CGST+SGST invoice for it would be wrong on the face of the document.
+
+Please get in touch - we would like to know about this case, and it may change what we build next.`;
+  }
+  return null;
+}
+
 /** An agency's GST state code: derived from its own GSTIN, falling back to a stored
  *  value only for agencies recorded before derivation existed. Never defaulted. */
 export function getAgencyStateCode(agency: any): string {

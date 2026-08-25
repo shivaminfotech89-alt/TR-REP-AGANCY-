@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { stateCodeFromGstin } from '../lib/utils';
+import { stateCodeFromGstin, gstinScopeError } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
 import {
   Loader2, FileUp, Check, Building2,
@@ -215,6 +215,14 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     // blocking would deadlock every OTHER agency field behind a fault with no editor.
     // The warnings still render in the Divisions tab, beside the button that reaches the
     // AT where they ARE editable.
+
+    // SCOPE LIMIT, enforced where the GSTIN is SAVED rather than at agency creation - the
+    // creation form does not collect it, so a check there would catch nothing. See D6.
+    const scopeError = gstinScopeError(gstin);
+    if (scopeError) {
+      alert(scopeError);
+      return;
+    }
 
     setIsSubmitting(true);
     try {

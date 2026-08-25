@@ -1,4 +1,4 @@
-import { getAgencyStateCode } from './utils';
+import { getAgencyStateCode, gstinScopeError } from './utils';
 
 // Shared presentation for GP (guarantee) jobs. Defined ONCE here and imported by every
 // screen that lists jobs - NewJob, External/Internal Inspection, Testing Report,
@@ -122,6 +122,14 @@ export function missingForTaxInvoice(agency: any): string[] {
   // It earns its own line in exactly one case: a GSTIN is present but does not begin with
   // two digits, so nothing can be derived from it and `agencyStateCode` is empty as well.
   // That is a malformed GSTIN, which the field-presence check cannot see.
+  // SCOPE LIMIT, enforced at the document rather than only at the form. An agency that
+  // stored a non-Gujarat GSTIN before this check existed - or by any route that bypasses
+  // the form - must still not issue a CGST+SGST invoice against it (AUDIT O9, D6).
+  const scopeError = gstinScopeError(agency?.gstin);
+  if (scopeError) {
+    missing.push('A Gujarat GSTIN (this app cannot yet issue an inter-state IGST invoice)');
+  }
+
   const hasGstin = Boolean(String(agency?.gstin ?? '').trim());
   if (hasGstin && !getAgencyStateCode(agency)) {
     missing.push('Agency State Code (cannot be derived - the GSTIN does not start with a two-digit state code)');

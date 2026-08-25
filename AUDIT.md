@@ -530,6 +530,51 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: the app RECOMPUTES documents rather than REPRODUCING them
+
+Two items that look unrelated share one root, and the root is what makes both expensive.
+
+**O29 - the bill ignores the DISCOM's approved amount.** `approvedAmount` is captured,
+stored, and displayed beside the estimate when they differ. `BillingSystem` never reads it,
+so the bill claims a third independently recomputed figure.
+
+**O9 item 5 - IGST is not a tax feature, it is a STAMPED-DOCUMENT feature.** Adding an IGST
+path is not mainly about a third rate and a different column. It is that a reprint of an
+intra-state invoice must stay intra-state, and nothing records which treatment was applied.
+Change the basis and every historical reprint silently changes with it.
+
+**The shared root: no document pins its own figures.** A bill stores `billAmount` as a side
+record, and every screen, print and export recomputes from the CURRENT master, the CURRENT
+AT percentage and the CURRENT tax rates. `BillingSystem:2984` says so in as many words about
+the EST. AMOUNT column: *"an invoice reprinted after a rate change shows a different figure
+from the estimate that actually went out. THE PRINTED ESTIMATE ON FILE IS THE AUTHORITY."*
+That is a workaround written into a comment, not a property of the system.
+
+**What follows from it, and why each of these is dear on its own but cheap together:**
+
+- an approved figure cannot be honoured, because nothing pins a figure at approval (O29)
+- a tax treatment cannot be changed safely, because nothing pins the treatment at send (O9)
+- historical estimates reprice at every rollover, because nothing pins the AT percentage
+  (the 15 active-AT call sites)
+- `estimateAmount` and `billAmount` exist as stored side-records that no document reads,
+  and drift from the documents they name (O3, O4)
+
+**The capability that closes all four is one thing: STAMP THE DOCUMENT AT ISSUE.** Write the
+line items, the rates, the AT percentage and the tax treatment onto the job when the estimate
+is sent and when the bill is sent, and reprint from that. A reprint then reproduces a
+document instead of recalculating one.
+
+**It is not a small change** - it is a storage-shape change and a migration for jobs already
+issued. But it should be priced as ONE change that closes four items, not four changes. Each
+of those items, attacked alone, ends up re-implementing a piece of it.
+
+**Do not confuse this with the export pattern above.** That one says: prefer taking the
+rendered output over rebuilding it, WITHIN a single production of a document. This one says:
+prefer reproducing an ISSUED document over recomputing it, ACROSS time. Same instinct,
+different axis - one is about who computes, the other about when.
+
+---
+
 ## Pattern: an export that serialises the page cannot disagree with it; one that rebuilds always can
 
 **Three Word exports in this codebase could not have been wrong. Two Excel exports were.**
@@ -2734,6 +2779,55 @@ the field actually has.
 one rendered an impossible date (F58). The value predates everything traceable, so no query
 can say whether it was a deliberate rate or a slip - only the person who set up the source
 master can. The field's silence was correct behaviour and still left the question open.
+
+---
+
+### D6. Gujarat-only registration, enforced - a scope limit, not a fix
+
+`gstinScopeError` refuses a GSTIN whose first two digits are not `24`, at three points: the
+agency creation form, the save in `EditAgencyForm` where the GSTIN is actually entered, and
+`missingForTaxInvoice` - so an agency that acquired a non-Gujarat GSTIN by any route still
+cannot issue an invoice against it.
+
+**This is not the IGST fix. O9 stays open and unbuilt.** What this does is make an existing,
+silent decision honest.
+
+**The scope was already decided and encoded.** `DISCOM_OPTIONS` offers four entities, all
+Gujarat, behind a required select; `discomState` and `discomStateCode` are seeded from that.
+The app has only ever been built for Gujarat agencies serving Gujarat DISCOMs. The decision
+was invisible, and the single place it surfaced was a tax invoice printing `Supplier State
+Code 27` against `Buyer State Code 24` while charging CGST+SGST.
+
+**Why a block is better than a partial IGST path.** `cgstPercent` and `sgstPercent` are
+agency-configurable, so an out-of-state agency could set 0 and 18 and get the right AMOUNTS
+under the wrong LABELS - an invalid invoice that looks solved. A refusal cannot be worked
+around into something that appears correct.
+
+**THE MESSAGE IS THE POINT, and it is why this is recorded as a decision rather than a
+validation.** "Invalid GSTIN" would be a dead end: it teaches the prospect nothing and
+teaches us nothing about whether we want their business. The refusal instead names what is
+refused, why it is refused, and asks them to make contact:
+
+    This app currently supports agencies registered in Gujarat - a GSTIN beginning 24 -
+    working for Gujarat DISCOMs. Yours begins 27.
+
+    An agency registered outside Gujarat supplying a Gujarat DISCOM is an inter-state supply
+    and must be billed IGST, which this app does not yet produce. Issuing a CGST+SGST
+    invoice for it would be wrong on the face of the document.
+
+    Please get in touch - we would like to know about this case, and it may change what we
+    build next.
+
+**It fails at the one moment the assumption can be corrected cheaply.** Today an out-of-state
+agency onboards, works for weeks, and finds out when a division office rejects an invoice -
+or never finds out. With the block they hit it at signup, before any paper exists, and the
+scope assumption gets tested by the only people who can test it.
+
+**Blocked on the GSTIN PREFIX, not `agencyState`.** That field is free text, seeded empty,
+and asserts nothing. The GSTIN's first two digits ARE the registration.
+
+**When IGST is built, this constant goes** - it is `SUPPORTED_GSTIN_STATE_CODE` in
+`lib/utils.ts`, one place, deliberately.
 
 ---
 

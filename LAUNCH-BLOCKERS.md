@@ -30,9 +30,17 @@ Bites only an out-of-state customer, but on their first invoice, and it cannot b
 later deploy: the paper is out. The workaround anyone would find — setting cgst 0 / sgst 18 —
 produces right amounts under wrong labels, which looks solved and is not.
 
-**Open question that decides the fix:** if the customer base is Gujarat agencies working for
-Gujarat DISCOMs, refusing a non-24 GSTIN at signup is smaller and more honest than an IGST
-path nobody exercises.
+**INTERIM SHIPPED — a non-24 GSTIN is now refused** at the creation form, at the save in
+`EditAgencyForm`, and in `missingForTaxInvoice`, with a message naming what is refused, why,
+and asking the prospect to make contact (**D6**). That makes an already-encoded scope
+decision honest and fails at signup rather than at a division office. **O9 itself stays open
+and unbuilt.**
+
+**And IGST is not a tax feature — it is a stamped-document feature.** A reprint of an
+intra-state invoice must stay intra-state, and nothing records which treatment was applied.
+That is the same missing capability as O29, and it is now filed as its own pattern note:
+the app recomputes documents rather than reproducing them. Price IGST as part of that
+change, not on its own.
 
 ### 2. `billAmount` applied the AT percentage twice — **O3** — ✅ FIXED
 
