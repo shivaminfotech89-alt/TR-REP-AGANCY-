@@ -98,7 +98,7 @@ const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', 
 const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair'];
 
 export default function MrLedger() {
-  const { activeAgency, activeAtMaster, atMasters, getNextJobNoInfo } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, predictNextJobNo } = useAgency();
   const [loading, setLoading] = useState(true);
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -227,7 +227,7 @@ export default function MrLedger() {
     const capacityKva = lastJob?.capacityKva || '63';
 
     if (activeAgency) {
-      const info = getNextJobNoInfo(editingMr.division, coreType, editingMr.repairType);
+      const info = predictNextJobNo(editingMr.division, coreType, editingMr.repairType);
       let highestNum = info.nextNum - 1;
       editingMr.jobs.forEach(j => {
         const parts = j.jobNo.split('-');

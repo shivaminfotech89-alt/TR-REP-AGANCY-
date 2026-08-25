@@ -376,7 +376,7 @@ interface AgencyContextType {
   addAtMaster: (atData: Omit<AtMaster, 'id' | 'ownerId'>) => Promise<{ id: string; seed: AtSeedReport } | undefined>;
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
 
-  getNextJobNoInfo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
+  predictNextJobNo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
   getJobNoPrefix: (division: string, coreType?: string) => { prefix: string; counterKey: string };
   reserveJobNos: (division: string, coreType?: string, count?: number) => Promise<string[]>;
   incrementJobNoCounter: (counterKey: string, count: number) => Promise<void>;
@@ -1204,7 +1204,20 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     return allocated.map(n => `${prefix}-${n}`);
   };
 
-  const getNextJobNoInfo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
+  /**
+   * PREDICTS the next job number from the CONTEXT SNAPSHOT. It does not allocate.
+   *
+   * Renamed from `getNextJobNoInfo`, which is how it came to be used as an allocator: a
+   * function whose name says "next job no" sitting beside the real allocator is how someone
+   * wires up the wrong one. Its only legitimate caller is the renumber prompt, which shows
+   * the operator what a replacement WOULD be before they accept - a prediction that
+   * `reserveJobNos` then makes real, and which may differ if another operator got there
+   * first (AUDIT F60, F64).
+   *
+   * Never use this to fill a job-number field. The number in that field is written on the
+   * transformer, so it must come from a reservation.
+   */
+  const predictNextJobNo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
     if (!activeAgency) return { prefix: 'JOB', nextNum: 1, counterKey: 'JOB' };
     
     const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) 
@@ -1306,7 +1319,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
       saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
-      getNextJobNoInfo, getJobNoPrefix, reserveJobNos, incrementJobNoCounter, syncCountersState
+      predictNextJobNo, getJobNoPrefix, reserveJobNos, incrementJobNoCounter, syncCountersState
     }}>
       {children}
     </AgencyContext.Provider>

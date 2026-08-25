@@ -48,6 +48,17 @@ interface TransformerEntry {
   starRating?: string;
   ratingLevel?: string;
   autoFilledFrom?: string;
+  /**
+   * STABLE CLIENT-SIDE IDENTITY. Never persisted - it exists only while the form is open.
+   *
+   * Rows were plain array entries keyed by index. `duplicateTransformer` splices at
+   * index + 1 and `removeTransformer` splices out, so every index shifts - which made the
+   * React list key at the row wrong after any insert or delete, letting the DOM carry
+   * input focus and typed state to a neighbouring row (AUDIT F63). It also made any
+   * per-row marker unreliable, which is how this was found: "has this row already drawn a
+   * number" cannot be answered by index.
+   */
+  rowKey: string;
   prevAtNo?: string;
   prevJobNo?: string;
   prevDeliveryDate?: string;
@@ -221,6 +232,10 @@ export default function NewJob() {
   /** Blocking setup gap awaiting the operator's decision - see SetupGapDialog. */
   const [setupGap, setSetupGap] = useState<SetupGap | null>(null);
 
+  /** A row's stable identity for the life of the form. Never written to Firestore. */
+  const newRowKey = () =>
+    (globalThis.crypto?.randomUUID?.() ?? `row-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+
   const [commonData, setCommonData] = useState({
     mrNo: '',
     dateOfIssue: new Date().toISOString().split('T')[0],
@@ -231,6 +246,7 @@ export default function NewJob() {
 
   const [transformers, setTransformers] = useState<TransformerEntry[]>([
     { 
+      rowKey: newRowKey(),
       jobNo: '', 
       capacityKva: '63', 
       make: '', 
@@ -451,6 +467,7 @@ export default function NewJob() {
 
   /** A fresh, empty transformer row. */
   const blankTransformerRow = (): TransformerEntry => ({
+    rowKey: newRowKey(),
     jobNo: '',
     capacityKva: '63',
     make: '',
@@ -478,7 +495,9 @@ export default function NewJob() {
       const draft = JSON.parse(raw);
       if (draft?.commonData) setCommonData(draft.commonData);
       if (Array.isArray(draft?.transformers) && draft.transformers.length) {
-        setTransformers(draft.transformers);
+        // A draft saved before rowKey existed - or by an older build - has none. Rows
+        // without a stable key would fall back to index and reintroduce F63.
+        setTransformers(draft.transformers.map((t: any) => ({ ...t, rowKey: t.rowKey || newRowKey() })));
       }
       setAutoFillNotice('Your previous intake has been restored.');
       setTimeout(() => setAutoFillNotice(null), 5000);
@@ -671,6 +690,9 @@ export default function NewJob() {
     setTransformers(prev => {
       const updated = [...prev];
       updated[index] = {
+        // Same row, emptied - the key is deliberately preserved. A cleared row that
+        // already drew a number keeps it: reservations are never released (F60).
+        rowKey: updated[index].rowKey,
         jobNo: '',
         capacityKva: '',
         make: '',
@@ -906,6 +928,7 @@ export default function NewJob() {
     setTransformers([
       ...transformers, 
       { 
+        rowKey: newRowKey(),
         jobNo: nextJobNo, 
         capacityKva: lastKva, 
         make: '', 
@@ -942,6 +965,7 @@ export default function NewJob() {
 
     const newEntry: TransformerEntry = {
       ...source,
+      rowKey: newRowKey(),
       jobNo: nextJobNo,
       serialNo: '',
       autoFilledFrom: undefined
@@ -2087,7 +2111,7 @@ export default function NewJob() {
           <div className="p-3 sm:p-4 space-y-3">
             {transformers.map((t, index) => (
               <div 
-                key={index} 
+                key={t.rowKey ?? index} 
                 className={`p-3 sm:p-4 rounded-xl border transition-all ${
                   commonData.repairType === 'GP' 
                     ? 'border-amber-200 bg-amber-50/30' 
