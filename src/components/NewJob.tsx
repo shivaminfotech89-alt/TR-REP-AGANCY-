@@ -477,6 +477,11 @@ export default function NewJob() {
    * in-flight guard - this used to call reserveJobNos directly and reach past it, so
    * flipping a division twice with unnumbered rows burned a set of numbers each time
    * (AUDIT F69).
+   *
+   * ONE CALLER, and it must stay that way: the save path, where a row still blank at save
+   * genuinely needs a number. It was also called on every division change, which is one of
+   * the paths that burned numbers on a dropdown flip - see the note in the core-type branch
+   * of handleTransformerChange. Do not call it from a change handler.
    */
   const numberUnnumberedRows = async (division: string, repairType: string) => {
     if (repairType === 'GP') return;
@@ -509,9 +514,11 @@ export default function NewJob() {
       .map((t, index) => ({ t, index }))
       .filter(({ t }) => String(t.jobNo || '').trim());
 
-    // Rows with no number: reserve straight away, nothing has been marked.
-    await numberUnnumberedRows(division, repairType);
-
+    // A DIVISION CHANGE RESERVES NOTHING EITHER, for the same reason as core type above.
+    // This used to number every blank row on the way past ("nothing has been marked, so
+    // it is free") - but a blank row is blank because the operator has not described a
+    // transformer yet, and flipping between divisions to compare them drew a set of
+    // numbers on each flip. Blank rows draw when a serial, make or capacity is typed.
     if (numbered.length === 0) return;
 
     // Rows that already hold a number: PREDICT the replacement and offer it. Nothing is
@@ -1047,18 +1054,31 @@ export default function NewJob() {
     //
     // NEVER for GP: core type is part of counterKey, so this used to recompute the number
     // and wipe an original number the operator had typed.
+    // ⚠ A CORE-TYPE CHANGE RESERVES NOTHING. EVER. Do not add a reservation to either
+    // branch below, under any guard.
+    //
+    // Three fixes were made here, each closing the previous one's hole, and each time a
+    // flip still burned numbers: reserve-then-guard (F65), one guarded entry point (F69),
+    // then a per-sequence serialising lock. The last one still drew four numbers across
+    // three counters on a single unsaved row. The lock was not the problem; reserving on a
+    // dropdown change was. Every guard has to be correct under React's batching, timing
+    // and double-invocation, and the fourth attempt would have been the fourth to look
+    // correct. Removing the call removes the whole class - there is no longer anything to
+    // serialise, guard, or get wrong.
+    //
+    // A dropdown flip is not first-meaningful-entry. An operator changing core type to see
+    // what a job would cost has entered nothing about a transformer and has marked no
+    // metal. The number is drawn when a serial, make or capacity is typed
+    // (RESERVE_TRIGGER_FIELDS) and at no other time.
+    //
+    // NEVER for GP: core type is part of counterKey, so this used to recompute the number
+    // and wipe an original number the operator had typed.
     if (field === 'coreType' && activeAgency && commonData.repairType !== 'GP') {
       const existing = String(newTransformers[index].jobNo || '').trim();
       setTransformers(newTransformers);
-      if (!existing) {
-        // Through reserveForRow, not reserveJobNos - this branch used to call the allocator
-        // directly, so changing the core type repeatedly on an unnumbered row drew a number
-        // each time. The assignment is asynchronous, so the row stayed unnumbered for the
-        // duration and every change saw `existing === ''` (AUDIT F69).
-        if (row.rowKey) void reserveForRow(row.rowKey, value);
-      } else {
-        // PREDICTED, not reserved - see the division branch and F68. Reserving here burned a
-        // number every time an operator changed a core type to look at the difference.
+      if (existing) {
+        // PREDICTED, not reserved (F68). Reserved only if the operator accepts the prompt
+        // and says they will re-mark the transformer - by then the number is a commitment.
         const info = predictNextJobNo(commonData.division, value, commonData.repairType);
         setRenumberPrompt({
           field: 'coreType',
@@ -1073,6 +1093,7 @@ export default function NewJob() {
           }],
         });
       }
+      // No number yet: the core type changes and the row stays blank. Nothing drawn.
       return;
     }
     
