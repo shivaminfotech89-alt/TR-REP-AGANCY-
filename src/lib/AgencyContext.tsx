@@ -377,6 +377,8 @@ interface AgencyContextType {
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
 
   getNextJobNoInfo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
+  getJobNoPrefix: (division: string, coreType?: string) => { prefix: string; counterKey: string };
+  reserveJobNos: (division: string, coreType?: string, count?: number) => Promise<string[]>;
   incrementJobNoCounter: (counterKey: string, count: number) => Promise<void>;
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
 }
@@ -1095,6 +1097,113 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * If this needs changing, change both, and check what happens on the FIRST job of a new
    * AT specifically. See AUDIT.md A6.
    */
+  /**
+   * THE ONE TEST for which document owns the job-number counters.
+   *
+   * `getNextJobNoInfo` used to branch on `activeAtMaster && activeAtMaster.lastJobNumbers`
+   * while `incrementJobNoCounter` branched on `activeAtMaster` alone - a read and a write
+   * disagreeing about the same field, held together only by an AT never being left with an
+   * empty counter map (AUDIT A6). They now share this, so they cannot drift.
+   *
+   * THE AT'S COUNTER IS AUTHORITATIVE whenever an AT is active. The agency's exists for the
+   * no-AT case and is legacy: `EditAgencyForm` backfills its keys to 0 so they exist, and
+   * `AgencySettings` seeds them at creation, but nothing ADVANCES it while an AT is active
+   * and nothing reads it in that state. It is not kept in step, deliberately.
+   */
+  const jobNoCounterTarget = (): { ref: any; isAtMaster: boolean; id: string } | null => {
+    if (activeAtMaster) return { ref: doc(db, 'atMasters', activeAtMaster.id), isAtMaster: true, id: activeAtMaster.id };
+    if (activeAgency) return { ref: doc(db, 'agencies', activeAgency.id), isAtMaster: false, id: activeAgency.id };
+    return null;
+  };
+
+  /**
+   * The prefix and counter key for a division/core type. NO NUMBER - see reserveJobNos.
+   *
+   * Split out of `getNextJobNoInfo` because composing a number from a client-side snapshot
+   * is what let two operators draw the same one (AUDIT O2). Prefix resolution is pure and
+   * stays synchronous; the number now comes from a transaction.
+   */
+  const getJobNoPrefix = (division: string, coreType: string = 'CRGO') => {
+    const empty = { prefix: 'JOB', counterKey: getCounterKey(division, coreType) };
+    if (!activeAgency) return empty;
+
+    const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0)
+        ? activeAtMaster.prefixes
+        : activeAgency.prefixes || {};
+
+    const divPrefixInfo = currentPrefixes[division];
+    let prefix = 'JOB';
+    const typeUpper = (coreType || 'CRGO').trim().toUpperCase();
+
+    if (typeof divPrefixInfo === 'string') {
+      prefix = divPrefixInfo;
+    } else if (divPrefixInfo && typeof divPrefixInfo === 'object') {
+      if (typeUpper === 'OH') {
+        prefix = (divPrefixInfo as any)['OH'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+      } else if (typeUpper.includes('AMORPHOUS') || typeUpper.includes('AM')) {
+        prefix = (divPrefixInfo as any)['Amorphous'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+      } else if (typeUpper.includes('WOUND') || typeUpper.includes('WC')) {
+        prefix = (divPrefixInfo as any)['Wound Core'] || (divPrefixInfo as any)['CRGO'] || 'JOB';
+      } else {
+        prefix = (divPrefixInfo as any)['CRGO'] || (divPrefixInfo as any)[coreType] || 'JOB';
+      }
+    } else if (divPrefixInfo) {
+      prefix = String(divPrefixInfo);
+    }
+    return { prefix, counterKey: getCounterKey(division, coreType) };
+  };
+
+  /**
+   * RESERVE job numbers atomically. Returns the composed numbers, in order.
+   *
+   * The counter is advanced INSIDE the transaction, so two operators cannot draw the same
+   * number: Firestore retries the loser, which then reads the advanced value.
+   *
+   * A RESERVATION IS PERMANENT. There is no expiry and nothing reclaims an abandoned
+   * number, because the app cannot know whether the operator has already written it on the
+   * transformer - and handing a marked number to someone else is the exact failure this
+   * prevents. An abandoned number is burned, and a gap in the sequence is correct: the job
+   * number is the agency's internal reference, and the counter is already never rewound
+   * when a job is deleted.
+   */
+  const reserveJobNos = async (division: string, coreType: string = 'CRGO', count: number = 1): Promise<string[]> => {
+    if (count <= 0) return [];
+    const target = jobNoCounterTarget();
+    const { prefix, counterKey } = getJobNoPrefix(division, coreType);
+    if (!target) throw new Error('No agency is selected, so a job number cannot be reserved.');
+
+    const allocated = await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(target.ref);
+      const counters: Record<string, number> = { ...((snap.data() as any)?.lastJobNumbers || {}) };
+      // CRGO is counted under either `${div}_CRGO` or a bare `${div}` key - same fallback
+      // the seeding uses, so the two cannot disagree about where CRGO's sequence lives.
+      const bare = division;
+      const current = Math.max(
+        Number(counters[counterKey] ?? 0) || 0,
+        counterKey.endsWith('_CRGO') ? (Number(counters[bare] ?? 0) || 0) : 0,
+      );
+      const nums: number[] = [];
+      for (let i = 1; i <= count; i++) nums.push(current + i);
+      counters[counterKey] = current + count;
+      if (counterKey.endsWith('_CRGO')) counters[bare] = current + count;
+      transaction.update(target.ref, { lastJobNumbers: counters });
+      return nums;
+    });
+
+    // Local mirror so the next reservation in the same session does not re-read a stale
+    // context value. The transaction is authoritative either way.
+    if (target.isAtMaster) {
+      setAtMasters(prev => prev.map(a => a.id === target.id
+        ? { ...a, lastJobNumbers: { ...(a.lastJobNumbers || {}), [counterKey]: allocated[allocated.length - 1] } }
+        : a));
+    } else {
+      setAgencies(prev => prev.map(a => a.id === target.id
+        ? { ...a, lastJobNumbers: { ...(a.lastJobNumbers || {}), [counterKey]: allocated[allocated.length - 1] } }
+        : a));
+    }
+    return allocated.map(n => `${prefix}-${n}`);
+  };
+
   const getNextJobNoInfo = (division: string, coreType: string = 'CRGO', repairType: string = 'OGP') => {
     if (!activeAgency) return { prefix: 'JOB', nextNum: 1, counterKey: 'JOB' };
     
@@ -1197,7 +1306,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
       saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
-      getNextJobNoInfo, incrementJobNoCounter, syncCountersState
+      getNextJobNoInfo, getJobNoPrefix, reserveJobNos, incrementJobNoCounter, syncCountersState
     }}>
       {children}
     </AgencyContext.Provider>

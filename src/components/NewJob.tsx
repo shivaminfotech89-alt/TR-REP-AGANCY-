@@ -183,7 +183,12 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getNextJobNoInfo, syncCountersState } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, reserveJobNos, syncCountersState } = useAgency();
+  // Which row is waiting on a reservation, and the last failure. The number field shows
+  // a spinner rather than a provisional value: a provisional number is exactly what gets
+  // written on a transformer (AUDIT F60).
+  const [reservingRow, setReservingRow] = useState<number | null>(null);
+  const [reserveError, setReserveError] = useState<string | null>(null);
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -260,28 +265,19 @@ export default function NewJob() {
   // Fill any blank / placeholder job numbers once agency & division context are ready.
   // Only touches rows the user (or GP auto-fill) hasn't already set a real job number on.
   //
-  // NEVER runs for GP. A GP repair REUSES the original job number from the previous
-  // repair - it does not draw a new one from the counter, and the number may carry a
-  // completely different prefix from a previous AT. Auto-numbering GP rows made the
-  // field impossible to use: clearing it to type the original number immediately
-  // refilled it with the next sequential number.
-  useEffect(() => {
-    if (!activeAgency || !commonData.division) return;
-    if (commonData.repairType === 'GP') return;
+  // THE AUTO-NUMBERING EFFECT THAT USED TO SIT HERE IS DELETED (AUDIT F60).
+  //
+  // It assigned a number to every unnumbered row whenever division, repair type or the
+  // transformers array changed - and it depended on `transformers`, so it re-ran on its own
+  // output. That was harmless while numbering was a pure client-side computation. Once a
+  // number is RESERVED by advancing a shared counter, an effect that writes and re-runs on
+  // its own result burns numbers, and React's development double-invocation burns one on
+  // every mount.
+  //
+  // Numbering is now driven by the three user actions that actually create the need for a
+  // number: adding a row, duplicating a row, and choosing a division. Handlers run once per
+  // action, so there is nothing to guard against.
 
-    setTransformers(prev => {
-      let changed = false;
-      const updated = prev.map((t, idx) => {
-        if (t.jobNo && !t.jobNo.startsWith('JOB')) return t;
-        const { prefix, nextNum } = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
-        const newJobNo = `${prefix}-${nextNum + idx}`;
-        if (newJobNo === t.jobNo) return t;
-        changed = true;
-        return { ...t, jobNo: newJobNo };
-      });
-      return changed ? updated : prev;
-    });
-  }, [activeAgency, activeAtMaster, commonData.division, commonData.repairType, transformers]);
 
   // Past jobs for the GP lookup: across all AT masters of the CURRENT AGENCY.
   //
@@ -316,7 +312,54 @@ export default function NewJob() {
     }
   }, [auth.currentUser, activeAgency?.id]);
 
-  const handleCommonChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  /**
+   * RENUMBERING IS OFFERED, NEVER APPLIED.
+   *
+   * Both branches of this handler used to rewrite job numbers in place - a division change
+   * did `t.jobNo.replace(oldPrefix + '-', newPrefix + '-')`, keeping the NUMERIC TAIL from
+   * the old division's counter. Two faults in one line, and neither needed concurrency to
+   * fire: the number is written on the transformer at intake, so rewriting it leaves the
+   * tank marked one thing and the record saying another; and the retained tail comes from a
+   * sequence the new division does not own, so it could collide immediately (AUDIT F61).
+   *
+   * A row that already HOLDS a number is now never rewritten silently. The operator is
+   * shown what the new number would be and has to say that they will re-mark the unit.
+   * A row with no number yet reserves freely - nothing has been written on anything.
+   */
+  const [renumberPrompt, setRenumberPrompt] = useState<
+    { field: 'division' | 'coreType'; label: string; rows: { index: number; from: string; fromLabel: string; to: string }[] } | null
+  >(null);
+
+  /** Reserve numbers for rows that have none. Rows that hold one are left alone. */
+  const numberUnnumberedRows = async (division: string, repairType: string) => {
+    if (!activeAgency || !division || repairType === 'GP') return;
+    const pending = transformers
+      .map((t, index) => ({ t, index }))
+      .filter(({ t }) => !String(t.jobNo || '').trim());
+    if (pending.length === 0) return;
+
+    // Grouped by counter key: a mixed-core intake draws from several sequences, and one
+    // transaction per sequence keeps each allocation contiguous.
+    const byKey: Record<string, { coreType: string; indexes: number[] }> = {};
+    pending.forEach(({ t, index }) => {
+      const { counterKey } = getJobNoPrefix(division, t.coreType);
+      (byKey[counterKey] ||= { coreType: t.coreType, indexes: [] }).indexes.push(index);
+    });
+
+    try {
+      const assigned: Record<number, string> = {};
+      for (const { coreType, indexes } of Object.values(byKey)) {
+        const nums = await reserveJobNos(division, coreType, indexes.length);
+        indexes.forEach((rowIdx, i) => { assigned[rowIdx] = nums[i]; });
+      }
+      setTransformers(prev => prev.map((t, i) => assigned[i] ? { ...t, jobNo: assigned[i] } : t));
+    } catch (err) {
+      console.error('Could not reserve job numbers:', err);
+      setReserveError('Could not reserve job numbers. Check the connection and try again - no numbers were issued.');
+    }
+  };
+
+  const handleCommonChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setCommonData(prev => ({ ...prev, [name]: value }));
 
@@ -327,37 +370,62 @@ export default function NewJob() {
     if (commonData.repairType === 'GP' && (name === 'division' || name === 'repairType')) {
       return;
     }
+    if (!activeAgency) return;
+    if (name !== 'division' && name !== 'repairType') return;
 
-    if (name === 'division' && activeAgency) {
-      const oldDivision = commonData.division;
-      
-      setTransformers(prev => prev.map((t, idx) => {
-        const oldInfo = getNextJobNoInfo(oldDivision, t.coreType, commonData.repairType);
-        const newInfo = getNextJobNoInfo(value, t.coreType, commonData.repairType);
-        
-        if (t.jobNo && t.jobNo.startsWith(oldInfo.prefix + '-')) {
-          return { ...t, jobNo: t.jobNo.replace(oldInfo.prefix + '-', newInfo.prefix + '-') };
-        } else if (!t.jobNo) {
-          return { ...t, jobNo: `${newInfo.prefix}-${newInfo.nextNum + idx}` };
-        }
-        return t;
-      }));
-    } else if (name === 'repairType' && activeAgency) {
-      const oldRepairType = commonData.repairType;
-      
-      setTransformers(prev => prev.map((t, idx) => {
-        const oldInfo = getNextJobNoInfo(commonData.division, t.coreType, oldRepairType);
-        const newInfo = getNextJobNoInfo(commonData.division, t.coreType, value);
-        
-        if (t.jobNo && t.jobNo.startsWith(oldInfo.prefix + '-')) {
-          return { ...t, jobNo: t.jobNo.replace(oldInfo.prefix + '-', newInfo.prefix + '-') };
-        } else if (!t.jobNo) {
-          return { ...t, jobNo: `${newInfo.prefix}-${newInfo.nextNum + idx}` };
-        }
-        return t;
-      }));
+    const division = name === 'division' ? value : commonData.division;
+    const repairType = name === 'repairType' ? value : commonData.repairType;
+    if (repairType === 'GP') return;
+
+    const numbered = transformers
+      .map((t, index) => ({ t, index }))
+      .filter(({ t }) => String(t.jobNo || '').trim());
+
+    // Rows with no number: reserve straight away, nothing has been marked.
+    await numberUnnumberedRows(division, repairType);
+
+    if (numbered.length === 0) return;
+
+    // Rows that already hold a number: reserve what the replacement WOULD be and offer it.
+    // Reserved to show, and burned if declined - the number on screen has to be the number
+    // that gets assigned, or the prompt reintroduces the very gap it exists to close. A
+    // burned number is a gap in the sequence, which is already normal here.
+    try {
+      const offers: { index: number; from: string; fromLabel: string; to: string }[] = [];
+      const byKey: Record<string, { coreType: string; rows: { index: number; from: string; fromLabel: string }[] }> = {};
+      numbered.forEach(({ t, index }) => {
+        const { counterKey } = getJobNoPrefix(division, t.coreType);
+        // Where the EXISTING number came from - the division and core type in force when it
+        // was reserved, not the new ones. The operator may not remember which division they
+        // picked two rows ago, and the number may already be on metal.
+        (byKey[counterKey] ||= { coreType: t.coreType, rows: [] }).rows.push({
+          index, from: t.jobNo,
+          fromLabel: `${commonData.division || '-'} / ${t.coreType || 'CRGO'}`,
+        });
+      });
+      for (const { coreType, rows } of Object.values(byKey)) {
+        const nums = await reserveJobNos(division, coreType, rows.length);
+        rows.forEach((r, i) => offers.push({ index: r.index, from: r.from, fromLabel: r.fromLabel, to: nums[i] }));
+      }
+      setRenumberPrompt({
+        field: name === 'division' ? 'division' : 'coreType',
+        label: name === 'division' ? `division ${commonData.division || '-'} to ${value}` : `repair type to ${value}`,
+        rows: offers.sort((x, y) => x.index - y.index),
+      });
+    } catch (err) {
+      console.error('Could not reserve replacement job numbers:', err);
+      setReserveError('Could not reserve replacement job numbers. The existing numbers are unchanged.');
     }
   };
+
+  const applyRenumber = () => {
+    if (!renumberPrompt) return;
+    const map: Record<number, string> = {};
+    renumberPrompt.rows.forEach(r => { map[r.index] = r.to; });
+    setTransformers(prev => prev.map((t, i) => map[i] ? { ...t, jobNo: map[i] } : t));
+    setRenumberPrompt(null);
+  };
+
 
   /** A fresh, empty transformer row. */
   const blankTransformerRow = (): TransformerEntry => ({
@@ -420,7 +488,8 @@ export default function NewJob() {
       return true;
     }
 
-    const info = getNextJobNoInfo(commonData.division, coreType, 'OGP');
+    // Prefix only - this is checking whether one is CONFIGURED, not drawing a number.
+    const info = getJobNoPrefix(commonData.division, coreType);
     if (info.prefix === 'JOB') {
       const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
       setSetupGap({
@@ -750,53 +819,66 @@ export default function NewJob() {
       }
     }
     
-    // Auto-update jobNo if coreType changes.
-    // NEVER for GP: core type is part of counterKey, so this recomputed the number and
-    // wiped an original job number the operator had typed. A GP job reuses its number
-    // from the previous repair and never draws a new one.
+    // CORE TYPE CHANGES WHICH SEQUENCE THE ROW DRAWS FROM, so it cannot renumber silently
+    // - same reasoning as the division change (AUDIT F61). A row with no number yet takes
+    // one freely; a row that holds one is offered a replacement and the operator has to
+    // say they will re-mark the transformer.
+    //
+    // NEVER for GP: core type is part of counterKey, so this used to recompute the number
+    // and wipe an original number the operator had typed.
     if (field === 'coreType' && activeAgency && commonData.repairType !== 'GP') {
-      const newCoreType = value;
-      const info = getNextJobNoInfo(commonData.division, newCoreType, commonData.repairType);
-      
-      let highestNum = info.nextNum - 1;
-      newTransformers.forEach((t, i) => {
-        if (i === index) return;
-        const tInfo = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
-        if (tInfo.counterKey === info.counterKey) {
-          const parts = t.jobNo.split('-');
-          if (parts.length > 1) {
-            const num = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(num) && num > highestNum) highestNum = num;
-          }
-        }
-      });
-      newTransformers[index].jobNo = `${info.prefix}-${highestNum + 1}`;
+      const existing = String(newTransformers[index].jobNo || '').trim();
+      setTransformers(newTransformers);
+      if (!existing) {
+        reserveJobNos(commonData.division, value, 1)
+          .then(([jobNo]) => setTransformers(prev => prev.map((t, i) => i === index ? { ...t, jobNo } : t)))
+          .catch(err => {
+            console.error('Could not reserve a job number:', err);
+            setReserveError('Could not reserve a job number for the new core type. The row is unnumbered.');
+          });
+      } else {
+        // Reserved to show, burned if declined - the offered number must be the assigned one.
+        reserveJobNos(commonData.division, value, 1)
+          .then(([to]) => setRenumberPrompt({
+            field: 'coreType',
+            label: `core type to ${value}`,
+            rows: [{
+              index, from: existing, to,
+              fromLabel: `${commonData.division || '-'} / ${transformers[index]?.coreType || 'CRGO'}`,
+            }],
+          }))
+          .catch(err => {
+            console.error('Could not reserve a replacement job number:', err);
+            setReserveError('Could not reserve a replacement job number. The existing number is unchanged.');
+          });
+      }
+      return;
     }
     
     setTransformers(newTransformers);
   };
 
-  const addTransformer = () => {
-    let nextJobNo = '';
+  const addTransformer = async () => {
     const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
     const lastKva = transformers.length > 0 ? transformers[transformers.length - 1].capacityKva : '63';
     const lastStar = transformers.length > 0 ? (transformers[transformers.length - 1].starRating || '3 Star & other') : '3 Star & other';
-    
-    // Only generate new sequence Job No for fresh OGP repairs. GP reuses original Job No from 1st repair.
+
+    // RESERVED, not computed. The number is written on the transformer at intake, so it is
+    // a commitment the moment the operator sees it - it cannot be recomputed at save
+    // (AUDIT O2, F60). The in-form high-water scan that used to live here is gone: the
+    // counter itself is the high-water mark now that every assignment advances it.
+    let nextJobNo = '';
     if (commonData.repairType === 'OGP' && activeAgency) {
-      const info = getNextJobNoInfo(commonData.division, lastCoreType, 'OGP');
-      let highestNum = info.nextNum - 1;
-      transformers.forEach(t => {
-        const tInfo = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
-        if (tInfo.counterKey === info.counterKey) {
-          const parts = t.jobNo.split('-');
-          if (parts.length > 1) {
-            const num = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(num) && num > highestNum) highestNum = num;
-          }
-        }
-      });
-      nextJobNo = `${info.prefix}-${highestNum + 1}`;
+      try {
+        setReservingRow(transformers.length);
+        [nextJobNo] = await reserveJobNos(commonData.division, lastCoreType, 1);
+      } catch (err) {
+        console.error('Could not reserve a job number:', err);
+        setReserveError('Could not reserve a job number. Check the connection and try again - nothing was added.');
+        return;
+      } finally {
+        setReservingRow(null);
+      }
     }
 
     setTransformers([
@@ -817,25 +899,23 @@ export default function NewJob() {
     ]);
   };
 
-  const duplicateTransformer = (index: number) => {
+  const duplicateTransformer = async (index: number) => {
     const source = transformers[index];
+
+    // Reserved, exactly as addTransformer - a duplicated row is a new transformer and
+    // draws its own number. Never copies the source's.
     let nextJobNo = '';
-    
-    // Only generate new sequence Job No for OGP repairs
     if (commonData.repairType === 'OGP') {
-      const info = getNextJobNoInfo(commonData.division, source.coreType, 'OGP');
-      let highestNum = info.nextNum - 1;
-      transformers.forEach(t => {
-        const tInfo = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
-        if (tInfo.counterKey === info.counterKey) {
-          const parts = t.jobNo.split('-');
-          if (parts.length > 1) {
-            const num = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(num) && num > highestNum) highestNum = num;
-          }
-        }
-      });
-      nextJobNo = `${info.prefix}-${highestNum + 1}`;
+      try {
+        setReservingRow(index + 1);
+        [nextJobNo] = await reserveJobNos(commonData.division, source.coreType, 1);
+      } catch (err) {
+        console.error('Could not reserve a job number:', err);
+        setReserveError('Could not reserve a job number. Check the connection and try again - nothing was added.');
+        return;
+      } finally {
+        setReservingRow(null);
+      }
     }
 
     const newEntry: TransformerEntry = {
@@ -857,7 +937,7 @@ export default function NewJob() {
     setTransformers(newTransformers);
   };
 
-  const handleAutoFillEmptyJobNos = () => {
+  const handleAutoFillEmptyJobNos = async () => {
     if (!activeAgency) {
       setErrorMsg("Please configure and select an agency in Settings first.");
       return;
@@ -869,35 +949,14 @@ export default function NewJob() {
       return;
     }
     
-    const nextNums: Record<string, number> = {};
-    
-    transformers.forEach(t => {
-      const info = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
-      if (!nextNums[info.counterKey]) {
-        nextNums[info.counterKey] = info.nextNum;
-      }
-      const parts = t.jobNo.split('-');
-      if (parts.length > 1) {
-        const num = parseInt(parts[parts.length - 1], 10);
-        if (!isNaN(num) && num >= nextNums[info.counterKey]) {
-          nextNums[info.counterKey] = num + 1;
-        }
-      }
-    });
-    
-    const newTransformers = transformers.map(t => {
-      if (!t.jobNo.trim()) {
-        const info = getNextJobNoInfo(commonData.division, t.coreType, commonData.repairType);
-        if (!nextNums[info.counterKey]) nextNums[info.counterKey] = info.nextNum;
-        
-        const jobNo = `${info.prefix}-${nextNums[info.counterKey]}`;
-        nextNums[info.counterKey]++;
-        return { ...t, jobNo };
-      }
-      return t;
-    });
-    
-    setTransformers(newTransformers);
+    // BULK RESERVE, blank rows only.
+    //
+    // The skip-if-numbered rule was already here and is the important half: a row that
+    // holds a number may have that number written on the transformer, so this must never
+    // replace one. What changes is where the numbers come from - the client-side
+    // high-water scan is gone, and each blank row draws from the shared counter inside a
+    // transaction (AUDIT F60).
+    await numberUnnumberedRows(commonData.division, commonData.repairType);
   };
 
   // Derived Totals
@@ -943,7 +1002,8 @@ export default function NewJob() {
     }
     if (commonData.repairType === 'OGP') {
       for (const t of transformers) {
-        const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
+        // Prefix only - validating the shape of a number already assigned.
+        const info = getJobNoPrefix(commonData.division, t.coreType);
         if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
           // Diagnose the REAL cause before reporting. 'JOB' is the fallback prefix
           // returned when there is no AT master or no prefix configured for this
@@ -1057,7 +1117,8 @@ export default function NewJob() {
       // Check OGP prefix validation
       if (commonData.repairType === 'OGP') {
         for (const t of transformers) {
-          const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
+          // Prefix only - validating the shape of an already-assigned number.
+          const info = getJobNoPrefix(commonData.division, t.coreType);
           if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
             if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
             const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
@@ -1373,8 +1434,8 @@ export default function NewJob() {
 
           // Only update sequence counter for OGP repairs. GP warranty repairs reuse the original Job Number from 1st repair.
           if (commonData.repairType !== 'GP') {
-            const info = getNextJobNoInfo(commonData.division, t.coreType, 'OGP');
-            const counterKey = info.counterKey;
+            // counterKey only - the number itself was reserved when the row was created.
+            const counterKey = getJobNoPrefix(commonData.division, t.coreType).counterKey;
 
             const parts = t.jobNo.split('-');
             if (parts.length > 1) {
@@ -1451,6 +1512,16 @@ export default function NewJob() {
           createdJobsList.push({ id: newJobRef.id, ...jobData });
         }
 
+        // RECONCILIATION, NOT ALLOCATION - and it is no longer how numbers are issued.
+        //
+        // Every number now comes from `reserveJobNos`, which advances the counter inside
+        // its own transaction before the operator ever sees the number (AUDIT F60). This
+        // block survives for the one case reservation does not cover: the job-number field
+        // is editable, and a hand-typed number higher than the counter must still push it
+        // forward or the next reservation would reissue it.
+        //
+        // It only ever advances - `maxNum > currentLast` - so it cannot rewind the counter
+        // below a number that was reserved and then burned.
         const nextCounters = { ...currentCounters };
         let hasCounterChange = false;
 
@@ -1496,6 +1567,95 @@ export default function NewJob() {
   return (
     <div className="w-full max-w-full overflow-x-hidden space-y-4 pb-24 sm:pb-16 print:m-0 print:p-0">
       
+      {/* RENUMBER PROMPT - offer, never apply (AUDIT F61).
+          The number is written on the transformer at intake, so changing the division or
+          core type of a row that already holds one cannot rewrite it silently: the tank
+          would say one thing and the record another, and the marking is the half this app
+          cannot correct. The replacement is already RESERVED, so the number shown is the
+          number assigned - and if the operator declines, it is burned, which is a gap in
+          the sequence and costs nothing. */}
+      {renumberPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-amber-200 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center gap-3 mb-3 text-amber-700">
+              <div className="bg-amber-100 p-2.5 rounded-xl shrink-0">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {renumberPrompt.rows.length === 1 ? 'This transformer needs a new job number' : 'These transformers need new job numbers'}
+                </h3>
+                <p className="text-xs text-amber-700 font-medium">
+                  Changing the {renumberPrompt.label} moves {renumberPrompt.rows.length === 1 ? 'it' : 'them'} to a different number sequence.
+                </p>
+              </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 my-4">
+              {renumberPrompt.rows.map(r => (
+                <div key={r.index} className="p-3">
+                  <div className="text-[11px] uppercase tracking-widest text-slate-400 font-bold mb-1">
+                    Transformer #{r.index + 1}
+                  </div>
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span className="font-mono font-bold text-slate-500 line-through">{r.from}</span>
+                    <span className="text-slate-400">&rarr;</span>
+                    <span className="font-mono font-black text-slate-900 text-lg">{r.to}</span>
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    <span className="font-mono">{r.from}</span> came from <strong>{r.fromLabel}</strong>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <strong>If you have already written the old number on the transformer, it must be
+              re-marked before you continue.</strong> The job number on the tank and the number in
+              this record have to match - nothing downstream can reconcile them if they differ.
+            </p>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setRenumberPrompt(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300"
+              >
+                Cancel - keep {renumberPrompt.rows.length === 1 ? renumberPrompt.rows[0].from : 'the existing numbers'}
+              </button>
+              <button
+                type="button"
+                onClick={applyRenumber}
+                className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm"
+              >
+                {renumberPrompt.rows.length === 1
+                  ? `Re-mark this transformer as ${renumberPrompt.rows[0].to}`
+                  : `Re-mark all ${renumberPrompt.rows.length} transformers`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* RESERVATION FAILURE - a job number could not be drawn. Nothing was issued. */}
+      {reserveError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200">
+            <div className="flex items-center gap-3 mb-3 text-rose-600">
+              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0"><AlertCircle className="w-6 h-6" /></div>
+              <h3 className="text-base font-bold text-slate-900">Job number not issued</h3>
+            </div>
+            <p className="text-sm text-slate-700 whitespace-pre-line">{reserveError}</p>
+            <div className="flex justify-end mt-4">
+              <button type="button" onClick={() => setReserveError(null)}
+                      className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ERROR MODAL */}
       {errorMsg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">

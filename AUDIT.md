@@ -4987,6 +4987,105 @@ least three are the 2026-27 tender. Free text as a join key has ALREADY fragment
 current state, not a risk to design against. That settled the AT-keyed master design in
 favour of admin-issued tender keys (see O33).
 
+### F60. Job numbers are reserved, not computed
+
+`getNextJobNoInfo` composed a number from a CLIENT-SIDE SNAPSHOT of the counter, and the
+save transaction only RECONCILED the counter to whatever the form had already decided. Two
+operators on the same agency read the same snapshot, composed the same number, and one of
+them lost their intake to the save-time duplicate guard (F33).
+
+**The constraint that shaped the fix: the number goes on the transformer.** Operators chalk
+it onto the tank at intake, so the number the form shows is a commitment, not a preview.
+That ruled out the obvious repair - allocating inside the save transaction - because a
+number that changes on save leaves the tank marked `PLN1-41` and the record saying
+`PLN1-42`, and the marking is the one half this app cannot correct.
+
+So the number is RESERVED when the row acquires it, by advancing the counter inside a
+transaction. Firestore retries the loser, which reads the advanced value: two operators get
+41 and 42, neither is refused, neither loses an intake.
+
+**A reservation is permanent.** No expiry, no reclaim, no reservation collection. The app
+cannot know whether the operator has already marked the tank, and handing a marked number to
+someone else is the exact failure this prevents - an expiry sweeper would BE the defect. An
+abandoned number is burned, and the gap is correct: the counter is already never rewound
+when a job is deleted, and the job number is the agency's internal reference rather than a
+series UGVCL tracks.
+
+**What it removed.** Every call site carried the same block - read the counter, then scan
+the form's own rows for a higher number, take max+1. That scan existed BECAUSE the counter
+did not advance per row. Once it does, the counter IS the high-water mark and all of it
+goes, taking with it the parse-the-number-back-out-of-a-string round trip that A6 depended
+on. `nextNum` no longer appears in `NewJob` at all.
+
+**One test for which counter is authoritative.** `getNextJobNoInfo` branched on
+`activeAtMaster && activeAtMaster.lastJobNumbers` while `incrementJobNoCounter` branched on
+`activeAtMaster` alone - a read and a write disagreeing about one field, held together only
+by an AT never being left with an empty counter map. `jobNoCounterTarget()` is now the
+single test used by both, which closes **A6** rather than preserving it. The AT's counter is
+authoritative whenever an AT is active; the agency's is legacy for the no-AT case and is
+deliberately NOT kept in step - nothing advances it or reads it while an AT exists.
+
+**The auto-numbering effect was DELETED rather than converted.** It depended on
+`transformers` and so re-ran on its own output - harmless while numbering was pure
+computation, a burn loop once it writes, with React's development double-invocation burning
+one more per mount. Numbering now hangs off the three user actions that create the need for
+a number. Handlers run once per action, so there is nothing to guard: the class is removed
+rather than defended against.
+
+**What still reconciles, and why it earns its place.** The save transaction still advances
+the counter to the highest number it sees, because the job-number field is EDITABLE - a
+hand-typed `PLN1-99` must push the counter forward or the next reservation reissues it. It
+only ever advances, so it cannot rewind below a reserved-then-burned number.
+
+**F33 stays load-bearing, not a net.** Atomic allocation closes the concurrency path and
+nothing else. A new AT still starts its counter fresh and reissues numbers that exist under
+the previous AT (O2 path 3) - counters are per AT, prefixes per division - and hand-typed
+numbers, GP reuse against a different transformer, and legacy duplicates all remain its job.
+
+### F61. Changing a division or core type silently rewrote a job number that may be on metal
+
+**A standalone defect, live before any of the reservation work, and it would have survived
+every design considered.** It was found only because the marking constraint made it visible.
+
+`handleCommonChange` did this on a division change, and the core-type handler did the
+equivalent:
+
+    if (t.jobNo && t.jobNo.startsWith(oldInfo.prefix + '-')) {
+      return { ...t, jobNo: t.jobNo.replace(oldInfo.prefix + '-', newInfo.prefix + '-') };
+    }
+
+**Two faults in three lines, and neither needs concurrency.**
+
+**One - it rewrites a number that may already be written on the transformer.** The operator
+chalks the number on at intake. Change the division afterwards and the tank says `PLN1-41`
+while the record says `MHS1-41`, with nothing anywhere to reconcile them.
+
+**Two - it keeps the numeric tail from a sequence the new division does not own.** `PLN1-41`
+becomes `MHS1-41` regardless of where MHS1's counter stands. If MHS1 is at 7, the number is
+from the future and the next seven intakes collide with it. If MHS1 is at 200, it is a
+duplicate on the spot. The prefix changed; the number did not, and nothing checked whether
+the new sequence had any claim to it.
+
+**Now: offer, never apply.** A row with no number reserves freely - nothing has been marked.
+A row that holds one gets a dialog naming the physical act rather than the data operation:
+
+    Transformer #2
+    PLN1-41  ->  AMR1-7
+    PLN1-41 came from SABARMATI / CRGO
+
+    If you have already written the old number on the transformer, it must be re-marked
+    before you continue.
+
+    [ Cancel - keep PLN1-41 ]   [ Re-mark this transformer as AMR1-7 ]
+
+The replacement is RESERVED before it is shown, so the number on screen is the number
+assigned - a prompt offering an unreserved number can offer one that is taken by the time it
+is clicked, which is the defect the whole design exists to close. Declining burns it, which
+is consistent with F60's no-reclaim rule and costs nothing.
+
+The provenance line exists because the operator may not remember which division they chose
+two rows ago, and the number may be on metal.
+
 ## Recurring theme
 
 Every entry above is one of two shapes:
