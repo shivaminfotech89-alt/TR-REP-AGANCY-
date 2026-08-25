@@ -1196,6 +1196,38 @@ originally attributed to it.
 
 ### O9. No IGST path exists — out-of-state agencies are charged the wrong tax
 
+> **REFRAMED AND UPGRADED, 2026-08-25.** Both open questions were verified and both hold, so
+> this is not a missing feature - it is **a wrong tax treatment on an issued invoice, against
+> evidence the same document carries.**
+>
+> **1. A non-Gujarat GSTIN can be entered without obstacle.** There is no GSTIN validation
+> anywhere: `firestore.rules:107` checks only `is string && size() <= 100` - no format, no
+> length, no state prefix - and `stateCodeFromGstin` simply reads the first two digits of
+> whatever is there. So an out-of-state agency onboards fully.
+>
+> **2. Nothing compares the agency's state to the DISCOM's.** `getAgencyStateCode` is read in
+> exactly three places, all display or gating: the invoice's supplier block
+> (`BillingSystem:2892`), the letterhead (`LetterheadHeader:110`), and the malformed-GSTIN
+> check (`jobDisplay:126`). `cgstPercent` / `sgstPercent` are read unconditionally at eight
+> sites. The string `igst` appears nowhere in `src/`.
+>
+> **The consequence is self-contradicting paperwork.** A Maharashtra agency working for a
+> Gujarat DISCOM produces an invoice printing *Supplier State Code 27* and *Buyer State Code
+> 24* - an inter-state supply on its face - and then charges CGST+SGST on the same page. The
+> app holds the GSTIN proving the treatment is wrong and prints it beside the wrong treatment.
+>
+> **Also reframed: the DISCOM side is not the exposure.** `DISCOM_OPTIONS` in
+> `AgencySettings.tsx:11` offers four entities, all Gujarat, and the select is required - so
+> an out-of-state DISCOM cannot be represented at all. That is an onboarding wall, not a tax
+> gap. The IGST case is an out-of-state **AGENCY**, which the app supports completely except
+> for the tax.
+>
+> **A partial workaround exists and is worse than none.** `cgstPercent` / `sgstPercent` are
+> agency-configurable, so an out-of-state agency could set 0 and 18. The amounts would then be
+> right and the invoice would still be invalid, because the columns are labelled CGST and
+> SGST. Anyone who found this workaround would believe the problem solved.
+
+
 **Correcting an earlier conclusion in this trail.** The seeded `agencyStateCode` of `24`
 (O8) was described as causing a non-Gujarat agency to "silently get CGST+SGST where IGST
 is due". That overstated it, and the distinction matters:

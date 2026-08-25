@@ -36,11 +36,26 @@ them is not.
 Worst single item for onboarding: it is wrong at the moment of signup, on a tax document,
 and looks configured.
 
-### 3. No IGST path — **O9**
+### 3. Out-of-state agencies are taxed CGST+SGST against their own GSTIN — **O9**
 
-CGST/SGST is applied unconditionally. An out-of-state agency is charged the wrong tax on
-every invoice. Compounds with O7: the state code that would drive the determination is
-seeded, not asked.
+**Upgraded after verification — this is a wrong tax treatment, not a missing feature.**
+
+There is no GSTIN validation anywhere (`firestore.rules:107` checks type and length only), so
+a non-Gujarat agency onboards without obstacle. Nothing anywhere compares the agency's state
+to the DISCOM's: `getAgencyStateCode` is read only for display and gating, `cgstPercent` /
+`sgstPercent` are applied unconditionally at eight sites, and `igst` appears nowhere in `src/`.
+
+The invoice therefore prints *Supplier State Code 27*, *Buyer State Code 24* — an inter-state
+supply on its face — and charges intra-state tax on the same page. The document carries the
+evidence that its own tax treatment is wrong.
+
+The DISCOM side is not the exposure: `DISCOM_OPTIONS` offers four Gujarat entities and the
+select is required, so an out-of-state DISCOM cannot be represented at all. That is an
+onboarding wall, not a tax gap.
+
+**Bites only an out-of-state customer** — but bites on their first invoice, and the
+workaround anyone would find (setting cgst 0 / sgst 18) produces right amounts under wrong
+labels, which looks solved and is not.
 
 ### 4. Job numbers are not uniquely allocated — **O2**
 
