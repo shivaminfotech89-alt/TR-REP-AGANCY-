@@ -403,8 +403,8 @@ interface AgencyContextType {
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
 
   predictNextJobNo: (division: string, coreType?: string, repairType?: string) => { prefix: string, nextNum: number, counterKey: string };
-  getJobNoPrefix: (division: string, coreType?: string) => { prefix: string; counterKey: string };
-  reserveJobNos: (division: string, coreType?: string, count?: number) => Promise<string[]>;
+  getJobNoPrefix: (division: string, coreType?: string, atMasterId?: string) => { prefix: string; counterKey: string };
+  reserveJobNos: (division: string, coreType?: string, count?: number, atMasterId?: string) => Promise<string[]>;
   incrementJobNoCounter: (counterKey: string, count: number) => Promise<void>;
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
 }
@@ -1136,7 +1136,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * `AgencySettings` seeds them at creation, but nothing ADVANCES it while an AT is active
    * and nothing reads it in that state. It is not kept in step, deliberately.
    */
-  const jobNoCounterTarget = (): { ref: any; isAtMaster: boolean; id: string } | null => {
+  const jobNoCounterTarget = (atMasterId?: string): { ref: any; isAtMaster: boolean; id: string } | null => {
+    // An EXPLICIT AT wins over the session's. MrLedger adds a transformer to an MR issued
+    // under some tender, and that job belongs to THAT tender - it consumes its allotment
+    // and prices at its percentage - regardless of which AT is selected months later
+    // (AUDIT F66).
+    if (atMasterId) return { ref: doc(db, 'atMasters', atMasterId), isAtMaster: true, id: atMasterId };
     if (activeAtMaster) return { ref: doc(db, 'atMasters', activeAtMaster.id), isAtMaster: true, id: activeAtMaster.id };
     if (activeAgency) return { ref: doc(db, 'agencies', activeAgency.id), isAtMaster: false, id: activeAgency.id };
     return null;
@@ -1149,12 +1154,16 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * is what let two operators draw the same one (AUDIT O2). Prefix resolution is pure and
    * stays synchronous; the number now comes from a transaction.
    */
-  const getJobNoPrefix = (division: string, coreType: string = 'CRGO') => {
+  const getJobNoPrefix = (division: string, coreType: string = 'CRGO', atMasterId?: string) => {
     const empty = { prefix: 'JOB', counterKey: getCounterKey(division, coreType) };
     if (!activeAgency) return empty;
 
-    const currentPrefixes = (activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0)
-        ? activeAtMaster.prefixes
+    // Prefixes follow the SAME AT the number is drawn from - a job added to an older MR
+    // must carry that tender's prefix as well as its sequence, or the number would be
+    // half from one tender and half from another (F66).
+    const sourceAt = atMasterId ? atMasters.find(a => a.id === atMasterId) : activeAtMaster;
+    const currentPrefixes = (sourceAt && sourceAt.prefixes && Object.keys(sourceAt.prefixes).length > 0)
+        ? sourceAt.prefixes
         : activeAgency.prefixes || {};
 
     const divPrefixInfo = currentPrefixes[division];
@@ -1192,10 +1201,15 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * number is the agency's internal reference, and the counter is already never rewound
    * when a job is deleted.
    */
-  const reserveJobNos = async (division: string, coreType: string = 'CRGO', count: number = 1): Promise<string[]> => {
+  const reserveJobNos = async (
+    division: string,
+    coreType: string = 'CRGO',
+    count: number = 1,
+    atMasterId?: string,
+  ): Promise<string[]> => {
     if (count <= 0) return [];
-    const target = jobNoCounterTarget();
-    const { prefix, counterKey } = getJobNoPrefix(division, coreType);
+    const target = jobNoCounterTarget(atMasterId);
+    const { prefix, counterKey } = getJobNoPrefix(division, coreType, atMasterId);
     if (!target) throw new Error('No agency is selected, so a job number cannot be reserved.');
 
     const allocated = await runTransaction(db, async (transaction) => {

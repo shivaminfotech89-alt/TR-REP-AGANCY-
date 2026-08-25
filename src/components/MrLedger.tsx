@@ -98,7 +98,9 @@ const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', 
 const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair'];
 
 export default function MrLedger() {
-  const { activeAgency, activeAtMaster, atMasters, predictNextJobNo } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, reserveJobNos } = useAgency();
+  /** True while a job number is being reserved - disables the Add button. */
+  const [addingTransformer, setAddingTransformer] = useState(false);
   const [loading, setLoading] = useState(true);
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -217,26 +219,73 @@ export default function MrLedger() {
     });
   };
 
+  /**
+   * The AT this MR belongs to, read from its own jobs - never from the session (F66).
+   *
+   * A transformer added to MR 1563 belongs to the tender MR 1563 was issued under: it
+   * consumes that AT's allotment and prices at that AT's percentage, whichever AT happens
+   * to be selected months later. Returns an error string rather than guessing when the
+   * MR's jobs disagree or carry no AT at all - that is a data fault and should surface.
+   */
+  const atForEditingMr = (): { atId: string } | { error: string } => {
+    if (!editingMr) return { error: 'No MR is open.' };
+    const ids = [...new Set(editingMr.jobs.map(j => String((j as any).atId ?? '').trim()).filter(Boolean))];
+    const without = editingMr.jobs.filter(j => !String((j as any).atId ?? '').trim()).length;
+
+    if (ids.length === 1 && without === 0) return { atId: ids[0] };
+    if (ids.length === 0) {
+      return { error: `MR ${editingMr.mrNo} does not record which AT it was issued under - none of its ${editingMr.jobs.length} transformer(s) carries one.
+
+A transformer added now would have to take its job number and AT percentage from whichever AT is selected today, which may not be the tender this MR belongs to. Set the AT on the existing jobs first.` };
+    }
+    if (ids.length === 1) {
+      return { error: `MR ${editingMr.mrNo} is partly unstamped - ${without} of its ${editingMr.jobs.length} transformer(s) carry no AT.
+
+The AT is known from the others, but adding a transformer while the MR disagrees with itself would spread the inconsistency. Set the AT on those jobs first.` };
+    }
+    return { error: `MR ${editingMr.mrNo} has transformers under ${ids.length} DIFFERENT ATs.
+
+An MR belongs to one tender. Until that is resolved there is no single sequence to draw a job number from, and no single percentage to price a new transformer at.` };
+  };
+
   // Add new transformer row to editing MR
-  const handleAddTransformerToMr = () => {
+  const handleAddTransformerToMr = async () => {
     if (!editingMr) return;
-    
-    let nextJobNo = '';
+
     const lastJob = editingMr.jobs[editingMr.jobs.length - 1];
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
 
-    if (activeAgency) {
-      const info = predictNextJobNo(editingMr.division, coreType, editingMr.repairType);
-      let highestNum = info.nextNum - 1;
-      editingMr.jobs.forEach(j => {
-        const parts = j.jobNo.split('-');
-        if (parts.length > 1) {
-          const num = parseInt(parts[parts.length - 1], 10);
-          if (!isNaN(num) && num > highestNum) highestNum = num;
-        }
-      });
-      nextJobNo = `${info.prefix}-${highestNum + 1}`;
+    // RESERVED from the MR'S OWN AT, not composed from a snapshot (AUDIT F66).
+    //
+    // This used to read the counter, then scan the MR's existing jobs for a higher number
+    // and add one - the same client-side high-water pattern O2 was about, on a screen the
+    // original trace never reached. Worse than NewJob's old behaviour: nothing here ever
+    // wrote `lastJobNumbers` back, so a number issued from this screen left the counter
+    // untouched and the next intake reissued it. The scan was load-bearing precisely
+    // because the counter was stale by construction.
+    //
+    // GP reuses the original number from the previous repair and draws nothing.
+    let nextJobNo = '';
+    if (activeAgency && editingMr.repairType !== 'GP') {
+      const at = atForEditingMr();
+      if ('error' in at) {
+        setNotification({ type: 'error', message: at.error });
+        return;
+      }
+      try {
+        setAddingTransformer(true);
+        [nextJobNo] = await reserveJobNos(editingMr.division, coreType, 1, at.atId);
+      } catch (err) {
+        console.error('Could not reserve a job number:', err);
+        setNotification({
+          type: 'error',
+          message: 'Could not reserve a job number for this transformer. Check the connection and try again - nothing was added.',
+        });
+        return;
+      } finally {
+        setAddingTransformer(false);
+      }
     }
 
     setEditingMr(prev => {
@@ -372,7 +421,21 @@ export default function MrLedger() {
             coreType: j.coreType || 'CRGO',
             status: j.status || 'Received',
             isClosed: false,
-            atId: activeAtMaster ? activeAtMaster.id : '',
+            // THE MR'S OWN AT, not the session's (AUDIT F66). A transformer added to an
+            // MR issued under an earlier tender belongs to that tender - it consumes its
+            // allotment and prices at its percentage. Stamping the active AT here is the
+            // same defect as the estimate reading the active AT instead of the job's own:
+            // the session's selection standing in for the job's tender.
+            //
+            // The add path already refuses when the MR has no single AT, so by the time a
+            // row reaches this write the answer is known. `activeAtMaster` remains the
+            // fallback only for the impossible case of an MR with no jobs at all.
+            atId: (() => {
+              const ids = [...new Set(editingMr.jobs
+                .map(x => String((x as any).atId ?? '').trim())
+                .filter(Boolean))];
+              return ids.length === 1 ? ids[0] : (activeAtMaster ? activeAtMaster.id : '');
+            })(),
             prevAtNo: j.prevAtNo || '',
             prevJobNo: j.prevJobNo || '',
             prevDeliveryDate: j.prevDeliveryDate || '',
@@ -861,10 +924,13 @@ export default function MrLedger() {
                   <button
                     type="button"
                     onClick={handleAddTransformerToMr}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                    disabled={addingTransformer}
+                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait"
                   >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Unit to this MR</span>
+                    {addingTransformer
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Plus className="w-3.5 h-3.5" />}
+                    <span>{addingTransformer ? 'Reserving job number…' : 'Add Unit to this MR'}</span>
                   </button>
                 </div>
 

@@ -5254,6 +5254,58 @@ numbers itself, with the same client-side high-water scan O2 was about:
 other screens issue a job number. Adding a transformer to an existing MR goes through this
 path, and two operators doing it concurrently collide exactly as before.
 
+### F66. MrLedger issued job numbers without advancing the counter, and stamped the session's AT
+
+Found by a sweep for the SHAPE of allocation rather than its name - string concatenation of
+a prefix and a number, a parse of a numeric tail off an existing `jobNo`, and any read of
+`lastJobNumbers`. That found exactly two allocators: `NewJob`, converted in F60, and this
+one, which the original O2 trace never reached.
+
+**Two faults, and the second is worse than the defect F60 fixed.**
+
+**One - the same client-side high-water scan.** Read the counter, scan the MR's own jobs for
+a higher number, add one. Two operators adding transformers to the same MR draw the same
+number.
+
+**Two - `lastJobNumbers` appears nowhere in the file.** A number issued here left the counter
+where it was, so the next `NewJob` intake reissued it. `NewJob`'s old code at least
+reconciled the counter upward at save; this never told it anything. Only F33's guard stood
+between that and a duplicate.
+
+Those two interact: the scan over the MR's own jobs was **load-bearing precisely because the
+counter was stale by construction**. Removing the scan without fixing the counter would have
+made the screen reissue immediately.
+
+**THE AT IS NOW THE MR'S OWN, NOT THE SESSION'S** - for the number and for the `atId` stamp.
+A transformer added to MR 1563 belongs to the tender MR 1563 was issued under: it consumes
+that AT's allotment and prices at that AT's percentage, whichever AT happens to be selected
+months later. `atId: activeAtMaster.id` was the same defect as the estimate reading the
+active AT instead of the job's own - the session's selection standing in for the job's
+tender.
+
+Prefixes follow the same AT as the sequence. Drawing the number from one tender and the
+prefix from another would produce a job number that is half from each.
+
+**It refuses rather than guesses when the MR cannot answer.** Three cases, each named:
+
+- **no job carries an `atId`** - there is nothing to draw from, and taking today's AT would
+  attach the job to a tender the MR may not belong to
+- **partly stamped** - one AT is known but some jobs lack it; adding a transformer while the
+  MR disagrees with itself spreads the inconsistency
+- **jobs under different ATs** - an MR belongs to one tender, and until that is resolved
+  there is no single sequence and no single percentage
+
+`scripts/mr-at-consistency-console.js` (read-only) counts how many MRs fall into each case,
+so the cost of refusing is known rather than assumed.
+
+**GP draws nothing**, as everywhere else - it reuses the original number from the previous
+repair.
+
+**O2 IS ONLY NOW CLOSED**, and was declared closed once before it was. The lesson is in how
+this was found: searching for `getNextJobNoInfo` finds callers of a function; searching for
+`${prefix}-${n}`, a tail parse and a counter read finds ALLOCATION. A defect defined by its
+shape has to be swept for by shape, or the sweep only finds the instances that share a name.
+
 ## Recurring theme
 
 Every entry above is one of two shapes:
