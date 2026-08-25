@@ -85,6 +85,9 @@ const LABELS: Record<string, string> = {
   circleOfficeName: 'Circle office name',
   gstin: "Agency GSTIN (your own, printed as Supplier GSTIN)",
   pan: 'Agency PAN (your own, printed as Supplier PAN)',
+  address: 'Agency address (your own, printed as Supplier address)',
+  circleAuthority: 'Circle authority title (e.g. Superintending Engineer (O & M))',
+  divisionAuthority: 'Division authority title (e.g. The Executive Engineer)',
 };
 
 function missingFields(agency: any, required: string[]): string[] {
@@ -104,7 +107,12 @@ function missingFields(agency: any, required: string[]): string[] {
 export function missingForTaxInvoice(agency: any): string[] {
   const missing = missingFields(agency, [
     'discomName', 'discomGstin', 'discomAddress',   // buyer
-    'gstin', 'pan',                                  // seller - this is what was missing
+    'gstin', 'pan', 'address',                       // seller - this is what was missing
+    // The recipient block's authority line. It used to be seeded with UGVCL's wording and
+    // applied to all four DISCOMs, so it always printed and never blocked. Now that it is
+    // no longer seeded, an ungated invoice would print a blank where the addressee belongs
+    // - which is worse than the wrong title it replaced.
+    'divisionAuthority',
   ]);
 
   // The supplier State Code is DERIVED from the agency's own GSTIN (its first two digits
@@ -124,7 +132,10 @@ export function missingForTaxInvoice(agency: any): string[] {
 
 /** The estimate prints the DISCOM's name and the circle office it is addressed to. */
 export function missingForEstimate(agency: any): string[] {
-  return missingFields(agency, ['discomName', 'circleOfficeName']);
+  // `circleAuthority` prints in the estimate's TO block via getEstimateCircleRecipient.
+  // Added here for the same reason divisionAuthority was added to the invoice gate: it
+  // stopped being seeded with UGVCL's wording, so nothing else would notice its absence.
+  return missingFields(agency, ['discomName', 'circleOfficeName', 'circleAuthority']);
 }
 
 // ---------------------------------------------------------------------------

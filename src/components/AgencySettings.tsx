@@ -149,9 +149,17 @@ export default function AgencySettings() {
         discomStateCode: '24',
         serviceSacCode: '998719',
         circleOfficeName: '',
-        circleAuthority: 'Superintending Engineer (O & M)',
-        divisionAuthority: 'The Executive Engineer',
-        estimateCcTemplate: 'E. E. (O & M) DIVISION - {division}',
+        // AUTHORITY TITLES AND THE CC TEMPLATE ARE NOT SEEDED.
+        //
+        // These were UGVCL's specific wording written into every agency regardless of which
+        // of the four DISCOMs it had selected. Unlike discomState / discomStateCode /
+        // serviceSacCode - which FOLLOW from that required choice and are correct for all
+        // four Gujarat entities - these are one DISCOM's phrasing presented as everyone's.
+        //
+        // They are the shape this audit keeps finding: a value that looks configured, never
+        // blocks, and prints. The estimate and tax-invoice gates now require them
+        // (missingForEstimate, missingForTaxInvoice), so they are asked for rather than
+        // assumed, and the render fallbacks that used to re-supply them are gone.
         forwardingSubject: 'Submiting Inspection Report & Estimate of Transformer',
         gpValidationMonths: 18,
         prefixes,

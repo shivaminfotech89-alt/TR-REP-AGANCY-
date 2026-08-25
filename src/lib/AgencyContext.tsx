@@ -109,7 +109,11 @@ export interface Agency {
 }
 
 export function getEstimateCircleRecipient(agency?: Agency | null, circleOrDivision?: string): string {
-  const authority = agency?.circleAuthority || 'Superintending Engineer (O & M)';
+  // NO FALLBACK. It used to default to UGVCL's wording, applied to whichever of the four
+  // DISCOMs the agency had chosen - so an unset field printed a plausible title nobody
+  // had entered. missingForEstimate now gates on it, so an empty value cannot reach a
+  // document; if one ever does, a visible blank is the correct symptom (AUDIT O7).
+  const authority = agency?.circleAuthority || '';
   const company = agency?.discomName || 'DISCOM';
   let circle = circleOrDivision;
   if (circleOrDivision && agency?.divisionCircles?.[circleOrDivision]) {
@@ -129,12 +133,16 @@ export function getEstimateCcText(agency?: Agency | null, division?: string): st
   if (agency?.forwardingCcText && agency.forwardingCcText.trim()) {
     return agency.forwardingCcText.replace(/{division}/gi, div);
   }
-  return `E. E. (O & M) DIVISION - ${div}`;
+  // NO HARDCODED TAIL. The CC line is a courtesy copy rather than a required field, so
+  // it is not gated - but an unset template must produce NO CC line rather than
+  // UGVCL's. An empty string is rendered as an omitted line by both callers.
+  return '';
 }
 
 export function getBillDivisionRecipient(agency?: Agency | null, division?: string): string {
   const div = division || 'DIVISION';
-  const authority = agency?.divisionAuthority || 'The Executive Engineer ,';
+  // NO FALLBACK - see getEstimateCircleRecipient above. Gated by missingForTaxInvoice.
+  const authority = agency?.divisionAuthority || '';
   const company = agency?.discomName || 'DISCOM';
   return `To\n${authority}\n${company}\nDivision Office : ${div}`;
 }

@@ -2765,7 +2765,7 @@ export default function BillingSystem() {
                 <div>
                   {/* Recipient */}
                   <div className="mb-4 text-xs text-black whitespace-pre-wrap font-medium">
-                    {forwardingTo || `To\n${activeAgency?.divisionAuthority || 'The Executive Engineer ,'}\n${activeAgency?.discomName || ''}\nDivision Office : ${currentDivision}`}
+                    {forwardingTo || `To\n${activeAgency?.divisionAuthority || ''}\n${activeAgency?.discomName || ''}\nDivision Office : ${currentDivision}`}
                     {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
                   </div>
 
@@ -2927,7 +2927,9 @@ export default function BillingSystem() {
                     <div className="grid grid-cols-2 gap-2 text-[9px]">
                       <div>
                         <span className="text-[8px] font-black uppercase tracking-widest text-slate-500 block mb-0.5">Billed To (Client / Consignee):</span>
-                        <p className="font-bold uppercase text-[9px]">{activeAgency?.divisionAuthority || 'EXECUTIVE ENGINEER (O&M)'}</p>
+                        {/* No fallback. It defaulted to UGVCL's title on every DISCOM's
+                            invoice; missingForTaxInvoice now gates on it (AUDIT O7). */}
+                        <p className="font-bold uppercase text-[9px]">{activeAgency?.divisionAuthority || ''}</p>
                         {/* No placeholder. This is the BUYER NAME on a tax invoice: a
                             literal like 'DISCOM' looks like a filled field and survives
                             review, where an empty one does not. The gate
