@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, doc, query, where, getDocs, runTransaction } from 'firebase/firestore';
@@ -219,16 +219,23 @@ export default function NewJob() {
   const [reserveFailedKeys, setReserveFailedKeys] = useState<Set<string>>(new Set());
   const [reserveError, setReserveError] = useState<string | null>(null);
 
-  const markReserving = (key: string, on: boolean) =>
-    setReservingKeys(prev => {
-      const next = new Set(prev);
-      if (on) next.add(key); else next.delete(key);
-      return next;
-    });
-  const markFailed = (key: string, on: boolean) =>
+  /**
+   * THE GUARD IS A REF, NOT THE STATE. The state exists only to render the spinner.
+   *
+   * `reservingKeys.has(...)` is a read of a value that React has not committed yet: two
+   * keystrokes in the same tick both see an empty set and both reserve. A ref updates
+   * synchronously, so the second call sees the first.
+   */
+  const reservingRef = useRef<Set<string>>(new Set());
+
+  const markReserving = (keys: string[], on: boolean) => {
+    keys.forEach(k => { if (on) reservingRef.current.add(k); else reservingRef.current.delete(k); });
+    setReservingKeys(new Set(reservingRef.current));
+  };
+  const markFailed = (keys: string[], on: boolean) =>
     setReserveFailedKeys(prev => {
       const next = new Set(prev);
-      if (on) next.add(key); else next.delete(key);
+      keys.forEach(k => { if (on) next.add(k); else next.delete(k); });
       return next;
     });
 
@@ -238,32 +245,58 @@ export default function NewJob() {
    * `serialNo` and `make` come off the nameplate and start empty, so entry in either is
    * unambiguous. `capacityKva` is pre-filled with a default, so there is no "first entry" -
    * only a change, which is still a deliberate act on a real unit. `coreType` is excluded:
-   * it is pre-filled too and already runs the reserve-or-prompt path, so counting it here
-   * would double-fire.
-   *
-   * Reserving at this moment rather than at form open is what makes the no-reclaim rule
-   * defensible: a number is only drawn once the operator could plausibly write it on metal
-   * (AUDIT F67). Opening the screen and leaving burns nothing.
+   * pre-filled too, and it already runs the reserve-or-prompt path.
    */
   const RESERVE_TRIGGER_FIELDS: StringRowField[] = ['serialNo', 'make', 'capacityKva'];
 
-  /** Draw this row's number, once. Safe to call on every keystroke. */
-  const reserveForRow = async (rowKey: string, coreType: string) => {
-    if (!activeAgency || commonData.repairType === 'GP') return;
-    if (reservingKeys.has(rowKey)) return;
-    markReserving(rowKey, true);
-    markFailed(rowKey, false);
+  /**
+   * THE ONE PLACE A ROW DRAWS ITS NUMBER. Every path goes through here (AUDIT F69).
+   *
+   * Takes a batch, because a division change numbers every unnumbered row at once and each
+   * counter key wants a single transaction to stay contiguous. Rows already in flight are
+   * dropped before anything is reserved - that check is what makes it safe to call on a
+   * keystroke, and routing every caller through it is what stops a second call site
+   * reaching past the guard.
+   */
+  const reserveForRows = async (
+    rows: { rowKey: string; coreType: string }[],
+    division: string,
+  ) => {
+    if (!activeAgency || !division || commonData.repairType === 'GP') return;
+    const eligible = rows.filter(r => r.rowKey && !reservingRef.current.has(r.rowKey));
+    if (eligible.length === 0) return;
+
+    const keys = eligible.map(r => r.rowKey);
+    markReserving(keys, true);
+    markFailed(keys, false);
     try {
-      const [jobNo] = await reserveJobNos(commonData.division, coreType, 1);
-      setTransformers(prev => prev.map(t => (t.rowKey === rowKey && !String(t.jobNo || '').trim())
-        ? { ...t, jobNo } : t));
+      const byCounter: Record<string, { coreType: string; rowKeys: string[] }> = {};
+      eligible.forEach(r => {
+        const { counterKey } = getJobNoPrefix(division, r.coreType);
+        (byCounter[counterKey] ||= { coreType: r.coreType, rowKeys: [] }).rowKeys.push(r.rowKey);
+      });
+
+      const assigned: Record<string, string> = {};
+      for (const { coreType, rowKeys } of Object.values(byCounter)) {
+        const nums = await reserveJobNos(division, coreType, rowKeys.length);
+        rowKeys.forEach((k, i) => { assigned[k] = nums[i]; });
+      }
+      // Keyed on rowKey, so a splice between firing and landing cannot put a number on the
+      // wrong transformer (F63). Only fills a row still without one.
+      setTransformers(prev => prev.map(t =>
+        (t.rowKey && assigned[t.rowKey] && !String(t.jobNo || '').trim())
+          ? { ...t, jobNo: assigned[t.rowKey] } : t));
     } catch (err) {
-      console.error('Could not reserve a job number:', err);
-      markFailed(rowKey, true);
+      console.error('Could not reserve job number(s):', err);
+      markFailed(keys, true);
     } finally {
-      markReserving(rowKey, false);
+      markReserving(keys, false);
     }
   };
+
+  /** Single-row convenience over reserveForRows. */
+  const reserveForRow = (rowKey: string, coreType: string) =>
+    reserveForRows([{ rowKey, coreType }], commonData.division);
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -416,32 +449,19 @@ export default function NewJob() {
   >(null);
 
   /** Reserve numbers for rows that have none. Rows that hold one are left alone. */
+  /**
+   * Number every row that has none. A thin wrapper over reserveForRows, which owns the
+   * in-flight guard - this used to call reserveJobNos directly and reach past it, so
+   * flipping a division twice with unnumbered rows burned a set of numbers each time
+   * (AUDIT F69).
+   */
   const numberUnnumberedRows = async (division: string, repairType: string) => {
-    if (!activeAgency || !division || repairType === 'GP') return;
+    if (repairType === 'GP') return;
     const pending = transformers
-      .map((t, index) => ({ t, index }))
-      .filter(({ t }) => !String(t.jobNo || '').trim());
+      .filter(t => t.rowKey && !String(t.jobNo || '').trim())
+      .map(t => ({ rowKey: t.rowKey, coreType: t.coreType || 'CRGO' }));
     if (pending.length === 0) return;
-
-    // Grouped by counter key: a mixed-core intake draws from several sequences, and one
-    // transaction per sequence keeps each allocation contiguous.
-    const byKey: Record<string, { coreType: string; indexes: number[] }> = {};
-    pending.forEach(({ t, index }) => {
-      const { counterKey } = getJobNoPrefix(division, t.coreType);
-      (byKey[counterKey] ||= { coreType: t.coreType, indexes: [] }).indexes.push(index);
-    });
-
-    try {
-      const assigned: Record<number, string> = {};
-      for (const { coreType, indexes } of Object.values(byKey)) {
-        const nums = await reserveJobNos(division, coreType, indexes.length);
-        indexes.forEach((rowIdx, i) => { assigned[rowIdx] = nums[i]; });
-      }
-      setTransformers(prev => prev.map((t, i) => assigned[i] ? { ...t, jobNo: assigned[i] } : t));
-    } catch (err) {
-      console.error('Could not reserve job numbers:', err);
-      setReserveError('Could not reserve job numbers. Check the connection and try again - no numbers were issued.');
-    }
+    await reserveForRows(pending, division);
   };
 
   const handleCommonChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -1005,12 +1025,11 @@ export default function NewJob() {
       const existing = String(newTransformers[index].jobNo || '').trim();
       setTransformers(newTransformers);
       if (!existing) {
-        reserveJobNos(commonData.division, value, 1)
-          .then(([jobNo]) => setTransformers(prev => prev.map((t, i) => i === index ? { ...t, jobNo } : t)))
-          .catch(err => {
-            console.error('Could not reserve a job number:', err);
-            setReserveError('Could not reserve a job number for the new core type. The row is unnumbered.');
-          });
+        // Through reserveForRow, not reserveJobNos - this branch used to call the allocator
+        // directly, so changing the core type repeatedly on an unnumbered row drew a number
+        // each time. The assignment is asynchronous, so the row stayed unnumbered for the
+        // duration and every change saw `existing === ''` (AUDIT F69).
+        if (row.rowKey) void reserveForRow(row.rowKey, value);
       } else {
         // PREDICTED, not reserved - see the division branch and F68. Reserving here burned a
         // number every time an operator changed a core type to look at the difference.

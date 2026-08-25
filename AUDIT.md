@@ -5426,6 +5426,57 @@ tank, never against one that has moved underneath them.
 appears only after a save has already been refused - the operator is not exploring, they are
 correcting, and a second refusal in the same breath would be a loop rather than an offer.
 
+### F69. The reservation guard was built for one path and two older paths reached past it
+
+Reported from the UI: changing a row's core type repeatedly burned a number each time,
+without saving. The design (F68) is that the prompt shows an UNRESERVED prediction and
+reserves only on accept, precisely so flipping a dropdown to look at something costs
+nothing.
+
+**The prediction was correct. The burn came from the other branch of the same handler.**
+
+A core-type change on a row that HOLDS a number predicts, as designed. On a row that does
+not, it draws one - which is right, since nothing has been marked. But it called
+`reserveJobNos` **directly**:
+
+    if (!existing) {
+      reserveJobNos(commonData.division, value, 1).then(([jobNo]) => …)
+
+`reserveForRow` owns `reservingKeys`, the in-flight marker that stops a second reservation
+firing before the first returns. This branch never touched it. And because the assignment is
+asynchronous, the row stays unnumbered for the duration - so every change in that window saw
+`existing === ''` and drew again. Three quick flips, three numbers.
+
+`numberUnnumberedRows` had the same gap and a wider blast radius: no guard either, called on
+every division AND repair-type change, operating on ALL unnumbered rows. A four-row intake
+burned four numbers per flip.
+
+**THE GUARD ITSELF WAS ALSO UNSOUND.** `reservingKeys.has(...)` reads React state, which is
+not committed synchronously - two keystrokes in the same tick both see an empty set and both
+pass. The marker is now a `useRef`, which updates immediately; the state remains only to
+render the spinner. So even the path that HAD a guard was relying on one that could not hold
+under the exact conditions it existed for.
+
+Everything now goes through `reserveForRows`, which takes a batch so a division change keeps
+its per-sequence batching, drops rows already in flight before reserving anything, and
+assigns by `rowKey` so a splice between firing and landing cannot put a number on the wrong
+transformer (F63). `reserveForRow` is a one-row wrapper.
+
+`addTransformer` and `duplicateTransformer` still call the allocator directly, deliberately:
+they create a row that does not exist yet, and two clicks SHOULD produce two rows with two
+numbers. That is not a burn.
+
+**THIS IS THE F65 SHAPE, COMMITTED BY THE FIX FOR A DIFFERENT INSTANCE OF IT.** F65 recorded
+a second call site reaching past a rule - `MrLedger` allocating job numbers while the O2
+work assumed `NewJob` was the only allocator. Here the same thing happened inside a single
+file, in the same week, by the same hand: the guard was written for the keystroke path,
+which was new, and not applied to the two paths that already existed. Building a rule and
+retrofitting its call sites are two jobs, and finishing the first feels like finishing both.
+
+The countermeasure is not vigilance. It is that a rule with more than one entry point should
+have exactly one - `reserveForRows` is now the only function that calls `reserveJobNos` from
+a row-editing path, so a future caller cannot bypass the guard without deleting it.
+
 ## Recurring theme
 
 Every entry above is one of two shapes:
