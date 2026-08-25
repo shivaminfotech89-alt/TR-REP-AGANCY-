@@ -12,12 +12,17 @@
 //   2. In the app: open New Job and type a serial number into the first row
 //   3. node scripts/admin/read-counters.js          <- after
 //
-// EXPECTED: exactly one key advances, by exactly 1.
+// EXPECTED, for one row: one number issued.
 //
-//   advanced by 2   a reservation fired twice - the in-flight guard is not holding
-//   advanced by 0   the trigger did not fire at all
-//   two keys moved  the CRGO bare/_CRGO pair both moved, which is correct for CRGO
-//                   (reserveJobNos writes both deliberately) - check they moved together
+//   an EXISTING key +2      a reservation fired twice - the in-flight guard is not holding
+//   nothing moved           the trigger did not fire at all
+//   two keys moved          normal for CRGO: reserveJobNos writes `<div>` and `<div>_CRGO`
+//                           together, so one allocation shows as two keys
+//   a key CREATED           also normal, and not a jump. An AT predating addAtMaster's
+//                           seeding fix can be missing its bare `<div>` key; reserveJobNos
+//                           reads the MAX of the pair and writes both, so it is created in
+//                           step rather than restarting the sequence at 1. The delta looks
+//                           large because absent reads as zero - it is not an increment.
 //
 // And the form-open test, which is what F67 was for:
 //
@@ -72,21 +77,63 @@ if (mode === 'save') {
   });
 
   console.log(`Snapshot taken ${new Date(before.at).toLocaleString('en-IN')}\n`);
+
+  // A KEY THAT DID NOT EXIST IS NOT A KEY THAT JUMPED.
+  //
+  // The first version knew only "delta must be 1". When reserveJobNos CREATED the bare
+  // `<div>` key alongside `<div>_CRGO` - which it does deliberately - the diff read absent
+  // as 0, reported 0 -> 11 as a jump of eleven, and printed a warning at the exact moment
+  // the code was working correctly.
+  //
+  // Third time in this audit a check has reported confidently outside its own model: an
+  // exact-string comparison that could not detect mistyping, a sweep truncated before the
+  // judgement, and this. A diagnostic that flags a failure while the code works is worse
+  // than no diagnostic - it costs the investigation that follows.
+  const bareOf = k => k.replace(/_CRGO$/, '');
+  const wasPresent = k => k in before.counters;
+
   if (moved.length === 0) {
     console.log('  NOTHING MOVED.');
     console.log('  Correct for the form-open test. If you typed a serial, the trigger did not fire.');
   } else {
-    console.table(moved);
-    const byDelta = moved.reduce((m, r) => { (m[r.delta] ||= []).push(r.counter); return m; }, {});
-    console.log('\n  ' + Object.entries(byDelta)
-      .map(([d, list]) => `${list.length} counter(s) moved by ${d}`).join(', '));
-    const bad = moved.filter(r => r.delta !== 1);
-    if (bad.length === 0) {
-      console.log('  Every counter that moved advanced by exactly 1 - one row, one number.');
+    console.table(moved.map(r => ({ ...r, note: wasPresent(r.counter) ? '' : 'key created' })));
+    console.log('');
+
+    const pairs = moved.filter(r => r.counter.endsWith('_CRGO'))
+      .map(r => ({ crgo: r, bare: moved.find(x => x.counter === bareOf(r.counter)) }))
+      .filter(p => p.bare);
+    const paired = new Set(pairs.flatMap(p => [p.crgo.counter, p.bare.counter]));
+
+    pairs.forEach(({ crgo, bare }) => {
+      console.log(`  ${crgo.counter}`);
+      console.log(`    ${crgo.delta} number(s) issued  (${crgo.before} -> ${crgo.after})`);
+      if (!wasPresent(bare.counter)) {
+        console.log(`    bare key CREATED at ${bare.after} - it did not exist on this AT.`);
+        console.log('    reserveJobNos writes both and reads the MAX of them, so a missing bare');
+        console.log('    key is repaired in step rather than restarting the sequence at 1.');
+      } else if (bare.delta !== crgo.delta) {
+        console.log(`    bare key moved by ${bare.delta} against ${crgo.delta} issued - THEY DISAGREE.`);
+      } else {
+        console.log(`    bare key moved with it (${bare.before} -> ${bare.after}) - in step.`);
+      }
+    });
+
+    moved.filter(r => !paired.has(r.counter)).forEach(r => {
+      console.log(`  ${r.counter}`);
+      console.log(wasPresent(r.counter)
+        ? `    ${r.delta} number(s) issued  (${r.before} -> ${r.after})`
+        : `    key CREATED at ${r.after}.`);
+    });
+
+    const overrun = moved.filter(r => wasPresent(r.counter) && r.delta > 1);
+    console.log('');
+    if (overrun.length === 0) {
+      console.log('  VERDICT: no existing counter advanced by more than 1. For a single row that');
+      console.log('  means one number was issued and the in-flight guard held.');
     } else {
-      console.log('\n  NOT ALL MOVED BY 1. A delta of 2 on one key means a reservation fired');
-      console.log('  twice for one row. A CRGO row legitimately moves BOTH `<div>` and');
-      console.log('  `<div>_CRGO` by 1 each - two keys, one apiece, not one key by two.');
+      console.log('  VERDICT: a counter that already existed advanced by more than 1:');
+      overrun.forEach(r => console.log(`    ${r.counter}: +${r.delta}`));
+      console.log('  If you added ONE row, a reservation fired more than once.');
     }
   }
 } else {

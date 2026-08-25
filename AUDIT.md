@@ -530,6 +530,42 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: a check can only see what its model anticipated, and reports confidently outside it
+
+Three instances in this audit, and the third is the clearest because the code was RIGHT.
+
+**One - the AT-number variant check compared exact strings.** It normalised by stripping
+non-alphanumerics and grouping, which cannot see that `"AT2026-27"` and `"2026_27"` are one
+tender: the `AT` prefix survives and the year widths differ. It reported "no tender is spelled
+two ways" across six records spelling one tender at least three ways (F59). **A comparison
+built to detect mistyping could not tolerate the mistyping.**
+
+**Two - a Schedule-A sweep's output was truncated before the judgement.** The search found
+the evidence; the triage lost it, and a completeness claim was made on the clipped view (F41).
+
+**Three - the counter checker knew only "delta must be 1".** `reserveJobNos` writes the bare
+`<div>` key alongside `<div>_CRGO` and reads the MAX of the pair. On an AT missing its bare
+key, the reservation CREATES it - so the diff read absent as `0`, reported `0 -> 11` as a
+jump of eleven, and printed a warning **at the exact moment the code was working correctly**.
+
+**The common shape: a model that admits one kind of change, meeting a second kind.** Exact
+equality meeting a typo. A full result set meeting a display limit. Increment meeting
+creation. In each case the check did not fail - it answered a narrower question than the one
+being asked, and the answer was reported as though it were the wider one.
+
+**A diagnostic that flags a failure while the code works is worse than no diagnostic.** It
+costs the investigation that follows, and it spends the credibility the next real warning
+needs. The third instance cost a full trace through `reserveJobNos` to establish that nothing
+was wrong.
+
+**What to do about it, concretely:** when a check reports a fault, confirm the fault
+independently before acting on it - and when a check reports success, ask which question it
+answered. That is the same discipline as the note below on `tsc`, arrived at from the
+opposite direction: there, silence was mistaken for coverage; here, noise was mistaken for a
+defect.
+
+---
+
 ## Pattern: a green check was cited as evidence without establishing what it covered
 
 **This is the most consequential process finding in the audit, and it is not about types.**
@@ -5083,6 +5119,20 @@ number that changes on save leaves the tank marked `PLN1-41` and the record sayi
 So the number is RESERVED when the row acquires it, by advancing the counter inside a
 transaction. Firestore retries the loser, which reads the advanced value: two operators get
 41 and 42, neither is refused, neither loses an intake.
+
+**IT REPAIRS A MISSING BARE COUNTER KEY AS IT GOES - a property, not an accident.**
+
+CRGO is counted under either `${div}_CRGO` or a bare `${div}` key, and `reserveJobNos` reads
+the **MAX of the two** and writes **both**. An AT created before `addAtMaster`'s seeding fix
+can be missing the bare key entirely; the first reservation creates it in step with the
+`_CRGO` value rather than starting it at 1. Observed on `AT 2026_27 [SUCHIT]`, whose bare
+`DEESA` key did not exist: a reservation took `DEESA_CRGO` from 10 to 11 and created `DEESA`
+at 11.
+
+**Simplifying that to a single-key read would reintroduce reissue-from-1** on any AT with a
+missing bare key - the sequence would restart while jobs numbered 1..10 already existed, and
+every one of them would collide until F33's guard caught it. The max-of-both read is what
+makes writing both safe, and the two must not be separated.
 
 **A reservation is permanent.** No expiry, no reclaim, no reservation collection. The app
 cannot know whether the operator has already marked the tank, and handing a marked number to
