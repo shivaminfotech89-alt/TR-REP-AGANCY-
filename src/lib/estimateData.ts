@@ -336,6 +336,23 @@ export const defaultOverhaulingEstimateData: EstimateItem[] = [
 ];
 
 export const defaultEstimateData: EstimateItem[] = [
+  // SCRAP CHARGE - required, and absent until now.
+  //
+  // `SCRAP_ITEM_CODE_BY_CORE_CLASS` maps CRGO to '22'. The Amorphous card has always
+  // carried its equivalent ('0') and Wound Core inherits it by copy, but the CRGO card
+  // never had one - so a freshly seeded agency could not price a CRGO scrap job at all.
+  // `resolveScrapCharge` returned `rate: null` and BillingSystem raised "Scrap charge not
+  // configured", which fails honestly but demands the operator hand-add a row that every
+  // agency needs and no agency was ever given.
+  //
+  // Same figures as the Amorphous '0' row: flat Rs 500 regardless of capacity. Both
+  // `fixedRate` and every per-capacity cell are populated, because resolveScrapCharge
+  // reads `rates[kva]` first and only falls back to `fixedRate`.
+  //
+  // Shipped DATA, not code - it changes no logic and no existing agency, which stores its
+  // own master. It changes what the next agency is born with.
+  { itemCode: "22", itemName: "Rate for inspection & dismantling charges of damaged transformer declared as scrap by E.E. (TR)", unit: "QTY", fixedRate: 500.00,
+    rates: { "5": 500.00, "10": 500.00, "16": 500.00, "25": 500.00, "50": 500.00, "63": 500.00, "100": 500.00, "200": 500.00, "315": 500.00, "500": 500.00 } },
   { itemCode: "1a", itemName: "Dismentaling", unit: "QTY", rates: { ...defaultRates, "10": 1603.00, "16": 1603.00, "25": 2061.00, "63": 2061.00 } },
   { itemCode: "1b", itemName: "Repl. of Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 40.00, "16": 40.00, "25": 46.00, "63": 46.00 } },
   { itemCode: "1c", itemName: "Repl. HV/LV Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 28.75, "16": 28.75, "25": 34.00, "63": 34.00 } },
