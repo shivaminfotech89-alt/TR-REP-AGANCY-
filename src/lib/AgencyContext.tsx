@@ -106,6 +106,31 @@ export interface Agency {
   estimateMasterWoundCore?: EstimateItem[];
   estimateMasterOverhauling?: EstimateItem[];
   estimateMasterCircleLimits?: EstimateItem[];
+
+  /**
+   * GST RATES. Read at fourteen sites each in BillingSystem and declared nowhere until
+   * now, so every use was unchecked (AUDIT F65).
+   *
+   * Each is read as `activeAgency?.cgstPercent !== undefined ? … : 9`. The 9+9 default is
+   * the correct CGST/SGST split for an 18% supply and produces a valid invoice, so it is
+   * not urgent - but an agency that never configures them issues invoices at a rate nobody
+   * chose. Gating the invoice on them belongs with the IGST work (O9), not with a types
+   * pass. Recorded, deliberately not changed here.
+   */
+  cgstPercent?: number;
+  sgstPercent?: number;
+
+  /** Printed on documents. Undeclared until now. */
+  agencyCode?: string;
+
+  /**
+   * SUBSCRIPTION FIELDS - written by AdminPanel, read by almost nothing (AUDIT O34).
+   * Declared so the write is type-checked; their emptiness as a feature is a separate item.
+   */
+  subscriptionStatus?: 'active' | 'trial' | 'expired' | 'suspended';
+  subscriptionPlanAmount?: number;
+  subscriptionLastPaid?: number;
+  subscriptionExpiryDate?: number;
 }
 
 export function getEstimateCircleRecipient(agency?: Agency | null, circleOrDivision?: string): string {
@@ -343,7 +368,8 @@ interface AgencyContextType {
   globalConfigError: string | null;
   globalConfigLoaded: boolean;
   dismissGlobalConfigError: () => void;
-  addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<void>;
+  /** Returns the new agency's id so the caller can select it (F30). */
+  addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<string | undefined>;
   updateAgency: (id: string, agencyData: Partial<Agency>) => Promise<void>;
   updateAllAgenciesEstimateMaster: (payload: {
     estimateMasterCRGO?: EstimateItem[];
@@ -356,7 +382,7 @@ interface AgencyContextType {
   countOverridesForApply: (
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],
-  ) => Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number> }>>;
+  ) => Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number>; sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> }>>;
   applyEstimateMasterToOwnAgencies: (
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],

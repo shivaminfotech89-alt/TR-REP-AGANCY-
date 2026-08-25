@@ -73,6 +73,15 @@ interface TransformerEntry {
   gpLookupMissFor?: string;
 }
 
+/**
+ * The row fields that genuinely hold a string. `gpSource` and `gpPriorJobId` are excluded
+ * deliberately - a union and a nullable id, set by the GP linkage paths rather than by
+ * field edits.
+ */
+type StringRowField = {
+  [K in keyof TransformerEntry]-?: TransformerEntry[K] extends string | undefined ? K : never
+}[keyof TransformerEntry];
+
 const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', '500'];
 const COMMON_GP_REASONS = ['HT Coil Burn', 'LT Coil Burn', 'Oil Leakage', 'Flashover / Bushing', 'High Temperature', 'Core Damage', 'Tripping on Load'];
 const COMMON_GP_TERMS = [
@@ -835,7 +844,15 @@ export default function NewJob() {
     }
   };
 
-  const handleTransformerChange = (index: number, field: keyof TransformerEntry, value: string) => {
+  /**
+   * Every row field change funnels through here - and it was never type-checked, because
+   * `useAgency()` resolved to `any` for want of @types/react (AUDIT F65).
+   *
+   * `field` was `keyof TransformerEntry` while `value` is always a string, so this was
+   * writing arbitrary strings into `gpSource` (a union) and `gpPriorJobId` (a nullable
+   * id). Narrowed to the string-valued keys, which is what every caller actually passes.
+   */
+  const handleTransformerChange = <K extends StringRowField>(index: number, field: K, value: TransformerEntry[K]) => {
     const newTransformers = [...transformers];
     newTransformers[index][field] = value;
 

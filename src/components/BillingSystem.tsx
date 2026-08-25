@@ -414,7 +414,11 @@ export default function BillingSystem() {
     }
 
     const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
-    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || activeAgency?.atNumber || '';
+    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || '';
+  // WAS: `|| activeAgency?.atNumber` - an AT number on the AGENCY, which no write path
+  // has ever produced. It read as a fallback and could only ever be undefined, so the
+  // expression was `atMaster.atNumber || undefined || ''`. Removed rather than declared
+  // (AUDIT F65).
     
     // Check if bill details were already recorded for THIS BILL TYPE's jobs. Searching
     // every job in the MR prefilled a mixed MR's scrap bill with the repair bill's

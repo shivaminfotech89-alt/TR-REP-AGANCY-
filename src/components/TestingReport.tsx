@@ -25,6 +25,8 @@ interface Job {
   repairType: string;
   status: string;
   division?: string;
+  /** Read at three sites here and undeclared until now (AUDIT F65). */
+  coreType?: string;
   externalInspectionDate?: string;
   internalInspectionDate?: string;
   starRating?: number;
