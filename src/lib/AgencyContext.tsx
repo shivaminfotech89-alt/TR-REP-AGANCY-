@@ -1224,22 +1224,22 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
 
   /**
-   * PREDICTS the next job number. READS ONLY - it writes nothing, anywhere.
+   * ⚠ NO CALLERS. Do not wire this up to a job-number field (AUDIT F70).
    *
-   * This is now the ONLY source of a number the app puts in front of an operator, and it is
-   * a SUGGESTION: New Job pre-fills a new row with it, MrLedger pre-fills a unit added to
-   * an MR, and in both cases the operator overwrites it with whatever the division wrote on
-   * the paper. Filling a job-number field from this is correct and expected - the opposite
-   * of what the comment here used to say, back when a field could only be filled from a
-   * reservation (AUDIT F70).
+   * It predicts from `lastJobNumbers`, and a suggestion must NOT come from there any more.
+   * The counter records what has been ISSUED and only ever rises. Suggestions now continue
+   * from the highest job number actually SAVED for that prefix, which is a record of what
+   * EXISTS and can fall - so an abandoned intake offers the same number again, and a
+   * deleted or cancelled job frees its number. Reading the counter instead would quietly
+   * undo both, and would look right while doing it.
    *
-   * Because it only reads, two operators can be shown the same number. That is accepted:
-   * the duplicate check refuses the second at save and names the conflicting job, so the
-   * loser edits one field. The alternative cost a number on every dropdown flip.
+   * NewJob and MrLedger both compute their own from jobs they already hold; neither needs
+   * an extra read. What survives here is the counter LOOKUP, which nothing consults.
    *
-   * Renamed from `getNextJobNoInfo`, which is how it once came to be used as an allocator -
-   * a function whose name says "next job no" sitting beside a real allocator is how someone
-   * wires up the wrong one (AUDIT F64). There is no allocator beside it now.
+   * Kept rather than deleted only because removing it was out of scope for the change that
+   * orphaned it. It is a deletion candidate: the last function in this file that looked
+   * useful and had no callers was `incrementJobNoCounter`, and it sat here long enough to
+   * be documented as a hazard twice (A2) before it went.
    */
   const predictNextJobNo = (
     division: string,

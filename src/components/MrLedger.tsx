@@ -99,7 +99,7 @@ const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', 
 const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair'];
 
 export default function MrLedger() {
-  const { activeAgency, activeAtMaster, atMasters, predictNextJobNo } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix } = useAgency();
   const [loading, setLoading] = useState(true);
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -255,17 +255,25 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
 
-    // SUGGESTED from the MR'S OWN AT, not drawn from it (AUDIT F66, F70).
+    // CONTINUE FROM THE HIGHEST NUMBER SAVED ON THIS MR (AUDIT F70).
     //
-    // A transformer added to MR 1563 belongs to the tender MR 1563 was issued under, so the
-    // prediction reads that AT's counter rather than whichever AT the session has selected
-    // - which is why atForEditingMr must resolve before anything is suggested, and why an
-    // MR that disagrees with itself about its AT is refused rather than guessed at.
+    // Not from the counter. Saved jobs are a record of what EXISTS and can go down when one
+    // is deleted; the counter only ever goes up. So an abandoned add suggests the same
+    // number again, and a cancelled job frees its number - the same rule intake follows.
     //
-    // NOTHING IS RESERVED. This row is held in memory until the operator presses Save, so
-    // reserving here burned a number every time someone opened the dialog, added a row and
-    // thought better of it. The counter advances at save, to the highest number actually
-    // written, exactly as intake does.
+    // THE MR FIRST, the agency second. A unit added to MR 1563 continues 1563's own run of
+    // numbers, which is what the division sees on that MR. Only when this MR carries no
+    // number under this prefix at all - an Amorphous unit added to a CRGO-only MR - does it
+    // fall back to the highest saved anywhere in the agency, because there is nothing on
+    // this MR to continue from.
+    //
+    // The PREFIX still comes from the MR's own AT (F66): a unit added to MR 1563 belongs to
+    // the tender 1563 was issued under, not to whichever AT the session has selected, which
+    // is why atForEditingMr must resolve first and why an MR that disagrees with itself
+    // about its AT is refused rather than guessed at.
+    //
+    // NOTHING IS RESERVED. This row is held in memory until Save, so reserving here burned a
+    // number every time someone opened the dialog, added a row and thought better of it.
     //
     // GP reuses the original number from the previous repair and is suggested nothing.
     let nextJobNo = '';
@@ -275,18 +283,27 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
         setNotification({ type: 'error', message: at.error });
         return;
       }
-      const info = predictNextJobNo(editingMr.division, coreType, editingMr.repairType, at.atId);
-      // Step past every number already on this MR, saved rows and unsaved ones alike, so
-      // adding three transformers suggests three consecutive numbers rather than one number
-      // three times. The counter has not moved for the rows sitting in this dialog.
-      const head = `${(info.prefix || '').toUpperCase()}-`;
-      const onThisMr = editingMr.jobs
-        .map(j => String(j.jobNo || '').trim().toUpperCase())
-        .filter(v => head.length > 1 && v.startsWith(head))
-        .map(v => Number(v.slice(head.length)))
-        .filter(n => Number.isFinite(n) && n > 0);
-      const next = Math.max(Number(info.nextNum) || 1, ...onThisMr.map(n => n + 1));
-      nextJobNo = `${info.prefix}-${next}`;
+      const { prefix } = getJobNoPrefix(editingMr.division, coreType, at.atId);
+      if (prefix) {
+        const head = `${prefix.toUpperCase()}-`;
+        const tailOf = (v: unknown): number => {
+          const raw = String(v ?? '').trim().toUpperCase();
+          if (!raw.startsWith(head)) return 0;
+          const n = Number(raw.slice(head.length));
+          return Number.isFinite(n) && n > 0 ? n : 0;
+        };
+
+        // Rows in the dialog count alongside the saved ones, so adding three units gives
+        // three consecutive numbers rather than the same one three times.
+        const onThisMr = editingMr.jobs.reduce((m, j) => Math.max(m, tailOf(j.jobNo)), 0);
+        // Already loaded - mrGroups is the same agency-wide read fetchJobs performs, so
+        // this costs nothing extra.
+        const inAgency = mrGroups.reduce(
+          (m, g) => g.jobs.reduce((n, j) => Math.max(n, tailOf((j as any).jobNo)), m), 0);
+
+        const base = onThisMr > 0 ? onThisMr : inAgency;
+        nextJobNo = `${prefix}-${base + 1}`;
+      }
     }
 
     setEditingMr(prev => {

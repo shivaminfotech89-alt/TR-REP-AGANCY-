@@ -203,7 +203,7 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, syncCountersState } = useAgency();
 
   /**
    * INTAKE RECORDS JOB NUMBERS. IT DOES NOT ALLOCATE THEM.
@@ -321,10 +321,10 @@ export default function NewJob() {
    * appeared from row two onward via Add or Duplicate.
    *
    * WHY THIS IS SAFE WHERE THE OLD AUTO-NUMBERING EFFECT WAS NOT (F60): it writes a
-   * PREDICTION, so re-running costs nothing at all - no counter moves, no allotment is
-   * spent, and React's double-invocation in development is invisible. And it does not
-   * depend on `transformers`, so it cannot re-run on its own output; filling a blank makes
-   * that row non-blank and the guard below skips it forever after.
+   * SUGGESTION read from saved jobs, so re-running costs nothing at all - no counter moves,
+   * no allotment is spent, and React's double-invocation in development is invisible. And
+   * it does not depend on `transformers`, so it cannot re-run on its own output; filling a
+   * blank makes that row non-blank and the guard below skips it forever after.
    *
    * ⚠ ONLY BLANKS. A row the operator has typed into is never touched, whatever changes
    * around it - that is what "a dropdown never alters what is in the box" means.
@@ -347,10 +347,11 @@ export default function NewJob() {
     commonData.division,
     commonData.repairType,
     activeAgency?.id,
-    activeAtMaster?.id,
-    // The counter map itself: a save advances it, and the next blank row should start from
-    // the new mark rather than from whatever was cached when the form opened.
-    JSON.stringify(activeAtMaster?.lastJobNumbers ?? activeAgency?.lastJobNumbers ?? {}),
+    // THE SAVED JOBS, not the counter (see suggestNextJobNo). `pastJobsLoading` is the
+    // important one: the first pass runs while the read is in flight and fills nothing, and
+    // this is what brings the effect back once the jobs are actually known.
+    pastJobsLoading,
+    pastJobs.length,
   ]);
 
   // ⚠ NO OTHER EFFECT MAY WRITE A JOB NUMBER (AUDIT F60, F70).
@@ -867,27 +868,55 @@ export default function NewJob() {
 
 
   /**
-   * THE SUGGESTION. A convenience, never a commitment.
+   * THE SUGGESTION CONTINUES FROM THE LAST SAVED JOB, not from the counter.
    *
-   * Predicted from the counter, not drawn from it - `predictNextJobNo` reads, and nothing
-   * here writes. The operator is free to overwrite it with whatever the MR says, and if
-   * they abandon the form nothing has been consumed.
+   * `lastJobNumbers` is a record of what has been ISSUED. Saved jobs are a record of what
+   * EXISTS, and only the second one can go down. Reading the jobs gives three properties
+   * the counter cannot:
    *
-   * It steps past any number already typed into the form under the same prefix, so adding
-   * three rows suggests three consecutive numbers rather than the same one three times.
+   *   - an ABANDONED intake suggests the same number again, because nothing was saved;
+   *   - a DELETED or cancelled job frees its number, because it is no longer among them;
+   *   - the number offered is always one more than a number that is really on a transformer.
+   *
+   * The counter still advances at save. It is simply no longer consulted here.
+   *
+   * NO QUERY. `pastJobs` already holds every job for this agency across all ATs - it is
+   * fetched once on mount for the GP lookup and is not gated on repair type. Prefixes
+   * belong to the division and agency rather than to a tender period, so agency-wide across
+   * ATs is the right scope: a new AT that restarted at 1 would reissue a live number, which
+   * is what AUDIT F42 was about.
+   *
+   * ⚠ SILENT UNTIL THE JOBS ARE LOADED. There is a window on mount where `pastJobs` is
+   * empty because the read has not returned, and a suggestion computed there would say
+   * "SU-1" - a plausible-looking number that is wrong by the entire history of the agency.
+   * An empty box the operator fills from the MR is the correct behaviour in that window.
    */
   const suggestNextJobNo = (coreType: string, rows: TransformerEntry[]): string => {
     if (commonData.repairType !== 'OGP' || !activeAgency) return '';
-    const info = predictNextJobNo(commonData.division, coreType || 'CRGO', commonData.repairType);
-    if (!info?.prefix) return '';
-    const head = `${info.prefix.toUpperCase()}-`;
-    const usedHere = rows
-      .map(t => String(t.jobNo || '').trim().toUpperCase())
-      .filter(v => v.startsWith(head))
-      .map(v => Number(v.slice(head.length)))
-      .filter(n => Number.isFinite(n) && n > 0);
-    const next = Math.max(Number(info.nextNum) || 1, ...usedHere.map(n => n + 1));
-    return `${info.prefix}-${next}`;
+    if (pastJobsLoading) return '';
+    const { prefix } = getJobNoPrefix(commonData.division, coreType || 'CRGO');
+    if (!prefix) return '';
+
+    // Matched on the PREFIX, not on division + core type. The prefix is what makes a number
+    // unique - two divisions configured with the same one share a sequence whether or not
+    // anybody intended it (see scripts/admin/prefix-distinctness.js), and the suggestion has
+    // to reflect what is actually on the transformers.
+    const head = `${prefix.toUpperCase()}-`;
+    const tailOf = (v: unknown): number => {
+      const raw = String(v ?? '').trim().toUpperCase();
+      if (!raw.startsWith(head)) return 0;
+      const n = Number(raw.slice(head.length));
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+
+    const savedMax = pastJobs.reduce((m, j) => Math.max(m, tailOf((j as any).jobNo)), 0);
+    // Rows already in THIS form count too, so three added rows get three consecutive
+    // numbers rather than the same one three times. They are not saved, so they hold no
+    // number against the sequence - they are only here to stop the form colliding with
+    // itself.
+    const inFormMax = rows.reduce((m, t) => Math.max(m, tailOf(t.jobNo)), 0);
+
+    return `${prefix}-${Math.max(savedMax, inFormMax) + 1}`;
   };
 
   /**
@@ -1598,10 +1627,10 @@ export default function NewJob() {
             nextCounters[counterKey] = maxNum;
             hasCounterChange = true;
           }
-          // CRGO lives under `<div>_CRGO` and a bare `<div>`, and both must move together or
-          // the pair disagrees about where the sequence is. predictNextJobNo reads the MAX
-          // of them, so a stale half is not wrong today - it is one refactor away from being
-          // wrong, and MrLedger's advance keeps them in step for the same reason.
+          // CRGO lives under `<div>_CRGO` and a bare `<div>`, and both move together so the
+          // pair cannot disagree about where the sequence is. Nothing reads the counter for
+          // a suggestion any more - saved jobs answer that - so a stale half would not be
+          // wrong today; it is one refactor away from being wrong. MrLedger does the same.
           if (counterKey.endsWith('_CRGO') && maxNum > (Number(currentCounters[commonData.division]) || 0)) {
             nextCounters[commonData.division] = maxNum;
             hasCounterChange = true;
