@@ -5086,6 +5086,49 @@ is consistent with F60's no-reclaim rule and costs nothing.
 The provenance line exists because the operator may not remember which division they chose
 two rows ago, and the number may be on metal.
 
+### F62. A refused save now offers replacements instead of only complaining
+
+F33's duplicate guard was correct and unhelpful. It refused the save, named the conflicting
+record, and left the operator to work out the next free number and type it in - **once per
+clash**, because it returned on the first one. An intake with four clashing rows produced
+the same dialog four times.
+
+It now collects EVERY clash, reserves a replacement for each, and offers them together:
+
+    Transformer #2
+    PLN1-41 is already used by:
+      MR 12 - Serial 88231, 100 KVA, Make Vijay
+    Next free   PLN1-45
+
+    Re-mark each transformer with its new number before saving.
+
+    [ Cancel - leave the numbers as they are ]  [ Re-mark all 4 transformers ]
+
+**Reserved before shown**, as with F61's renumber prompt - an offer of an unreserved number
+can be taken by the time it is clicked, which is the defect the reservation design exists to
+close.
+
+**Cancel changes nothing.** The numbers stay, nothing is written, and the operator can edit
+by hand if they prefer. It is an offer, not a gate.
+
+**Accepting writes the numbers into the form and stops there - it does not save.** The
+operator has just been told to walk to four transformers with chalk; a save firing under
+them would commit the record before the metal matches it. They press Save when the marking
+is done, which is the same discipline F61 enforces on the other side.
+
+**GP rows are never offered a replacement.** A GP repair reuses the original number from its
+previous repair, and issuing a fresh one would break the link the guarantee depends on. A GP
+clash means the number belongs to a different transformer - a judgement only the operator
+can make - so it still refuses with the full comparison and no offer.
+
+**The same-number-twice-in-one-intake case also keeps refusing without an offer.** The
+operator typed one number onto two rows; which transformer keeps it is theirs to decide.
+
+**What this does NOT change: what the guard catches.** F33 still queries every job in the
+agency and still distinguishes a GP repair of the same physical unit from a genuine clash.
+Atomic reservation (F60) closed the concurrency path; this closed the cost of the paths it
+did not.
+
 ## Recurring theme
 
 Every entry above is one of two shapes:

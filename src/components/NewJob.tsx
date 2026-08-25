@@ -326,6 +326,11 @@ export default function NewJob() {
    * shown what the new number would be and has to say that they will re-mark the unit.
    * A row with no number yet reserves freely - nothing has been written on anything.
    */
+  /** Rows refused at save because their number is taken, with a reserved replacement. */
+  const [refusalPrompt, setRefusalPrompt] = useState<
+    { rows: { index: number; from: string; fromLabel: string; to: string }[] } | null
+  >(null);
+
   const [renumberPrompt, setRenumberPrompt] = useState<
     { field: 'division' | 'coreType'; label: string; rows: { index: number; from: string; fromLabel: string; to: string }[] } | null
   >(null);
@@ -416,6 +421,23 @@ export default function NewJob() {
       console.error('Could not reserve replacement job numbers:', err);
       setReserveError('Could not reserve replacement job numbers. The existing numbers are unchanged.');
     }
+  };
+
+  /**
+   * Apply the offered replacements. The numbers are already reserved, so this only writes
+   * them into the form - it does NOT save. The operator presses Save again, which is
+   * deliberate: they have just been told to walk to four transformers with chalk, and a
+   * save that fires under them would commit the record before the metal matches it.
+   */
+  const applyRefusalOffer = () => {
+    if (!refusalPrompt) return;
+    const map: Record<number, string> = {};
+    refusalPrompt.rows.forEach(r => { map[r.index] = r.to; });
+    setTransformers(prev => prev.map((t, i) => map[i] ? { ...t, jobNo: map[i] } : t));
+    setRefusalPrompt(null);
+    setModalAlertMessage(
+      `Job number${refusalPrompt.rows.length === 1 ? '' : 's'} updated. Re-mark ${refusalPrompt.rows.length === 1 ? 'the transformer' : 'the transformers'} and press Save to record the intake.`
+    );
   };
 
   const applyRenumber = () => {
@@ -1223,13 +1245,22 @@ export default function NewJob() {
       const describe = (j: any) =>
         `MR ${j.mrNo || '-'} - Serial ${j.serialNo || '-'}, ${j.capacityKva || '-'} KVA, Make ${j.make || '-'}`;
 
+      // COLLECT EVERY CLASH, then offer replacements for all of them at once.
+      //
+      // This used to return on the first conflict, so an operator with four clashing rows
+      // met the same dialog four times and fixed the numbers by hand between each. The
+      // guard is unchanged in what it CATCHES (AUDIT F33); what changed is that a refusal
+      // now comes with an offer (F62).
       const seenInBatch: Record<string, number> = {};
+      const clashRows: { index: number; jobNo: string; existing: any[]; isGp: boolean }[] = [];
+
       for (let i = 0; i < transformers.length; i++) {
         const t = transformers[i];
         const key = normKey(t.jobNo);
         if (!key) continue;
 
-        // Same number twice inside this one intake.
+        // Same number twice inside this one intake. NOT offerable - the operator typed one
+        // number onto two rows, and which transformer keeps it is theirs to decide.
         if (seenInBatch[key] !== undefined) {
           const err = `Duplicate Job Number "${t.jobNo.trim()}" appears twice in this intake (Transformer #${seenInBatch[key] + 1} and #${i + 1}). A job number identifies one physical transformer.`;
           setErrorMsg(err);
@@ -1246,18 +1277,58 @@ export default function NewJob() {
         const sameUnit = clashes.find(c => isSameTransformer(c, t));
         if (isGp && sameUnit) continue;   // same transformer returning under guarantee
 
-        const others = clashes.map(describe).join('\n  ');
-        const err = isGp
-          ? `Job Number "${t.jobNo.trim()}" already exists in this agency, but for a DIFFERENT transformer.\n\n` +
-            `Existing record${clashes.length > 1 ? 's' : ''}:\n  ${others}\n\n` +
-            `This intake - Serial ${t.serialNo || '-'}, ${t.capacityKva || '-'} KVA, Make ${t.make || '-'}.\n\n` +
-            `A GP repair may only reuse a job number when it is the same physical transformer - serial number, make and capacity must all match.`
-          : `Job Number "${t.jobNo.trim()}" is already used in this agency and cannot be reused for a new OGP intake.\n\n` +
-            `Existing record${clashes.length > 1 ? 's' : ''}:\n  ${others}\n\n` +
-            `This intake - Serial ${t.serialNo || '-'}, ${t.capacityKva || '-'} KVA, Make ${t.make || '-'}.\n\n` +
-            `A job number identifies one physical transformer. Use the next free number, or book this as a GP repair if it is the same unit returning under guarantee.`;
-        setErrorMsg(err);
-        setModalAlertMessage(err);
+        clashRows.push({ index: i, jobNo: t.jobNo.trim(), existing: clashes, isGp });
+      }
+
+      if (clashRows.length > 0) {
+        // A GP row must NOT be offered a fresh number - it reuses the original from its
+        // previous repair, and a new one would break the link the guarantee depends on.
+        // Its clash means the number belongs to a different transformer, which is a
+        // judgement the operator has to make.
+        const gpClash = clashRows.find(c => c.isGp);
+        if (gpClash) {
+          const t = transformers[gpClash.index];
+          const err = [
+            `Job Number "${gpClash.jobNo}" already exists in this agency, but for a DIFFERENT transformer.`,
+            '',
+            `Existing record${gpClash.existing.length > 1 ? 's' : ''}:`,
+            ...gpClash.existing.map(x => `  ${describe(x)}`),
+            '',
+            `This intake - Serial ${t.serialNo || '-'}, ${t.capacityKva || '-'} KVA, Make ${t.make || '-'}.`,
+            '',
+            'A GP repair may only reuse a job number when it is the same physical transformer - serial number, make and capacity must all match.',
+          ].join('\n');
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          setLoading(false);
+          return;
+        }
+
+        // Reserve the replacements BEFORE showing them. An offer of an unreserved number
+        // can be taken by the time it is clicked, which is the defect the reservation
+        // design exists to close (F60).
+        try {
+          const byKey: Record<string, { coreType: string; rows: typeof clashRows }> = {};
+          clashRows.forEach(c => {
+            const coreType = transformers[c.index].coreType || 'CRGO';
+            const { counterKey } = getJobNoPrefix(commonData.division, coreType);
+            (byKey[counterKey] ||= { coreType, rows: [] }).rows.push(c);
+          });
+          const offers: { index: number; from: string; fromLabel: string; to: string }[] = [];
+          for (const { coreType, rows } of Object.values(byKey)) {
+            const nums = await reserveJobNos(commonData.division, coreType, rows.length);
+            rows.forEach((c, i) => offers.push({
+              index: c.index,
+              from: c.jobNo,
+              fromLabel: c.existing.map(describe).join('; '),
+              to: nums[i],
+            }));
+          }
+          setRefusalPrompt({ rows: offers.sort((x, y) => x.index - y.index) });
+        } catch (err) {
+          console.error('Could not reserve replacement job numbers:', err);
+          setReserveError('Some job numbers are already in use, and replacements could not be reserved. Nothing was saved.');
+        }
         setLoading(false);
         return;
       }
@@ -1567,6 +1638,83 @@ export default function NewJob() {
   return (
     <div className="w-full max-w-full overflow-x-hidden space-y-4 pb-24 sm:pb-16 print:m-0 print:p-0">
       
+      {/* REFUSAL OFFER - a rejected save comes with replacements, not just a complaint.
+          Every clashing row is offered at once: an operator refused on four rows re-marks
+          four transformers and clicks once, rather than meeting this dialog four times and
+          editing numbers by hand between each (AUDIT F62).
+          Cancel changes nothing - the numbers stay, nothing is written, and the operator
+          can edit by hand if they prefer. This is an offer, not a gate. */}
+      {refusalPrompt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-xl w-full border border-rose-200 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-3 mb-3 text-rose-600">
+              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {refusalPrompt.rows.length === 1
+                    ? 'This job number is already used'
+                    : `${refusalPrompt.rows.length} job numbers are already used`}
+                </h3>
+                <p className="text-xs text-rose-600 font-medium">
+                  A job number identifies one physical transformer. Nothing has been saved.
+                </p>
+              </div>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl divide-y divide-slate-200 my-4">
+              {refusalPrompt.rows.map(r => (
+                <div key={r.index} className="p-3">
+                  <div className="text-[11px] uppercase tracking-widest text-slate-400 font-bold mb-1">
+                    Transformer #{r.index + 1}
+                  </div>
+                  <div className="text-xs text-slate-700">
+                    <span className="font-mono font-bold">{r.from}</span> is already used by:
+                  </div>
+                  <div className="text-[11px] text-slate-600 mt-0.5 pl-3 border-l-2 border-slate-200">
+                    {r.fromLabel}
+                  </div>
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <span className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Next free</span>
+                    <span className="font-mono font-black text-slate-900 text-lg">{r.to}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+              <strong>
+                {refusalPrompt.rows.length === 1
+                  ? 'Re-mark the transformer with the new number before saving.'
+                  : 'Re-mark each transformer with its new number before saving.'}
+              </strong>{' '}
+              The number on the tank and the number in this record have to match - nothing
+              downstream can reconcile them if they differ.
+            </p>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={() => setRefusalPrompt(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300"
+              >
+                Cancel - leave the numbers as they are
+              </button>
+              <button
+                type="button"
+                onClick={applyRefusalOffer}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm"
+              >
+                {refusalPrompt.rows.length === 1
+                  ? `Re-mark this transformer as ${refusalPrompt.rows[0].to}`
+                  : `Re-mark all ${refusalPrompt.rows.length} transformers`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* RENUMBER PROMPT - offer, never apply (AUDIT F61).
           The number is written on the transformer at intake, so changing the division or
           core type of a row that already holds one cannot rewrite it silently: the tank
