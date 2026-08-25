@@ -530,6 +530,51 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: a green check was cited as evidence without establishing what it covered
+
+**This is the most consequential process finding in the audit, and it is not about types.**
+
+`npm run lint` is `tsc --noEmit`. It was reported clean after nearly every change in this
+session and cited as the verification for work that had no other. **`@types/react` was not
+installed.** `node_modules/@types/` held `express`, `node` and `babel__*` and nothing for
+React, so `useContext` resolved to `any`, `useAgency()` returned `any`, and every destructure
+from it was unchecked - along with props, state and refs.
+
+Proven rather than inferred: `const t: string = useAgency();` produced **no error**, while
+`const n: number = 'string';` in the same file did. The checker was working. It was working
+on materially less than the word "clean" implied.
+
+**The lesson is not "install the types".** It is that a tool's output was quoted as evidence
+across an entire session and nobody - including the person quoting it - established its scope
+first. A green check answers a question. Which question it answers is a fact about the
+configuration, and that fact went unexamined because the answer was the one being hoped for.
+
+**What it hid, concretely.** `getNextJobNoInfo` was renamed to `predictNextJobNo`; tsc
+reported clean; `MrLedger.tsx:101` was still destructuring the old name and `:230` still
+calling it, so adding a transformer to an existing MR would have thrown at runtime. That
+break was found by GREP, not by the compiler, and only because the rename prompted a search.
+Following it turned up a second job-number allocator on a screen the O2 trace never reached.
+
+**A cast defeats the checker at exactly the point someone reached for it.** The subscription
+fields (O34) are read as `(agency as any).subscriptionStatus`. Even after the types were
+installed, those reads stay unchecked - the cast was written to silence a complaint and it
+still silences it. `as any` is not a local shortcut; it is a permanent hole at the point of
+greatest doubt.
+
+**Installing the types surfaced 40 errors**, 36 of which were properties read or written that
+the interfaces never declared - including `cgstPercent` and `sgstPercent`, the GST rates,
+read at fourteen sites each. Four were real mismatches, one of them a broken contract inside
+F56 that had been there since it was written.
+
+**What "zero errors" means now, stated exactly, because the same trap is available again:**
+after the fix, the reservation work of F60-F62 reports no type errors on its first real
+check. **The shapes are right. The logic is untested.** That path has still never executed;
+a counter check against live data remains the only thing that will say whether it reserves
+one number or two. A type checker cannot tell the difference, and reporting its silence as
+if it could is the error this note exists to prevent repeating.
+
+---
+
 ## Pattern: the app RECOMPUTES documents rather than REPRODUCING them
 
 Two items that look unrelated share one root, and the root is what makes both expensive.
@@ -2634,6 +2679,41 @@ the job document that this path deletes. The remedy would survive only in this f
 against live data to tidy a handful of records is the wrong trade - see the five undated
 AARATI jobs, where backfilling one field is reversible and deletes nothing. Recorded so the
 gaps are known before someone reaches for the button, not after.
+
+---
+
+### O34. Subscription: a feature that appears to work and has no consumer
+
+`AdminPanel.handleUpdateSubscription` writes four fields to an agency:
+
+    subscriptionStatus       status
+    subscriptionPlanAmount   planAmount    (default 3999)
+    subscriptionLastPaid     now
+    subscriptionExpiryDate   now + one year
+
+**Three of the four are named differently from the fields `firestore.rules` was written to
+validate**: the rules name `subscriptionPlan` and `subscriptionExpiresAt` (`:141-143`), and
+`subscriptionLastPaid` appears in them nowhere. `isValidAgency` only validates fields it
+names, so the mismatched ones pass through and persist - they are simply outside every check
+that was meant to cover them.
+
+**Only `subscriptionStatus` is ever read**, and only inside `AdminPanel` itself (`:236`,
+`:237`, `:417`). `subscriptionPlanAmount`, `subscriptionLastPaid` and `subscriptionExpiryDate`
+are written by one function and read by nothing, anywhere in the codebase.
+
+So an administrator sets a subscription to expire in a year, sees a confirmation saying so,
+and **nothing enforces or displays that expiry**. No screen shows it, no gate consults it, no
+job is refused when it passes. The feature is complete from the operator's side and absent
+from the system's.
+
+**It slipped past the checker even where the type WAS consulted**, because every read goes
+through `(agency as any).subscriptionStatus`. That is the cast pattern recorded in the note
+above - reached for to silence a complaint, and still silencing it now that the types are
+installed.
+
+The four fields are now declared on `Agency`, so the WRITE is type-checked. That is all this
+entry changes. Whether the feature should exist - and if so, what should consult the expiry -
+is a product question nobody has been asked.
 
 ---
 
@@ -5128,6 +5208,51 @@ operator typed one number onto two rows; which transformer keeps it is theirs to
 agency and still distinguishes a GP repair of the same physical unit from a genuine clash.
 Atomic reservation (F60) closed the concurrency path; this closed the cost of the paths it
 did not.
+
+### F63. Rows had no stable identity - the React key was the array index
+
+Found while building the reservation markers, and live independently of them.
+
+Transformer rows in `NewJob` are plain array entries. `duplicateTransformer` splices at
+`index + 1` and `removeTransformer` splices out, so **every index shifts**. The React list
+key was `key={index}`, which means after any insert or delete React reuses the DOM node for a
+different row - carrying input focus, cursor position and uncommitted keystrokes to a
+neighbouring transformer.
+
+That is a data-entry defect with no error, no warning and no trace: an operator duplicating
+row 2 while typing into row 3 can find their keystrokes land somewhere else. It would be very
+hard to report and very hard to reproduce.
+
+It also made the reservation work unbuildable as designed. "Has this row already drawn a
+number" cannot be answered by index when the index moves - the marker would follow the
+position rather than the transformer.
+
+Each row now carries a `rowKey`, generated at creation and never persisted, used as the React
+key and as the reservation marker. `clearTransformerRow` deliberately PRESERVES the key: it
+empties a row rather than replacing it, and a row that has already drawn a number keeps it,
+because reservations are never released (F60). Drafts restored from `sessionStorage` are
+backfilled, since one saved by an earlier build has no key.
+
+### F65. `getNextJobNoInfo` renamed to `predictNextJobNo`, and a second allocator found
+
+A function whose name says "next job number" sitting beside the real allocator is how someone
+wires up the wrong one. Renamed to what it does: it PREDICTS from the context snapshot, and
+its only legitimate caller is the renumber prompt, which shows what a replacement WOULD be
+before the operator accepts.
+
+**The rename found a live break and a second defect.** `MrLedger.tsx:101` still destructured
+the old name and `:230` still called it - invisible to the checker, for the reason recorded in
+the pattern note above. Repairing it exposed the larger finding: `MrLedger` composes job
+numbers itself, with the same client-side high-water scan O2 was about:
+
+    const info = getNextJobNoInfo(editingMr.division, coreType, editingMr.repairType);
+    let highestNum = info.nextNum - 1;
+    editingMr.jobs.forEach(j => { ...parse the tail, keep the max... });
+    nextJobNo = `${info.prefix}-${highestNum + 1}`;
+
+**So O2 was not closed by F60.** The original trace covered `NewJob` and never asked which
+other screens issue a job number. Adding a transformer to an existing MR goes through this
+path, and two operators doing it concurrently collide exactly as before.
 
 ## Recurring theme
 
