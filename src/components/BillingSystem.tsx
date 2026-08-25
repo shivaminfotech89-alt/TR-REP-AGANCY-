@@ -545,9 +545,11 @@ export default function BillingSystem() {
         activeAgency,
         activeAtMaster
       );
-      // getJobFullEstimate applies the AT percentage itself in amountWithPercentage;
-      // baseTotal is taken so this function keeps returning a pre-AT figure like the
-      // itemised path, and the single uplift below stays the only one.
+      // `est.baseTotal` is pre-AT; the multiplication below adds the AT percentage, so
+      // THIS FUNCTION RETURNS AN AT-INCLUSIVE FIGURE. The old comment here said it kept
+      // "returning a pre-AT figure", which described baseTotal rather than the return
+      // value - and every caller that believed it multiplied by the AT again (AUDIT O3).
+      // Callers name the result `atInclusiveAmt` for the same reason.
       return est.baseTotal * (1 + atPct / 100);
     }
 
@@ -1023,10 +1025,18 @@ export default function BillingSystem() {
 
     let subTotal = 0;
     selectedJobsData.forEach((job, idx) => {
-      const baseAmt = calculateJobTotal(job);
+      // calculateJobTotal ALREADY includes the AT percentage - see the comment on its
+      // return. This used to multiply by it again, so every money figure in this file was
+      // 4% high at a 4% AT: TOTAL AMOUNT, SUB TOTAL, CGST, SGST, GRAND TOTAL and the oil
+      // deduction computed from them. The printed invoice was correct throughout; only
+      // this export was wrong (AUDIT O3).
+      const atInclusiveAmt = calculateJobTotal(job);
       const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
-      const grandAmt = baseAmt * (1 + atPct / 100);
-      subTotal += grandAmt;
+      // BASE COST is a pre-AT column, so it is back-derived rather than relabelled: the
+      // file must satisfy its own arithmetic, BASE COST x (1 + AT%) = TOTAL AMOUNT. It
+      // previously printed the AT-inclusive figure under a heading that says base.
+      const baseBeforeAt = atPct === -100 ? 0 : atInclusiveAmt / (1 + atPct / 100);
+      subTotal += atInclusiveAmt;
 
       wsData.push([
         idx + 1,
@@ -1035,9 +1045,9 @@ export default function BillingSystem() {
         job.make,
         job.serialNo,
         job.coreType || 'CRGO',
-        Number(baseAmt.toFixed(2)),
+        Number(baseBeforeAt.toFixed(2)),
         `${atPct >= 0 ? '+' : ''}${atPct.toFixed(2)}%`,
-        Number(grandAmt.toFixed(2))
+        Number(atInclusiveAmt.toFixed(2))
       ]);
     });
 
@@ -1076,11 +1086,11 @@ export default function BillingSystem() {
       const todayIso = billDate || new Date().toISOString().split('T')[0];
 
       selectedJobsData.forEach(job => {
-        const baseAmt = calculateJobTotal(job);
+        const atInclusiveAmt = calculateJobTotal(job);
         const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
-        const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+        const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
 
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
@@ -1108,11 +1118,11 @@ export default function BillingSystem() {
       // Update local state
       setJobs(prev => prev.map(j => {
         if (selectedJobsData.some(sj => sj.id === j.id)) {
-          const baseAmt = calculateJobTotal(j);
+          const atInclusiveAmt = calculateJobTotal(j);
           const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
-          const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+          const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
           return {
             ...j,
             billSentDate: todayIso,
@@ -1205,11 +1215,11 @@ export default function BillingSystem() {
       const { grandTotal } = calculateMrBillSummary(sendTargetMr);
 
       groupJobs.forEach(job => {
-        const baseAmt = calculateJobTotal(job);
+        const atInclusiveAmt = calculateJobTotal(job);
         const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
-        const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+        const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
 
         const jobRef = doc(db, 'jobs', job.id);
         batch.update(jobRef, {
@@ -1242,11 +1252,11 @@ export default function BillingSystem() {
       // Update local state
       setJobs(prev => prev.map(j => {
         if (j.mrNo === sendTargetMr) {
-          const baseAmt = calculateJobTotal(j);
+          const atInclusiveAmt = calculateJobTotal(j);
           const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
-          const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgstRate + sgstRate) / 100));
+          const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
           return {
             ...j,
             billNo: sendBillNo.trim(),

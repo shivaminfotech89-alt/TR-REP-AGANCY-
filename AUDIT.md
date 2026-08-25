@@ -530,6 +530,48 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: an export that serialises the page cannot disagree with it; one that rebuilds always can
+
+**Three Word exports in this codebase could not have been wrong. Two Excel exports were.**
+The difference is not the file format - it is whether the exporter TAKES the rendered output
+or REBUILDS it.
+
+`lib/wordExport.ts` is handed `document.getElementById('printable-…-container').innerHTML`
+by all three of its callers - the bill, the estimate and the challan. It serialises whatever
+the page already rendered. There is no arithmetic in that path, so a Word export cannot show
+a figure the printed page does not. It is correct by construction, and stays correct through
+every future change to how the page computes.
+
+Both Excel exports rebuilt the table from the data instead, and both diverged:
+
+- **F54** - the ESTIMATE export called the item-pricing function with no inspection data at
+  all, so every optional item was charged on every job, while the totals rows underneath came
+  from the real builder. The sheet did not reconcile against itself.
+- **O3** - the BILL export multiplied by the AT percentage a second time, because
+  `calculateJobTotal` already includes it. Every money figure in a file headed TAX INVOICE
+  was 4% high at a 4% AT, while the printed invoice was right.
+
+**THE RULE: prefer taking the rendered output over rebuilding it.** A serialising exporter
+inherits every fix the page ever receives. A rebuilding exporter is a second implementation
+of the same calculation and needs exactly the treatment F55 and F57 gave the other two - one
+source of the figure, or it drifts.
+
+**Where rebuilding is unavoidable** - Excel wants cells and formulas, not a screenshot of a
+table - then it is a second implementation and must be recognised as one: same builder, same
+inputs, no local arithmetic. The bill export now calls `calculateJobTotal` and applies only
+the tax; it back-derives the pre-AT column rather than computing it, so the file satisfies
+its own arithmetic.
+
+**And the corollary, which is why this pattern is filed here rather than as a one-off:
+ANYTHING PRODUCING A FIGURE FOR A CUSTOMER HAS THREE PATHS - SCREEN, PRINT, EXPORT - AND A
+TRACE THAT STARTS FROM THE STORED FIELD OR THE RENDERED PAGE REACHES NEITHER THE EXPORT NOR
+ITS ARITHMETIC.** O3 was investigated twice and reported as stored-only both times, because
+the investigation went outward from `job.billAmount` and inward from the print path. The
+export sits in neither direction: it recomputes independently and writes to a file. That is
+the second time an Excel export has been the path outside both traces.
+
+---
+
 ## Pattern: a comparison against a literal the producing code never emits
 
 Three instances this session, and they are the same defect:
@@ -834,7 +876,55 @@ disambiguation), but the underlying ambiguity remains until renumbering.
 Resolve both together: whoever identifies which physical transformer this record is
 can settle the renumbering and the Repairable/Scrap determination in one pass.
 
-### O3. Per-job `billAmount` applies AT twice
+### O3. The AT percentage applied twice — in the bill Excel export, and in four stored fields
+
+> **FIXED. Recorded in full because it was reported wrongly TWICE before it was reported
+> correctly, and both errors are more instructive than the defect.**
+
+`BillingSystem.calculateJobTotal` returns an **AT-inclusive** figure. Five callers multiplied
+by the AT percentage again:
+
+    // four write sites - handleSaveBillDates x2, handleConfirmSendBill x2
+    const totalJobTaxedAmt = Math.round((baseAmt * (1 + atPct / 100)) * (1 + (cgst + sgst) / 100));
+
+    // and the Excel export
+    const grandAmt = baseAmt * (1 + atPct / 100);
+
+**The variable name caused it.** `calculateJobTotal` returned an AT-inclusive figure into a
+variable called `baseAmt`, and the comment above its return said it "keeps returning a pre-AT
+figure" - which described `est.baseTotal`, not the return value. Every caller that read the
+name or the comment multiplied again. Renamed to `atInclusiveAmt` at all five sites and the
+comment corrected, because leaving the name would invite the same edit back.
+
+**WHAT IT AFFECTED.** The printed invoice was always correct - it recomputes per-job from
+`calculateJobTotal` and sums those same values, so rows and total agreed. The damage was:
+
+- the **Excel export headed "TAX INVOICE / REPAIR BILL"** - TOTAL AMOUNT, SUB TOTAL, CGST,
+  SGST, GRAND TOTAL and the oil deduction derived from them, all 4% high at a 4% AT. Its
+  BASE COST column additionally printed the AT-inclusive figure under a heading that says
+  base, so the file did not satisfy `BASE COST x (1 + AT%) = TOTAL AMOUNT`. Now back-derived.
+- the stored `job.billAmount`, whose only consumer is the `Reports` cycle view and its export.
+  `billTotalMrAmount` on the same job was always correct, so the two stored fields disagreed.
+
+**FIRST WRONG REPORT: "the per-job figures do not sum to the MR total on the same bill."**
+False. `subTotal` is literally `selectedJobsData.reduce((acc, job) => acc + calculateJobTotal(job), 0)`
+- the same function that prints each row - so they sum exactly, by construction. The claim was
+asserted from reading the WRITE path and never checked against the RENDER path. The operator
+had run bills and seen no discrepancy, which was correct evidence that the claim was wrong.
+
+**SECOND WRONG REPORT: "stored-only, no document changes."** Also false, and it is the more
+useful error. The reconciliation traced outward from `job.billAmount` and inward from the
+print path - and the Excel export is in neither direction. It recomputes independently and
+writes to a file, so it appears in no consumer list and no render tree. It was found only
+when a `grep` for the renamed variable turned up a fifth site nobody had asked about.
+
+**The generalisation is a pattern note above:** an export that serialises the rendered page
+cannot disagree with it; one that rebuilds always can. Screen, print and export are three
+paths, and a trace from the stored field or the rendered page reaches only two.
+
+**Original entry, kept for the observed evidence it cites:**
+
+#### (superseded heading) Per-job `billAmount` applies AT twice
 
 `BillingSystem.calculateJobTotal` already returns an AT-inclusive figure, then
 `handleConfirmSendBill` multiplies by `(1 + atPct/100)` again before GST.

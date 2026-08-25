@@ -14,18 +14,34 @@ Full detail for each is in `AUDIT.md` under the item number.
 These do not need a rollover, a second agency, or an unusual case. A first customer meets
 them in their first week.
 
-### 1. `billAmount` applies the AT percentage twice — **O3**
+### 1. Out-of-state agencies are taxed CGST+SGST against their own GSTIN — **O9**
 
-`BillingSystem.calculateJobTotal` returns an AT-inclusive figure (`est.baseTotal * (1 + atPct/100)`).
-`handleConfirmSendBill:1212` then does `(baseAmt * (1 + atPct/100)) * (1 + gst)`.
+**A wrong tax treatment on a printed document, and the document carries the evidence.**
 
-At 4% AT that is a **4.16% overcharge** on every per-job `billAmount` — and the MR total on
-the same bill is computed by a different path that applies AT once, so **the per-job figures
-do not sum to the total printed beneath them.** Every bill, every customer, from day one.
+There is no GSTIN validation anywhere (`firestore.rules:107` checks type and length only), so
+a non-Gujarat agency onboards without obstacle. Nothing compares the agency's state to the
+DISCOM's: `getAgencyStateCode` is read only for display and gating, `cgstPercent` /
+`sgstPercent` are applied unconditionally at eight sites, and `igst` appears nowhere in `src/`.
 
-Not theoretical: this is the arithmetic, read from the current code.
+So the invoice prints *Supplier State Code 27*, *Buyer State Code 24* — an inter-state supply
+on its face — and charges intra-state tax on the same page.
 
-### 2. A new agency is seeded with another DISCOM's identity — **O7**, **O8**
+Bites only an out-of-state customer, but on their first invoice, and it cannot be fixed by a
+later deploy: the paper is out. The workaround anyone would find — setting cgst 0 / sgst 18 —
+produces right amounts under wrong labels, which looks solved and is not.
+
+**Open question that decides the fix:** if the customer base is Gujarat agencies working for
+Gujarat DISCOMs, refusing a non-24 GSTIN at signup is smaller and more honest than an IGST
+path nobody exercises.
+
+### 2. `billAmount` applied the AT percentage twice — **O3** — ✅ FIXED
+
+Left in place because its ranking history is instructive. Reported twice as narrower than it
+was: first as a rows-do-not-sum discrepancy that did not exist, then as stored-only when it
+also affected the **Excel export headed TAX INVOICE**. Fixed at all five sites, with the
+pre-AT column back-derived so the file satisfies its own arithmetic.
+
+### 3. A new agency is seeded with another DISCOM's identity — **O7**, **O8** — ✅ LARGELY FIXED
 
 `AgencySettings.tsx:146-158` seeds every newly created agency with UGVCL's registration:
 `discomState: 'Gujarat'`, `discomStateCode: '24'`, `serviceSacCode`, a circle authority, a
@@ -35,27 +51,6 @@ them is not.
 
 Worst single item for onboarding: it is wrong at the moment of signup, on a tax document,
 and looks configured.
-
-### 3. Out-of-state agencies are taxed CGST+SGST against their own GSTIN — **O9**
-
-**Upgraded after verification — this is a wrong tax treatment, not a missing feature.**
-
-There is no GSTIN validation anywhere (`firestore.rules:107` checks type and length only), so
-a non-Gujarat agency onboards without obstacle. Nothing anywhere compares the agency's state
-to the DISCOM's: `getAgencyStateCode` is read only for display and gating, `cgstPercent` /
-`sgstPercent` are applied unconditionally at eight sites, and `igst` appears nowhere in `src/`.
-
-The invoice therefore prints *Supplier State Code 27*, *Buyer State Code 24* — an inter-state
-supply on its face — and charges intra-state tax on the same page. The document carries the
-evidence that its own tax treatment is wrong.
-
-The DISCOM side is not the exposure: `DISCOM_OPTIONS` offers four Gujarat entities and the
-select is required, so an out-of-state DISCOM cannot be represented at all. That is an
-onboarding wall, not a tax gap.
-
-**Bites only an out-of-state customer** — but bites on their first invoice, and the
-workaround anyone would find (setting cgst 0 / sgst 18) produces right amounts under wrong
-labels, which looks solved and is not.
 
 ### 4. Job numbers are not uniquely allocated — **O2**
 
