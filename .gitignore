@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Service account keys for the local admin runner (scripts/admin). NEVER commit.
+.secrets/
+*serviceAccount*.json
+*-firebase-adminsdk-*.json
