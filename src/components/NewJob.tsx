@@ -284,9 +284,20 @@ export default function NewJob() {
     rows: { rowKey: string; coreType: string }[],
     division: string,
   ) => {
-    if (!activeAgency || !division || commonData.repairType === 'GP') return;
+    // ⚠ TEMPORARY INSTRUMENTATION - remove with the trace in reserveJobNos.
+    console.log('%c[reserveForRows] ENTER', 'background:#1e3a8a;color:#fff;padding:2px 6px',
+      { division, rows: rows.map(r => `${r.rowKey?.slice(0, 8)}/${r.coreType}`),
+        inFlight: [...reservingRef.current].map(k => k.slice(0, 8)) });
+    console.log(new Error('reserveForRows caller — stack').stack);
+
+    if (!activeAgency || !division || commonData.repairType === 'GP') {
+      console.log('[reserveForRows] SKIP - no agency / no division / GP'); return;
+    }
     const eligible = rows.filter(r => r.rowKey && !reservingRef.current.has(r.rowKey));
-    if (eligible.length === 0) return;
+    if (eligible.length === 0) {
+      console.log('[reserveForRows] SKIP - every row already in flight (guard held)'); return;
+    }
+    console.log(`[reserveForRows] PROCEEDING with ${eligible.length} of ${rows.length} row(s)`);
 
     const keys = eligible.map(r => r.rowKey);
     markReserving(keys, true);
@@ -1005,6 +1016,13 @@ export default function NewJob() {
    * id). Narrowed to the string-valued keys, which is what every caller actually passes.
    */
   const handleTransformerChange = <K extends StringRowField>(index: number, field: K, value: TransformerEntry[K]) => {
+    // ⚠ TEMPORARY INSTRUMENTATION - remove with the trace in reserveJobNos.
+    console.log('%c[ROW CHANGE]', 'background:#78350f;color:#fff;padding:2px 6px',
+      `row ${index} · ${field} = "${value}"`,
+      { jobNoBefore: transformers[index]?.jobNo || '(blank)',
+        coreTypeBefore: transformers[index]?.coreType,
+        rowKey: transformers[index]?.rowKey?.slice(0, 8), repairType: commonData.repairType });
+
     const newTransformers = [...transformers];
     newTransformers[index][field] = value;
 
