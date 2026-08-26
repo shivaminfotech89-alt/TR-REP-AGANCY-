@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
-import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate } from '../lib/estimateCalc';
 import { classifyCoreType } from './SingleJobEstimateReport';
@@ -50,7 +50,7 @@ export function numberToIndianWords(num: number): string {
 }
 
 export default function BillingSystem() {
-  const { activeAgency, activeAtMaster, updateAgency } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, updateAgency } = useAgency();
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams<{ mrNo?: string }>();
   const navigate = useNavigate();
@@ -523,7 +523,7 @@ export default function BillingSystem() {
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
-    const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+    const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
 
     // A scrap transformer is ONE flat charge, resolved by the mapped scrap item code
     // for its core type (shared helper - see lib/estimateCalc.ts). It never walks the
@@ -547,7 +547,7 @@ export default function BillingSystem() {
         externalInspMap[job.id],
         internalInspMap[job.id],
         activeAgency,
-        activeAtMaster
+        atForJob(job, atMasters) ?? activeAtMaster
       );
       // `est.baseTotal` is pre-AT; the multiplication below adds the AT percentage, so
       // THIS FUNCTION RETURNS AN AT-INCLUSIVE FIGURE. The old comment here said it kept
@@ -590,7 +590,7 @@ export default function BillingSystem() {
       externalInspMap[job.id],
       internalInspMap[job.id],
       activeAgency,
-      activeAtMaster
+      atForJob(job, atMasters) ?? activeAtMaster
     );
     return est.baseTotal * (1 + atPct / 100);
   };
@@ -1035,7 +1035,7 @@ export default function BillingSystem() {
       // deduction computed from them. The printed invoice was correct throughout; only
       // this export was wrong (AUDIT O3).
       const atInclusiveAmt = calculateJobTotal(job);
-      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
       // BASE COST is a pre-AT column, so it is back-derived rather than relabelled: the
       // file must satisfy its own arithmetic, BASE COST x (1 + AT%) = TOTAL AMOUNT. It
       // previously printed the AT-inclusive figure under a heading that says base.
@@ -1091,7 +1091,7 @@ export default function BillingSystem() {
 
       selectedJobsData.forEach(job => {
         const atInclusiveAmt = calculateJobTotal(job);
-        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
         const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -1123,7 +1123,7 @@ export default function BillingSystem() {
       setJobs(prev => prev.map(j => {
         if (selectedJobsData.some(sj => sj.id === j.id)) {
           const atInclusiveAmt = calculateJobTotal(j);
-          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
           const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -1220,7 +1220,7 @@ export default function BillingSystem() {
 
       groupJobs.forEach(job => {
         const atInclusiveAmt = calculateJobTotal(job);
-        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
         const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -1257,7 +1257,7 @@ export default function BillingSystem() {
       setJobs(prev => prev.map(j => {
         if (j.mrNo === sendTargetMr) {
           const atInclusiveAmt = calculateJobTotal(j);
-          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
           const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -3020,7 +3020,7 @@ export default function BillingSystem() {
                           externalInspMap[job.id],
                           internalInspMap[job.id],
                           activeAgency,
-                          activeAtMaster
+                          atForJob(job, atMasters) ?? activeAtMaster
                         ).finalAmount;
                         return (
                           <tr key={job.id} className="border-b border-black">

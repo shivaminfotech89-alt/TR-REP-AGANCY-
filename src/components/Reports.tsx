@@ -31,9 +31,10 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { resolveScrapCharge, getScrapItemCodeForCore, getJobFullEstimate } from '../lib/estimateCalc';
+import { atForJob } from '../lib/AgencyContext';
 
 export default function Reports() {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,7 +148,7 @@ export default function Reports() {
         ext?.data ?? ext,
         int?.data ?? int,
         activeAgency,
-        activeAtMaster
+        atForJob(job, atMasters) ?? activeAtMaster
       );
       return Math.round(est.baseTotal);
     } catch {

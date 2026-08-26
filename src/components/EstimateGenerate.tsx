@@ -1,5 +1,5 @@
 
-import { useAgency, getAtPercentageForCore, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -44,7 +44,7 @@ const ROWS_FIRST_PAGE = 14;
 const ROWS_PER_PAGE = 22;
 
 export default function EstimateGenerate() {
-  const { activeAgency, activeAtMaster, updateAgency } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, updateAgency } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -372,7 +372,7 @@ export default function EstimateGenerate() {
 
     const riseTotalsRow = ['-', 'AT % RISE / FALL TOTAL'];
     selectedJobsData.forEach(job => {
-      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
       const baseTot = calculateJobTotal(job);
       const riseAmt = baseTot * (atPct / 100);
       riseTotalsRow.push(riseAmt.toFixed(2));
@@ -381,7 +381,7 @@ export default function EstimateGenerate() {
 
     const grandTotalsRow = ['-', 'GRAND TOTAL'];
     selectedJobsData.forEach(job => {
-      const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+      const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
       const baseTot = calculateJobTotal(job);
       const grandTot = baseTot * (1 + atPct / 100);
       grandTotalsRow.push(grandTot.toFixed(2));
@@ -404,7 +404,7 @@ export default function EstimateGenerate() {
 
       selectedJobsData.forEach(job => {
         const baseTot = calculateJobTotal(job);
-        const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+        const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
         const grandTot = Math.round(baseTot * (1 + atPct / 100));
 
         const jobRef = doc(db, 'jobs', job.id);
@@ -434,7 +434,7 @@ export default function EstimateGenerate() {
       setJobs(prev => prev.map(j => {
         if (j.mrNo === selectedMrNo) {
           const baseTot = calculateJobTotal(j);
-          const atPct = getAtPercentageForCore(activeAtMaster, j.coreType);
+          const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
           const grandTot = Math.round(baseTot * (1 + atPct / 100));
           return {
             ...j,
@@ -469,7 +469,10 @@ export default function EstimateGenerate() {
   const getJobFullEstimate = (job: any) => {
     const ext = externalInspMap[job.id];
     const int = internalInspMap[job.id];
-    return getJobFullEstimatePure(job, ext, int, activeAgency, activeAtMaster);
+    // THE JOB'S OWN AT (AUDIT F72). This wrapper is the single choke point for roughly
+    // fourteen callers in this file, which is why the fix is one line here rather than
+    // fourteen at the call sites.
+    return getJobFullEstimatePure(job, ext, int, activeAgency, atForJob(job, atMasters) ?? activeAtMaster);
   };
 
   const calculateJobTotal = (job: any) => {
@@ -525,7 +528,7 @@ export default function EstimateGenerate() {
     const ext = externalInspMap[job.id];
     const int = internalInspMap[job.id];
     const circleMaster = getCircleLimitsEstimateMaster(activeAgency);
-    return checkJobCircleLimitPure(job, ext, int, activeAgency, activeAtMaster, circleMaster);
+    return checkJobCircleLimitPure(job, ext, int, activeAgency, atForJob(job, atMasters) ?? activeAtMaster, circleMaster);
   };
 
   /** Jobs of an MR that actually get estimated - GP carries no charge (see isGpJob). */
@@ -1500,13 +1503,19 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 {/* 1. COMMON FORWARDING LETTER FOR ALL JOBS IN THIS MR */}
                 {renderForwardingLetterPages()}
 
-                {/* 2. SEPARATE INDIVIDUAL ESTIMATE SHEETS (1 PAGE PER TRANSFORMER) */}
+                {/* 2. SEPARATE INDIVIDUAL ESTIMATE SHEETS (1 PAGE PER TRANSFORMER)
+
+                    THE SHEET RECOMPUTES EVERY LINE at render - it is not a view of stored
+                    figures. So a reprint after an AT rollover used to restate an already
+                    issued estimate at the new tender's percentage, and the paper in the
+                    file would no longer match the screen. It now prices from the AT the
+                    job was booked under (AUDIT F72). */}
                 {selectedJobsData.map((job) => (
                   <SingleJobEstimateReport
                     key={job.id}
                     job={job}
                     agency={activeAgency}
-                    atMaster={activeAtMaster}
+                    atMaster={atForJob(job, atMasters) ?? activeAtMaster}
                     externalData={externalInspMap[job.id]}
                     internalData={internalInspMap[job.id]}
                     letterDateText={letterDateText || dateString}
@@ -1527,7 +1536,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   <SingleJobEstimateReport
                     job={targetJob}
                     agency={activeAgency}
-                    atMaster={activeAtMaster}
+                    atMaster={atForJob(targetJob, atMasters) ?? activeAtMaster}
                     externalData={externalInspMap[targetJob.id]}
                     internalData={internalInspMap[targetJob.id]}
                     letterDateText={letterDateText || dateString}
@@ -1688,7 +1697,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                             <td className="p-1 border-r border-black text-right">
                               {(() => {
                                 if (selectedJobsData.length === 0) return 'Rise / Fall Total';
-                                const pcts = selectedJobsData.map(j => getAtPercentageForCore(activeAtMaster, j.coreType));
+                                const pcts = selectedJobsData.map(j => getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType));
                                 const allSame = pcts.every(p => p === pcts[0]);
                                 if (allSame) {
                                   const p = pcts[0];
@@ -1698,7 +1707,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                               })()}
                             </td>
                             {selectedJobsData.map(job => {
-                              const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                              const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
                               const baseTot = calculateJobTotal(job);
                               const riseAmt = baseTot * (atPct / 100);
                               return (
@@ -1711,7 +1720,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                           <tr className="border-t border-black font-bold text-[9px]">
                             <td className="p-1 border-r border-black text-right">Grand Total</td>
                             {selectedJobsData.map(job => {
-                              const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                              const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
                               const baseTot = calculateJobTotal(job);
                               const grandTot = baseTot * (1 + atPct / 100);
                               return (
@@ -1829,7 +1838,7 @@ Circle Office : SABARMATI`}
                         <tbody>
                           {selectedJobsData.map((job, idx) => {
                              const jobBaseTotal = calculateJobTotal(job);
-                             const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                             const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
                              const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
                              const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
                              const check = checkJobCircleLimit(job);
@@ -1864,7 +1873,7 @@ Circle Office : SABARMATI`}
                             <td className="p-1 border-r border-black text-right font-mono font-bold">
                               {selectedJobsData.reduce((acc, job) => {
                                 const baseAmt = calculateJobTotal(job);
-                                const atPct = getAtPercentageForCore(activeAtMaster, job.coreType);
+                                const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
                                 return acc + (baseAmt * (1 + atPct / 100));
                               }, 0).toFixed(2)}
                             </td>

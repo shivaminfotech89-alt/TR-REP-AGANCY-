@@ -12,6 +12,7 @@ import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 import { getJobFullEstimate, checkJobCircleLimit } from '../lib/estimateCalc';
+import { atForJob } from '../lib/AgencyContext';
 
 export interface InternalData {
   windingType: string;
@@ -46,7 +47,7 @@ export interface InternalData {
 }
 
 export default function InternalInspection() {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]); // Internal-type only
   const [externalInspections, setExternalInspections] = useState<any[]>([]);
@@ -705,8 +706,8 @@ export default function InternalInspection() {
 
     const externalDataSaved = externalInspections.find(i => i.jobId === job.id)?.data;
 
-    const est = getJobFullEstimate(job, externalDataSaved, internalDataLive, activeAgency, activeAtMaster);
-    const check = checkJobCircleLimit(job, externalDataSaved, internalDataLive, activeAgency, activeAtMaster, circleLimitsData);
+    const est = getJobFullEstimate(job, externalDataSaved, internalDataLive, activeAgency, atForJob(job, atMasters) ?? activeAtMaster);
+    const check = checkJobCircleLimit(job, externalDataSaved, internalDataLive, activeAgency, atForJob(job, atMasters) ?? activeAtMaster, circleLimitsData);
 
     // Never show a figure that rests on missing data. Each case says what is actually
     // missing - "Limit not configured" must mean the limit, nothing else.
