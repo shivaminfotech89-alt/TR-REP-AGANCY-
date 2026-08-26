@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 
 export default function AdminPanel() {
-  const { agencies, updateAgency } = useAgency();
+  const { agencies, updateAgency, publishedAts, atMasters } = useAgency();
   const currentUser = auth.currentUser;
   const isSuperAdminEmail = currentUser?.email === 'shivaminfotech89@gmail.com';
 
@@ -385,6 +385,84 @@ export default function AdminPanel() {
           <span>Web App Controls</span>
         </button>
       </div>
+
+      {/* --- THE PUBLISHED AT REGISTER (AUDIT F73) ---
+           Read-only here. Templates are PUBLISHED from Estimate Master, where the rates
+           being published are on screen and can be checked - publishing from a list would
+           mean publishing figures nobody is looking at.
+
+           This exists because the register was otherwise visible only on Estimate Master,
+           under the AT the admin happens to have selected. "Which templates exist, at what
+           version, and who is on an old one" is an administrative question and had no
+           screen. */}
+      {activeTab === 'agencies' && (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4 mb-6">
+          <div>
+            <h2 className="text-base font-bold text-slate-900">Published AT rate templates</h2>
+            <p className="text-xs text-slate-500">
+              Tender schedules any user can copy onto their own AT. Published from Estimate Master;
+              revising one bumps its version and changes nobody&rsquo;s existing rates.
+            </p>
+          </div>
+
+          {publishedAts.length === 0 ? (
+            <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
+              None published yet. Open <strong>Estimate Master</strong> with the AT whose rates you want to
+              publish selected, then use &ldquo;Publish this AT as a template&rdquo;.
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-left text-slate-500 border-b border-slate-200">
+                    <th className="py-2 pr-3 font-bold">Template</th>
+                    <th className="py-2 pr-3 font-bold">Version</th>
+                    <th className="py-2 pr-3 font-bold">Published</th>
+                    <th className="py-2 pr-3 font-bold">In use by</th>
+                    <th className="py-2 font-bold">On an older version</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {publishedAts.map(t => {
+                    const adopters = atMasters.filter(a => String((a as any).ratesSource || '') === `published:${t.id}`);
+                    // WHO IS BEHIND. A copy never follows the template, so this is the only
+                    // place the drift is visible across everyone at once - each operator
+                    // sees only their own AT.
+                    const behind = adopters.filter(a => Number((a as any).publishedAtVersion ?? 0) < Number(t.version));
+                    return (
+                      <tr key={t.id} className="border-b border-slate-100 align-top">
+                        <td className="py-2 pr-3">
+                          <div className="font-bold text-slate-800">{t.name}</div>
+                          {t.atNumber && <div className="text-slate-500">AT {t.atNumber}</div>}
+                          {t.notes && <div className="text-slate-500 mt-0.5 max-w-md">{t.notes}</div>}
+                        </td>
+                        <td className="py-2 pr-3 font-mono font-bold text-slate-800">v{t.version}</td>
+                        <td className="py-2 pr-3 text-slate-600">
+                          {t.publishedAt ? new Date(t.publishedAt).toLocaleDateString('en-IN') : '-'}
+                          {t.publishedBy && <div className="text-slate-400">{t.publishedBy}</div>}
+                        </td>
+                        <td className="py-2 pr-3 font-bold text-slate-800">{adopters.length}</td>
+                        <td className="py-2">
+                          {behind.length === 0
+                            ? <span className="text-emerald-700 font-semibold">none</span>
+                            : (
+                              <span className="text-amber-800 font-semibold">
+                                {behind.length}
+                                <span className="font-normal text-amber-700">
+                                  {' '}({[...new Set(behind.map(a => `v${(a as any).publishedAtVersion ?? '?'}`))].join(', ')})
+                                </span>
+                              </span>
+                            )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* --- TAB 1: AGENCIES & SUBSCRIPTION MANAGEMENT --- */}
       {activeTab === 'agencies' && (

@@ -1563,6 +1563,22 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     sections: Record<string, EstimateItem[] | undefined>,
   ): Promise<string> => {
     if (!isSuperAdmin) throw new Error('Only the administrator can publish a rate template.');
+    // A TEMPLATE CARRIES THE WHOLE SCHEDULE OR IT IS NOT A TEMPLATE.
+    //
+    // adoptPublishedAt copies what the template has and leaves the rest of the AT alone,
+    // then stamps `ratesSource: 'published:<id>'`. A partial template therefore produces an
+    // AT that is a MIXTURE, labelled as though it all came from one place. Refused here, by
+    // name, rather than discovered later as a rate nobody can account for.
+    const missing = ESTIMATE_SECTION_FIELDS.filter(k => {
+      const v = sections[k];
+      return !Array.isArray(v) || v.length === 0;
+    });
+    if (missing.length > 0) {
+      throw new Error(
+        `A template must carry all five sections. Missing: ${missing.map(k => k.replace('estimateMaster', '')).join(', ')}. `
+        + 'Adopting a partial template would leave the rest of an AT as it was while labelling the whole schedule as this template.'
+      );
+    }
     const existing = tpl.id ? publishedAts.find(t => t.id === tpl.id) : undefined;
     const version = (Number(existing?.version) || 0) + 1;
     const payload: any = {
@@ -1595,6 +1611,16 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const adoptPublishedAt = async (atMasterId: string, templateId: string) => {
     const tpl = publishedAts.find(t => t.id === templateId);
     if (!tpl) throw new Error('That published template could not be found.');
+    // Defensive: publishAtTemplate refuses to create a partial template, so this can only
+    // fire for one written before that check existed, or outside the app. Refusing is
+    // right either way - a partial copy mislabels everything it does not overwrite.
+    const short = ESTIMATE_SECTION_FIELDS.filter(k => !Array.isArray((tpl as any)[k]) || (tpl as any)[k].length === 0);
+    if (short.length > 0) {
+      throw new Error(
+        `"${tpl.name}" is missing ${short.map(k => k.replace('estimateMaster', '')).join(', ')} and cannot be copied. `
+        + 'Ask the administrator to republish it with all five sections.'
+      );
+    }
     const payload: any = {
       ratesSource: `published:${templateId}`,
       publishedAtVersion: Number(tpl.version) || 1,

@@ -1086,6 +1086,30 @@ export default function EstimateMaster() {
   };
 
   /**
+   * ALL FIVE SECTIONS, for publishing a template.
+   *
+   * `buildSectionPayload` returns only the sections TOUCHED this session, which is right for
+   * saving and for applying to other ATs - both write onto something that already exists,
+   * and leaving an unedited section alone is the point.
+   *
+   * IT IS WRONG FOR A TEMPLATE. A template is adopted wholesale: `adoptPublishedAt` copies
+   * the sections the template carries and leaves the rest of the AT as it was, then stamps
+   * `ratesSource: 'published:<id>'`. Publish after editing only CRGO and the template holds
+   * only CRGO - so an AT adopting it ends up a MIXTURE of that template and whatever was
+   * there before, labelled as though the whole schedule came from the template.
+   *
+   * That is the shape this audit keeps finding: a value that describes something other than
+   * what it is attached to. A template carries the whole schedule or it is not a template.
+   */
+  const buildFullTemplatePayload = () => {
+    const out: Record<string, EstimateItem[] | undefined> = {};
+    (['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS'] as const).forEach(sec => {
+      out[SECTION_FIELD[sec]] = publishPlanFor(sec).payload;
+    });
+    return out;
+  };
+
+  /**
    * "Apply to my agencies" - owner-scoped, available to every user, no admin rights.
    *
    * The count is fetched BEFORE the modal can be confirmed, and from fresh reads, because
@@ -1191,7 +1215,8 @@ export default function EstimateMaster() {
     try {
       const id = await publishAtTemplate(
         { id: publishTplTargetId || undefined, name: publishTplName.trim(), atNumber: activeAtMaster?.atNumber, notes: publishTplNotes.trim() },
-        buildSectionPayload(),
+        // ALL FIVE, not just what was edited - see buildFullTemplatePayload.
+        buildFullTemplatePayload(),
       );
       setShowPublishTplModal(false);
       setPublishTplNotes('');
