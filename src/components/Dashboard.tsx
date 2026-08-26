@@ -848,7 +848,7 @@ export default function Dashboard() {
             <span className="text-[11px] text-rose-950 font-bold block truncate mt-0.5">Hub</span>
           </Link>
 
-          <Link to="/estimate-master" className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg text-center transition-colors">
+          <Link to="/agency-settings?section=estimate-master" className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg text-center transition-colors">
             <span className="text-[10px] font-black text-slate-700 block">MASTER</span>
             <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">AT Rates</span>
           </Link>

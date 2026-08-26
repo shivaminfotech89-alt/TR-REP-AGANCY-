@@ -1,5 +1,7 @@
-import { AtSettings } from './AtSettings';
-import React, { useState, useRef } from 'react';
+import EstimateMaster from './EstimateMaster';
+import AtMasters from './AtMasters';
+import React, { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useAgency } from '../lib/AgencyContext';
 import { gstinScopeError } from '../lib/utils';
 import EditAgencyForm from "./EditAgencyForm";
@@ -211,6 +213,32 @@ export default function AgencySettings() {
   };
 
   if (loading) return <Loader2 className="w-6 h-6 animate-spin mx-auto mt-10 text-blue-600" />;
+
+  /**
+   * ?section= RESOLVES TO A SECTION OF THIS PAGE.
+   *
+   * Tenders and Estimate Master are parts of agency setup, not separate destinations, so
+   * every deep link that used to name a route now names a section here: the setup-gap
+   * dialogs in New Job, Estimate Generate and Billing all send `?section=at`,
+   * `?section=divisions`, `?section=allotments` or `?section=estimate-master`.
+   *
+   * The atId / division / coreType parameters are NOT consumed here and must be left in the
+   * URL: `AtSettings` reads them itself, to open the named AT on the right tab. Stripping
+   * them lands the operator on a settings page with the problem still to find - which is what
+   * happened once already when this was retargeted carelessly (AUDIT F74).
+   */
+  const [settingsParams] = useSearchParams();
+  useEffect(() => {
+    const section = settingsParams.get('section');
+    if (!section) return;
+    const id = section === 'estimate-master' ? 'estimate-master-section' : 'at-masters-section';
+    // After paint: the sections below render conditionally on activeAgency, so the element
+    // does not exist on the first pass.
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [settingsParams, activeAgency?.id]);
 
   return (
     // 900px, not 672px. The form is two-column by construction (grid-cols-1
@@ -571,14 +599,30 @@ export default function AgencySettings() {
                 </div>
               </div>
               <div id="at-masters-section" className="mt-6">
-                <AtSettings />
+                <AtMasters />
               </div>
             </div>
           ) : (
             <div id="at-masters-section" className="border-l-4 border-l-indigo-400 rounded-l">
-              <AtSettings />
+              <AtMasters />
             </div>
           )}
+        </div>
+      )}
+
+      {/* ESTIMATE MASTER — a section of agency setup, not a destination.
+          It comes AFTER Tenders because rates live on a tender: the screen cannot save
+          without one, and listing it earlier is what put a new agency in front of it before
+          it had an AT to save to (AUDIT F74). */}
+      {activeAgency && (
+        <div id="estimate-master-section" className="relative left-1/2 -translate-x-1/2 w-[min(1400px,94vw)]">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mb-2.5 px-1">
+            <h2 className="text-base font-black text-slate-900">Estimate Master</h2>
+            <span className="text-[11px] text-slate-500">
+              The rate schedule for the AT selected above &mdash; each tender carries its own
+            </span>
+          </div>
+          <EstimateMaster />
         </div>
       )}
 

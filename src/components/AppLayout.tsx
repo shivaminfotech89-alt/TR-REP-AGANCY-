@@ -43,7 +43,6 @@ import Reports from './Reports';
 import BillingSystem from './BillingSystem';
 import OilInward from './OilInward';
 import AgencySettings from './AgencySettings';
-import AtMasters from './AtMasters';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
@@ -225,7 +224,7 @@ export default function AppLayout({ user }: { user: User }) {
                 save them to. Divisions and allotment are not listed because they are set
                 on a tender, inside the Tenders screen. */}
             <div className="px-3 pb-1">
-              <span className={`text-[10px] uppercase font-bold tracking-widest ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>Setup &amp; Rates</span>
+              <span className={`text-[10px] uppercase font-bold tracking-widest ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>System &amp; Customization</span>
             </div>
 
             <Link 
@@ -238,34 +237,15 @@ export default function AppLayout({ user }: { user: User }) {
               }`}
             >
               <Settings className="w-4 h-4 opacity-80" />
-              <span>1. Agency Settings</span>
+              <span>Agency Settings</span>
             </Link>
 
-            <Link
-              to="/at-masters"
-              onClick={handleSidebarItemClick}
-              className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
-                location.pathname === '/at-masters'
-                  ? (isLight ? 'text-blue-700 bg-blue-50 font-bold border border-blue-200' : 'text-white bg-white/10 font-bold')
-                  : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
-              }`}
-            >
-              <FileSignature className="w-4 h-4 opacity-80" />
-              <span>2. Tenders (AT)</span>
-            </Link>
-
-            <Link
-              to="/estimate-master"
-              onClick={handleSidebarItemClick}
-              className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
-                location.pathname === '/estimate-master'
-                  ? (isLight ? 'text-blue-700 bg-blue-50 font-bold border border-blue-200' : 'text-white bg-white/10 font-bold')
-                  : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
-              }`}
-            >
-              <Database className="w-4 h-4 opacity-80" />
-              <span>3. Estimate Master</span>
-            </Link>
+            {/* TENDERS AND ESTIMATE MASTER ARE NOT NAV ENTRIES.
+                Both are agency SETUP, and both live as sections of the Agency Settings
+                page: tenders (with divisions, prefixes and allotments nested), then the
+                estimate master for the selected tender. Listing them here made them look
+                like destinations of their own, and Estimate Master in particular cannot
+                stand alone - it has nothing to save to without a tender (AUDIT F74). */}
 
             <Link 
               to="/support" 
@@ -424,7 +404,7 @@ export default function AppLayout({ user }: { user: User }) {
             <Route path="/external-inspection/:jobId?" element={<ExternalInspection />} />
             <Route path="/internal-inspection/:jobId?" element={<InternalInspection />} />
             <Route path="/testing-report/:jobId?" element={<TestingReport />} />
-            <Route path="/estimate-master" element={<EstimateMaster />} />
+            <Route path="/estimate-master" element={<Navigate to={{ pathname: '/agency-settings', search: '?section=estimate-master' }} replace />} />
             <Route path="/estimates/new" element={<EstimateGenerate />} />
             <Route path="/challan/new" element={<DispatchChallan />} />
             <Route path="/reports" element={<Reports />} />
@@ -433,7 +413,14 @@ export default function AppLayout({ user }: { user: User }) {
             <Route path="/bills/:mrNo" element={<BillingSystem />} />
             <Route path="/bills/view/:mrNo" element={<BillingSystem />} />
             <Route path="/oil-inward" element={<OilInward />} />
-            <Route path="/at-masters" element={<AtMasters />} />
+            {/* REDIRECTS, NOT DELETIONS. Both were real routes and both were linked from
+                setup-gap dialogs, the Dashboard and each other. A removed route would send
+                every one of those - and any bookmark - to the catch-all, which redirects to
+                the Dashboard and says nothing. `location.search` is carried through because
+                AtSettings reads atId / section / division / coreType from it to open the
+                named AT on the right tab; dropping them lands the operator on a settings
+                page with the problem still to find (AUDIT F74). */}
+            <Route path="/at-masters" element={<Navigate to={{ pathname: '/agency-settings', search: location.search || '?section=at' }} replace />} />
             <Route path="/agency-settings" element={<AgencySettings />} />
             <Route path="/admin" element={isSuperAdmin ? <AdminPanel /> : <Navigate to="/" replace />} />
             <Route path="/support" element={<SupportTickets />} />

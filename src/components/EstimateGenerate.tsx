@@ -330,7 +330,7 @@ export default function EstimateGenerate() {
           'Until then, any figure shown comes from the agency or the shipped defaults and has not been checked against this tender.',
         ],
         actionLabel: 'Open Estimate Master',
-        actionTo: '/estimate-master',
+        actionTo: '/agency-settings?section=estimate-master',
       });
       return true;
     }
@@ -356,7 +356,7 @@ export default function EstimateGenerate() {
           'Nothing here is repaired automatically: only someone with the tender can say which schedule belongs in this section.',
         ],
         actionLabel: 'Open Estimate Master',
-        actionTo: '/estimate-master',
+        actionTo: '/agency-settings?section=estimate-master',
       });
       return true;
     }

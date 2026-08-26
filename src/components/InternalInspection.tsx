@@ -745,7 +745,7 @@ export default function InternalInspection() {
                 'Set it under Estimate Master - Circle Authority Estimate Approval Limit.',
               ],
               actionLabel: 'Open Estimate Master',
-              actionTo: '/estimate-master',
+              actionTo: '/agency-settings?section=estimate-master',
             })}
             className="block text-[9px] font-semibold text-slate-500 italic underline hover:text-slate-800"
             title="Click to set the circle approval limit"

@@ -4,9 +4,14 @@ import { useAgency } from '../lib/AgencyContext';
 import { AtSettings } from './AtSettings';
 
 /**
- * TENDERS (ATs) AS A DESTINATION OF THEIR OWN.
+ * THE TENDERS SECTION OF AGENCY SETTINGS — the setup chain, stated.
  *
- * AtSettings existed with no route to it: it rendered inside the Agency Settings page,
+ * NOT A PAGE. Tenders are part of agency setup, not a destination of their own, so this
+ * renders as a section of the Agency Settings page above `AtSettings`. It was briefly a
+ * route (`/at-masters`); that route now redirects here, carrying its query string, because
+ * setup-gap dialogs and bookmarks pointed at it.
+ *
+ * What it exists for is the ORDER. AtSettings rendered inside the Agency Settings page,
  * below the agency form, reachable only by scrolling past the thing the operator had just
  * finished. Every link that claimed to go there - `/agency-settings?section=at` from the
  * setup gaps, from Estimate Master, from AtSettings itself - carried a query parameter
@@ -32,19 +37,8 @@ export default function AtMasters() {
 
   return (
     <div className="w-full max-w-full space-y-4">
-      <div className="bg-white p-5 sm:p-6 rounded-xl shadow-xs border border-slate-200">
-        <div className="flex flex-wrap items-center gap-2.5">
-          <h1 className="text-xl font-bold text-slate-900 flex items-center">
-            <FileSignature className="w-6 h-6 mr-2.5 text-indigo-600" />
-            Tenders (AT)
-          </h1>
-          {activeAgency && (
-            <span className="px-2.5 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
-              {activeAgency.name}
-            </span>
-          )}
-        </div>
-        <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
+      <div className="bg-white p-4 sm:p-5 rounded-xl shadow-xs border border-slate-200">
+        <p className="text-xs sm:text-sm text-slate-500">
           A tender carries its own job-number prefixes, its allotment, its AT percentage and
           its <strong>rate schedule</strong>. Everything priced is priced against the tender the
           job was booked under &mdash; not against whichever tender is selected today.
@@ -103,7 +97,7 @@ export default function AtMasters() {
               <p className="mt-0.5">
                 Set its prefixes and allotment below, then enter its rates.
               </p>
-              <Link to="/estimate-master" className="font-bold underline">Open Estimate Master</Link>
+              <Link to="/agency-settings?section=estimate-master" className="font-bold underline">Open Estimate Master</Link>
             </div>
           </div>
         )}

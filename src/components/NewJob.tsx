@@ -478,7 +478,7 @@ export default function NewJob() {
         problem: 'Job numbers cannot be generated until an AT (tender period) is set up and selected. The prefix and the number sequence both come from it.',
         detail: ['Add an AT under Agency Settings, then select it as the active AT.'],
         actionLabel: 'Set Up AT',
-        actionTo: `/at-masters?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
+        actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
         unsavedWarning: draftWarning,
         onBeforeNavigate: saveIntakeDraft,
       });
@@ -503,7 +503,7 @@ export default function NewJob() {
           'Each division needs a prefix per core type - they generate separate number sequences.',
         ],
         actionLabel: 'Configure Prefixes',
-        actionTo: '/at-masters',
+        actionTo: '/agency-settings?section=at',
         unsavedWarning: draftWarning,
         onBeforeNavigate: saveIntakeDraft,
       });
@@ -1121,7 +1121,7 @@ export default function NewJob() {
             'Set up an AT, or select one, under Agency Settings.',
           ],
           actionLabel: 'Set Up AT',
-          actionTo: '/at-masters',
+          actionTo: '/agency-settings?section=at',
           unsavedWarning: intakeHasData()
             ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
             : undefined,
@@ -1382,7 +1382,7 @@ export default function NewJob() {
                 'GP repairs and Overhauling (OH) do not draw on the allotment.',
               ],
               actionLabel: 'Add Allotment',
-              actionTo: `/at-masters?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
+              actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
               unsavedWarning: intakeHasData()
                 ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
                 : undefined,
@@ -1421,7 +1421,7 @@ export default function NewJob() {
                   'GP repairs and Overhauling (OH) do not draw on the allotment.',
                 ],
                 actionLabel: 'Add Allotment',
-                actionTo: `/at-masters?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
+                actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
                 unsavedWarning: intakeHasData()
                   ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
                   : undefined,
