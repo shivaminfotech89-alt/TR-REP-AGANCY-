@@ -30,7 +30,19 @@ const sectionFor = (coreType) => {
   return 'estimateMasterCRGO';
 };
 
-const norm = v => JSON.stringify(v ?? null);
+// ⚠ STABLE, NOT JSON.stringify. Plain stringify compares KEY ORDER, and two documents
+// written through different code paths hold the same rates in a different order. Comparing
+// public_config against the agencies with plain stringify reported 31 of 32 CRGO rows as
+// differing when only TWO really did - a check confidently wrong about its own subject, for
+// the fifth time in this audit. The verdict below happened to be right because the migration
+// copied arrays verbatim, so key order was preserved; that was luck, not method.
+const norm = (v) => {
+  if (Array.isArray(v)) return '[' + v.map(norm).join(',') + ']';
+  if (v && typeof v === 'object') {
+    return '{' + Object.keys(v).sort().map(k => JSON.stringify(k) + ':' + norm(v[k])).join(',') + '}';
+  }
+  return JSON.stringify(v ?? null);
+};
 
 const rows = [];
 let identical = 0, differing = 0, noAt = 0;
