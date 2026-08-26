@@ -30,7 +30,7 @@ export function AtSettings() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
 
-  // Deep link from a setup-gap dialog: /agency-settings?section=allotments&atId=...
+  // Deep link from a setup-gap dialog: /at-masters?section=allotments&atId=...
   // Opens the named AT on the right tab so the operator lands where the fix is, rather
   // than on a settings page with the problem still to find.
   const [searchParams] = useSearchParams();

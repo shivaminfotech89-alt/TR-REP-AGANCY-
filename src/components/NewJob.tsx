@@ -246,7 +246,13 @@ export default function NewJob() {
     dateOfIssue: new Date().toISOString().split('T')[0],
     type: 'Distribution',
     repairType: 'OGP', // OGP, GP
-    division: 'SABARMATI',
+    /**
+     * NOT KNOWN YET - empty, not a literal (AUDIT F71). Most agencies do not have
+     * SABARMATI: SUCHIT and UPENDRA are DEESA only, AARATI is GNR only. The effect below
+     * sets it from availableDivisions; until then, everything that reads it was computing
+     * against a division this agency has no prefix for.
+     */
+    division: '',
   });
 
   const [transformers, setTransformers] = useState<TransformerEntry[]>([
@@ -472,7 +478,7 @@ export default function NewJob() {
         problem: 'Job numbers cannot be generated until an AT (tender period) is set up and selected. The prefix and the number sequence both come from it.',
         detail: ['Add an AT under Agency Settings, then select it as the active AT.'],
         actionLabel: 'Set Up AT',
-        actionTo: '/agency-settings?section=at',
+        actionTo: `/at-masters?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
         unsavedWarning: draftWarning,
         onBeforeNavigate: saveIntakeDraft,
       });
@@ -481,7 +487,11 @@ export default function NewJob() {
 
     // Prefix only - this is checking whether one is CONFIGURED, not drawing a number.
     const info = getJobNoPrefix(commonData.division, coreType);
-    if (info.prefix === 'JOB') {
+    // Tested against null, NOT against the string 'JOB' (AUDIT F71). getJobNoPrefix returns
+    // null when nothing is configured; comparing to 'JOB' can never be true, so this dialog
+    // silently stopped firing and the save fell through to a message reading
+    // "Expected prefix starting with \"null-\"" - `null + '-'` composed as a string.
+    if (!info.prefix) {
       const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
       setSetupGap({
         title: 'No job number prefix configured',
@@ -493,7 +503,7 @@ export default function NewJob() {
           'Each division needs a prefix per core type - they generate separate number sequences.',
         ],
         actionLabel: 'Configure Prefixes',
-        actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
+        actionTo: '/at-masters',
         unsavedWarning: draftWarning,
         onBeforeNavigate: saveIntakeDraft,
       });
@@ -1111,7 +1121,7 @@ export default function NewJob() {
             'Set up an AT, or select one, under Agency Settings.',
           ],
           actionLabel: 'Set Up AT',
-          actionTo: '/agency-settings?section=at',
+          actionTo: '/at-masters',
           unsavedWarning: intakeHasData()
             ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
             : undefined,
@@ -1136,7 +1146,12 @@ export default function NewJob() {
           const info = getJobNoPrefix(commonData.division, t.coreType);
           if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
             if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
-            const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please select a Core Type or enter a valid job number.`;
+            // Past setupGapForPrefix, so `info.prefix` is non-null here and cannot render
+            // as "null-". Names the empty case separately because that is the one an
+            // operator actually meets.
+            const err = !String(t.jobNo || '').trim()
+              ? `Transformer #${i + 1} has no job number. Every unit needs the number the division wrote on the MR.`
+              : `Job number "${t.jobNo}" does not belong to ${commonData.division} / ${t.coreType || 'CRGO'}, which uses "${info.prefix}-". Check the division and core type on this row against the MR.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
@@ -1367,7 +1382,7 @@ export default function NewJob() {
                 'GP repairs and Overhauling (OH) do not draw on the allotment.',
               ],
               actionLabel: 'Add Allotment',
-              actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
+              actionTo: `/at-masters?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
               unsavedWarning: intakeHasData()
                 ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
                 : undefined,
@@ -1406,7 +1421,7 @@ export default function NewJob() {
                   'GP repairs and Overhauling (OH) do not draw on the allotment.',
                 ],
                 actionLabel: 'Add Allotment',
-                actionTo: `/agency-settings?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
+                actionTo: `/at-masters?section=allotments&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(cType)}`,
                 unsavedWarning: intakeHasData()
                   ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
                   : undefined,

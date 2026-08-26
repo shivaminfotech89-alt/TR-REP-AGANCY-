@@ -2998,6 +2998,80 @@ the untouched engine is identical and the grand total cannot differ.
 
 ---
 
+### F73. Three writers to `public_config`, and the two rates nobody has
+
+**The task was to replace one publish button.** "Publish to public_config" was to become
+"Publish this AT as a template", so that a shared baseline is a published tender rather than
+an agency-level document — rates having moved onto the AT.
+
+**There were three writers, not one.** The other two were found by grepping for the
+function names rather than by looking at the button, and neither is reachable from a control
+called "publish":
+
+| Writer | How it is reached |
+|---|---|
+| `handleExecuteFullSync` | the "Publish as shared default" button — **the one that was known about** |
+| the per-section save modal, `saveScope === 'ALL'` | an admin **radio inside the ordinary Save dialog**, sitting beside "save for this agency" |
+| `updateAllAgenciesEstimateMaster` | called by that radio's branch |
+
+The second is the one that matters. An admin editing a single section, in the dialog they use
+every day to save their own rates, could publish the shared baseline by picking the *other
+radio*. Nothing in that dialog is named "publish" until you read the radio's label. F31 had
+already recorded that this dialog "counted the wrong thing"; what it did not record is that
+one of its two options wrote a different document entirely.
+
+**THE DRIFT IS MEASURABLE, AND IT IS TWO CELLS.**
+
+`scripts/admin/_pc*.js` compared `public_config` against every agency:
+
+| Row | Cell | public_config | Most agencies |
+|---|---|---|---|
+| `1f` Drying of active parts | 100 KVA | **230** | `null` |
+| `11B` LV Connector | 100 KVA | **148.99** | `null` |
+
+Every other cell of every other section is identical everywhere. SUCHIT matches on both;
+UPENDRA on `1f`; MEGHA, suchit, DRISHIV and AARATI have neither.
+
+That is the residue of the eight-cell correction earlier in this audit: filled in the
+baseline through one writer, applied to some agencies through another, and never reconciled
+because no single action wrote both. **Two publish paths writing to different layers is not a
+tidiness problem — it is how a baseline and the things derived from it stop agreeing, one
+cell at a time, with nothing reporting it.**
+
+**AND THE FIRST MEASUREMENT WAS WRONG.** The comparison initially reported **31 of 32** CRGO
+rows as differing. `JSON.stringify` treats a different KEY ORDER as a difference, and two
+documents written through different code paths hold the same rates in a different order. The
+real figure is two. `master-equivalence.js` used the same comparison and had been giving the
+right answer by luck — the migration copied arrays verbatim, so key order was preserved. Both
+now use a stable stringify.
+
+Fifth check in this audit to report confidently outside its own model. The others:
+delta-must-be-1 in `read-counters.js`, a counter key matched by division prefix in
+`suggestion-source.js`, the `head`-truncated inventory in F72, and the exact-string
+comparison that could not detect mistyping.
+
+**WHAT REACHES `public_config` NOW: ONE AGENCY.** Only IDEAL ENGINEERING COMPANY resolves
+through it — no sections of its own, no ATs. Every other agency answers from its AT or its
+own sections first, and the migration copied *agency* sections onto the ATs, so the ATs carry
+the `null` version rather than the baseline's 230 and 148.99.
+
+So freezing it creates no drift; the drift already exists and is already unreachable. **The
+risk is the opposite one: it becomes a fossil that still looks authoritative** — two rates in
+a document labelled "the shared baseline", which nothing reads and nothing updates, is how
+someone concludes in a year that the app's baseline says 230 when no live estimate has ever
+used it.
+
+**Resolved:** all three writers deleted. Publishing is one action, "Publish this AT as a
+template", writing `published_ats`. `public_config` stays as the resolution fallback and has
+no writer. The `frozenAt` stamp that would say so in the data is NOT applied — it is an
+additive write to a live document and was not asked for.
+
+**The rule:** before replacing a control, count the writers to what it writes — by grepping
+the function it calls, not by trusting the control's name. A second path is unlikely to be
+labelled like the first; the one here was a radio button in a Save dialog.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test

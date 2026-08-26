@@ -1954,7 +1954,7 @@ export default function EstimateMaster() {
                        figures below are the shipped defaults and are shown for reference only.</>}
                 </p>
                 <Link
-                  to="/agency-settings?section=at"
+                  to="/at-masters"
                   className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold"
                 >
                   {agencyHasAnyAt ? 'Choose an AT' : 'Create an AT for this agency'}

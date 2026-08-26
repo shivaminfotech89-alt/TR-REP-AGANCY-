@@ -15,6 +15,7 @@ import {
   BarChart3, 
   Settings, 
   Database, 
+  FileSignature,
   BookOpen, 
   LogOut, 
   Menu, 
@@ -42,6 +43,7 @@ import Reports from './Reports';
 import BillingSystem from './BillingSystem';
 import OilInward from './OilInward';
 import AgencySettings from './AgencySettings';
+import AtMasters from './AtMasters';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
@@ -103,7 +105,6 @@ export default function AppLayout({ user }: { user: User }) {
     { to: '/bills/new', label: 'Billing System', icon: Receipt },
     { to: '/oil-inward', label: 'Oil Account', icon: Droplets },
     { to: '/reports', label: 'Report Hub', icon: BarChart3 },
-    { to: '/estimate-master', label: 'Estimate Master', icon: Database },
   ];
 
   const isLight = currentTheme.isLightSidebar;
@@ -216,8 +217,15 @@ export default function AppLayout({ user }: { user: User }) {
           })}
           
           <div className={`mt-4 pt-3 border-t ${currentTheme.sidebarBorder} space-y-1`}>
+            {/* SETUP, IN THE ORDER IT HAS TO HAPPEN (AUDIT F74).
+                agency -> tender -> divisions -> allotment -> rates. The New Job gates
+                already enforce exactly this sequence; the nav used to contradict it by
+                listing Estimate Master among the working screens, where a new agency
+                reached it first and met a wall - it cannot save rates without a tender to
+                save them to. Divisions and allotment are not listed because they are set
+                on a tender, inside the Tenders screen. */}
             <div className="px-3 pb-1">
-              <span className={`text-[10px] uppercase font-bold tracking-widest ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>System & Customization</span>
+              <span className={`text-[10px] uppercase font-bold tracking-widest ${isLight ? 'text-slate-400' : 'text-slate-500'}`}>Setup &amp; Rates</span>
             </div>
 
             <Link 
@@ -230,7 +238,33 @@ export default function AppLayout({ user }: { user: User }) {
               }`}
             >
               <Settings className="w-4 h-4 opacity-80" />
-              <span>Agency Settings</span>
+              <span>1. Agency Settings</span>
+            </Link>
+
+            <Link
+              to="/at-masters"
+              onClick={handleSidebarItemClick}
+              className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                location.pathname === '/at-masters'
+                  ? (isLight ? 'text-blue-700 bg-blue-50 font-bold border border-blue-200' : 'text-white bg-white/10 font-bold')
+                  : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
+              }`}
+            >
+              <FileSignature className="w-4 h-4 opacity-80" />
+              <span>2. Tenders (AT)</span>
+            </Link>
+
+            <Link
+              to="/estimate-master"
+              onClick={handleSidebarItemClick}
+              className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center gap-2.5 text-xs font-semibold transition-all ${
+                location.pathname === '/estimate-master'
+                  ? (isLight ? 'text-blue-700 bg-blue-50 font-bold border border-blue-200' : 'text-white bg-white/10 font-bold')
+                  : `${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`
+              }`}
+            >
+              <Database className="w-4 h-4 opacity-80" />
+              <span>3. Estimate Master</span>
             </Link>
 
             <Link 
@@ -399,6 +433,7 @@ export default function AppLayout({ user }: { user: User }) {
             <Route path="/bills/:mrNo" element={<BillingSystem />} />
             <Route path="/bills/view/:mrNo" element={<BillingSystem />} />
             <Route path="/oil-inward" element={<OilInward />} />
+            <Route path="/at-masters" element={<AtMasters />} />
             <Route path="/agency-settings" element={<AgencySettings />} />
             <Route path="/admin" element={isSuperAdmin ? <AdminPanel /> : <Navigate to="/" replace />} />
             <Route path="/support" element={<SupportTickets />} />
