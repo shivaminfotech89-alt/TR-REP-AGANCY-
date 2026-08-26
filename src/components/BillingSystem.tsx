@@ -420,7 +420,15 @@ export default function BillingSystem() {
     }
 
     const div = mrJobs[0]?.division || activeAgency?.circleOfficeName || 'SABARMATI';
-    const orderNum = activeAtMaster?.atNumber || mrJobs[0]?.atNumber || '';
+    // ⚠ THE JOB'S OWN TENDER, NOT THE SESSION'S (AUDIT F85).
+    //
+    // This preferred `activeAtMaster` and fell back to the job's. It is right by accident
+    // today - every screen now filters to the selected tender, so the MR on screen belongs
+    // to it and the two agree - but a PRINTED FIELD ON A TAX INVOICE should read from the
+    // record it describes, not from whatever is selected while it is being printed. Right
+    // by accident is one refactor from wrong, and this one goes on paper.
+    const orderAt = atForJob(mrJobs[0], atMasters);
+    const orderNum = orderAt?.atNumber || mrJobs[0]?.atNumber || activeAtMaster?.atNumber || '';
   // WAS: `|| activeAgency?.atNumber` - an AT number on the AGENCY, which no write path
   // has ever produced. It read as a fallback and could only ever be undefined, so the
   // expression was `atMaster.atNumber || undefined || ''`. Removed rather than declared

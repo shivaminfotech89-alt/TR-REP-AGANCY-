@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
 import { AllotmentWidget } from './AllotmentWidget';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -35,6 +35,15 @@ export default function Dashboard() {
   
   const [jobs, setJobs] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
+  /**
+   * EVERY job of this agency, across all tenders — for guarantee tracking only.
+   *
+   * Deliberately separate from `jobs`, which is the selected tender's work. Two sets on one
+   * screen is a cost, and it is paid because a guarantee claim references a repair from a
+   * previous tender: filtering guarantees to the current tender would report zero the day
+   * after a rollover (AUDIT F85).
+   */
+  const [allAgencyJobs, setAllAgencyJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [activeKvaTab, setActiveKvaTab] = useState<'repaired' | 'under_repair' | 'scrap'>('repaired');
@@ -49,7 +58,23 @@ export default function Dashboard() {
     }
     setLoading(true);
     try {
-      const [jobsSnap, oilSnap] = await Promise.all([
+      // ⚠ THE ACTIVE TENDER (AUDIT F85). Every count on this screen is "how much work is in
+      // each state RIGHT NOW", and right now means the tender being worked. A work list
+      // showing eight jobs awaiting internal inspection, five of them under a closed tender,
+      // is a number the operator cannot act on and should not be chasing.
+      //
+      // GUARANTEES ARE THE ONE EXCEPTION and are fetched agency-wide below - see
+      // guaranteeStats. A GP claim is by definition against a PREVIOUS tender's repair, the
+      // same reason New Job's GP lookup is not filtered either: scoping it to the current
+      // tender would show zero the day after a rollover and hide the entire population that
+      // panel exists to watch.
+      const [jobsSnap, allJobsSnap, oilSnap] = await Promise.all([
+        getDocs(query(
+          collection(db, 'jobs'),
+          where('ownerId', '==', auth.currentUser.uid),
+          where('agencyId', '==', activeAgency.id),
+          where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT)
+        )),
         getDocs(query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid),
@@ -58,12 +83,15 @@ export default function Dashboard() {
         getDocs(query(
           collection(db, 'oilTransactions'),
           where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id)
+          where('agencyId', '==', activeAgency.id),
+          where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT)
         ))
       ]);
 
       const fetchedJobs = jobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const fetchedAllJobs = allJobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const fetchedOil = oilSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setAllAgencyJobs(fetchedAllJobs);
 
       // Sort newest jobs first
       fetchedJobs.sort((a: any, b: any) => {
@@ -287,7 +315,11 @@ export default function Dashboard() {
     const eighteenMonthsMs = 18 * 30.4375 * 24 * 60 * 60 * 1000;
     let activeGuaranteeCount = 0;
 
-    filteredJobs.forEach(j => {
+    // ⚠ ACROSS ALL TENDERS, not `filteredJobs` (AUDIT F85). A unit dispatched under 26-27 is
+    // inside its guarantee window for eighteen months, which outlives the tender. Counting
+    // only the current tender's would empty this panel at every rollover and hide exactly
+    // the units a guarantee claim will come back against.
+    allAgencyJobs.forEach((j: any) => {
       if (j.status === 'Dispatched') {
         // Nothing ever writes `dispatchDate` - the dispatch batch writes deliveryDate
         // and challanDate. Reading the unwritten field fell through to `updatedAt`,
@@ -304,7 +336,7 @@ export default function Dashboard() {
     });
 
     return { activeGuaranteeCount };
-  }, [filteredJobs]);
+  }, [allAgencyJobs]);
 
   // Pending Backlog Items
   const pendingBacklog = useMemo(() => {
