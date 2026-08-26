@@ -644,6 +644,8 @@ interface AgencyContextType {
   predictNextJobNo: (division: string, coreType?: string, repairType?: string, atMasterId?: string) => { prefix: string | null, nextNum: number, counterKey: string };
   getJobNoPrefix: (division: string, coreType?: string, atMasterId?: string) => { prefix: string | null; counterKey: string };
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
+  /** Drop an AT that has been deleted elsewhere, and stop pointing at it. See forgetAtMaster. */
+  forgetAtMaster: (atMasterId: string) => void;
 
   /** Admin-published rate templates, readable by everyone. See PublishedAt. */
   publishedAts: PublishedAt[];
@@ -1522,6 +1524,48 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /**
+   * AN AT HAS BEEN DELETED — FORGET IT EVERYWHERE (AUDIT F78).
+   *
+   * The delete happens in a Cloud Function, so nothing in the client knows about it unless
+   * it is told. `atMasters` is fetched once and thereafter mutated in place by add and
+   * update; NOTHING removed a row. So the deleted tender stayed in the list, kept its chip
+   * in the Estimate Master header, kept its "this AT has no rates" panel, and stayed
+   * selectable — a record of something that no longer exists, shown as though it did.
+   *
+   * THREE THINGS HAVE TO GO, and missing any one of them leaves the screen lying:
+   *
+   *   1. the row in `atMasters`, or every list still renders it;
+   *   2. `activeAtMasterId` if it names the deleted AT — otherwise `activeAtMaster`
+   *      resolves to null and every screen reads "no AT selected" while the sidebar and
+   *      localStorage still insist one is;
+   *   3. the localStorage key, or the next reload selects the deleted id again and the
+   *      whole thing comes back after appearing to be fixed.
+   *
+   * The replacement is chosen the same way `setActiveAgencyId` chooses one — an Active AT
+   * of the same agency, else any of them, else nothing. Deliberately the same rule: two
+   * places choosing a default differently is how a screen ends up on an AT the sidebar does
+   * not agree with.
+   */
+  const forgetAtMaster = (atMasterId: string) => {
+    const gone = atMasters.find(a => a.id === atMasterId);
+    const remaining = atMasters.filter(a => a.id !== atMasterId);
+    setAtMasters(remaining);
+
+    if (activeAtMasterId !== atMasterId) return;
+
+    const agencyId = gone?.agencyId || activeAgencyId;
+    const siblings = remaining.filter(a => a.agencyId === agencyId);
+    const active = siblings.filter(a => String(a.status || '') === 'Active');
+    const next = active[0] || siblings[0] || null;
+
+    setActiveAtMasterIdState(next ? next.id : null);
+    if (agencyId) {
+      if (next) localStorage.setItem(`activeAtMasterId_${agencyId}`, next.id);
+      else localStorage.removeItem(`activeAtMasterId_${agencyId}`);
+    }
+  };
+
+  /**
    * Mirror a counter map the SAVE has already written into context state, so the next
    * suggestion in the same session does not read a stale value. It writes nothing to
    * Firestore - the caller's transaction has already committed.
@@ -1684,7 +1728,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
       predictNextJobNo, getJobNoPrefix, syncCountersState,
-      publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts
+      publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster
     }}>
       {children}
     </AgencyContext.Provider>

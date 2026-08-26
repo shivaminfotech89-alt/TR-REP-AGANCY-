@@ -22,7 +22,7 @@ function atPercentageHint(value: string): string {
 }
 
 export function AtSettings() {
-  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster } = useAgency();
+  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster, forgetAtMaster } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   // Kept until dismissed, not a toast. It reports what the new AT's job numbering will
   // start from, and any job number that could not be read - the operator creating the AT
@@ -82,7 +82,22 @@ export function AtSettings() {
     try {
       await deleteIfEmpty('atMasters', at.id);
       setEmptyAtIds(prev => { const n = new Set(prev); n.delete(at.id); return n; });
-      // The context refetches on its own; nothing here writes atMasters directly.
+
+      // ⚠ TELL THE CONTEXT. The delete happened in a Cloud Function, so nothing in the
+      // client knows unless it is told - and an earlier version of this line claimed "the
+      // context refetches on its own", which is simply not true: `atMasters` is fetched
+      // once and thereafter only added to and updated. The deleted tender stayed in every
+      // list, kept its chip on the Estimate Master header and stayed selectable (F78).
+      forgetAtMaster(at.id);
+
+      // THE SEED PANEL IS KEYED ON AN AT, and that AT may be the one just deleted -
+      // creating a tender and immediately thinking better of it is the exact case the
+      // delete button exists for. Left alone it would go on offering "Set rates for this
+      // AT" for a record that no longer exists.
+      if (seedReportAtNo && seedReportAtNo === (at.atNumber || at.name)) {
+        setSeedReport(null);
+        setSeedReportAtNo('');
+      }
     } catch (err) {
       const e = err as GuardedDeleteError;
       setDeleteError({
