@@ -1,5 +1,5 @@
 
-import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -292,6 +292,18 @@ export default function EstimateGenerate() {
    * type, because "the estimate master is wrong" does not tell an operator which of five
    * sections to open.
    */
+  /**
+   * JOBS ON THIS MR WHOSE RECORDED AT NO LONGER EXISTS.
+   *
+   * WARNS, does not block. The fallback prices them correctly enough to work with, and
+   * refusing to issue an estimate because someone deleted a tender would strand real work.
+   * But it must not be SILENT: that is the whole shape this change removes (AUDIT F72).
+   */
+  const jobsWithMissingAt = useMemo(
+    () => selectedJobsData.filter(j => atResolutionForJob(j, atMasters).source === 'at-missing'),
+    [selectedJobsData, atMasters]
+  );
+
   const blockIfMasterMisfiled = (action: string) => {
     const cores: string[] = Array.from(new Set<string>(
       jobs.filter((j: any) => j.mrNo === selectedMrNo).map((j: any) => String(j.coreType || 'CRGO'))
@@ -2650,6 +2662,37 @@ Circle Office : SABARMATI`}
                   Standard format: <strong className="font-mono text-slate-700">E. E. (O & M) DIVISION - {currentSelectedDivision}</strong>
                 </p>
               </div>
+
+              {/* A RECORDED TENDER THAT NO LONGER EXISTS.
+                  Warns, never blocks: the fallback prices these well enough to work with,
+                  and refusing to issue an estimate because someone deleted an AT would
+                  strand real work. What it must not be is silent - a job that HAS a
+                  recorded tender being priced from whatever is selected today, with
+                  nothing saying so, is the exact shape this change removes (AUDIT F72). */}
+              {jobsWithMissingAt.length > 0 && (
+                <div className="bg-rose-50 border border-rose-300 p-3 rounded-lg text-xs text-rose-900">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <div>
+                      <p className="font-bold">
+                        {jobsWithMissingAt.length === 1
+                          ? 'One transformer on this MR names an AT that no longer exists.'
+                          : `${jobsWithMissingAt.length} transformers on this MR name an AT that no longer exists.`}
+                      </p>
+                      <p className="mt-1">
+                        {jobsWithMissingAt.map((j: any) => j.jobNo).filter(Boolean).join(', ')}
+                        {' — '}priced from the AT selected now
+                        {activeAtMaster ? ` (${activeAtMaster.atNumber || activeAtMaster.name})` : ''},
+                        which may not be the tender they were booked under.
+                      </p>
+                      <p className="mt-1 font-semibold">
+                        Check this against the MR before issuing. Deleting an AT that still
+                        has jobs under it is what produces this.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="bg-amber-50 border border-amber-200 p-3 rounded flex items-center space-x-2 text-xs text-amber-800">
                 <input

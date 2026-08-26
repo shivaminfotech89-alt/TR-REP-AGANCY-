@@ -281,13 +281,55 @@ export function highWaterJobNos(
  * inferred is indistinguishable downstream from one that was recorded, and the whole point
  * is that a job's tender is a fact about the job.
  */
+export type AtResolution =
+  /** `atId` names an AT that exists. Priced from it. */
+  | { at: AtMaster; source: 'own' }
+  /** No `atId` at all - the job never recorded a tender. Documented fallback. */
+  | { at: null; source: 'no-at' }
+  /** `atId` names an AT that is GONE. Documented fallback, but a DATA FAULT. */
+  | { at: null; source: 'at-missing'; missingAtId: string };
+
+/**
+ * WHICH AT, AND WHY — the three cases kept apart.
+ *
+ * `no-at` and `at-missing` take the SAME pricing fallback, and that is deliberate: a job
+ * whose tender has been deleted still has to be priceable. But they are not the same fact
+ * and must not be collapsed into one.
+ *
+ *   no-at        the job never recorded a tender. Twelve live jobs. Expected.
+ *   at-missing   the job recorded one and it no longer exists. Deleting an AT that has
+ *                jobs under it produces this, and nothing in the app prevents or reports
+ *                it. Zero live jobs today - which is exactly when to build the distinction,
+ *                because the first one will appear silently.
+ *
+ * Returning `null` for both without saying which is the defect this whole change exists to
+ * remove, one level down: a job that HAS a recorded tender priced from whatever is selected
+ * today, with nothing anywhere saying it happened.
+ */
+export function atResolutionForJob(
+  job: { atId?: string | null } | null | undefined,
+  atMasters: AtMaster[] | null | undefined,
+): AtResolution {
+  const id = String(job?.atId ?? '').trim();
+  if (!id) return { at: null, source: 'no-at' };
+  const found = atMasters?.find(a => a.id === id);
+  if (found) return { at: found, source: 'own' };
+  return { at: null, source: 'at-missing', missingAtId: id };
+}
+
+/**
+ * THE AT A JOB WAS BOOKED UNDER, for pricing. `null` means "use the documented fallback",
+ * which every caller spells as `?? activeAtMaster`.
+ *
+ * Thin wrapper over atResolutionForJob. Callers that need to TELL THE OPERATOR why - rather
+ * than merely price - must use the resolution directly, because this deliberately flattens
+ * `no-at` and `at-missing` into the same `null`.
+ */
 export function atForJob(
   job: { atId?: string | null } | null | undefined,
   atMasters: AtMaster[] | null | undefined,
 ): AtMaster | null {
-  const id = String(job?.atId ?? '').trim();
-  if (!id || !atMasters) return null;
-  return atMasters.find(a => a.id === id) || null;
+  return atResolutionForJob(job, atMasters).at;
 }
 
 export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType: string = 'CRGO'): number {
