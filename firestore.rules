@@ -180,6 +180,18 @@ service cloud.firestore {
              (!('lastJobNumbers' in data) || (data.lastJobNumbers is map)) &&
              (!('allotments' in data) || (data.allotments is map)) &&
              (!('allotmentHistory' in data) || (data.allotmentHistory is list)) &&
+             // THE TENDER'S OWN RATE SCHEDULE. Rates moved from the agency onto the AT so
+             // that re-pricing an old job after a rollover cannot produce the new tender's
+             // figures for work done under the old one. Same shape as isValidSystemConfig's
+             // section clauses - a list or absent, nothing asserted about the contents.
+             (!('estimateMasterCRGO' in data) || (data.estimateMasterCRGO is list)) &&
+             (!('estimateMasterAmorphous' in data) || (data.estimateMasterAmorphous is list)) &&
+             (!('estimateMasterWoundCore' in data) || (data.estimateMasterWoundCore is list)) &&
+             (!('estimateMasterOverhauling' in data) || (data.estimateMasterOverhauling is list)) &&
+             (!('estimateMasterCircleLimits' in data) || (data.estimateMasterCircleLimits is list)) &&
+             (!('ratesSource' in data) || (data.ratesSource is string && data.ratesSource.size() <= 200)) &&
+             (!('publishedAtVersion' in data) || (data.publishedAtVersion is number)) &&
+             (!('ratesUpdatedAt' in data) || (data.ratesUpdatedAt is number || data.ratesUpdatedAt is string)) &&
              (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string)) &&
              (!('updatedAt' in data) || (data.updatedAt is number || data.updatedAt is string));
     }

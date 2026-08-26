@@ -213,6 +213,39 @@ export interface AtMaster {
   allotments?: Record<string, Record<string, number>>;
   allotmentHistory?: AllotmentRecord[];
   prefixes?: Record<string, string | Record<string, string>>;
+
+  /**
+   * THE RATES FOR THIS TENDER. Rates belong to the AT, not to the agency.
+   *
+   * A tender is negotiated with its own schedule; a rollover is a new schedule. Holding
+   * them on the agency meant one set of rates for every tender the agency had ever worked
+   * under, so re-pricing an old job after a rollover produced the NEW tender's figures for
+   * work done under the OLD one.
+   *
+   * Empty on a newly created AT, deliberately. `ratesSource` says which of the four states
+   * an AT is in, so "not entered yet" is never mistaken for "entered and empty".
+   */
+  estimateMasterCRGO?: EstimateItem[];
+  estimateMasterAmorphous?: EstimateItem[];
+  estimateMasterWoundCore?: EstimateItem[];
+  estimateMasterOverhauling?: EstimateItem[];
+  estimateMasterCircleLimits?: EstimateItem[];
+
+  /**
+   * WHERE THIS AT'S RATES CAME FROM. Absent means NONE ENTERED YET.
+   *
+   *   'own'                rates typed for this tender
+   *   'inherited-agency'   migrated from the agency's sections. Records the fallthrough as
+   *                        a FACT rather than leaving it invisible - a silent fallthrough
+   *                        is the 'JOB' sentinel again (F71)
+   *   'published:<id>'     copied from an admin-published template
+   *   absent               new AT, no rates. Pricing screens block, and say so
+   */
+  ratesSource?: string;
+  /** Version of the published template this was copied from, if any. See publishedAtVersion drift. */
+  publishedAtVersion?: number;
+  /** When the rates were last set on this AT, whatever the source. */
+  ratesUpdatedAt?: number;
 }
 
 export function getCounterKey(division: string, coreType: string = 'CRGO'): string {
