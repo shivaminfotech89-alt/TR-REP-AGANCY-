@@ -3072,6 +3072,77 @@ labelled like the first; the one here was a radio button in a Save dialog.
 
 ---
 
+### F75. Two correct commits, three days apart, that stopped anyone creating an AT
+
+**Creating an AT failed with "Missing or insufficient permissions".** Not a privilege
+problem, and nothing to do with the rules change that was suspected — the deployed ruleset
+was byte-identical to the repo.
+
+**The mechanism.** `serverTimestamp()` resolves to a Firestore `timestamp`. Every validator
+spelled its time fields out by hand:
+
+    (!('createdAt' in data) || (data.createdAt is number || data.createdAt is string))
+
+A `timestamp` is neither. The clause evaluates false, the whole `&&` chain is false, and the
+write is refused.
+
+**Neither commit was wrong.**
+
+| | |
+|---|---|
+| `e8235e0` (18 Aug) | added the `is number \|\| is string` clauses — correct when nothing wrote a `timestamp` |
+| `f744ba6` (23 Aug) | *"stamp creation time on agencies and AT masters"* — started writing `serverTimestamp()`, correct because a client clock is not to be trusted |
+
+Each is defensible alone. Together they refuse every create. Nobody reviewed the writer
+against the rule, because the rule is in a different file, a different language, and is
+deployed by a different action.
+
+**IT WENT UNNOTICED FOR THREE DAYS BECAUSE NOBODY PERFORMED THE ACTION.** The evidence is in
+the data: **all six existing ATs have `createdAt` ABSENT**, and so do all seven agencies.
+Every one predates `f744ba6`. Not a single document has ever been created successfully since
+the stamp was added — the failure was total, and total failure of an action nobody takes is
+indistinguishable from everything working.
+
+**Two more collections had it, and one was invisible for the same reason.**
+
+| Validator | Writer | State |
+|---|---|---|
+| `isValidAtMaster` | `addAtMaster` | the reported failure |
+| `isValidAgency` | `addAgency` (`AgencyContext.tsx:1172`, identical shape) | **same defect**, unnoticed — 7 agencies, all `createdAt` ABSENT |
+| `isValidOilTransaction` | `OilInward.tsx:255` | **same defect**, latent |
+
+The oil case nearly escaped notice a second time. Its four transactions **do** carry
+`Timestamp` values, which looks like proof the clause accepts them — and that validator alone
+carried `|| data.createdAt is map`, which reads like somebody's fix for exactly this. Both
+readings are wrong: the transactions were written **12–15 August** and the clause landed on
+**18 August**. They predate it. `is map` has never once been evaluated against a
+`serverTimestamp` write, and nobody has created an oil transaction since.
+
+**A near-miss worth recording on its own:** existing data that survived a rule is only
+evidence about the rule if the data was written *after* the rule was deployed. Checking the
+dates is what separated "this clause works" from "this clause has never run".
+
+**F45 IS THE SAME BUG, ALREADY RECORDED, ALREADY SOLVED THE OTHER WAY.** Inspections were
+reverted from `serverTimestamp()` to `Date.now()` for precisely this reason. So the trap was
+known, written down, and left in place — the rule was never widened, so the next writer to
+reach for the server clock fell into it. Fixing the symptom at one writer left the cause for
+the next.
+
+**Resolved.** One helper, `isTimeValue(v)`, accepting `number`, `string`, `timestamp` and
+`map`; **12 clauses across every validator** now call it. Widening an accepted TYPE is not
+widening a permission — who may write is untouched. `Date.now()` was rejected as the fix: it
+would undo the point of `f744ba6` to satisfy a rule, and F45 shows where that leads.
+
+**Why one function rather than twelve corrected copies:** twelve hand-written copies of one
+clause is what let them drift in the first place — one of them already carried `|| is map`
+that no other had. A single definition cannot drift from itself.
+
+**The rule this leaves:** a validator and the code that writes to it are one change, not two.
+When a write starts sending a new field or a new TYPE, the rule is part of that commit —
+being in another file and another language does not make it another change.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D0. Job numbers are DERIVED, and typing over one does not persist
