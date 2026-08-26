@@ -6,6 +6,7 @@ import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
 import { formatDDMMYYYY } from '../lib/utils';
 import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
+import { computeOilBalance } from '../lib/oilBalance';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
@@ -22,7 +23,7 @@ function atPercentageHint(value: string): string {
 }
 
 export function AtSettings() {
-  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster, forgetAtMaster } = useAgency();
+  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster, forgetAtMaster, carryOilBalanceForward } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   // Kept until dismissed, not a toast. It reports what the new AT's job numbering will
   // start from, and any job number that could not be read - the operator creating the AT
@@ -76,6 +77,83 @@ export function AtSettings() {
     })();
     return () => { cancelled = true; };
   }, [atMasters, activeAgency?.id, auth.currentUser?.uid]);
+
+  /**
+   * THE CLOSING OIL BALANCE OF EACH TENDER, for the carry-forward offer (AUDIT F82).
+   *
+   * Computed with `computeOilBalance`, the same function the Oil Account register uses. A
+   * second implementation is how the figure someone confirms comes to differ from the figure
+   * the register shows, and this one is the balance the DISCOM is owed against.
+   *
+   * A tender's closing balance is what it OPENED with plus what it moved - a tender that
+   * opened owing 210 and consumed none still owes 210.
+   */
+  const [oilByAt, setOilByAt] = useState<Record<string, { net: number; jobs: number; txns: number }>>({});
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !activeAgency) { setOilByAt({}); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [jobSnap, inspSnap, txSnap] = await Promise.all([
+          getDocs(query(collection(db, 'jobs'), where('ownerId', '==', uid), where('agencyId', '==', activeAgency.id))),
+          getDocs(query(collection(db, 'inspections'), where('ownerId', '==', uid))),
+          getDocs(query(collection(db, 'oilTransactions'), where('ownerId', '==', uid), where('agencyId', '==', activeAgency.id))),
+        ]);
+        const jobs = jobSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        const inspections = inspSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        const txns = txSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+
+        const out: Record<string, { net: number; jobs: number; txns: number }> = {};
+        for (const at of atMasters.filter(t => t.agencyId === activeAgency.id)) {
+          const b = computeOilBalance({
+            jobs: jobs.filter(j => String(j.atId ?? '') === at.id),
+            inspections,
+            transactions: txns.filter(t => String(t.atId ?? '') === at.id),
+          });
+          const opening = Number((at as any).openingOilBalance);
+          out[at.id] = {
+            net: Number(((Number.isFinite(opening) ? opening : 0) + b.net).toFixed(2)),
+            jobs: b.jobsCounted,
+            txns: b.transactionsCounted,
+          };
+        }
+        if (!cancelled) setOilByAt(out);
+      } catch {
+        if (!cancelled) setOilByAt({});   // unknown, and an unknown balance is never offered
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [atMasters, activeAgency?.id, auth.currentUser?.uid]);
+
+  /**
+   * THE TENDER A GIVEN AT WOULD CARRY ITS OPENING BALANCE FROM: the agency's most recent
+   * tender that STARTED EARLIER. `startDate` is the tender period the operator typed, which
+   * is the right ordering for "the one before this" - creation order is not.
+   */
+  const previousAtFor = (at: AtMaster): AtMaster | null => {
+    const earlier = atMasters
+      .filter(t => t.agencyId === at.agencyId && t.id !== at.id && (t.startDate || 0) < (at.startDate || 0))
+      .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+    return earlier[0] || null;
+  };
+
+  const [carryTarget, setCarryTarget] = useState<{ to: AtMaster; from: AtMaster; litres: number } | null>(null);
+  const [carrying, setCarrying] = useState(false);
+
+  const runCarry = async () => {
+    if (!carryTarget) return;
+    setCarrying(true);
+    try {
+      await carryOilBalanceForward(carryTarget.to.id, carryTarget.from.id, carryTarget.litres);
+      setCarryTarget(null);
+    } catch (err) {
+      alert('Could not record the opening balance. Nothing was changed.\n\n' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setCarrying(false);
+    }
+  };
 
   const runDelete = async (at: AtMaster) => {
     setConfirmDeleteAt(null);
@@ -466,6 +544,60 @@ export function AtSettings() {
         </div>
       )}
 
+      {/* THE CARRY-FORWARD CONFIRMATION — the figure, and the tender it closes. */}
+      {carryTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-indigo-200">
+            <h3 className="text-base font-bold text-slate-900">
+              Carry the oil balance into AT {carryTarget.to.atNumber || carryTarget.to.name}?
+            </h3>
+            <div className="mt-3 p-3 rounded-lg bg-indigo-50 border border-indigo-300">
+              <div className="text-[11px] uppercase font-bold tracking-widest text-indigo-700">
+                Closing balance of AT {carryTarget.from.atNumber || carryTarget.from.name}
+              </div>
+              <div className="font-mono font-black text-2xl text-indigo-900">
+                {carryTarget.litres >= 0 ? '+' : ''}{carryTarget.litres.toFixed(2)} LTR
+              </div>
+              <div className="text-[11px] text-indigo-800 mt-0.5">
+                {carryTarget.litres > 0
+                  ? 'The agency owes this much oil.'
+                  : carryTarget.litres < 0 ? 'The agency is owed this much oil.' : 'The tender closes level.'}
+                {' '}From {oilByAt[carryTarget.from.id]?.jobs ?? 0} job(s) and{' '}
+                {oilByAt[carryTarget.from.id]?.txns ?? 0} transaction(s).
+              </div>
+            </div>
+
+            {/* WHICH TENDER IS BEING CLOSED, said plainly - and whether it is still open.
+                A tender still marked Active can move again after this is recorded, which
+                does not make the figure wrong, only provisional. */}
+            {String(carryTarget.from.status || '').toLowerCase() !== 'closed' && (
+              <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg p-3 mt-3">
+                <strong>AT {carryTarget.from.atNumber || carryTarget.from.name} is still marked Active.</strong>{' '}
+                Its balance can change after this is recorded, and the figure carried here will not
+                follow it. Mark it Closed first if it is finished.
+              </p>
+            )}
+
+            <p className="text-[11px] text-slate-600 mt-3">
+              This is recorded, not computed on the fly &mdash; it will not move if an old
+              transaction is later edited. The source tender is stored with it so the number can
+              be checked.
+            </p>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setCarryTarget(null)} disabled={carrying}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300">
+                Cancel
+              </button>
+              <button type="button" onClick={runCarry} disabled={carrying}
+                      className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg disabled:opacity-50">
+                {carrying ? 'Recording…' : `Record ${carryTarget.litres.toFixed(2)} LTR as the opening balance`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* CONFIRM — names what is about to go, and what it is not. */}
       {confirmDeleteAt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
@@ -669,6 +801,41 @@ export function AtSettings() {
                                 behind `emptyAtIds` is stale the moment another tab saves an
                                 intake. This decides what to show; the function decides what
                                 happens. */}
+                            {/* CARRY THE PREVIOUS TENDER'S CLOSING BALANCE IN (AUDIT F82).
+                                A SEPARATE ACT, deliberately not part of creating the AT: at
+                                creation the operator is naming a tender and setting dates,
+                                and an oil balance appearing in that flow is a number they
+                                would confirm without reading. Here it is a decision.
+
+                                REPEATABLE-SAFE: once carried, the card says so and does not
+                                offer it again. Re-carrying after a correction is possible
+                                through the same action only because the stamp records when
+                                it last happened. */}
+                            {(() => {
+                              const carried = Number((at as any).openingOilBalance);
+                              if (Number.isFinite(carried)) {
+                                const src = atMasters.find(x => x.id === (at as any).openingOilBalanceFromAtId);
+                                return (
+                                  <span
+                                    title={`Carried from AT ${src?.atNumber || src?.name || '(unknown)'}`}
+                                    className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg"
+                                  >
+                                    Opening oil {carried >= 0 ? '+' : ''}{carried.toFixed(2)} L
+                                  </span>
+                                );
+                              }
+                              const prev = previousAtFor(at);
+                              const bal = prev ? oilByAt[prev.id] : undefined;
+                              if (!prev || !bal) return null;
+                              return (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); setCarryTarget({ to: at, from: prev, litres: bal.net }); }}
+                                  className="text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg"
+                                >
+                                  Carry oil from {prev.atNumber || prev.name}
+                                </button>
+                              );
+                            })()}
                             {emptyAtIds.has(at.id) && (
                               <button
                                 onClick={(e) => { e.stopPropagation(); setConfirmDeleteAt(at); }}
