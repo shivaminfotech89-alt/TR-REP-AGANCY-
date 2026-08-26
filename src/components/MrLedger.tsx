@@ -12,7 +12,7 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useAgency, highWaterJobNos, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
+import { useAgency, highWaterJobNos, atScope, NO_ACTIVE_AT, isIntakeOpen } from '../lib/AgencyContext';
 import { 
   Loader2, 
   Search, 
@@ -126,6 +126,16 @@ export default function MrLedger() {
    * job names a tender, so there is nothing to infer from - scripts/admin/assign-at.js
    * refuses all twelve for exactly that reason. Each needs a human with the MR paperwork.
    */
+  /**
+   * ADDING A UNIT CREATES NEW WORK, so it obeys the same gate as New Job (AUDIT F83).
+   * Editing the units already on an MR does not, and is untouched: a transformer received
+   * under a tender is finished under it.
+   */
+  const intakeGate = useMemo(
+    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id)),
+    [activeAtMaster, atMasters, activeAgency?.id],
+  );
+
   const [unassignedJobs, setUnassignedJobs] = useState<any[]>([]);
   const [showUnassigned, setShowUnassigned] = useState(false);
 
@@ -1252,14 +1262,25 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     );
                   })()}
 
-                  <button
-                    type="button"
-                    onClick={handleAddTransformerToMr}
-                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Unit to this MR</span>
-                  </button>
+                  {/* THE REASON IN ITS PLACE, not a disabled control. A greyed button still
+                      says "this is a thing you might do to this MR", and under a closed
+                      tender it is not (AUDIT F83). Editing the units already here is
+                      unaffected - only adding a NEW one is refused. */}
+                  {intakeGate.open ? (
+                    <button
+                      type="button"
+                      onClick={handleAddTransformerToMr}
+                      className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Add Unit to this MR</span>
+                    </button>
+                  ) : (
+                    <span className="px-3 py-1.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-semibold max-w-xs">
+                      No new units: {intakeGate.reason} The units already on this MR can still be
+                      edited, inspected, tested and dispatched.
+                    </span>
+                  )}
                 </div>
 
                 <div className="space-y-3">

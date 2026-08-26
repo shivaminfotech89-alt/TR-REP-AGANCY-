@@ -391,6 +391,92 @@ export function getCounterKey(division: string, coreType: string = 'CRGO'): stri
  */
 export const NO_ACTIVE_AT = '__no_active_at__';
 
+/**
+ * IS THIS TENDER OPEN TO NEW WORK? (AUDIT F83)
+ *
+ * Once a new AT starts, the old one accepts NO NEW WORK - no new MRs, no new jobs, no new
+ * oil entries. It stays fully usable for everything already booked under it: inspections,
+ * testing, challans, estimates, bills, reports. A transformer received under 26-27 is
+ * inspected, tested and dispatched under 26-27, whenever that work actually happens.
+ *
+ * ONE FUNCTION, THREE CALLERS - New Job, MrLedger's add-unit, and Oil Inward. Those are the
+ * only three paths in the app that create a job, an MR or an oil transaction; everything
+ * else writes onto a record that already exists. Three copies of this test is the shape that
+ * has cost this session twice already (F73's three publish paths, F81's two parsers).
+ *
+ * THE RULES, IN ORDER:
+ *
+ *   1. `status === 'Closed'` -> CLOSED. Unambiguous and operator-declared.
+ *
+ *   2. Not the agency's CURRENT tender -> CLOSED. Current is the Active AT with the latest
+ *      `startDate`. `status === 'Active'` alone is not enough: UPENDRA has TWO ATs marked
+ *      Active in live data, and on the plain test both would accept new work, one of them a
+ *      tender that finished years ago.
+ *
+ *   3. Anything else - blank, unrecognised, or the only tender there is -> OPEN. Deliberate.
+ *      Every existing AT predates this rule, and refusing intake because a field was never
+ *      set would break working agencies on a technicality, silently, with nothing telling
+ *      whoever configured them what happened.
+ */
+export interface IntakeGate {
+  open: boolean;
+  /** Why it is closed, in the operator's terms. Empty when open. */
+  reason: string;
+  /** The tender that IS open, when this one is not - so the message can offer it. */
+  currentAt: AtMaster | null;
+}
+
+export function isIntakeOpen(
+  at: AtMaster | null | undefined,
+  agencyAts: AtMaster[],
+): IntakeGate {
+  const active = agencyAts
+    .filter(t => String(t.status || '').toLowerCase() === 'active')
+    .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+  const currentAt = active[0] || null;
+
+  if (!at) {
+    return { open: false, reason: 'No tender is selected. New work is recorded against a tender.', currentAt };
+  }
+
+  const label = at.atNumber || at.name || at.id;
+
+  // 1
+  if (String(at.status || '').toLowerCase() === 'closed') {
+    return {
+      open: false,
+      reason: `AT ${label} is marked Closed, so no new MRs, jobs or oil entries can be recorded against it.`,
+      currentAt,
+    };
+  }
+
+  // 2
+  if (currentAt && currentAt.id !== at.id) {
+    return {
+      open: false,
+      reason: `AT ${label} has been superseded by AT ${currentAt.atNumber || currentAt.name}. New work belongs to the current tender.`,
+      currentAt,
+    };
+  }
+
+  // 3
+  return { open: true, reason: '', currentAt: currentAt || at };
+}
+
+/**
+ * MORE THAN ONE TENDER MARKED ACTIVE — a data fault the app can see (AUDIT F83).
+ *
+ * `isIntakeOpen` rule 2 handles it safely by taking the latest, so nothing breaks. But a
+ * fault the app can see and does not mention is one nobody fixes, so Tenders names it.
+ */
+export function otherActiveAts(at: AtMaster, agencyAts: AtMaster[]): AtMaster[] {
+  if (String(at.status || '').toLowerCase() !== 'active') return [];
+  return agencyAts.filter(t =>
+    t.id !== at.id &&
+    t.agencyId === at.agencyId &&
+    String(t.status || '').toLowerCase() === 'active');
+}
+
 export function atScope(activeAtMaster: AtMaster | null | undefined): string | null {
   const id = String(activeAtMaster?.id ?? '').trim();
   return id || null;

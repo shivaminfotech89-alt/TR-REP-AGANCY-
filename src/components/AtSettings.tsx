@@ -7,6 +7,7 @@ import { AtDivisions } from './AtDivisions';
 import { formatDDMMYYYY } from '../lib/utils';
 import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
 import { computeOilBalance } from '../lib/oilBalance';
+import { otherActiveAts } from '../lib/AgencyContext';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
@@ -801,6 +802,24 @@ export function AtSettings() {
                                 behind `emptyAtIds` is stale the moment another tab saves an
                                 intake. This decides what to show; the function decides what
                                 happens. */}
+                            {/* MORE THAN ONE TENDER MARKED ACTIVE (AUDIT F83).
+                                isIntakeOpen handles it safely by taking the one with the
+                                latest start date, so nothing breaks - but a data fault the
+                                app can see and does not mention is one nobody fixes. UPENDRA
+                                has exactly this in live data. */}
+                            {(() => {
+                              const others = otherActiveAts(at, agencyAts);
+                              if (others.length === 0) return null;
+                              return (
+                                <span
+                                  title="Only one tender should be Active at a time"
+                                  className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2.5 py-1.5 rounded-lg max-w-xs"
+                                >
+                                  Also Active: {others.map(o => o.atNumber || o.name).join(', ')} &mdash;
+                                  new work goes to whichever started latest
+                                </span>
+                              );
+                            })()}
                             {/* CARRY THE PREVIOUS TENDER'S CLOSING BALANCE IN (AUDIT F82).
                                 A SEPARATE ACT, deliberately not part of creating the AT: at
                                 creation the operator is naming a tender and setting dates,

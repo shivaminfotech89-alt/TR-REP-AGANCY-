@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useAgency, atScope, NO_ACTIVE_AT } from "../lib/AgencyContext";
+import { useAgency, atScope, NO_ACTIVE_AT, isIntakeOpen } from "../lib/AgencyContext";
 import { db, auth, handleFirestoreError, OperationType } from "../lib/firebase";
 import * as XLSX from "xlsx";
 import {
@@ -50,7 +50,13 @@ export interface OilTransaction {
 }
 
 export default function OilInward() {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters } = useAgency();
+/**
+   * NEW OIL ENTRIES OBEY THE TENDER GATE (AUDIT F83). Oil already recorded under this
+   * tender stays visible and stays in its balance; only NEW entries are refused.
+   */
+  const intakeGate = isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id));
+
   const [transactions, setTransactions] = useState<OilTransaction[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
@@ -233,6 +239,16 @@ export default function OilInward() {
   };
 
   const handleSave = async (e: React.FormEvent) => {
+    // ⚠ THE GATE IS IN THE HANDLER, not only on the button. Hiding a control is what the
+    // operator sees; this is what happens. An edit is always allowed - correcting oil
+    // already recorded under this tender is work on an existing record (AUDIT F83).
+    if (!editingId && !intakeGate.open) {
+      e.preventDefault();
+      alert(`No new oil entries can be recorded against this tender.
+
+${intakeGate.reason}`);
+      return;
+    }
     e.preventDefault();
     if (!activeAgency || !auth.currentUser) return;
 
@@ -999,13 +1015,24 @@ export default function OilInward() {
                     Cancel Edit
                   </button>
                 )}
-                <button
-                  type="submit"
-                  className="flex items-center px-6 py-2 text-sm font-bold uppercase tracking-wider bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                >
-                  <Save className="w-4 h-4 mr-2" />
-                  {editingId ? "Update Entry" : "Save Inward Entry"}
-                </button>
+                {/* A NEW ENTRY OBEYS THE TENDER GATE; AN EDIT DOES NOT (AUDIT F83).
+                    `editingId` is the distinction: correcting oil already recorded under
+                    this tender is work on an existing record, which an old tender stays
+                    open for. Only a NEW entry creates work. */}
+                {(editingId || intakeGate.open) ? (
+                  <button
+                    type="submit"
+                    className="flex items-center px-6 py-2 text-sm font-bold uppercase tracking-wider bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
+                  >
+                    <Save className="w-4 h-4 mr-2" />
+                    {editingId ? "Update Entry" : "Save Inward Entry"}
+                  </button>
+                ) : (
+                  <span className="px-4 py-2 text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 rounded max-w-md">
+                    No new oil entries: {intakeGate.reason} Oil already recorded under this
+                    tender stays in its balance and can still be corrected.
+                  </span>
+                )}
               </div>
             </form>
           </div>

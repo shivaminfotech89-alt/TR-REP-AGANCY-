@@ -32,7 +32,7 @@ import {
   Tag,
   Scale
 } from 'lucide-react';
-import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { useAgency, getCircleLimitsEstimateMaster, isIntakeOpen } from '../lib/AgencyContext';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
@@ -203,7 +203,7 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState, setActiveAtMasterId } = useAgency();
 
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
@@ -515,6 +515,39 @@ export default function NewJob() {
   /** Stash the in-progress intake so leaving to fix agency setup does not mean
    *  re-entering it. Session-scoped and agency-scoped; cleared once restored. */
   const intakeDraftKey = `intakeDraft_${activeAgency?.id || 'none'}`;
+
+  /**
+   * IS THIS TENDER OPEN TO NEW INTAKE? (AUDIT F83)
+   *
+   * An old AT accepts no new work. It stays fully usable for everything already booked under
+   * it - inspections, testing, challans, estimates, bills - because a transformer received
+   * under 26-27 is finished under 26-27 whenever that work happens. Only NEW units are
+   * refused, and New Job is the path that creates them.
+   */
+  const intakeGate = useMemo(
+    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id)),
+    [activeAtMaster, atMasters, activeAgency?.id],
+  );
+
+  /**
+   * ⚠ SWITCHING TENDER MID-ENTRY MUST NOT DESTROY THE ENTRY.
+   *
+   * This is the realistic way the block bites: the operator is half-way through an intake,
+   * changes the AT in the top bar for some other reason, and the form they were filling is
+   * now against a tender that refuses it. A block that discarded that entry would be the
+   * same failure it exists to prevent - a lost intake - so the draft is stashed the moment
+   * the tender closes under them, and the banner offers it back under the current tender.
+   *
+   * Stashed rather than restored automatically: restoring into a different tender without
+   * being asked is how an MR ends up booked against the wrong one.
+   */
+  const [draftStashedFromSwitch, setDraftStashedFromSwitch] = useState(false);
+  useEffect(() => {
+    if (intakeGate.open) return;
+    if (!intakeHasData()) return;
+    saveIntakeDraft();
+    setDraftStashedFromSwitch(true);
+  }, [intakeGate.open]);
 
   const saveIntakeDraft = () => {
     try {
@@ -1642,6 +1675,80 @@ export default function NewJob() {
   const handlePrintReceipt = () => {
     window.print();
   };
+
+  /**
+   * ⚠ CLOSED TO NEW INTAKE — SAID BEFORE ANYTHING IS TYPED, NOT AT SAVE (AUDIT F83).
+   *
+   * An operator who fills in a full intake - several transformers, serials, capacities - and
+   * is refused at the end has lost the entry. So the form is not rendered at all: a banner
+   * alone would leave live fields inviting exactly that, and "read the warning but the inputs
+   * still work" is not a block, it is a hint.
+   *
+   * Everything already booked under this tender stays available elsewhere - inspections,
+   * testing, challans, estimates, bills. Only NEW units are refused, which is the whole
+   * distinction: new work versus work on units already recorded.
+   */
+  if (!intakeGate.open) {
+    return (
+      <div className="w-full max-w-full space-y-4">
+        <div className="bg-white rounded-xl border-2 border-amber-300 shadow-xs p-6">
+          <div className="flex items-start gap-3">
+            <div className="bg-amber-100 p-2.5 rounded-xl shrink-0">
+              <AlertTriangle className="w-6 h-6 text-amber-700" />
+            </div>
+            <div className="min-w-0">
+              <h1 className="text-lg font-bold text-slate-900">
+                This tender is closed to new intake
+              </h1>
+              <p className="text-sm text-slate-700 mt-1">{intakeGate.reason}</p>
+
+              <p className="text-xs text-slate-600 mt-3">
+                Work already booked under it continues normally &mdash; inspections, testing,
+                dispatch challans, estimates and bills are all still available for those units.
+                A transformer received under a tender is finished under that tender, whenever
+                the work actually happens. Only <strong>new</strong> units are refused here.
+              </p>
+
+              {/* THE DRAFT, IF THE TENDER CLOSED UNDER THEM MID-ENTRY.
+                  Stashed, not silently restored: putting a half-typed MR into a different
+                  tender without being asked is how one gets booked against the wrong one. */}
+              {draftStashedFromSwitch && (
+                <div className="mt-3 p-3 rounded-lg bg-blue-50 border border-blue-300 text-xs text-blue-900">
+                  <strong className="font-bold block">Your entry was saved.</strong>
+                  You had an intake in progress when the tender changed. It is kept, and will be
+                  offered back when you open New Job under a tender that accepts new work.
+                </div>
+              )}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {intakeGate.currentAt && activeAtMaster && intakeGate.currentAt.id !== activeAtMaster.id && (
+                  <button
+                    type="button"
+                    onClick={() => setActiveAtMasterId(intakeGate.currentAt!.id)}
+                    className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm"
+                  >
+                    Switch to AT {intakeGate.currentAt.atNumber || intakeGate.currentAt.name} and continue
+                  </button>
+                )}
+                <Link
+                  to="/agency-settings?section=at"
+                  className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg"
+                >
+                  Open Tenders
+                </Link>
+                <Link
+                  to="/mr-ledger"
+                  className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg"
+                >
+                  Back to the MR Register
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="w-full max-w-full overflow-x-hidden space-y-4 pb-24 sm:pb-16 print:m-0 print:p-0">
