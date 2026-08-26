@@ -3217,6 +3217,91 @@ intake saved in between would be orphaned silently. `MODE = 'dry-run'` in the re
 
 ---
 
+### F81. A check measuring something that was never the problem
+
+**The warning:** creating an AT reported *"N job numbers could not be read — so the starting
+number for those divisions may be lower than the highest already issued."* Prominent, amber,
+and shown at the moment a tender is created.
+
+**It was measuring a disagreement between two parsers, not a fault in the data.**
+
+| | reads a job number as | `SU-12A` | `102` |
+|---|---|---|---|
+| the SEEDER (`addAtMaster`) | `/(\d+)\s*$/` — trailing digit run | **unreadable** | 102 |
+| the LIVE PATH (`getAutoJobNo`) | `parseInt` after the prefix | **12** | — |
+
+So a number the seeder called unreadable and warned about, the code that decides real job
+numbers read perfectly well. **The strict parser was the one wired to a user-facing warning;
+the tolerant one silently decided the numbers.**
+
+---
+
+**AND THE VALUE IT WARNED ABOUT IS READ BY NOTHING.**
+
+`lastJobNumbers` has exactly three consumers:
+
+- the save-time advance in `NewJob` and `MrLedger` — reads the current value only to decide
+  whether to write a **higher** one;
+- the seeder, seeding a new AT from existing counters;
+- `predictNextJobNo`, which has **zero callers**.
+
+Every suggested job number comes from **saved jobs**: `getAutoJobNo` reads `pastJobs`,
+MrLedger reads `editingMr.jobs` then `mrGroups`. So an under-seeded counter has no
+consequence — and because the advance only ever moves upward, a low counter **corrects
+itself at the next save**. The warning described a condition that was invisible and
+self-healing.
+
+**Live data: 0 unreadable job numbers in 64.** It had never fired.
+
+---
+
+**THE INVERTED SHAPE, and why it is worth a separate entry.**
+
+Five checks in this audit have reported outside their own model — `delta-must-be-1`, a
+counter key matched by division prefix, a `head`-truncated inventory, an exact-string
+comparison that could not detect mistyping, `JSON.stringify` comparing key order. Every one
+was a check **too narrow to see the thing it was about**.
+
+This is the opposite: a check that worked exactly as written, on a quantity **that was never
+the problem**. Nothing was too narrow. It measured the wrong thing, precisely, and reported
+it prominently to a user who could do nothing with it — and the answer to "what would fixing
+it mean" turned out to be *nothing*, which is how the measurement was exposed.
+
+**The question that catches this one:** not "is the check correct?" but **"if this fires,
+what does the operator do — and does anything read the value it is about?"** A warning whose
+answer to both is *nothing* is not a conservative safeguard; it is noise with authority.
+
+---
+
+**THE FIX ALMOST INTRODUCED A REAL BUG, and the before/after check caught it.**
+
+The obvious unification — point the seeder at the existing `highWaterJobNos` — would have
+been wrong. That function required a dash before the digits, and **AARATI's highest job
+numbers are bare**: `1`, `2`, `101`, `102`, with no prefix at all. Seeding a new AT would
+have dropped its `SABARMATI` counter from **102 to 5**, losing 97 numbers.
+
+    === COUNTERS A NEW AT WOULD BE SEEDED WITH ===
+      ⚠ 2 counter(s) differ:
+        AARATI TRANSFORMER  SABARMATI       102 -> 5
+        AARATI TRANSFORMER  SABARMATI_CRGO  102 -> 5
+
+`scripts/admin/seed-parser-equivalence.js` reported that **before the change was made**.
+Reading the code did not, and would not have: nothing in either parser says "AARATI has bare
+job numbers". Only the data says that.
+
+That also means `highWaterJobNos` had a live gap of its own — a job saved with a bare number
+would not have advanced the counter at either save path. Unreachable in practice, because
+the OGP prefix check refuses a number without the configured prefix, but it was there.
+
+**Resolved:** one function, `jobNoSequence` — after the last dash when there is one, the
+whole string when there is not. `highWaterJobNos` delegates to it and the seeder calls it.
+The `unparsed` and `unparsedKeys` fields, and the amber block that rendered them, are
+**deleted along with the discrepancy that produced them** rather than moved somewhere better
+— there was nothing left to report. After: counters identical for every agency and every
+key, and no stored job number read differently by the two rules.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D0. Job numbers are DERIVED, and typing over one does not persist

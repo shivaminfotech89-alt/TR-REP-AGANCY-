@@ -196,10 +196,6 @@ export interface AllotmentRecord {
 export interface AtSeedReport {
   /** Counter keys and the starting number seeded for each. */
   counters: Record<string, number>;
-  /** Job numbers whose numeric tail could not be read, verbatim. */
-  unparsed: string[];
-  /** Counter keys affected by an unparseable job number. */
-  unparsedKeys: string[];
   jobsScanned: number;
 }
 
@@ -329,6 +325,32 @@ export function getCounterKey(division: string, coreType: string = 'CRGO'): stri
  * batch. Deliberately not merged into one applier: NewJob's atomicity with the job writes
  * is worth more than sharing five lines.
  */
+/**
+ * THE SEQUENCE NUMBER IN A JOB NUMBER — the one reading of it, used everywhere.
+ *
+ * "SU-27" -> 27,  "21 IS-40" -> 40,  "102" -> 102,  "SU-12A" -> 12,  "OH21 IS" -> null
+ *
+ * After the LAST dash when there is one, because a prefix may contain one itself ("21 IS",
+ * "OH-A"); the WHOLE STRING when there is not, because legacy records carry bare numbers
+ * with no prefix at all - AARATI's 1, 2, 101 and 102 are exactly that.
+ *
+ * ⚠ THE BARE-NUMBER CASE WAS ALMOST DROPPED. Unifying the seeder onto this function's older
+ * rule - which required a dash - would have seeded AARATI's SABARMATI counter at 5 instead
+ * of 102, losing 97 numbers, because its highest job numbers carry no prefix. The
+ * before/after check caught it; reading the code did not (AUDIT F81).
+ *
+ * Tolerant on purpose, and deliberately the same reading `getAutoJobNo` performs when it
+ * looks a number up to suggest the next one. A stricter rule here than the one deciding real
+ * job numbers is exactly the discrepancy this replaces.
+ */
+export function jobNoSequence(jobNo: string | null | undefined): number | null {
+  const raw = String(jobNo ?? '').trim();
+  if (!raw) return null;
+  const dash = raw.lastIndexOf('-');
+  const n = parseInt(dash >= 0 ? raw.slice(dash + 1) : raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 export function highWaterJobNos(
   rows: { jobNo?: string | null; coreType?: string | null; repairType?: string | null; isGp?: boolean }[],
   division: string,
@@ -336,13 +358,8 @@ export function highWaterJobNos(
   const out: Record<string, number> = {};
   for (const r of rows) {
     if ((r.repairType || '').toUpperCase() === 'GP' || r.isGp) continue;
-    const raw = String(r.jobNo ?? '').trim();
-    if (!raw) continue;
-    // The tail after the LAST dash - prefixes themselves may contain one ("21 IS", "OH-A").
-    const dash = raw.lastIndexOf('-');
-    if (dash < 0) continue;
-    const num = parseInt(raw.slice(dash + 1), 10);
-    if (!Number.isFinite(num) || num <= 0) continue;
+    const num = jobNoSequence(r.jobNo);
+    if (num === null) continue;
     const key = getCounterKey(division, r.coreType || 'CRGO');
     if (!out[key] || num > out[key]) out[key] = num;
   }
@@ -1275,8 +1292,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       const agencyIdForSeed = String(atData.agencyId).trim();
       const callerCounters = (atData as any).lastJobNumbers;
       const seededCounters: Record<string, number> = { ...(callerCounters || {}) };
-      const seedUnparsed: string[] = [];
-      const seedUnparsedKeys = new Set<string>();
       let seedJobsScanned = 0;
 
       const bump = (key: string, value: number) => {
@@ -1309,15 +1324,14 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
           const division = String(j.division ?? '').trim();
           if (!division) return;
           const key = getCounterKey(division, j.coreType || 'CRGO');
-          // The numeric TAIL. "21 IS-40" -> 40. A number that does not end in digits
-          // cannot be continued from and is reported rather than guessed at.
-          const raw = String(j.jobNo ?? '').trim();
-          const m = raw.match(/(\d+)\s*$/);
-          if (!m) {
-            if (raw) { seedUnparsed.push(raw); seedUnparsedKeys.add(key); }
-            return;
-          }
-          const n = Number(m[1]);
+          // ONE READING OF A JOB NUMBER, shared with every save path (AUDIT F81).
+          //
+          // This carried its own parser - a trailing digit run - and reported anything it
+          // could not read as an "unparsed" warning shown when the AT was created. Two
+          // parsers for one field, and the strict one was the one wired to a user-facing
+          // warning while the tolerant one decided real job numbers.
+          const n = jobNoSequence(j.jobNo);
+          if (n === null) return;
           bump(key, n);
           // CRGO is counted under EITHER `${div}_CRGO` or a bare `${div}` key, and
           // getNextJobNoInfo reads one and falls back to the other. Seeding only one lets
@@ -1333,8 +1347,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
       const seedReport: AtSeedReport = {
         counters: seededCounters,
-        unparsed: [...new Set(seedUnparsed)],
-        unparsedKeys: [...seedUnparsedKeys],
         jobsScanned: seedJobsScanned,
       };
 

@@ -265,23 +265,16 @@ export function AtSettings() {
       </div>
       )}
 
-      {seedReport.unparsed.length > 0 && (
-        /* REPORT AND PROCEED. Blocking a tender rollover on historical job numbers nobody
-           can now change would stop intake for the whole agency; a slightly low seed is
-           caught by the duplicate guard at save. So it is stated plainly, with the
-           consequence, rather than either hidden or made fatal. */
-        <div className="p-2.5 rounded-lg bg-amber-100 border border-amber-400 text-[11px] text-amber-900 leading-relaxed">
-          <strong className="font-bold block">
-            {seedReport.unparsed.length} job number(s) could not be read.
-          </strong>
-          <span className="font-mono">{seedReport.unparsed.slice(0, 12).join(', ')}</span>
-          {seedReport.unparsed.length > 12 && ` +${seedReport.unparsed.length - 12} more`}
-          <p className="mt-1">
-            So the starting number for {seedReport.unparsedKeys.join(', ') || 'the affected division(s)'} may
-            be lower than the highest already issued. A duplicate will be refused at save if it occurs.
-          </p>
-        </div>
-      )}
+      {/* THE "N JOB NUMBERS COULD NOT BE READ" WARNING IS DELETED (AUDIT F81).
+          It reported a disagreement between two parsers rather than a problem with the
+          data: the seeder's own rule rejected numbers that the rule deciding real job
+          numbers reads perfectly well. There is now one reading - jobNoSequence - so there
+          is nothing left to disagree about and nothing to report.
+
+          Deleted rather than moved somewhere better, because "somewhere better" would have
+          been a permanent warning about a value nothing reads: lastJobNumbers is advanced
+          at save and consulted by nothing that numbers or prices anything, and it only ever
+          moves upward, so a low counter corrects itself at the next save. */}
     </div>
   );
 
