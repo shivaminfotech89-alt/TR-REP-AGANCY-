@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -15,7 +15,8 @@ import {
 import { serverTimestamp } from 'firebase/firestore';
 import { auth } from '../lib/firebase';
 import { formatDDMMYYYY } from '../lib/utils';
-import { useAgency } from '../lib/AgencyContext';
+import { Link } from 'react-router-dom';
+import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
 import { SCHEDULE_A, bandForKva } from '../lib/ugvclSchedule2020';
@@ -307,8 +308,11 @@ export default function EstimateMaster() {
   const { 
     agencies, 
     activeAgency, 
+    atMasters,
+    activeAtMaster,
+    updateAtMaster,
+    publishedAts,
     isSuperAdmin,
-    updateAgency, 
     updateAllAgenciesEstimateMaster, 
     saveGlobalDefaultEstimateMaster,
     countOverridesForApply,
@@ -357,23 +361,64 @@ export default function EstimateMaster() {
   const [countingOverrides, setCountingOverrides] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
 
+  /**
+   * WHERE THIS SCREEN'S RATES COME FROM — the ACTIVE AT first, the agency behind it.
+   *
+   * Mirrors getEstimateMasterForCore's top two rungs exactly (AUDIT F73), per section
+   * rather than per document: an AT that holds CRGO but not Overhauling shows its own CRGO
+   * and the agency's Overhauling, which is what pricing will do.
+   *
+   * ⚠ Not `activeAtMaster ?? activeAgency`. That would show the agency's rates only when
+   * NO AT is selected, and blank sections whenever an AT held some but not all of them -
+   * which is precisely the state every migrated AT could be left in.
+   */
+  const rateHolder = useMemo(() => {
+    const pick = (k: keyof AtMaster & keyof Agency) => {
+      const fromAt = (activeAtMaster as any)?.[k];
+      if (Array.isArray(fromAt) && fromAt.length > 0) return fromAt;
+      return (activeAgency as any)?.[k];
+    };
+    return {
+      estimateMasterCRGO: pick('estimateMasterCRGO' as any),
+      estimateMasterAmorphous: pick('estimateMasterAmorphous' as any),
+      estimateMasterWoundCore: pick('estimateMasterWoundCore' as any),
+      estimateMasterOverhauling: pick('estimateMasterOverhauling' as any),
+      estimateMasterCircleLimits: pick('estimateMasterCircleLimits' as any),
+      // The pre-sections CRGO field never moved onto the AT and never will - nothing has
+      // written it since D4. Agency only.
+      estimateMaster: (activeAgency as any)?.estimateMaster,
+    };
+  }, [activeAtMaster, activeAgency]);
+
+  /**
+   * WHAT THE OPERATOR IS LOOKING AT, in one value. Absent ratesSource means NO RATES YET.
+   */
+  const ratesState = useMemo(() => {
+    if (!activeAtMaster) return { kind: 'no-at' as const };
+    const src = String((activeAtMaster as any).ratesSource || '').trim();
+    if (!src) return { kind: 'none' as const };
+    if (src === 'inherited-agency') return { kind: 'inherited' as const };
+    if (src.startsWith('published:')) return { kind: 'published' as const, id: src.slice('published:'.length) };
+    return { kind: 'own' as const };
+  }, [activeAtMaster]);
+
   useEffect(() => {
     if (activeAgency) {
       // Load CRGO
-      if (activeAgency.estimateMasterCRGO && activeAgency.estimateMasterCRGO.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterCRGO))));
+      if (rateHolder.estimateMasterCRGO && rateHolder.estimateMasterCRGO.length > 0) {
+        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(rateHolder.estimateMasterCRGO))));
       } else if (globalDefaultEstimateMaster?.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
         setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
-      } else if (activeAgency.estimateMaster && activeAgency.estimateMaster.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMaster))));
+      } else if (rateHolder.estimateMaster && rateHolder.estimateMaster.length > 0) {
+        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(rateHolder.estimateMaster))));
       } else {
         setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
       }
 
       // Load Amorphous
       let currentAmorphous: EstimateItem[] = [];
-      if (activeAgency.estimateMasterAmorphous && activeAgency.estimateMasterAmorphous.length > 0) {
-        currentAmorphous = normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterAmorphous, defaultAmorphousEstimateData);
+      if (rateHolder.estimateMasterAmorphous && rateHolder.estimateMasterAmorphous.length > 0) {
+        currentAmorphous = normalizeAmorphousOrWoundCoreData(rateHolder.estimateMasterAmorphous, defaultAmorphousEstimateData);
       } else if (globalDefaultEstimateMaster?.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
         currentAmorphous = normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData);
       } else {
@@ -390,8 +435,8 @@ export default function EstimateMaster() {
         return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
       });
 
-      if (activeAgency.estimateMasterWoundCore && activeAgency.estimateMasterWoundCore.length > 0 && !isLegacyWc(activeAgency.estimateMasterWoundCore)) {
-        setWoundCoreData(normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterWoundCore, currentAmorphous));
+      if (rateHolder.estimateMasterWoundCore && rateHolder.estimateMasterWoundCore.length > 0 && !isLegacyWc(rateHolder.estimateMasterWoundCore)) {
+        setWoundCoreData(normalizeAmorphousOrWoundCoreData(rateHolder.estimateMasterWoundCore, currentAmorphous));
       } else if (globalDefaultEstimateMaster?.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0 && !isLegacyWc(globalDefaultEstimateMaster.estimateMasterWoundCore)) {
         setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, currentAmorphous));
       } else {
@@ -399,8 +444,8 @@ export default function EstimateMaster() {
       }
 
       // Load Overhauling
-      if (activeAgency.estimateMasterOverhauling && activeAgency.estimateMasterOverhauling.length > 0) {
-        setOverhaulingData(normalizeOverhaulingData(activeAgency.estimateMasterOverhauling, defaultOverhaulingEstimateData));
+      if (rateHolder.estimateMasterOverhauling && rateHolder.estimateMasterOverhauling.length > 0) {
+        setOverhaulingData(normalizeOverhaulingData(rateHolder.estimateMasterOverhauling, defaultOverhaulingEstimateData));
       } else if (globalDefaultEstimateMaster?.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
         setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
       } else {
@@ -408,15 +453,15 @@ export default function EstimateMaster() {
       }
 
       // Load Circle Approval Limits
-      if (activeAgency.estimateMasterCircleLimits && activeAgency.estimateMasterCircleLimits.length > 0) {
-        setCircleLimitsData(normalizeCircleLimitsData(activeAgency.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
+      if (rateHolder.estimateMasterCircleLimits && rateHolder.estimateMasterCircleLimits.length > 0) {
+        setCircleLimitsData(normalizeCircleLimitsData(rateHolder.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
       } else if (globalDefaultEstimateMaster?.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
         setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
       } else {
         setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
       }
     }
-  }, [activeAgency, globalDefaultEstimateMaster]);
+  }, [activeAgency, activeAtMaster, globalDefaultEstimateMaster, rateHolder]);
 
   if (!activeAgency) {
     return (
@@ -724,10 +769,10 @@ export default function EstimateMaster() {
         updatePayload.estimateMasterCircleLimits = circleLimitsData;
       }
 
-      await updateAgency(activeAgency.id, { ...updatePayload, ...editStamp() });
+      await saveRatesToActiveAt(updatePayload);
       setEditingSection(null);
       setPendingSaveSection(null);
-      setSyncSuccessMsg(`✓ Saved ${section} rates specifically for "${activeAgency.name}". (Other users and agencies are NOT affected).`);
+      setSyncSuccessMsg(`✓ Saved ${section} rates for AT "${activeAtMaster?.atNumber || activeAtMaster?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
     } catch (err) {
       alert(`Failed to save ${section} Estimate Master data for active agency.`);
@@ -939,6 +984,34 @@ export default function EstimateMaster() {
     }
   };
 
+  /**
+   * WHERE A SAVE LANDS: THE ACTIVE AT (AUDIT F73).
+   *
+   * Rates belong to the tender. Writing them to the agency would put them on a document
+   * every AT of that agency falls back to, so editing one tender's rates would silently
+   * re-price every other tender that had not yet been given its own - which is the exact
+   * shape this move removes.
+   *
+   * Stamps `ratesSource: 'own'` on every write. An AT that was showing
+   * 'inherited-agency' becomes its own the moment the operator saves, because that is what
+   * has happened: the figures on screen are now this tender's, whatever they came from.
+   *
+   * The agency's sections are NOT written and NOT cleared. They remain the fallback rung
+   * for ATs that have no section of their own, and the recovery path if a tender's rates
+   * turn out wrong.
+   */
+  const saveRatesToActiveAt = async (payload: Record<string, any>) => {
+    if (!activeAtMaster) {
+      throw new Error('No AT is selected, so there is nowhere to save these rates. Rates belong to a tender.');
+    }
+    await updateAtMaster(activeAtMaster.id, {
+      ...payload,
+      ratesSource: 'own',
+      ratesUpdatedAt: Date.now(),
+      ...editStamp(),
+    } as any);
+  };
+
   // Direct 1-click Save for Active Agency Only (Safe & Isolated)
   const handleSaveAllToCurrentAgency = async () => {
     if (!activeAgency) return;
@@ -960,9 +1033,9 @@ export default function EstimateMaster() {
         estimateMasterOverhauling: overhaulingData,
         estimateMasterCircleLimits: circleLimitsData,
       };
-      await updateAgency(activeAgency.id, { ...payload, ...editStamp() });
+      await saveRatesToActiveAt(payload);
       setEditingSection(null);
-      setSyncSuccessMsg(`✓ Successfully saved all rates for "${activeAgency.name}". Other users and agencies are NOT affected.`);
+      setSyncSuccessMsg(`✓ Saved all five sections for AT "${activeAtMaster?.atNumber || activeAtMaster?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
     } catch (err) {
       alert('Failed to save rates for active agency.');
@@ -1817,6 +1890,106 @@ export default function EstimateMaster() {
         </div>
       )}
 
+      {/* WHERE THESE RATES COME FROM — stated, never implied.
+          `ratesSource` absent means an AT has no rates of its own, and that must not look
+          the same as having them. A silent fallthrough to the agency's is the 'JOB'
+          sentinel shape (F71): a plausible value standing in for a missing one, with
+          nothing saying which it was. */}
+      {(() => {
+        if (ratesState.kind === 'no-at') {
+          return (
+            <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 text-sm text-rose-900 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">No AT is selected, so there is nowhere to save rates.</p>
+                <p className="text-xs mt-1">
+                  Rates belong to a tender. Select or create an AT in Agency Settings before editing.
+                </p>
+                <Link to="/agency-settings?section=at" className="text-xs font-bold underline mt-1 inline-block">
+                  Go to AT settings
+                </Link>
+              </div>
+            </div>
+          );
+        }
+        if (ratesState.kind === 'none') {
+          return (
+            <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 text-sm text-rose-900 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">
+                  AT &ldquo;{activeAtMaster?.atNumber || activeAtMaster?.name}&rdquo; has no rates of its own.
+                </p>
+                <p className="text-xs mt-1">
+                  A new tender starts with no schedule. The figures below are a starting point drawn from
+                  {' '}<strong>{activeAgency.name}</strong> and the shipped defaults &mdash; they are
+                  {' '}<strong>not this AT&rsquo;s rates</strong> until you save them.
+                </p>
+              </div>
+            </div>
+          );
+        }
+        if (ratesState.kind === 'inherited') {
+          return (
+            <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-sm text-amber-900 flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+              <div>
+                <p className="font-bold">
+                  These rates were inherited from {activeAgency.name}, not entered for this tender.
+                </p>
+                <p className="text-xs mt-1">
+                  They were copied onto AT &ldquo;{activeAtMaster?.atNumber || activeAtMaster?.name}&rdquo; when rates
+                  moved from agencies onto tenders, so they are the figures this agency was using &mdash; but nobody
+                  has confirmed them against <strong>this</strong> tender&rsquo;s schedule. Saving any section makes
+                  them this AT&rsquo;s own.
+                </p>
+              </div>
+            </div>
+          );
+        }
+        if (ratesState.kind === 'published') {
+          const tpl = publishedAts.find(t => t.id === (ratesState as any).id);
+          const usedVersion = Number((activeAtMaster as any)?.publishedAtVersion ?? 0);
+          const currentVersion = Number(tpl?.version ?? 0);
+          const drifted = tpl && currentVersion > usedVersion;
+          return (
+            <div className={`${drifted ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-300 text-emerald-900'} border rounded-xl p-4 text-sm flex items-start gap-3`}>
+              {drifted ? <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" /> : <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />}
+              <div>
+                <p className="font-bold">
+                  Copied from published template &ldquo;{tpl?.name || (ratesState as any).id}&rdquo; v{usedVersion || '?'}
+                </p>
+                {/* THE DRIFT CASE, said where someone editing rates would look - not only in
+                    the data. A copy does not follow the template, which is the point: a live
+                    estimate must not change because an admin revised a template. But the
+                    operator has to be able to SEE that it has moved on. */}
+                <p className="text-xs mt-1">
+                  {drifted
+                    ? <>The template is now at <strong>v{currentVersion}</strong>. Your rates did not change and will
+                       not &mdash; a copy never follows the template, or a live estimate could move under you. Review
+                       the differences and re-copy if this tender should adopt them.</>
+                    : <>This is the current version of that template. Your rates are a copy and will not change if the
+                       template is revised.</>}
+                </p>
+              </div>
+            </div>
+          );
+        }
+        return (
+          <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 text-sm text-emerald-900 flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />
+            <div>
+              <p className="font-bold">
+                Rates entered for AT &ldquo;{activeAtMaster?.atNumber || activeAtMaster?.name}&rdquo;.
+              </p>
+              <p className="text-xs mt-1">
+                They price only jobs booked under this tender. No other AT, agency or user is affected.
+              </p>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* Page Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-5 sm:p-6 rounded-xl shadow-xs border border-slate-200 gap-4">
         <div>
@@ -1828,6 +2001,19 @@ export default function EstimateMaster() {
             <span className="px-2.5 py-0.5 text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 rounded-full">
               Active: {activeAgency.name}
             </span>
+            {/* WHICH TENDER'S RATES THESE ARE. Rates live on the AT now (AUDIT F73), so the
+                agency alone no longer says what is on screen - and an AT NUMBER alone does
+                not either: "2026-27" exists under two different agencies in live data. */}
+            {activeAtMaster ? (
+              <span className="px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full">
+                AT: {activeAtMaster.atNumber || activeAtMaster.name}
+                {String(activeAtMaster.status || '').toLowerCase() === 'closed' && ' (CLOSED)'}
+              </span>
+            ) : (
+              <span className="px-2.5 py-0.5 text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 rounded-full">
+                No AT selected
+              </span>
+            )}
             {isSuperAdmin ? (
               <span className="px-2.5 py-0.5 text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 rounded-full flex items-center gap-1">
                 <Crown className="w-3.5 h-3.5 text-purple-600" />

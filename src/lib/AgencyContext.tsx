@@ -35,6 +35,13 @@ try {
 
 export interface Agency {
   id: string;
+  /**
+   * WHO OWNS THIS AGENCY. Present on every document and filtered on by every query
+   * (`where('ownerId','==',uid)`), but missing from this interface until now - so a read of
+   * `agency.ownerId` was an error while a query on it was not. Another gap the checker
+   * could not see, the fourth in this area (F71, F72, F73).
+   */
+  ownerId?: string;
   name: string;
   letterheadUrl: string;
   letterheadMode?: 'full_a4' | 'header_only' | 'standard';
@@ -246,6 +253,53 @@ export interface AtMaster {
   publishedAtVersion?: number;
   /** When the rates were last set on this AT, whatever the source. */
   ratesUpdatedAt?: number;
+}
+
+/**
+ * AN ADMIN-PUBLISHED RATE TEMPLATE — a tender schedule anyone can copy.
+ *
+ * A SEPARATE COLLECTION, deliberately not `atMasters` (AUDIT F73). An atMasters document
+ * carries `agencyId`, `lastJobNumbers`, `allotments` and `prefixes` - one operator's live
+ * job-number counters. Publishing through that collection would put a world-readable rule
+ * on documents holding every agency's numbering state. This has no owner, no agency and no
+ * counters: it is rates and a version, and nothing else.
+ *
+ * It SUPERSEDES publishing to `public_config`. Two publish paths writing to different
+ * layers is how a baseline and the things derived from it drift apart - `public_config`
+ * already holds two 100-KVA rates that no agency has. `public_config` stays as the
+ * resolution fallback for agencies with no AT rates, and nothing new writes to it.
+ */
+/** The five sections, in one place, so no caller enumerates them by hand. */
+export const ESTIMATE_SECTION_FIELDS = [
+  'estimateMasterCRGO',
+  'estimateMasterAmorphous',
+  'estimateMasterWoundCore',
+  'estimateMasterOverhauling',
+  'estimateMasterCircleLimits',
+] as const;
+
+export interface PublishedAt {
+  id: string;
+  /** What an operator picks it by, e.g. "UGVCL 2026-27 Schedule A". */
+  name: string;
+  /** The tender this schedule belongs to, as the DISCOM writes it. */
+  atNumber?: string;
+  /** Free text: what changed in this version, shown when a copy has drifted behind. */
+  notes?: string;
+  /**
+   * INCREMENTS ON EVERY REVISION. An AT that copied this stores the version it took, so a
+   * template moving from v3 to v5 is visible to whoever copied v3 - without their rates
+   * changing, because a copy never follows the template.
+   */
+  version: number;
+  publishedAt?: number;
+  publishedBy?: string;
+
+  estimateMasterCRGO?: EstimateItem[];
+  estimateMasterAmorphous?: EstimateItem[];
+  estimateMasterWoundCore?: EstimateItem[];
+  estimateMasterOverhauling?: EstimateItem[];
+  estimateMasterCircleLimits?: EstimateItem[];
 }
 
 export function getCounterKey(division: string, coreType: string = 'CRGO'): string {
@@ -589,6 +643,21 @@ interface AgencyContextType {
   predictNextJobNo: (division: string, coreType?: string, repairType?: string, atMasterId?: string) => { prefix: string | null, nextNum: number, counterKey: string };
   getJobNoPrefix: (division: string, coreType?: string, atMasterId?: string) => { prefix: string | null; counterKey: string };
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
+
+  /** Admin-published rate templates, readable by everyone. See PublishedAt. */
+  publishedAts: PublishedAt[];
+  /** Admin only. Creates a new template, or bumps an existing one's version. */
+  publishAtTemplate: (
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string },
+    sections: Record<string, EstimateItem[] | undefined>,
+  ) => Promise<string>;
+  /** Copy a template's sections onto an AT, stamping which template and version. */
+  adoptPublishedAt: (atMasterId: string, templateId: string) => Promise<void>;
+  /** Copy the sections currently on one AT onto other ATs the signed-in user owns. */
+  applyRatesToOwnAts: (
+    sections: Record<string, EstimateItem[] | undefined>,
+    targetAtIds: string[],
+  ) => Promise<void>;
 }
 
 const AgencyContext = createContext<AgencyContextType | undefined>(undefined);
@@ -598,6 +667,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [activeAgencyId, setActiveAgencyIdState] = useState<string | null>(localStorage.getItem('activeAgencyId') || null);
   
   const [atMasters, setAtMasters] = useState<AtMaster[]>([]);
+  /** Admin-published rate templates. World-readable, so no owner filter. */
+  const [publishedAts, setPublishedAts] = useState<PublishedAt[]>([]);
   
   const getInitialAtId = () => {
     const agId = localStorage.getItem('activeAgencyId');
@@ -1451,6 +1522,116 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * which is deleted. This function has no such pairing: the caller tells it which document
    * was written.)
    */
+  /**
+   * LOAD THE PUBLISHED TEMPLATES. No owner filter - they are readable by everyone, which is
+   * the whole point of a published baseline, and the rules allow exactly that on this
+   * collection and nothing else.
+   */
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const snap = await getDocs(collection(db, 'published_ats'));
+        const list: PublishedAt[] = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        list.sort((x, y) => (y.publishedAt || 0) - (x.publishedAt || 0));
+        setPublishedAts(list);
+      } catch (err) {
+        // Not fatal. A user with no templates available still enters rates by hand, and a
+        // failure here must not stop the app loading.
+        console.warn('Could not load published AT templates:', err);
+      }
+    };
+    load();
+  }, [auth.currentUser?.uid]);
+
+  /**
+   * PUBLISH A TEMPLATE. Admin only, enforced by the rules as well as here.
+   *
+   * A NEW VERSION IS A NEW NUMBER, NOT A NEW DOCUMENT. Whoever copied v3 keeps v3's rates
+   * and can see that the template has moved to v5. Replacing the document instead would
+   * leave their `publishedAtVersion` pointing at nothing.
+   */
+  const publishAtTemplate = async (
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string },
+    sections: Record<string, EstimateItem[] | undefined>,
+  ): Promise<string> => {
+    if (!isSuperAdmin) throw new Error('Only the administrator can publish a rate template.');
+    const existing = tpl.id ? publishedAts.find(t => t.id === tpl.id) : undefined;
+    const version = (Number(existing?.version) || 0) + 1;
+    const payload: any = {
+      name: tpl.name,
+      atNumber: tpl.atNumber || '',
+      notes: tpl.notes || '',
+      version,
+      publishedAt: Date.now(),
+      publishedBy: auth.currentUser?.email || auth.currentUser?.uid || '',
+    };
+    Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payload[k] = v; });
+
+    const ref = tpl.id ? doc(db, 'published_ats', tpl.id) : doc(collection(db, 'published_ats'));
+    await setDoc(ref, payload, { merge: false });
+    setPublishedAts(prev => {
+      const next = prev.filter(t => t.id !== ref.id);
+      return [{ id: ref.id, ...payload }, ...next];
+    });
+    return ref.id;
+  };
+
+  /**
+   * COPY A TEMPLATE ONTO AN AT. A COPY, NOT A REFERENCE.
+   *
+   * If the AT pointed at the template instead, an admin editing it would move the rates
+   * under a live estimate - including one already issued, because the printed sheet
+   * recomputes rather than reading stored figures (F72). The version stamp is what makes
+   * the copy traceable without making it live.
+   */
+  const adoptPublishedAt = async (atMasterId: string, templateId: string) => {
+    const tpl = publishedAts.find(t => t.id === templateId);
+    if (!tpl) throw new Error('That published template could not be found.');
+    const payload: any = {
+      ratesSource: `published:${templateId}`,
+      publishedAtVersion: Number(tpl.version) || 1,
+      ratesUpdatedAt: Date.now(),
+    };
+    ESTIMATE_SECTION_FIELDS.forEach(k => {
+      const v = (tpl as any)[k];
+      if (Array.isArray(v) && v.length) payload[k] = v;
+    });
+    await updateDoc(doc(db, 'atMasters', atMasterId), payload);
+    setAtMasters(prev => prev.map(a => a.id === atMasterId ? { ...a, ...payload } : a));
+  };
+
+  /**
+   * COPY ONE AT'S RATES ONTO OTHER ATs THE USER OWNS.
+   *
+   * The replacement for "apply to my agencies". An owner with several agencies now has
+   * several tenders, and the useful action is copying a schedule between tenders - copying
+   * between agency documents writes to the fallback rung, which would silently re-price
+   * every tender that has no schedule of its own.
+   *
+   * FILTERED ON BOTH the AT's own ownerId AND its agency's. They agree in live data; if
+   * they ever diverge the write fails here by name rather than arriving as a permission
+   * error from several parallel writes.
+   */
+  const applyRatesToOwnAts = async (
+    sections: Record<string, EstimateItem[] | undefined>,
+    targetAtIds: string[],
+  ) => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) throw new Error('Not signed in.');
+    const ownedAgencyIds = new Set(agencies.filter(a => a.ownerId === uid).map(a => a.id));
+    const targets = targetAtIds.filter(id => {
+      const at = atMasters.find(t => t.id === id);
+      return at && at.ownerId === uid && ownedAgencyIds.has(at.agencyId);
+    });
+    if (targets.length === 0) return;
+
+    const payload: any = { ratesSource: 'own', ratesUpdatedAt: Date.now() };
+    Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payload[k] = v; });
+    await Promise.all(targets.map(id => updateDoc(doc(db, 'atMasters', id), payload)));
+    const set = new Set(targets);
+    setAtMasters(prev => prev.map(a => set.has(a.id) ? { ...a, ...payload } : a));
+  };
+
   const syncCountersState = (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => {
     if (isAtMaster) {
       setAtMasters(prev => prev.map(a => a.id === id ? { ...a, lastJobNumbers: newCounters } : a));
@@ -1468,7 +1649,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
       saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
-      predictNextJobNo, getJobNoPrefix, syncCountersState
+      predictNextJobNo, getJobNoPrefix, syncCountersState,
+      publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts
     }}>
       {children}
     </AgencyContext.Provider>

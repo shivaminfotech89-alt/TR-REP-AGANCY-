@@ -235,6 +235,20 @@ service cloud.firestore {
              (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 150));
     }
 
+    function isValidPublishedAt(data) {
+      return data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
+             data.version is number &&
+             (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 150)) &&
+             (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
+             (!('publishedAt' in data) || (data.publishedAt is number || data.publishedAt is string)) &&
+             (!('publishedBy' in data) || (data.publishedBy is string && data.publishedBy.size() <= 150)) &&
+             (!('estimateMasterCRGO' in data) || (data.estimateMasterCRGO is list)) &&
+             (!('estimateMasterAmorphous' in data) || (data.estimateMasterAmorphous is list)) &&
+             (!('estimateMasterWoundCore' in data) || (data.estimateMasterWoundCore is list)) &&
+             (!('estimateMasterOverhauling' in data) || (data.estimateMasterOverhauling is list)) &&
+             (!('estimateMasterCircleLimits' in data) || (data.estimateMasterCircleLimits is list));
+    }
+
     function isValidSystemConfig(data) {
       return (!('estimateMaster' in data) || (data.estimateMaster is list)) &&
              (!('estimateMasterCRGO' in data) || (data.estimateMasterCRGO is list)) &&
@@ -315,6 +329,26 @@ service cloud.firestore {
                           || (isSignedIn() && resource.data.email == request.auth.token.email);
       allow create, update: if isSuperAdmin() && isValidUserRole(incoming());
       allow delete: if isSuperAdmin();
+    }
+
+    // ADMIN-PUBLISHED RATE TEMPLATES (AUDIT F73).
+    //
+    // World-readable by design - a published baseline everyone can copy - and admin-write
+    // only, mirroring public_config which it supersedes as the place a shared schedule is
+    // published to.
+    //
+    // ⚠ A SEPARATE COLLECTION FROM atMasters, and it must stay one. An atMasters document
+    // holds `lastJobNumbers`, `allotments` and `prefixes`: one operator's live job-number
+    // state. Publishing through that collection would require this world-readable rule on
+    // documents carrying every agency's numbering. Nothing here has an owner, an agency,
+    // or a counter.
+    //
+    // No delete rule, so deletes fall to the catch-all deny. A template someone has copied
+    // from is referenced by their AT's `ratesSource`; removing it would leave that pointing
+    // at nothing, and there is no reason to remove one rather than publish a new version.
+    match /published_ats/{templateId} {
+      allow get, list: if true;
+      allow create, update: if isSuperAdmin() && isValidPublishedAt(incoming());
     }
 
     match /public_config/{configId} {
