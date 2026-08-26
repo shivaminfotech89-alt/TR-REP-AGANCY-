@@ -2,7 +2,7 @@ import EstimateMaster from './EstimateMaster';
 import AtMasters from './AtMasters';
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, type PublishedAt } from '../lib/AgencyContext';
 import { gstinScopeError } from '../lib/utils';
 import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
@@ -19,7 +19,7 @@ const DISCOM_OPTIONS = [
 ];
 
 export default function AgencySettings() {
-  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, loading } = useAgency();
+  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, publishedAts, loading } = useAgency();
   // ATs belonging to the ACTIVE agency only - the selector must never offer another
   // agency's tender period (AUDIT F20 was exactly that leak).
   const agencyAtsForContext = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -227,11 +227,68 @@ export default function AgencySettings() {
    * them lands the operator on a settings page with the problem still to find - which is what
    * happened once already when this was retargeted carelessly (AUDIT F74).
    */
+  /**
+   * THE ESTIMATE MASTER SECTION IS COLLAPSED BY DEFAULT.
+   *
+   * It is a 2,600-line screen, and most visits to Agency Settings are not about rates -
+   * expanded, it buries everything above it. Collapsed, the header has to carry enough that
+   * nobody expands it just to find out what state it is in.
+   */
+  const [estimateOpen, setEstimateOpen] = useState(false);
+
+  /**
+   * WHAT THE COLLAPSED HEADER SAYS. Derived exactly as the Estimate Master banner derives
+   * it, so the two can never disagree about which state an AT is in.
+   *
+   * "NO RATES" IS NOT A NEUTRAL STATE and is not styled as one. An AT without rates blocks
+   * every estimate and every bill - atRatesReadiness refuses both - so in the collapsed
+   * header it is the loudest thing on the row, not a grey chip among others.
+   */
+  const ratesSummary = (() => {
+    if (!activeAtMaster) {
+      return { tone: 'blocking' as const, label: 'No AT selected', detail: 'Rates belong to a tender. Create or select one above.' };
+    }
+    const atLabel = activeAtMaster.atNumber || activeAtMaster.name || activeAtMaster.id;
+    const src = String((activeAtMaster as any).ratesSource || '').trim();
+    if (!src) {
+      return {
+        tone: 'blocking' as const,
+        label: 'NO RATES',
+        detail: `AT ${atLabel} has no rate schedule. Estimates and bills are blocked until it does.`,
+      };
+    }
+    if (src === 'inherited-agency') {
+      return {
+        tone: 'warn' as const,
+        label: 'Inherited from the agency',
+        detail: `AT ${atLabel} — figures carried over when rates moved onto tenders. Not confirmed against this tender.`,
+      };
+    }
+    if (src.startsWith('published:')) {
+      const tpl: PublishedAt | undefined = publishedAts.find(t => t.id === src.slice('published:'.length));
+      const used = Number((activeAtMaster as any).publishedAtVersion ?? 0);
+      const behind = tpl && Number(tpl.version) > used;
+      return {
+        tone: behind ? ('warn' as const) : ('ok' as const),
+        label: behind ? `Template v${used} — v${tpl?.version} available` : `From template v${used}`,
+        detail: `AT ${atLabel} — copied from "${tpl?.name || 'a published template'}".`,
+      };
+    }
+    return { tone: 'ok' as const, label: 'Entered for this tender', detail: `AT ${atLabel} carries its own rate schedule.` };
+  })();
+
   const [settingsParams] = useSearchParams();
   useEffect(() => {
     const section = settingsParams.get('section');
     if (!section) return;
     const id = section === 'estimate-master' ? 'estimate-master-section' : 'at-masters-section';
+    // ⚠ A DEEP LINK TO THE RATES MUST OPEN THEM, not merely scroll to a closed header.
+    //
+    // Three setup-gap dialogs send a BLOCKED estimate or bill here - EstimateGenerate and
+    // BillingSystem refuse to issue when the AT has no rates, and this is the route they
+    // offer out. Landing that on a collapsed header is a worse dead end than the one the
+    // collapse was meant to fix: the operator arrives at the answer and cannot see it.
+    if (section === 'estimate-master') setEstimateOpen(true);
     // After paint: the sections below render conditionally on activeAgency, so the element
     // does not exist on the first pass.
     const t = window.setTimeout(() => {
@@ -616,13 +673,54 @@ export default function AgencySettings() {
           it had an AT to save to (AUDIT F74). */}
       {activeAgency && (
         <div id="estimate-master-section" className="relative left-1/2 -translate-x-1/2 w-[min(1400px,94vw)]">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 mb-2.5 px-1">
-            <h2 className="text-base font-black text-slate-900">Estimate Master</h2>
-            <span className="text-[11px] text-slate-500">
-              The rate schedule for the AT selected above &mdash; each tender carries its own
-            </span>
-          </div>
-          <EstimateMaster />
+          <button
+            type="button"
+            onClick={() => setEstimateOpen(o => !o)}
+            aria-expanded={estimateOpen}
+            className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${
+              ratesSummary.tone === 'blocking'
+                ? 'bg-rose-50 border-rose-400 hover:bg-rose-100/70'
+                : ratesSummary.tone === 'warn'
+                  ? 'bg-amber-50 border-amber-300 hover:bg-amber-100/70'
+                  : 'bg-white border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h2 className="text-base font-black text-slate-900">Estimate Master Rates</h2>
+                  {/* THE STATE, WITHOUT EXPANDING. "No rates" is sized and coloured to be the
+                      loudest thing here - it is what stands between the operator and every
+                      document they are trying to produce. */}
+                  <span className={`px-2.5 py-0.5 rounded-full border font-black tracking-wide ${
+                    ratesSummary.tone === 'blocking'
+                      ? 'text-xs bg-rose-600 text-white border-rose-700 uppercase'
+                      : ratesSummary.tone === 'warn'
+                        ? 'text-[11px] bg-amber-100 text-amber-900 border-amber-300'
+                        : 'text-[11px] bg-emerald-50 text-emerald-800 border-emerald-200'
+                  }`}>
+                    {ratesSummary.label}
+                  </span>
+                </div>
+                <p className={`text-[11px] mt-1 ${ratesSummary.tone === 'blocking' ? 'text-rose-900 font-semibold' : 'text-slate-500'}`}>
+                  {ratesSummary.detail}
+                </p>
+              </div>
+              <span className={`shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg border ${
+                ratesSummary.tone === 'blocking'
+                  ? 'bg-rose-600 text-white border-rose-700'
+                  : 'bg-slate-100 text-slate-700 border-slate-300'
+              }`}>
+                {estimateOpen ? 'Hide' : (ratesSummary.tone === 'blocking' ? 'Set rates' : 'Show rates')}
+              </span>
+            </div>
+          </button>
+
+          {estimateOpen && (
+            <div className="mt-3">
+              <EstimateMaster />
+            </div>
+          )}
         </div>
       )}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
@@ -30,7 +30,7 @@ export function AtSettings() {
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
 
-  // Deep link from a setup-gap dialog: /at-masters?section=allotments&atId=...
+  // Deep link from a setup-gap dialog: /agency-settings?section=allotments&atId=...
   // Opens the named AT on the right tab so the operator lands where the fix is, rather
   // than on a settings page with the problem still to find.
   const [searchParams] = useSearchParams();
@@ -94,7 +94,7 @@ export function AtSettings() {
     <div className="p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/60 space-y-2">
       <div className="flex items-start justify-between gap-3">
         <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-900">
-          Job numbering for AT {seedReportAtNo}
+          AT {seedReportAtNo} is ready &mdash; two things to know
         </h4>
         <button type="button" onClick={() => setSeedReport(null)}
           className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 shrink-0">Dismiss</button>
@@ -117,6 +117,30 @@ export function AtSettings() {
           </div>
         </>
       )}
+      {/* THE SECOND FACT, AND THE ONE THAT BLOCKS WORK (AUDIT F74).
+          This panel is the only thing shown at the moment an AT is created, and it used to
+          say one thing: that job NUMBERING continues from the agency's series. Nothing
+          anywhere in this component mentioned rates - so the operator was told about a
+          counter they had not asked about, and not about the rate schedule that refuses
+          every estimate and every bill they will try to produce against the new tender.
+
+          The route out links to this same page with ?section=estimate-master, which the
+          settings page consumes to EXPAND the collapsed rates section and scroll to it. */}
+      <div className="p-2.5 rounded-lg bg-rose-100 border-2 border-rose-400 text-[11px] text-rose-900 leading-relaxed">
+        <strong className="font-bold block uppercase tracking-wide">This AT has no rates yet.</strong>
+        <p className="mt-1">
+          A new tender starts with no rate schedule of its own, so <strong>estimates and bills
+          against AT {seedReportAtNo} are blocked</strong> until it has one. Enter its rates, or copy
+          them from a published AT.
+        </p>
+        <Link
+          to="/agency-settings?section=estimate-master"
+          className="mt-2 inline-flex items-center px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold"
+        >
+          Set rates for this AT
+        </Link>
+      </div>
+
       {seedReport.unparsed.length > 0 && (
         /* REPORT AND PROCEED. Blocking a tender rollover on historical job numbers nobody
            can now change would stop intake for the whole agency; a slightly low seed is
