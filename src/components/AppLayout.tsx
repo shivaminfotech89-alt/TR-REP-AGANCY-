@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, isIntakeOpen } from '../lib/AgencyContext';
 import { useTheme } from '../lib/ThemeContext';
 import { auth } from '../lib/firebase';
 import { User, signOut } from 'firebase/auth';
@@ -49,7 +49,8 @@ import AgencySwitcher from './AgencySwitcher';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function AppLayout({ user }: { user: User }) {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId,
+          atSupersededNotice, dismissAtSupersededNotice } = useAgency();
   const { currentTheme, themeId } = useTheme();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -194,13 +195,61 @@ export default function AppLayout({ user }: { user: User }) {
                 {activeAgency?.name || 'No Agency Selected'}
               </span>
             </div>
-            {activeAgency && (
-              <div className="flex items-center space-x-1.5 mt-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                <span className={`text-[10px] font-medium ${isLight ? 'text-slate-600' : 'text-slate-300'}`}>Active Workspace</span>
-              </div>
-            )}
           </Link>
+
+          {/* THE TENDER, BESIDE THE AGENCY AND SWITCHABLE FROM HERE (AUDIT F84).
+              Every screen filters on the active AT, and until now the only way to change it
+              was to navigate to Agency Settings, scroll past the agency form and click an AT
+              card. A control that governs what every screen shows belongs where the operator
+              always is.
+
+              IT SHOWS THE INTAKE STATE, not only the name. "Can I book a new MR against
+              this?" is the difference between a tender you work in and one you can only
+              read, and it is needed BEFORE starting rather than when a save is refused. */}
+          {activeAgency && (() => {
+            const mine = atMasters.filter(t => t.agencyId === activeAgency.id);
+            const gate = isIntakeOpen(activeAtMaster, mine);
+            if (mine.length === 0) {
+              return (
+                <Link
+                  to="/agency-settings?section=at"
+                  className="mt-2 block p-2.5 rounded-lg border border-amber-400/50 bg-amber-500/10"
+                >
+                  <span className="text-[9px] uppercase font-bold tracking-wider text-amber-400">Tender</span>
+                  <div className="text-xs font-bold text-amber-300 mt-0.5">No AT — set one up</div>
+                </Link>
+              );
+            }
+            return (
+              <div className={`mt-2 p-2.5 rounded-lg border ${
+                gate.open ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-amber-400/50 bg-amber-500/10'
+              }`}>
+                <span className={`text-[9px] uppercase font-bold tracking-wider ${gate.open ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  Tender
+                </span>
+                <select
+                  value={activeAtMaster?.id || ''}
+                  onChange={e => setActiveAtMasterId(e.target.value || null)}
+                  className={`mt-0.5 w-full bg-transparent text-xs font-bold outline-none cursor-pointer ${
+                    gate.open ? 'text-emerald-200' : 'text-amber-200'
+                  }`}
+                >
+                  {mine
+                    .slice()
+                    .sort((x, y) => (y.startDate || 0) - (x.startDate || 0))
+                    .map(t => (
+                      <option key={t.id} value={t.id} className="text-slate-900">
+                        AT {t.atNumber || t.name}
+                        {String(t.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
+                      </option>
+                    ))}
+                </select>
+                <div className={`text-[9px] font-bold mt-0.5 uppercase tracking-wide ${gate.open ? 'text-emerald-400' : 'text-amber-400'}`}>
+                  {gate.open ? 'Open to new work' : 'Closed to new work — viewing only'}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         <nav className="flex-1 p-3 space-y-1 overflow-y-auto custom-scrollbar">
@@ -400,6 +449,34 @@ export default function AppLayout({ user }: { user: User }) {
         </header>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden print:overflow-visible p-2.5 sm:p-4 md:p-6 print:p-0 relative custom-scrollbar">
+          {/* SAID ONCE WHEN SIGN-IN MOVED THEM (AUDIT F84). A selection changing underneath
+              is the shape this audit has spent its length removing - the job number, the
+              estimate master, the reservation - so the one place it is now allowed to
+              happen announces itself. */}
+          {atSupersededNotice && (
+            <div className="mb-3 rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3 flex items-start gap-2.5">
+              <Building2 className="w-4 h-4 text-indigo-700 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1 text-xs text-indigo-900">
+                <strong className="font-bold">
+                  AT {atSupersededNotice.movedTo} is now the current tender; you were last working
+                  in {atSupersededNotice.wasOn}.
+                </strong>
+                <p className="mt-0.5">
+                  New MRs, jobs and oil entries go to {atSupersededNotice.movedTo}. Everything under
+                  {' '}{atSupersededNotice.wasOn} is still there &mdash; switch to it in the sidebar to
+                  see it, or to finish inspections and documents on units already booked under it.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={dismissAtSupersededNotice}
+                className="shrink-0 text-[11px] font-bold text-indigo-700 hover:text-indigo-900"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
           {!activeAgency && location.pathname !== '/agency-settings' && location.pathname !== '/admin' && location.pathname !== '/support' && (
              <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-10 flex items-center justify-center p-4 sm:p-6">
                 <div className="bg-white p-6 rounded-xl shadow-xl border border-amber-200 max-w-md w-full text-center">

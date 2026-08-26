@@ -426,14 +426,29 @@ export interface IntakeGate {
   currentAt: AtMaster | null;
 }
 
+/**
+ * THE AGENCY'S CURRENT TENDER — the Active AT with the latest start date.
+ *
+ * ONE DEFINITION, used by `isIntakeOpen` to decide what accepts new work AND by the sign-in
+ * default to decide what to select. Two definitions of "current" is how the tender an
+ * operator lands on comes to differ from the tender they are allowed to work in - which is
+ * precisely the confusion the default exists to remove (AUDIT F84).
+ *
+ * `startDate` is the tender period the operator typed, which is the right ordering for
+ * "the one in force". Creation order is not: an AT created later can start earlier.
+ */
+export function currentTenderFor(agencyAts: AtMaster[]): AtMaster | null {
+  const active = agencyAts
+    .filter(t => String(t.status || '').toLowerCase() === 'active')
+    .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+  return active[0] || null;
+}
+
 export function isIntakeOpen(
   at: AtMaster | null | undefined,
   agencyAts: AtMaster[],
 ): IntakeGate {
-  const active = agencyAts
-    .filter(t => String(t.status || '').toLowerCase() === 'active')
-    .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
-  const currentAt = active[0] || null;
+  const currentAt = currentTenderFor(agencyAts);
 
   if (!at) {
     return { open: false, reason: 'No tender is selected. New work is recorded against a tender.', currentAt };
@@ -802,6 +817,13 @@ interface AgencyContextType {
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
   /** Drop an AT that has been deleted elsewhere, and stop pointing at it. See forgetAtMaster. */
   forgetAtMaster: (atMasterId: string) => void;
+  /**
+   * Set once when sign-in moved the selection to the current tender because the stored one
+   * had been superseded. Null when nothing moved. See the restore logic (AUDIT F84).
+   */
+  atSupersededNotice: { movedTo: string; wasOn: string } | null;
+  dismissAtSupersededNotice: () => void;
+
   /** Record a confirmed opening oil balance on an AT, carried from the tender that closed. */
   carryOilBalanceForward: (
     toAtId: string,
@@ -834,6 +856,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [atMasters, setAtMasters] = useState<AtMaster[]>([]);
   /** Admin-published rate templates. World-readable, so no owner filter. */
   const [publishedAts, setPublishedAts] = useState<PublishedAt[]>([]);
+  const [atSupersededNotice, setAtSupersededNotice] = useState<{ movedTo: string; wasOn: string } | null>(null);
+  const dismissAtSupersededNotice = () => setAtSupersededNotice(null);
   
   const getInitialAtId = () => {
     const agId = localStorage.getItem('activeAgencyId');
@@ -883,8 +907,13 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     if (!activeAgencyId) return;
     if (id) {
       localStorage.setItem(`activeAtMasterId_${activeAgencyId}`, id);
+      // THE SESSION'S OWN CHOICE. Survives a reload, dies with the tab - so looking at an
+      // old tender sticks while the operator works and does not become the default they
+      // return to (AUDIT F84).
+      try { sessionStorage.setItem(`atSessionPick_${activeAgencyId}`, id); } catch { /* private mode */ }
     } else {
       localStorage.removeItem(`activeAtMasterId_${activeAgencyId}`);
+      try { sessionStorage.removeItem(`atSessionPick_${activeAgencyId}`); } catch { /* private mode */ }
     }
   };
 
@@ -1023,7 +1052,51 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         const agencyAts = targetAgId ? fetchedAts.filter(at => at.agencyId === targetAgId) : fetchedAts;
         const scopedStoredAt = targetAgId ? localStorage.getItem(`activeAtMasterId_${targetAgId}`) : null;
 
-        if (scopedStoredAt && agencyAts.some(at => at.id === scopedStoredAt)) {
+        /**
+         * ⚠ THE STORED SELECTION IS ONLY HONOURED IF IT IS STILL THE CURRENT TENDER
+         * (AUDIT F84).
+         *
+         * It used to be honoured whenever it still EXISTED - and an old tender still exists
+         * after a rollover, so it passed. The operator signed in, landed on last year's
+         * tender, found every screen showing last year's work and New Job refusing intake
+         * with the cause three screens away. The default has to be the tender they can
+         * actually work in.
+         *
+         * A DELIBERATE LOOK AT AN OLD TENDER SURVIVES THE SESSION, though: switching is
+         * recorded in sessionStorage, which outlives a reload and dies with the tab. Someone
+         * who switched to 26-27 to check something stays there while they work and starts
+         * fresh next time - the persisted default is the working tender, the in-session
+         * choice is theirs.
+         *
+         * AND IT SAYS SO WHEN IT MOVES THEM. A selection changing underneath is the shape
+         * this audit has spent its length removing - the job number, the estimate master,
+         * the reservation - and it would be strange to reintroduce it in the control that
+         * governs all three.
+         */
+        const currentTender = currentTenderFor(agencyAts);
+        const sessionPick = targetAgId ? sessionStorage.getItem(`atSessionPick_${targetAgId}`) : null;
+        const storedIsCurrent = Boolean(scopedStoredAt && currentTender && scopedStoredAt === currentTender.id);
+
+        if (sessionPick && agencyAts.some(at => at.id === sessionPick)) {
+          // Chosen in this session, deliberately. Not overridden and not announced.
+          setActiveAtMasterIdState(sessionPick);
+        } else if (storedIsCurrent && scopedStoredAt) {
+          setActiveAtMasterIdState(scopedStoredAt);
+        } else if (currentTender) {
+          setActiveAtMasterIdState(currentTender.id);
+          if (targetAgId) localStorage.setItem(`activeAtMasterId_${targetAgId}`, currentTender.id);
+          // Announce ONLY when a real, still-existing selection was moved. Landing on the
+          // current tender because there was no selection at all is not news.
+          const was = scopedStoredAt ? agencyAts.find(at => at.id === scopedStoredAt) : null;
+          if (was && was.id !== currentTender.id) {
+            setAtSupersededNotice({
+              movedTo: currentTender.atNumber || currentTender.name || currentTender.id,
+              wasOn: was.atNumber || was.name || was.id,
+            });
+          }
+        } else if (scopedStoredAt && agencyAts.some(at => at.id === scopedStoredAt)) {
+          // No tender is Active at all - keep what they had rather than clearing it. An
+          // agency with nothing Active is a setup problem, not a reason to lose the view.
           setActiveAtMasterIdState(scopedStoredAt);
         } else if (agencyAts.length > 0 && !agencyAts.find(a => a.id === activeAtMasterId)) {
           const activeAts = agencyAts.filter(at => at.status === 'Active');
@@ -1919,7 +1992,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAtMaster, updateAtMaster,
       predictNextJobNo, getJobNoPrefix, syncCountersState,
       publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster,
-      carryOilBalanceForward
+      carryOilBalanceForward, atSupersededNotice, dismissAtSupersededNotice
     }}>
       {children}
     </AgencyContext.Provider>
