@@ -2488,6 +2488,17 @@ export default function NewJob() {
             <div className="overflow-y-auto p-3 sm:p-4 space-y-2">
               {ambiguousMatch.candidates.map((pj: any) => {
                 const delDate = pj.deliveryDate || pj.challanDate || pj.dateOfIssue || '';
+                // THE AT IS PART OF WHAT DISTINGUISHES THESE RECORDS.
+                //
+                // A new AT may restart numbering, so the same job number legitimately
+                // exists under two tenders for two different transformers. That is expected
+                // and is NOT a collision to be detected or warned about. What the operator
+                // needs is enough to tell the candidates apart, and make + serial + capacity
+                // + AT never coincide for two records.
+                const pjAt = pj.atId
+                  ? atMasters.find(a => a.id === pj.atId)
+                  : null;
+                const pjAtLabel = pjAt ? (pjAt.atNumber || pjAt.name || '') : '';
                 return (
                   <button
                     key={pj.id || `${pj.mrNo}-${pj.serialNo}`}
@@ -2500,13 +2511,24 @@ export default function NewJob() {
                   >
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
                       <span className="font-mono font-bold text-slate-900 text-sm">{pj.jobNo}</span>
-                      <span className="text-[11px] font-bold text-slate-500 uppercase">MR {pj.mrNo || '-'}</span>
+                      <div className="flex items-baseline gap-2">
+                        {pjAtLabel && (
+                          <span className="text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 uppercase tracking-wide">
+                            AT {pjAtLabel}
+                          </span>
+                        )}
+                        <span className="text-[11px] font-bold text-slate-500 uppercase">MR {pj.mrNo || '-'}</span>
+                      </div>
                     </div>
                     <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 text-[11px]">
                       <div><span className="text-slate-500">Make: </span><span className="font-semibold text-slate-800">{pj.make || '-'}</span></div>
                       <div><span className="text-slate-500">Serial: </span><span className="font-mono font-semibold text-slate-800">{pj.serialNo || '-'}</span></div>
                       <div><span className="text-slate-500">Capacity: </span><span className="font-mono font-semibold text-slate-800">{pj.capacityKva} KVA</span></div>
                       <div><span className="text-slate-500">Delivered: </span><span className="font-mono font-semibold text-slate-800">{delDate ? formatDDMMYYYY(delDate) : '-'}</span></div>
+                      <div className="col-span-2 sm:col-span-4">
+                        <span className="text-slate-500">AT: </span>
+                        <span className="font-semibold text-slate-800">{pjAtLabel || 'not recorded on this job'}</span>
+                      </div>
                     </div>
                   </button>
                 );
