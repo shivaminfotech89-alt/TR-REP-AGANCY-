@@ -1,0 +1,12 @@
+{
+  "name": "tr-rep-agency-functions",
+  "description": "Guarded deletes for tr-rep-agency. See functions/index.js.",
+  "type": "module",
+  "engines": { "node": "20" },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^13.0.0",
+    "firebase-functions": "^6.1.0"
+  },
+  "private": true
+}

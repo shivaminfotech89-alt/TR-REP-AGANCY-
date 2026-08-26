@@ -7,7 +7,7 @@ import { SCHEDULE_A, bandForKva } from './ugvclSchedule2020';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from './scheduleItemMap';
 import { defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData } from './estimateData';
 
-const app = initializeApp(firebaseConfig);
+export const app = initializeApp(firebaseConfig);
 export const db = initializeFirestore(
   app, 
   { experimentalForceLongPolling: true }, 

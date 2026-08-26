@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
-import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building } from 'lucide-react';
+import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
 import { formatDDMMYYYY } from '../lib/utils';
+import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
+import { db, auth } from '../lib/firebase';
+import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
 // Live hint for an AT percentage field while it's still a string mid-edit (e.g. "-",
 // "-.", "." are valid intermediate states that aren't a usable number yet).
@@ -29,6 +32,74 @@ export function AtSettings() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
+
+  /**
+   * HOW MANY JOBS SIT UNDER EACH AT — read from Firestore, not held in context.
+   *
+   * The delete button exists only where this is 0. It is a COUNT FOR THE UI, not the guard:
+   * the guard runs inside the callable, in the same invocation as the delete, and refuses
+   * whatever this screen believed (AUDIT F77). A number read at render is stale the moment
+   * another tab saves an intake, so it decides what to SHOW and nothing else.
+   *
+   * `limit(1)` - the question is "any?", not "how many?". Reading a whole agency's jobs to
+   * decide whether to draw a button is a cost paid on every visit for an action taken twice
+   * a year.
+   */
+  const [emptyAtIds, setEmptyAtIds] = useState<Set<string>>(new Set());
+  const [deletingAtId, setDeletingAtId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<{ title: string; message: string; advice: string; items: string[] } | null>(null);
+  const [confirmDeleteAt, setConfirmDeleteAt] = useState<AtMaster | null>(null);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid || !activeAgency) { setEmptyAtIds(new Set()); return; }
+    let cancelled = false;
+    (async () => {
+      const empty = new Set<string>();
+      for (const at of atMasters.filter(t => t.agencyId === activeAgency.id)) {
+        try {
+          const snap = await getDocs(query(
+            collection(db, 'jobs'),
+            where('ownerId', '==', uid),
+            where('atId', '==', at.id),
+            limit(1),
+          ));
+          if (snap.empty) empty.add(at.id);
+        } catch {
+          // A failed read means UNKNOWN, and unknown must not read as empty - leaving it out
+          // of the set hides the button, which is the safe direction.
+        }
+      }
+      if (!cancelled) setEmptyAtIds(empty);
+    })();
+    return () => { cancelled = true; };
+  }, [atMasters, activeAgency?.id, auth.currentUser?.uid]);
+
+  const runDelete = async (at: AtMaster) => {
+    setConfirmDeleteAt(null);
+    setDeletingAtId(at.id);
+    setDeleteError(null);
+    try {
+      await deleteIfEmpty('atMasters', at.id);
+      setEmptyAtIds(prev => { const n = new Set(prev); n.delete(at.id); return n; });
+      // The context refetches on its own; nothing here writes atMasters directly.
+    } catch (err) {
+      const e = err as GuardedDeleteError;
+      setDeleteError({
+        title: e.kind === 'not-deployed' ? 'The delete function is not deployed'
+             : e.kind === 'blocked' ? 'This AT cannot be deleted'
+             : e.kind === 'denied' ? 'Not allowed'
+             : e.kind === 'gone' ? 'Already gone'
+             : 'The delete could not be completed',
+        message: e.message,
+        advice: e.advice,
+        items: e.blockers.flatMap(b => b.items),
+      });
+    } finally {
+      setDeletingAtId(null);
+    }
+  };
+
 
   // Deep link from a setup-gap dialog: /agency-settings?section=allotments&atId=...
   // Opens the named AT on the right tab so the operator lands where the fix is, rather
@@ -349,6 +420,72 @@ export function AtSettings() {
         </div>
       )}
 
+      {/* CONFIRM — names what is about to go, and what it is not. */}
+      {confirmDeleteAt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200">
+            <div className="flex items-center gap-3 mb-3 text-rose-700">
+              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0"><Trash2 className="w-6 h-6" /></div>
+              <h3 className="text-base font-bold text-slate-900">
+                Delete AT {confirmDeleteAt.atNumber || confirmDeleteAt.name}?
+              </h3>
+            </div>
+            <p className="text-sm text-slate-700">
+              No jobs are booked under it, so there is no repair history to lose. Its prefixes,
+              allotments, counters and rates live on this record and go with it.
+            </p>
+            <p className="text-xs text-slate-600 mt-2">
+              The check runs again on the server before anything is removed &mdash; if a job has been
+              booked against this tender since this screen loaded, the delete is refused.
+            </p>
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setConfirmDeleteAt(null)}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300">
+                Cancel
+              </button>
+              <button type="button" onClick={() => runDelete(confirmDeleteAt)}
+                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm">
+                Delete this AT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* THE REFUSAL, AND THE MISSING-FUNCTION CASE, SAID PLAINLY.
+          "not-deployed" is the one that must never read as a network blip: an operator
+          would retry it forever. It names the state and offers the admin script, which
+          performs the identical check and is not going anywhere (AUDIT F75, F77). */}
+      {deleteError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-rose-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-3 mb-3 text-rose-700">
+              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0"><AlertTriangle className="w-6 h-6" /></div>
+              <h3 className="text-base font-bold text-slate-900">{deleteError.title}</h3>
+            </div>
+            <p className="text-sm text-slate-700 whitespace-pre-line">{deleteError.message}</p>
+            {deleteError.items.length > 0 && (
+              <div className="mt-3 border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto">
+                {deleteError.items.map((it, i) => (
+                  <div key={i} className="px-3 py-1.5 text-xs font-mono text-slate-700">{it}</div>
+                ))}
+              </div>
+            )}
+            {deleteError.advice && (
+              <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mt-3">
+                {deleteError.advice}
+              </p>
+            )}
+            <div className="flex justify-end mt-4">
+              <button type="button" onClick={() => setDeleteError(null)}
+                      className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg">
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Expanded View */}
       {isExpanded && (
         <div className="pt-4 space-y-4">
@@ -423,6 +560,29 @@ export function AtSettings() {
                             >
                               Mark as {at.status === 'Active' ? 'Closed' : 'Active'}
                             </button>
+                            {/* DELETE APPEARS ONLY WHERE NOTHING IS BOOKED (AUDIT F77).
+                                Absent - not disabled, not greyed - for an AT with jobs: a
+                                disabled control still says "this is a thing you might do to
+                                this tender", and for a live tender it is not.
+
+                                Hiding it is not the guard. The callable re-queries and
+                                refuses whatever this screen believed, because the count
+                                behind `emptyAtIds` is stale the moment another tab saves an
+                                intake. This decides what to show; the function decides what
+                                happens. */}
+                            {emptyAtIds.has(at.id) && (
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setConfirmDeleteAt(at); }}
+                                disabled={deletingAtId === at.id}
+                                title="No jobs are booked under this AT, so it can be removed"
+                                className="flex items-center text-xs font-bold text-rose-700 hover:text-rose-900 bg-rose-50 hover:bg-rose-100 px-2.5 py-1.5 rounded-lg border border-rose-200 transition-colors disabled:opacity-50"
+                              >
+                                {deletingAtId === at.id
+                                  ? <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+                                  : <Trash2 className="w-3 h-3 mr-1" />}
+                                Delete
+                              </button>
+                            )}
                           </div>
                         </>
                       ) : (
