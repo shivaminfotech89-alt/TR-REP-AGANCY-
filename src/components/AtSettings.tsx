@@ -29,6 +29,8 @@ export function AtSettings() {
   // is the person who needs that, and a console log reaches the wrong person entirely.
   const [seedReport, setSeedReport] = useState<AtSeedReport | null>(null);
   const [seedReportAtNo, setSeedReportAtNo] = useState<string>('');
+  /** The new AT's document id, so "Set rates" can name the tender rather than assume it. */
+  const [seedReportAtId, setSeedReportAtId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
@@ -219,11 +221,16 @@ export function AtSettings() {
           against AT {seedReportAtNo} are blocked</strong> until it has one. Enter its rates, or copy
           them from a published AT.
         </p>
+        {/* ?at=<id> SELECTS THE TENDER THAT WAS JUST CREATED.
+            Without it the rates screen shows whichever AT is globally active, which is
+            usually - but only usually - the new one: addAtMaster makes it active, and
+            depending on that side effect staying true is how a button silently starts
+            opening the wrong tender. The id is explicit (AUDIT F79). */}
         <Link
-          to="/agency-settings?section=estimate-master"
+          to={`/agency-settings?section=estimate-master&at=${encodeURIComponent(seedReportAtId)}`}
           className="mt-2 inline-flex items-center px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold"
         >
-          Set rates for this AT
+          Set rates for AT {seedReportAtNo}
         </Link>
       </div>
 
@@ -290,7 +297,7 @@ export function AtSettings() {
       // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
       // a newly created AT showed a card with no way into its configuration.
       if (created?.id) setActiveAtMasterId(created.id);
-      if (created?.seed) { setSeedReport(created.seed); setSeedReportAtNo(newAt.atNumber); }
+      if (created?.seed) { setSeedReport(created.seed); setSeedReportAtNo(newAt.atNumber); setSeedReportAtId(created.id); }
       setShowAddForm(false);
       setNewAt({
         atNumber: '',

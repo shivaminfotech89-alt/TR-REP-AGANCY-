@@ -15,7 +15,7 @@ import {
 import { serverTimestamp } from 'firebase/firestore';
 import { auth } from '../lib/firebase';
 import { formatDDMMYYYY } from '../lib/utils';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
@@ -309,7 +309,7 @@ export default function EstimateMaster() {
     agencies, 
     activeAgency, 
     atMasters,
-    activeAtMaster,
+    activeAtMaster: globalActiveAtMaster,
     updateAtMaster,
     publishedAts,
     isSuperAdmin,
@@ -366,19 +366,83 @@ export default function EstimateMaster() {
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
 
   /**
+   * WHICH TENDER'S RATES THIS SCREEN IS SHOWING — a choice made HERE, and only here.
+   *
+   * ⚠ DISPLAY-ONLY. Selecting a tender in this dropdown does NOT change the globally active
+   * AT, and must never be made to. The active AT decides which prefixes New Job draws job
+   * numbers from, which allotment is checked at intake, and which tender the next MR is
+   * booked against. An operator who opens this screen to LOOK at last year's rates would
+   * otherwise silently re-point all three - a mutation caused by a read, which is the shape
+   * of F70 and F72 both (AUDIT F79).
+   *
+   * It DEFAULTS to the active AT, so the two agree unless the operator deliberately picks
+   * another; and when they do diverge, the screen says so rather than leaving it implicit.
+   */
+  const [selectedAtIdState, setSelectedAtId] = useState<string | null>(null);
+
+  /** The agency's tenders, newest tender period first. Closed ones are included - see below. */
+  const agencyAts = useMemo(
+    () => atMasters
+      .filter(t => t.agencyId === activeAgency?.id)
+      .sort((a, b) => (b.startDate || 0) - (a.startDate || 0)),
+    [atMasters, activeAgency?.id],
+  );
+
+  /**
+   * ⚠ EVERY READ AND EVERY WRITE ON THIS SCREEN GOES THROUGH `selectedAt`, NOT
+   * `globalActiveAtMaster`. A screen showing AT 24-25 that saves to AT 26-27 is worse than
+   * the problem this dropdown solves, so the context value is deliberately renamed: any
+   * reference that was not migrated is an undefined identifier and fails to compile rather
+   * than quietly reading the wrong tender.
+   *
+   * `globalActiveAtMaster` survives for exactly one purpose - saying that the two differ.
+   */
+  const selectedAt = useMemo(() => {
+    const chosen = selectedAtIdState ? agencyAts.find(t => t.id === selectedAtIdState) : null;
+    return chosen || globalActiveAtMaster || agencyAts[0] || null;
+  }, [selectedAtIdState, agencyAts, globalActiveAtMaster]);
+
+  /** True when this screen is showing a different tender from the one the app is working in. */
+  const divergedFromActive = Boolean(
+    selectedAt && globalActiveAtMaster && selectedAt.id !== globalActiveAtMaster.id
+  );
+
+  /**
+   * A CLOSED TENDER IS READ-ONLY.
+   *
+   * Viewing what a retired tender priced at is legitimate and is often the reason to come
+   * here. Editing it is not: those rates priced jobs that are already estimated, billed and
+   * paid, and the printed estimate RECOMPUTES rather than reading stored figures (F72) - so
+   * changing them silently re-prices work that has already left the building, and the paper
+   * in the file stops matching the screen.
+   *
+   * The way through is deliberate rather than blocked: reopen the tender in Agency Settings
+   * if its rates genuinely need correcting. Two steps, not one accident.
+   */
+  const selectedAtClosed = String(selectedAt?.status || '').toLowerCase() === 'closed';
+  const canSaveRates = Boolean(selectedAt) && !selectedAtClosed;
+
+  /** `?at=<id>` selects a tender on arrival - see the AT creation flow in AtSettings. */
+  const [emParams] = useSearchParams();
+  useEffect(() => {
+    const wanted = emParams.get('at');
+    if (wanted && agencyAts.some(t => t.id === wanted)) setSelectedAtId(wanted);
+  }, [emParams, agencyAts]);
+
+  /**
    * WHERE THIS SCREEN'S RATES COME FROM — the ACTIVE AT first, the agency behind it.
    *
    * Mirrors getEstimateMasterForCore's top two rungs exactly (AUDIT F73), per section
    * rather than per document: an AT that holds CRGO but not Overhauling shows its own CRGO
    * and the agency's Overhauling, which is what pricing will do.
    *
-   * ⚠ Not `activeAtMaster ?? activeAgency`. That would show the agency's rates only when
+   * ⚠ Not `selectedAt ?? activeAgency`. That would show the agency's rates only when
    * NO AT is selected, and blank sections whenever an AT held some but not all of them -
    * which is precisely the state every migrated AT could be left in.
    */
   const rateHolder = useMemo(() => {
     const pick = (k: keyof AtMaster & keyof Agency) => {
-      const fromAt = (activeAtMaster as any)?.[k];
+      const fromAt = (selectedAt as any)?.[k];
       if (Array.isArray(fromAt) && fromAt.length > 0) return fromAt;
       return (activeAgency as any)?.[k];
     };
@@ -392,19 +456,19 @@ export default function EstimateMaster() {
       // written it since D4. Agency only.
       estimateMaster: (activeAgency as any)?.estimateMaster,
     };
-  }, [activeAtMaster, activeAgency]);
+  }, [selectedAt, activeAgency]);
 
   /**
    * WHAT THE OPERATOR IS LOOKING AT, in one value. Absent ratesSource means NO RATES YET.
    */
   const ratesState = useMemo(() => {
-    if (!activeAtMaster) return { kind: 'no-at' as const };
-    const src = String((activeAtMaster as any).ratesSource || '').trim();
+    if (!selectedAt) return { kind: 'no-at' as const };
+    const src = String((selectedAt as any).ratesSource || '').trim();
     if (!src) return { kind: 'none' as const };
     if (src === 'inherited-agency') return { kind: 'inherited' as const };
     if (src.startsWith('published:')) return { kind: 'published' as const, id: src.slice('published:'.length) };
     return { kind: 'own' as const };
-  }, [activeAtMaster]);
+  }, [selectedAt]);
 
   useEffect(() => {
     if (activeAgency) {
@@ -465,7 +529,7 @@ export default function EstimateMaster() {
         setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
       }
     }
-  }, [activeAgency, activeAtMaster, globalDefaultEstimateMaster, rateHolder]);
+  }, [activeAgency, selectedAt, globalDefaultEstimateMaster, rateHolder]);
 
   if (!activeAgency) {
     return (
@@ -776,7 +840,7 @@ export default function EstimateMaster() {
       await saveRatesToActiveAt(updatePayload);
       setEditingSection(null);
       setPendingSaveSection(null);
-      setSyncSuccessMsg(`✓ Saved ${section} rates for AT "${activeAtMaster?.atNumber || activeAtMaster?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
+      setSyncSuccessMsg(`✓ Saved ${section} rates for AT "${selectedAt?.atNumber || selectedAt?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
     } catch (err) {
       alert(`Failed to save ${section} Estimate Master data for active agency.`);
@@ -1005,10 +1069,10 @@ export default function EstimateMaster() {
    * turn out wrong.
    */
   const saveRatesToActiveAt = async (payload: Record<string, any>) => {
-    if (!activeAtMaster) {
+    if (!selectedAt) {
       throw new Error('No AT is selected, so there is nowhere to save these rates. Rates belong to a tender.');
     }
-    await updateAtMaster(activeAtMaster.id, {
+    await updateAtMaster(selectedAt.id, {
       ...payload,
       ratesSource: 'own',
       ratesUpdatedAt: Date.now(),
@@ -1039,7 +1103,7 @@ export default function EstimateMaster() {
       };
       await saveRatesToActiveAt(payload);
       setEditingSection(null);
-      setSyncSuccessMsg(`✓ Saved all five sections for AT "${activeAtMaster?.atNumber || activeAtMaster?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
+      setSyncSuccessMsg(`✓ Saved all five sections for AT "${selectedAt?.atNumber || selectedAt?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
     } catch (err) {
       alert('Failed to save rates for active agency.');
@@ -1135,7 +1199,7 @@ export default function EstimateMaster() {
     const uid = activeAgency?.ownerId;
     const ownedAgencyIds = new Set(agencies.filter(a => a.ownerId === uid).map(a => a.id));
     return atMasters
-      .filter(t => t.id !== activeAtMaster?.id && t.ownerId === uid && ownedAgencyIds.has(t.agencyId))
+      .filter(t => t.id !== selectedAt?.id && t.ownerId === uid && ownedAgencyIds.has(t.agencyId))
       .map(t => ({
         id: t.id,
         label: t.atNumber || t.name || t.id,
@@ -1144,10 +1208,10 @@ export default function EstimateMaster() {
         ratesSource: String((t as any).ratesSource || '') || null,
       }))
       .sort((a, b) => a.agencyName.localeCompare(b.agencyName) || a.label.localeCompare(b.label));
-  }, [atMasters, agencies, activeAgency, activeAtMaster]);
+  }, [atMasters, agencies, activeAgency, selectedAt]);
 
   const openApplyToMyAgencies = async () => {
-    if (!activeAtMaster) {
+    if (!selectedAt) {
       alert('No AT is selected. Rates belong to a tender, so there is nothing to copy from.');
       return;
     }
@@ -1214,7 +1278,7 @@ export default function EstimateMaster() {
     setIsSaving(true);
     try {
       const id = await publishAtTemplate(
-        { id: publishTplTargetId || undefined, name: publishTplName.trim(), atNumber: activeAtMaster?.atNumber, notes: publishTplNotes.trim() },
+        { id: publishTplTargetId || undefined, name: publishTplName.trim(), atNumber: selectedAt?.atNumber, notes: publishTplNotes.trim() },
         // ALL FIVE, not just what was edited - see buildFullTemplatePayload.
         buildFullTemplatePayload(),
       );
@@ -1234,19 +1298,19 @@ export default function EstimateMaster() {
 
   /** Copy a published template onto the ACTIVE AT. A copy, with the version stamped. */
   const handleAdoptTemplate = async (templateId: string) => {
-    if (!activeAtMaster) { alert('No AT is selected, so there is nowhere to copy these rates to.'); return; }
+    if (!selectedAt) { alert('No AT is selected, so there is nowhere to copy these rates to.'); return; }
     const tpl = publishedAts.find(t => t.id === templateId);
     if (!tpl) return;
     const ok = window.confirm(
-      `Copy "${tpl.name}" v${tpl.version} onto AT ${activeAtMaster.atNumber || activeAtMaster.name}?\n\n`
+      `Copy "${tpl.name}" v${tpl.version} onto AT ${selectedAt.atNumber || selectedAt.name}?\n\n`
       + `This REPLACES the rates currently on this AT. It is a copy, so later revisions of the template will not change your rates - `
       + `you will simply be told the template has moved on.`
     );
     if (!ok) return;
     setIsSaving(true);
     try {
-      await adoptPublishedAt(activeAtMaster.id, templateId);
-      setSyncSuccessMsg(`✓ Copied "${tpl.name}" v${tpl.version} onto AT ${activeAtMaster.atNumber || activeAtMaster.name}.`);
+      await adoptPublishedAt(selectedAt.id, templateId);
+      setSyncSuccessMsg(`✓ Copied "${tpl.name}" v${tpl.version} onto AT ${selectedAt.atNumber || selectedAt.name}.`);
       setTimeout(() => setSyncSuccessMsg(null), 6000);
     } catch (err) {
       console.error(err);
@@ -1263,7 +1327,7 @@ export default function EstimateMaster() {
       setShowApplyModal(false);
       const names = applyCandidateAts.filter(a => applyTargets.includes(a.id))
         .map(a => `${a.label} (${a.agencyName})`).join(', ');
-      setSyncSuccessMsg(`✓ Rates from AT ${activeAtMaster?.atNumber || activeAtMaster?.name} applied to ${names}.`);
+      setSyncSuccessMsg(`✓ Rates from AT ${selectedAt?.atNumber || selectedAt?.name} applied to ${names}.`);
       setTimeout(() => setSyncSuccessMsg(null), 6000);
     } catch (err) {
       console.error(err);
@@ -1948,6 +2012,49 @@ export default function EstimateMaster() {
         </div>
       )}
 
+      {/* ⚠ THE SCREEN AND THE APP ARE ON DIFFERENT TENDERS.
+          Selecting here is display-only by design, which means the operator can end up
+          reading one tender's rates while New Job books against another. That is a fine
+          state to be in and a terrible one to be in WITHOUT KNOWING, so it is stated -
+          divergence named is not confusion; divergence unstated is (AUDIT F79). */}
+      {divergedFromActive && (
+        <div className="bg-indigo-50 border border-indigo-300 rounded-xl p-3 text-xs text-indigo-900 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold">
+              You are viewing AT {selectedAt?.atNumber || selectedAt?.name}. New Job is booking
+              against AT {globalActiveAtMaster?.atNumber || globalActiveAtMaster?.name}.
+            </p>
+            <p className="mt-0.5">
+              Choosing a tender here changes only what this screen shows and saves. It does not
+              change which tender intake, job numbering or allotment use &mdash; that is set in
+              Agency Settings.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* A CLOSED TENDER IS SHOWN BUT NOT EDITABLE. */}
+      {selectedAtClosed && (
+        <div className="bg-slate-100 border border-slate-400 rounded-xl p-3 text-xs text-slate-800 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+          <div>
+            <p className="font-bold">
+              AT {selectedAt?.atNumber || selectedAt?.name} is CLOSED. These rates are read-only.
+            </p>
+            <p className="mt-0.5">
+              They priced jobs that are already estimated, billed and paid, and the printed
+              estimate recomputes rather than reading stored figures &mdash; so changing them
+              would silently re-price work that has already left the building.
+            </p>
+            <p className="mt-0.5">
+              If they genuinely need correcting, reopen the tender first: Agency Settings &rarr;
+              Tenders &rarr; <strong>Mark as Active</strong>.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* WHERE THESE RATES COME FROM — stated, never implied.
           `ratesSource` absent means an AT has no rates of its own, and that must not look
           the same as having them. A silent fallthrough to the agency's is the 'JOB'
@@ -1994,7 +2101,7 @@ export default function EstimateMaster() {
               <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">
-                  AT &ldquo;{activeAtMaster?.atNumber || activeAtMaster?.name}&rdquo; has no rates of its own.
+                  AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo; has no rates of its own.
                 </p>
                 <p className="text-xs mt-1">
                   A new tender starts with no schedule. The figures below are a starting point drawn from
@@ -2014,7 +2121,7 @@ export default function EstimateMaster() {
                   These rates were inherited from {activeAgency.name}, not entered for this tender.
                 </p>
                 <p className="text-xs mt-1">
-                  They were copied onto AT &ldquo;{activeAtMaster?.atNumber || activeAtMaster?.name}&rdquo; when rates
+                  They were copied onto AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo; when rates
                   moved from agencies onto tenders, so they are the figures this agency was using &mdash; but nobody
                   has confirmed them against <strong>this</strong> tender&rsquo;s schedule. Saving any section makes
                   them this AT&rsquo;s own.
@@ -2025,7 +2132,7 @@ export default function EstimateMaster() {
         }
         if (ratesState.kind === 'published') {
           const tpl = publishedAts.find(t => t.id === (ratesState as any).id);
-          const usedVersion = Number((activeAtMaster as any)?.publishedAtVersion ?? 0);
+          const usedVersion = Number((selectedAt as any)?.publishedAtVersion ?? 0);
           const currentVersion = Number(tpl?.version ?? 0);
           const drifted = tpl && currentVersion > usedVersion;
           return (
@@ -2056,7 +2163,7 @@ export default function EstimateMaster() {
             <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />
             <div>
               <p className="font-bold">
-                Rates entered for AT &ldquo;{activeAtMaster?.atNumber || activeAtMaster?.name}&rdquo;.
+                Rates entered for AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo;.
               </p>
               <p className="text-xs mt-1">
                 They price only jobs booked under this tender. No other AT, agency or user is affected.
@@ -2069,19 +2176,19 @@ export default function EstimateMaster() {
       {/* ADOPT A PUBLISHED TEMPLATE. Shown to everyone: this is the second of the two ways
           a user gets rates - enter them, or take a published AT. It sits above the tables
           because for an AT with none, it is the fastest correct action on the screen. */}
-      {activeAtMaster && publishedAts.length > 0 && (
+      {selectedAt && publishedAts.length > 0 && (
         <div className="bg-white border border-slate-200 rounded-xl p-4">
           <div className="flex items-center gap-2 mb-2">
             <Database className="w-4 h-4 text-indigo-600" />
             <h3 className="text-sm font-bold text-slate-900">Published AT templates</h3>
             <span className="text-[11px] text-slate-500">
-              copy one onto AT {activeAtMaster.atNumber || activeAtMaster.name}
+              copy one onto AT {selectedAt.atNumber || selectedAt.name}
             </span>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
             {publishedAts.map(t => {
               const isSource = ratesState.kind === 'published' && (ratesState as any).id === t.id;
-              const usedVersion = Number((activeAtMaster as any)?.publishedAtVersion ?? 0);
+              const usedVersion = Number((selectedAt as any)?.publishedAtVersion ?? 0);
               return (
                 <div key={t.id} className="border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3">
                   <div className="min-w-0">
@@ -2201,14 +2308,32 @@ export default function EstimateMaster() {
             {/* WHICH TENDER'S RATES THESE ARE. Rates live on the AT now (AUDIT F73), so the
                 agency alone no longer says what is on screen - and an AT NUMBER alone does
                 not either: "2026-27" exists under two different agencies in live data. */}
-            {activeAtMaster ? (
-              <span className="px-2.5 py-0.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-full">
-                AT: {activeAtMaster.atNumber || activeAtMaster.name}
-                {String(activeAtMaster.status || '').toLowerCase() === 'closed' && ' (CLOSED)'}
-              </span>
+            {/* THE TENDER SELECTOR. Display-only: it changes what THIS SCREEN shows and
+                writes, and nothing else. See the note on `selectedAt`. */}
+            {agencyAts.length > 0 ? (
+              <label className="inline-flex items-center gap-1.5">
+                <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500">Rates for</span>
+                <select
+                  value={selectedAt?.id || ''}
+                  onChange={e => setSelectedAtId(e.target.value || null)}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border bg-white ${
+                    selectedAtClosed
+                      ? 'border-slate-400 text-slate-600'
+                      : 'border-indigo-300 text-indigo-800'
+                  }`}
+                >
+                  {agencyAts.map(t => (
+                    <option key={t.id} value={t.id}>
+                      AT {t.atNumber || t.name}
+                      {String(t.status || '').toLowerCase() === 'closed' ? ' — CLOSED' : ''}
+                      {!(t as any).ratesSource ? ' — no rates' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
             ) : (
               <span className="px-2.5 py-0.5 text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 rounded-full">
-                No AT selected
+                No AT exists for this agency
               </span>
             )}
             {isSuperAdmin ? (
@@ -2254,12 +2379,24 @@ export default function EstimateMaster() {
           <button 
             type="button"
             onClick={handleSaveAllToCurrentAgency}
-            disabled={isSaving}
+            disabled={isSaving || !canSaveRates}
             className="flex items-center px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition-colors disabled:opacity-50"
-            title={`Save all rates specifically for ${activeAgency.name} without affecting other users`}
+            title={!selectedAt
+              ? 'No AT is selected. Rates belong to a tender, so there is nowhere to save them.'
+              : selectedAtClosed
+                ? `AT ${selectedAt.atNumber || selectedAt.name} is closed and its rates are read-only.`
+                : `Save all five sections onto AT ${selectedAt.atNumber || selectedAt.name}. No other AT, agency or user is affected.`}
           >
-            <Save className="w-3.5 h-3.5 mr-1.5" /> 
-            Save All for {activeAgency.name}
+            <Save className="w-3.5 h-3.5 mr-1.5" />
+            {/* NAMES THE TENDER, NEVER THE AGENCY. Rates belong to a tender, the dropdown
+                above can be pointing at any of them, and this is the last thing the operator
+                reads before writing (AUDIT F79). */}
+            <span className="flex flex-col items-start leading-tight text-left">
+              <span>Save all 5 sections to AT {selectedAt?.atNumber || selectedAt?.name || '—'}</span>
+              {divergedFromActive && (
+                <span className="text-[9px] font-semibold opacity-90">not the tender New Job is using</span>
+              )}
+            </span>
           </button>
           {/* TWO BUTTONS, TWO BLAST RADII.
               One control used to do both: write public_config AND loop the caller's own
@@ -2273,7 +2410,7 @@ export default function EstimateMaster() {
             <button
               type="button"
               onClick={openApplyToMyAgencies}
-              disabled={isSaving || !activeAtMaster}
+              disabled={isSaving || !selectedAt}
               className="flex items-center px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 shadow-2xs transition-colors disabled:opacity-50"
               title={`Copy these rates onto your other ATs. You will see what it replaces before anything is written.`}
             >
@@ -2284,8 +2421,8 @@ export default function EstimateMaster() {
           {isSuperAdmin && (
             <button
               type="button"
-              onClick={() => { setPublishTplName(activeAtMaster?.atNumber ? `UGVCL ${activeAtMaster.atNumber}` : ''); setShowPublishTplModal(true); }}
-              disabled={!activeAtMaster}
+              onClick={() => { setPublishTplName(selectedAt?.atNumber ? `UGVCL ${selectedAt.atNumber}` : ''); setShowPublishTplModal(true); }}
+              disabled={!selectedAt}
               className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors disabled:opacity-50"
               title="Admin only: publish these rates as a named AT template that any user can copy onto their own tender. Does not change anyone's existing rates."
             >

@@ -103,6 +103,19 @@ export default function AppLayout({ user }: { user: User }) {
     { to: '/challan/new', label: 'Delivery Challan', icon: Truck },
     { to: '/bills/new', label: 'Billing System', icon: Receipt },
     { to: '/oil-inward', label: 'Oil Account', icon: Droplets },
+    /**
+     * A SHORTCUT, NOT A SECOND HOME (AUDIT F79).
+     *
+     * This points at the Agency Settings section, which already expands and scrolls to the
+     * rates. It deliberately does NOT render EstimateMaster at its own route: that would
+     * mount a 2,600-line component in two places, and every deep link to the rates - three
+     * setup-gap dialogs, the Dashboard, the AT seed panel - would then have two possible
+     * destinations that could drift apart. One component, one place it lives, two ways in.
+     *
+     * The NO RATES warning therefore also stays where tenders are created, because the
+     * section never left.
+     */
+    { to: '/agency-settings?section=estimate-master', label: 'Estimate Master', icon: Database },
     { to: '/reports', label: 'Report Hub', icon: BarChart3 },
   ];
 
@@ -197,7 +210,10 @@ export default function AppLayout({ user }: { user: User }) {
 
           {navLinks.map((link) => {
             const Icon = link.icon;
-            const isActive = location.pathname === link.to || (link.to !== '/' && location.pathname.startsWith(link.to));
+            // Compare the PATH ONLY. A nav entry carrying a query string ("?section=") would
+            // never match `location.pathname` and would sit permanently unhighlighted.
+            const linkPath = link.to.split('?')[0];
+            const isActive = location.pathname === linkPath || (linkPath !== '/' && location.pathname.startsWith(linkPath));
             return (
               <Link 
                 key={link.to}
