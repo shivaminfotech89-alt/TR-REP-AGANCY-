@@ -178,7 +178,33 @@ export function AtSettings() {
    * they are chosen by the act of submitting rather than applied behind it, and the panel
    * says where they came from.
    */
-  const seedPanel = seedReport && (
+  /**
+   * THE AT THE SEED PANEL IS ABOUT, AS IT IS NOW — not as it was when created.
+   *
+   * `seedReport` is a snapshot taken at creation and held until dismissed. Everything it
+   * says is therefore a claim about a moment that has passed, and one of those claims -
+   * "this AT has no rates yet" - stopped being true the moment the operator saved rates,
+   * while the panel went on asserting it (AUDIT F80).
+   *
+   * Reading the live document is what makes the panel describe the tender rather than the
+   * event.
+   */
+  const seedAtNow = seedReportAtId ? atMasters.find(t => t.id === seedReportAtId) : undefined;
+  const seedAtHasRates = Boolean((seedAtNow as any)?.ratesSource);
+
+  /**
+   * ⚠ THE WHOLE PANEL GOES ONCE THE TENDER IS SET UP.
+   *
+   * Both halves are creation-time facts. "Numbering continues from N" answers a question
+   * asked once, at creation; "this AT has no rates" answers one that has now been answered.
+   * A panel whose every statement is about a moment in the past, sitting permanently above a
+   * configured tender, is a header that says nothing - and worse, one whose most prominent
+   * line is false.
+   *
+   * It also disappears if the AT itself is gone: creating a tender and immediately deleting
+   * it is what the delete button exists for.
+   */
+  const seedPanel = seedReport && seedAtNow && !seedAtHasRates && (
     <div className="p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/60 space-y-2">
       <div className="flex items-start justify-between gap-3">
         <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-900">
@@ -214,6 +240,10 @@ export function AtSettings() {
 
           The route out links to this same page with ?section=estimate-master, which the
           settings page consumes to EXPAND the collapsed rates section and scroll to it. */}
+      {/* Gated on the LIVE document, not on the panel being open. Belt and braces with the
+          condition above: if the panel is ever kept alive for another reason, this half must
+          still not claim something that has stopped being true. */}
+      {!seedAtHasRates && (
       <div className="p-2.5 rounded-lg bg-rose-100 border-2 border-rose-400 text-[11px] text-rose-900 leading-relaxed">
         <strong className="font-bold block uppercase tracking-wide">This AT has no rates yet.</strong>
         <p className="mt-1">
@@ -233,6 +263,7 @@ export function AtSettings() {
           Set rates for AT {seedReportAtNo}
         </Link>
       </div>
+      )}
 
       {seedReport.unparsed.length > 0 && (
         /* REPORT AND PROCEED. Blocking a tender rollover on historical job numbers nobody
@@ -453,9 +484,62 @@ export function AtSettings() {
               </h3>
             </div>
             <p className="text-sm text-slate-700">
-              No jobs are booked under it, so there is no repair history to lose. Its prefixes,
-              allotments, counters and rates live on this record and go with it.
+              No jobs are booked under it, so there is no repair history to lose.
             </p>
+
+            {/* ⚠ THE RATE SCHEDULE GOES WITH IT, SAID ON ITS OWN (AUDIT F80).
+                This used to be the word "rates", fourth in a list of four, at the end of a
+                sentence about prefixes and counters. Rates live ON the AT document now
+                (F73), so deleting the tender deletes its whole schedule - and that is not
+                something anyone infers from "delete this AT". Prefixes and counters are
+                configuration; a rate schedule is a negotiated tender document that may have
+                taken an afternoon to enter, or been copied from a published template that
+                has since moved on. It gets its own block, with the counts. */}
+            {(() => {
+              const SECTIONS: Array<[string, string]> = [
+                ['CRGO', 'estimateMasterCRGO'],
+                ['Amorphous', 'estimateMasterAmorphous'],
+                ['Wound Core', 'estimateMasterWoundCore'],
+                ['Overhauling', 'estimateMasterOverhauling'],
+                ['Circle Limits', 'estimateMasterCircleLimits'],
+              ];
+              const held = SECTIONS
+                .map(([label, key]) => [label, ((confirmDeleteAt as any)[key] || []).length] as [string, number])
+                .filter(([, n]) => n > 0);
+              const src = String((confirmDeleteAt as any).ratesSource || '');
+              if (held.length === 0) {
+                return (
+                  <p className="text-xs text-slate-600 mt-2">
+                    It carries no rate schedule, so there are no rates to lose.
+                  </p>
+                );
+              }
+              return (
+                <div className="mt-3 p-3 rounded-lg bg-amber-50 border-2 border-amber-300 text-xs text-amber-900">
+                  <strong className="font-bold block">Its rate schedule goes with it.</strong>
+                  <p className="mt-1">
+                    Rates belong to a tender, so they are stored on this record and are deleted with it:
+                  </p>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {held.map(([label, n]) => (
+                      <span key={label} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-mono text-[10px]">
+                        {label} — {n} row{n === 1 ? '' : 's'}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="mt-1.5">
+                    {src === 'inherited-agency'
+                      ? <>They came from the agency&rsquo;s own sections, so the same figures are still there
+                         and a new tender would inherit them again.</>
+                      : src.startsWith('published:')
+                        ? <>They were copied from a published template, so they can be copied again &mdash;
+                           though the template may have been revised since.</>
+                        : <><strong>They were entered by hand for this tender and exist nowhere else.</strong>{' '}
+                           Nothing recreates them.</>}
+                  </p>
+                </div>
+              );
+            })()}
             <p className="text-xs text-slate-600 mt-2">
               The check runs again on the server before anything is removed &mdash; if a job has been
               booked against this tender since this screen loaded, the delete is refused.
