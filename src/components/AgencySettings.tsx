@@ -248,20 +248,19 @@ export default function AgencySettings() {
     if (!activeAtMaster) {
       return { tone: 'blocking' as const, label: 'No AT selected', detail: 'Rates belong to a tender. Create or select one above.' };
     }
-    const atLabel = activeAtMaster.atNumber || activeAtMaster.name || activeAtMaster.id;
     const src = String((activeAtMaster as any).ratesSource || '').trim();
     if (!src) {
       return {
         tone: 'blocking' as const,
         label: 'NO RATES',
-        detail: `AT ${atLabel} has no rate schedule. Estimates and bills are blocked until it does.`,
+        detail: `This tender has no rate schedule. Estimates and bills against it are blocked until it does.`,
       };
     }
     if (src === 'inherited-agency') {
       return {
         tone: 'warn' as const,
         label: 'Inherited from the agency',
-        detail: `AT ${atLabel} — figures carried over when rates moved onto tenders. Not confirmed against this tender.`,
+        detail: `Figures carried over from ${activeAgency?.name || "the agency"} when rates moved onto tenders. Nobody has confirmed them against this tender.`,
       };
     }
     if (src.startsWith('published:')) {
@@ -271,10 +270,10 @@ export default function AgencySettings() {
       return {
         tone: behind ? ('warn' as const) : ('ok' as const),
         label: behind ? `Template v${used} — v${tpl?.version} available` : `From template v${used}`,
-        detail: `AT ${atLabel} — copied from "${tpl?.name || 'a published template'}".`,
+        detail: `Copied from "${tpl?.name || 'a published template'}".`,
       };
     }
-    return { tone: 'ok' as const, label: 'Entered for this tender', detail: `AT ${atLabel} carries its own rate schedule.` };
+    return { tone: 'ok' as const, label: 'Entered for this tender', detail: `Entered against this tender and used to price only its jobs.` };
   })();
 
   const [settingsParams] = useSearchParams();
@@ -689,6 +688,23 @@ export default function AgencySettings() {
               <div className="min-w-0">
                 <div className="flex flex-wrap items-center gap-2">
                   <h2 className="text-base font-black text-slate-900">Estimate Master Rates</h2>
+                  {/* WHOSE RATES THESE ARE, AT HEADER LEVEL.
+                      The section shows the ACTIVE AT's schedule, so switching tender above
+                      changes everything below it - and with the section collapsed that
+                      change would otherwise be invisible. The AT was named only in the
+                      11px line beneath; here it is the same size as the state, because
+                      "which tender" and "what state" are the two things a collapsed header
+                      exists to answer. */}
+                  {activeAtMaster ? (
+                    <span className="px-2.5 py-0.5 text-xs font-black bg-indigo-50 text-indigo-800 border border-indigo-300 rounded-full">
+                      AT {activeAtMaster.atNumber || activeAtMaster.name}
+                      {String(activeAtMaster.status || '').toLowerCase() === 'closed' && ' · CLOSED'}
+                    </span>
+                  ) : (
+                    <span className="px-2.5 py-0.5 text-xs font-black bg-slate-100 text-slate-600 border border-slate-300 rounded-full">
+                      no AT selected
+                    </span>
+                  )}
                   {/* THE STATE, WITHOUT EXPANDING. "No rates" is sized and coloured to be the
                       loudest thing here - it is what stands between the operator and every
                       document they are trying to produce. */}
