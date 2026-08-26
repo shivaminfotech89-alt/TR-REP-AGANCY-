@@ -262,6 +262,34 @@ export function highWaterJobNos(
   return out;
 }
 
+/**
+ * THE AT A JOB WAS BOOKED UNDER — not the one the session happens to have selected.
+ *
+ * A job belongs to the tender it was issued under. Its AT percentage and (from the rates
+ * move) its rate schedule are properties of THAT tender, and must not follow whatever the
+ * operator selects months later. Selecting a new AT after a rollover was silently
+ * re-pricing every historical job at the new tender's percentage - a multiplier applied to
+ * every line of every estimate and every invoice (AUDIT F72).
+ *
+ * Returns null when the job carries no `atId`. TWELVE of sixty-four live jobs are in that
+ * state, so this is a real case and not a defensive branch: callers pass
+ * `atForJob(job, atMasters) ?? activeAtMaster` to keep those jobs on exactly the behaviour
+ * they have today. Falling through to `null` instead would hand them the 4% default and
+ * change their price, which is the one thing this fix must not do.
+ *
+ * ⚠ Do NOT "improve" this by guessing an AT from the job's date or division. An AT that was
+ * inferred is indistinguishable downstream from one that was recorded, and the whole point
+ * is that a job's tender is a fact about the job.
+ */
+export function atForJob(
+  job: { atId?: string | null } | null | undefined,
+  atMasters: AtMaster[] | null | undefined,
+): AtMaster | null {
+  const id = String(job?.atId ?? '').trim();
+  if (!id || !atMasters) return null;
+  return atMasters.find(a => a.id === id) || null;
+}
+
 export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType: string = 'CRGO'): number {
   if (!at) return 4;
   const type = (coreType || 'CRGO').trim().toUpperCase();
