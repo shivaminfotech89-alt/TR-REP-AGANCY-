@@ -3074,6 +3074,49 @@ labelled like the first; the one here was a radio button in a Save dialog.
 
 ## DELIBERATE — reviewed and kept, not defects
 
+### D0. Job numbers are DERIVED, and typing over one does not persist
+
+**This is the model, chosen deliberately. It is not a defect and must not be "fixed".**
+
+A job number in New Job is computed from the agency's saved jobs, the division and the row's
+core type — `getAutoJobNo`, plus the sync effect above it. The field is editable, but the
+computation is authoritative, so a typed value does not survive the next recomputation:
+
+- **changing a row's core type** rewrites `jobNo` on **every** row in the form
+  (`handleTransformerChange`, the OGP branch — an unconditional `.map`);
+- **changing the division**, or `pastJobs` reloading, fires the sync effect
+  (`NewJob.tsx` deps `[division, repairType, activeAgency, activeAtMaster, pastJobs, pastJobsLoading]`),
+  which replaces any row where `t.jobNo !== correctNo` — which is precisely a row the operator
+  typed differently;
+- a row with **no core type** has its number set to `''` rather than recomputed.
+
+**Why it is kept.** The prefix and the sequence both come from configuration the operator
+does not control — the division, the core type, the AT's prefixes, the agency's saved jobs.
+Deriving the whole number keeps it consistent with all four by construction, and makes a
+wrong prefix unconstructible rather than merely refused at save. A guard that let a typed
+value stick would mean two sources of truth for the same field, and the app cannot tell a
+deliberate override from a stale value left behind by a dropdown change.
+
+**What was considered and rejected.** A per-row ledger of the last auto-assigned value
+(`rowKey -> value`), so a box still holding the app's own suggestion could be recomputed and
+anything else left alone. It works, and it was built and reverted. Rejected because it
+reintroduces the ambiguity above for the sake of a case the derived model says should not
+arise: if the number is derived, there is nothing to override.
+
+**The consequence to be aware of.** An operator who types a number from the MR paper and
+then touches a dropdown loses it, silently. If that turns out to matter in practice, the
+correct response is **NOT** the guard — it is to make the field read-only, so nothing can be
+typed and then discarded. What must not stand is an editable field whose contents are thrown
+away without warning; either the number is the operator's or it is the app's.
+
+**History.** This behaviour has changed three times: an allocator that reserved numbers on
+entry (F60, F65, F69, F70), a period where the operator typed the number and the app only
+suggested, and the current derived model introduced by `c1eabbe`. Read F70 before changing it
+a fourth time — that entry is about what the reservation model cost, and the failure it
+records is a number changing under an operator mid-entry.
+
+---
+
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test
 
 `filteredMrNos` (`BillingSystem.tsx`) shows an MR if any job matches the bill type at
