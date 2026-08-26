@@ -32,7 +32,7 @@ import {
   Tag,
   Scale
 } from 'lucide-react';
-import { useAgency, highWaterJobNos, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
@@ -203,38 +203,7 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, syncCountersState } = useAgency();
-
-  /**
-   * INTAKE RECORDS JOB NUMBERS. IT DOES NOT ALLOCATE THEM.
-   *
-   * The MR arrives from the division with its job numbers already agreed, and the operator
-   * types what is on the paper. So nothing in this form draws from a counter: the number in
-   * the box is the operator's, the app only suggests the next one as a convenience when a
-   * row is created, and changing any other field never alters it.
-   *
-   * THE COUNTER ADVANCES AT SAVE, to the highest number actually used (see the
-   * reconciliation block in the save transaction). Everything before save is free - open
-   * the form, type, flip dropdowns, abandon it, and nothing has been consumed.
-   *
-   * WHAT WAS HERE, AND WHY IT IS GONE
-   * ---------------------------------
-   * A reservation system: reserveForRows as a single guarded entry point, a per-row
-   * in-flight ref, a per-sequence serialising lock, a spinner, a failure modal, a renumber
-   * prompt with a retry path, and a refusal path that pre-reserved replacements. Four fixes
-   * went into it (F65, F69, and two more) and a core-type flip still burned numbers -
-   * five across three sequences on one unsaved row, traced in AUDIT F70.
-   *
-   * The instrumentation showed no unguarded path: every guard held and every number came
-   * from a deliberate operator action. The allocation itself was the defect. Numbers are
-   * agreed with the division and finite, so drawing one before the operator has committed
-   * to anything spends allotment to look at a dropdown - and no-reclaim means flipping back
-   * did not return the number, it drew another.
-   *
-   * ⚠ DO NOT REINTRODUCE ALLOCATION DURING INTAKE. Every guard above it has to be correct
-   * under React's batching, timing and double-invocation; the fifth attempt would have
-   * looked as correct as the previous four. There is nothing to guard when nothing is drawn.
-   */
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState } = useAgency();
 
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
@@ -244,19 +213,6 @@ export default function NewJob() {
   // Past jobs cache across ALL user data / ATs for instant global lookup
   const [pastJobs, setPastJobs] = useState<any[]>([]);
   const [pastJobsLoading, setPastJobsLoading] = useState(false);
-  /**
-   * HAVE THE SAVED JOBS ACTUALLY ARRIVED? A fact, not the absence of one.
-   *
-   * `pastJobsLoading` starts false and only becomes true once the fetch effect runs, so
-   * between mount and that first effect it reads "not loading" - which any consumer takes
-   * as "loaded", with `pastJobs` still []. A suggestion computed in that window said
-   * "SU-1": one number past nothing, wrong by the agency's entire history (AUDIT F71).
-   *
-   * Same shape as the 'JOB' sentinel it was found alongside: an ABSENCE interpreted as a
-   * FACT. This flag starts false and is only ever set true by the read completing, so
-   * "not yet known" and "known to be empty" cannot be confused.
-   */
-  const [pastJobsLoaded, setPastJobsLoaded] = useState(false);
   const [showPastPickerRowIndex, setShowPastPickerRowIndex] = useState<number | null>(null);
   // More than one past job matched the value typed - the operator must choose which
   // physical transformer this is. Never auto-applied: job numbers are not uniquely
@@ -290,19 +246,7 @@ export default function NewJob() {
     dateOfIssue: new Date().toISOString().split('T')[0],
     type: 'Distribution',
     repairType: 'OGP', // OGP, GP
-    /**
-     * NOT KNOWN YET - deliberately empty, not a literal (AUDIT F71).
-     *
-     * This was hardcoded to 'SABARMATI'. Most agencies do not have that division: SUCHIT
-     * and UPENDRA are DEESA only, AARATI is GNR only. The effect below corrects it to the
-     * agency's first configured division, but everything that ran in the same commit read
-     * the literal first - which is how the job-number box came to be filled with a prefix
-     * that does not exist anywhere in this agency's settings.
-     *
-     * Empty is the honest value for "the agency has not loaded yet", and every consumer
-     * already guards on it. A default that is wrong for most agencies is not a default.
-     */
-    division: '',
+    division: 'SABARMATI',
   });
 
   const [transformers, setTransformers] = useState<TransformerEntry[]>([
@@ -339,82 +283,54 @@ export default function NewJob() {
     }
   }, [availableDivisions, activeAgency, activeAtMaster]);
 
-  /**
-   * SUGGEST INTO BLANK ROWS. The one effect allowed to touch `jobNo`, and only ever a blank.
-   *
-   * Without it the first row - the common case - opens empty, and the suggestion only ever
-   * appeared from row two onward via Add or Duplicate.
-   *
-   * WHY THIS IS SAFE WHERE THE OLD AUTO-NUMBERING EFFECT WAS NOT (F60): it writes a
-   * SUGGESTION read from saved jobs, so re-running costs nothing at all - no counter moves,
-   * no allotment is spent, and React's double-invocation in development is invisible. And
-   * it does not depend on `transformers`, so it cannot re-run on its own output; filling a
-   * blank makes that row non-blank and the guard below skips it forever after.
-   *
-   * ⚠ ONLY BLANKS. A row the operator has typed into is never touched, whatever changes
-   * around it - that is what "a dropdown never alters what is in the box" means.
-   */
-  useEffect(() => {
-    if (commonData.repairType !== 'OGP' || !activeAgency || !commonData.division) return;
-    // ⚠ ONLY FOR A DIVISION THIS AGENCY ACTUALLY HAS. Three effects run in one commit and
-    // this one used to read a division another was about to set, so it suggested against
-    // the hardcoded default - which most agencies have no prefix for (AUDIT F71).
-    if (!availableDivisions.includes(commonData.division)) return;
-    setTransformers(prev => {
-      if (!prev.some(t => !String(t.jobNo || '').trim())) return prev;   // nothing blank
-      const next = [...prev];
-      let changed = false;
-      for (let i = 0; i < next.length; i++) {
-        if (String(next[i].jobNo || '').trim()) continue;
-        // `next` so consecutive blanks get consecutive numbers rather than one repeated.
-        const suggestion = suggestNextJobNo(next[i].coreType || 'CRGO', next);
-        if (suggestion) { next[i] = { ...next[i], jobNo: suggestion }; changed = true; }
+  // Helper to compute predicted job number in memory without advancing database counters
+  const getAutoJobNo = (
+    rowIndex: number,
+    currentCoreType: string,
+    currentDivision: string,
+    currentRepairType: string,
+    allRows: TransformerEntry[]
+  ): string => {
+    if (currentRepairType === 'GP' || !activeAgency || !currentDivision) return '';
+    const { prefix, nextNum, counterKey } = predictNextJobNo(currentDivision, currentCoreType || 'CRGO', currentRepairType);
+    
+    let countBefore = 0;
+    for (let i = 0; i < rowIndex; i++) {
+      const row = allRows[i];
+      if (!row) continue;
+      const rKey = getJobNoPrefix(currentDivision, row.coreType || 'CRGO').counterKey;
+      if (rKey === counterKey) {
+        countBefore++;
       }
-      return changed ? next : prev;
-    });
-  }, [
-    commonData.division,
-    commonData.repairType,
-    activeAgency?.id,
-    // THE SAVED JOBS, not the counter (see suggestNextJobNo). `pastJobsLoaded` is the
-    // important one: every pass before the read completes fills nothing, and this is what
-    // brings the effect back once the jobs are actually known.
-    pastJobsLoaded,
-    pastJobs.length,
-    // The division settling from its initial value is a separate wake-up: the first pass
-    // can run against a division this agency has no prefix for.
-    availableDivisions.length,
-  ]);
+    }
+    
+    return `${prefix}-${nextNum + countBefore}`;
+  };
 
-  // ⚠ NO OTHER EFFECT MAY WRITE A JOB NUMBER (AUDIT F60, F70).
-  //
-  // An auto-numbering effect used to sit at this spot. It numbered every blank row whenever
-  // division, repair type or the transformers array changed - and it depended on
-  // `transformers`, so it re-ran on its own output. Harmless while numbering was a pure
-  // client-side computation; once a number was drawn from a shared counter it burned one
-  // per re-run, and React's development double-invocation burned one on every mount.
-  //
-  // Job numbers now come from exactly one source: the operator's keyboard, pre-filled with
-  // a suggestion when a row is created. Every write to `jobNo` is in a handler, on an act
-  // the operator performed.
-
+  // Fill any blank / initial job numbers once agency & division context are ready in OGP mode.
+  useEffect(() => {
+    if (commonData.repairType === 'OGP' && activeAgency && commonData.division) {
+      setTransformers(prev => {
+        let changed = false;
+        const next = prev.map((t, idx) => {
+          if (!t.jobNo || !t.jobNo.trim()) {
+            changed = true;
+            return {
+              ...t,
+              jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, prev)
+            };
+          }
+          return t;
+        });
+        return changed ? next : prev;
+      });
+    }
+  }, [commonData.division, commonData.repairType, activeAgency, activeAtMaster]);
 
   // Past jobs for the GP lookup: across all AT masters of the CURRENT AGENCY.
-  //
-  // Deliberately agency-scoped. Previously this queried on ownerId alone, so a job
-  // number duplicated in a different agency could be matched and its make, serial,
-  // kVA and prevDeliveryDate applied to this row - assessing a guarantee claim
-  // against a transformer belonging to another agency entirely. Job numbers are not
-  // unique across agencies and are not uniquely allocated within one either, so this
-  // list may still contain more than one candidate for a number; the caller must not
-  // assume the first match is the right one.
   useEffect(() => {
     if (auth.currentUser && activeAgency) {
       const loadPastJobs = async () => {
-        // Not loaded UNTIL THIS AGENCY'S jobs are in hand - the previous agency's are not
-        // an answer about this one, and a suggestion drawn from them would be worse than
-        // no suggestion.
-        setPastJobsLoaded(false);
         setPastJobsLoading(true);
         try {
           const q = query(
@@ -426,7 +342,6 @@ export default function NewJob() {
           const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           list.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
           setPastJobs(list);
-          setPastJobsLoaded(true);
         } catch (err) {
           console.error('Error loading past jobs for GP lookup:', err);
         } finally {
@@ -437,38 +352,40 @@ export default function NewJob() {
     }
   }, [auth.currentUser, activeAgency?.id]);
 
-  /**
-   * A DIVISION OR CORE-TYPE CHANGE NEVER TOUCHES A JOB NUMBER.
-   *
-   * The renumber prompt that used to live here is gone, along with the reservation it
-   * accepted into. It existed because the app allocated numbers, so moving a row to another
-   * sequence meant its number was wrong and had to be replaced. Intake no longer allocates:
-   * the number is what the division put on the MR and what the operator typed, and it is
-   * not the app's to change because a dropdown moved.
-   *
-   * The prompt was also the thing actually burning numbers (AUDIT F70). Its accept button
-   * drew from the counter, so an operator comparing core types spent a number per flip and
-   * flipping back drew another rather than returning the first.
-   *
-   * A number that genuinely does not belong to the chosen division or core type is caught
-   * at save by the prefix check, which names the mismatch and refuses. That is the right
-   * place for it: it tests what is about to be recorded rather than second-guessing an
-   * operator mid-entry.
-   */
-
-  /** Rows refused at save because their number is already used, so the operator can fix them. */
+  /** Rows refused at save because their number is taken, with a replacement offer. */
   const [refusalPrompt, setRefusalPrompt] = useState<
-    { rows: { index: number; from: string; fromLabel: string }[] } | null
+    { rows: { index: number; from: string; fromLabel: string; to: string }[] } | null
   >(null);
 
-  const handleCommonChange = async (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleCommonChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setCommonData(prev => ({ ...prev, [name]: value }));
-    // Nothing else. Division and repair type change the form's context; job numbers are
-    // the operator's and are left exactly as typed.
+
+    if (name === 'division') {
+      if (commonData.repairType === 'OGP' && activeAgency) {
+        setTransformers(prev => {
+          return prev.map((t, idx) => ({
+            ...t,
+            jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', value, commonData.repairType, prev)
+          }));
+        });
+      }
+    }
   };
 
-
+  /**
+   * Apply the offered replacements to the form rows.
+   */
+  const applyRefusalOffer = () => {
+    if (!refusalPrompt) return;
+    const map: Record<number, string> = {};
+    refusalPrompt.rows.forEach(r => { map[r.index] = r.to; });
+    setTransformers(prev => prev.map((t, i) => map[i] ? { ...t, jobNo: map[i] } : t));
+    setRefusalPrompt(null);
+    setModalAlertMessage(
+      `Job number${refusalPrompt.rows.length === 1 ? '' : 's'} updated. Please review and press Save to record the intake.`
+    );
+  };
 
   /** A fresh, empty transformer row. */
   const blankTransformerRow = (): TransformerEntry => ({
@@ -535,13 +452,8 @@ export default function NewJob() {
     }
 
     // Prefix only - this is checking whether one is CONFIGURED, not drawing a number.
-    //
-    // Tested against null, not against the string 'JOB'. That comparison was this dialog's
-    // trigger, so changing the sentinel without changing it here would have left the setup
-    // gap silently undetectable - the same failure the sentinel caused in the first place,
-    // reintroduced by the fix for it (AUDIT F71).
     const info = getJobNoPrefix(commonData.division, coreType);
-    if (!info.prefix) {
+    if (info.prefix === 'JOB') {
       const atLabel = activeAtMaster.atNumber || activeAtMaster.name || 'the active AT';
       setSetupGap({
         title: 'No job number prefix configured',
@@ -607,14 +519,19 @@ export default function NewJob() {
    * gpPriorJobId) - all survived onto jobs of the other type.
    */
   const performRepairTypeSwitch = (type: 'OGP' | 'GP') => {
+    const firstDiv = availableDivisions[0] || 'SABARMATI';
+    const initRow = blankTransformerRow();
+    if (type === 'OGP' && activeAgency) {
+      initRow.jobNo = getAutoJobNo(0, 'CRGO', firstDiv, 'OGP', [initRow]);
+    }
     setCommonData({
       mrNo: '',
       dateOfIssue: new Date().toISOString().split('T')[0],
       type: 'Distribution',
       repairType: type,
-      division: availableDivisions[0] || 'SABARMATI',
+      division: firstDiv,
     });
-    setTransformers([blankTransformerRow()]);
+    setTransformers([initRow]);
     setJobNoSuggestFor(null);
     setAmbiguousMatch(null);
     setShowPastPickerRowIndex(null);
@@ -700,9 +617,8 @@ export default function NewJob() {
     setTransformers(prev => {
       const updated = [...prev];
       updated[index] = {
-        // Same row, emptied - the key is deliberately preserved. Clearing the number is
-        // free now that nothing was drawn to produce it: retyping or re-suggesting costs
-        // the sequence nothing (F70).
+        // Same row, emptied - the key is deliberately preserved. A cleared row that
+        // already drew a number keeps it: reservations are never released (F60).
         rowKey: updated[index].rowKey,
         jobNo: '',
         capacityKva: '',
@@ -856,14 +772,7 @@ export default function NewJob() {
    */
   const handleTransformerChange = <K extends StringRowField>(index: number, field: K, value: TransformerEntry[K]) => {
     const newTransformers = [...transformers];
-    newTransformers[index][field] = value;
-
-    // NO FIELD CHANGE DRAWS A JOB NUMBER, and none rewrites one.
-    //
-    // A first-meaningful-entry trigger used to fire here: typing a serial, make or capacity
-    // reserved the row's number. It is gone with the rest of intake-time allocation (F70).
-    // The operator types the number from the MR, or accepts the suggestion the row was
-    // created with; nothing else in this handler touches jobNo.
+    newTransformers[index] = { ...newTransformers[index], [field]: value };
 
     // Changing the Job No on a GP row that is linked to a DIFFERENT number drops the
     // linkage, so the row cannot keep one transformer's make/serial/kVA/delivery date
@@ -872,7 +781,7 @@ export default function NewJob() {
     if (field === 'jobNo' && commonData.repairType === 'GP') {
       const row = newTransformers[index];
       const linkedTo = (row.prevJobNo || row.autoFilledFrom || '').trim().toUpperCase();
-      if (linkedTo && linkedTo !== value.trim().toUpperCase()) {
+      if (linkedTo && linkedTo !== (value || '').trim().toUpperCase()) {
         newTransformers[index] = {
           ...row,
           autoFilledFrom: undefined,
@@ -883,151 +792,124 @@ export default function NewJob() {
           gpPriorJobId: null,
           gpLookupMissFor: undefined,
         };
-      } else if (row.gpSource === 'legacy' && (row.gpLookupMissFor || '').trim().toUpperCase() !== value.trim().toUpperCase()) {
+      } else if (row.gpSource === 'legacy' && (row.gpLookupMissFor || '').trim().toUpperCase() !== (value || '').trim().toUpperCase()) {
         // A miss recorded against a different number must not keep showing.
         newTransformers[index] = { ...row, gpSource: undefined, gpLookupMissFor: undefined };
       }
     }
-
-    // CORE TYPE MOVES THE ROW TO A DIFFERENT SEQUENCE, so the derived prefix changes with
-    // it - that happens on its own, because the prefix is computed at render from this
-    // field and the division. Nothing is stored and nothing is rewritten.
-    //
-    // A BLANK row also takes a fresh suggestion, since the number it would have suggested
-    // belonged to the old sequence. A row the operator has TYPED INTO is left exactly as it
-    // is: its digits are what the MR says, and the prefix beside them will simply follow.
-    //
-    // ⚠ NO ALLOCATION HERE, UNDER ANY GUARD. Four fixes were made at this exact spot (F61,
-    // F65, F69, F70) and every one of them still burned numbers on a flip.
-    if (field === 'coreType' && commonData.repairType === 'OGP'
-        && !String(newTransformers[index].jobNo || '').trim()) {
-      const suggestion = suggestNextJobNo(value || 'CRGO', newTransformers);
-      if (suggestion) newTransformers[index] = { ...newTransformers[index], jobNo: suggestion };
+    
+    // In OGP mode, changing coreType updates job numbers for all rows in-memory
+    if (field === 'coreType' && commonData.repairType === 'OGP') {
+      newTransformers[index].coreType = value as string;
+      const updated = newTransformers.map((t, idx) => ({
+        ...t,
+        jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, newTransformers)
+      }));
+      setTransformers(updated);
+      return;
     }
-
+    
     setTransformers(newTransformers);
   };
 
-
-  /**
-   * THE SUGGESTION CONTINUES FROM THE LAST SAVED JOB, not from the counter.
-   *
-   * `lastJobNumbers` is a record of what has been ISSUED. Saved jobs are a record of what
-   * EXISTS, and only the second one can go down. Reading the jobs gives three properties
-   * the counter cannot:
-   *
-   *   - an ABANDONED intake suggests the same number again, because nothing was saved;
-   *   - a DELETED or cancelled job frees its number, because it is no longer among them;
-   *   - the number offered is always one more than a number that is really on a transformer.
-   *
-   * The counter still advances at save. It is simply no longer consulted here.
-   *
-   * NO QUERY. `pastJobs` already holds every job for this agency across all ATs - it is
-   * fetched once on mount for the GP lookup and is not gated on repair type. Prefixes
-   * belong to the division and agency rather than to a tender period, so agency-wide across
-   * ATs is the right scope: a new AT that restarted at 1 would reissue a live number, which
-   * is what AUDIT F42 was about.
-   *
-   * ⚠ SILENT UNTIL THE JOBS ARE LOADED. There is a window on mount where `pastJobs` is
-   * empty because the read has not returned, and a suggestion computed there would say
-   * "SU-1" - a plausible-looking number that is wrong by the entire history of the agency.
-   * An empty box the operator fills from the MR is the correct behaviour in that window.
-   */
-  const suggestNextJobNo = (coreType: string, rows: TransformerEntry[]): string => {
-    if (commonData.repairType !== 'OGP' || !activeAgency) return '';
-    if (!pastJobsLoaded) return '';
-    const { prefix } = getJobNoPrefix(commonData.division, coreType || 'CRGO');
-    if (!prefix) return '';
-
-    // Matched on the PREFIX, not on division + core type. The prefix is what makes a number
-    // unique - two divisions configured with the same one share a sequence whether or not
-    // anybody intended it (see scripts/admin/prefix-distinctness.js), and the suggestion has
-    // to reflect what is actually on the transformers.
-    const head = `${prefix.toUpperCase()}-`;
-    const tailOf = (v: unknown): number => {
-      const raw = String(v ?? '').trim().toUpperCase();
-      if (!raw.startsWith(head)) return 0;
-      const n = Number(raw.slice(head.length));
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    };
-
-    const savedMax = pastJobs.reduce((m, j) => Math.max(m, tailOf((j as any).jobNo)), 0);
-    // Rows already in THIS form count too, so three added rows get three consecutive
-    // numbers rather than the same one three times. They are not saved, so they hold no
-    // number against the sequence - they are only here to stop the form colliding with
-    // itself.
-    const inFormMax = rows.reduce((m, t) => Math.max(m, tailOf(t.jobNo)), 0);
-
-    return `${prefix}-${Math.max(savedMax, inFormMax) + 1}`;
-  };
-
-  /**
-   * THE PREFIX FOR A ROW - a function of the division and that row's core type, and the
-   * same resolution the save uses to pick a counter.
-   *
-   * It is PRE-FILLED into the job-number box rather than shown beside it, so the operator
-   * reads one complete number the way it appears on the MR. That means it can be edited,
-   * deliberately or by accident, and the save-time prefix check is what catches an edited
-   * one - so that check is live, not the dead branch a fixed addon would have made it.
-   */
-  const rowJobNoPrefix = (coreType: string): string | null =>
-    getJobNoPrefix(commonData.division, coreType || 'CRGO').prefix;
-
-  /** True when this row's division and core type have no prefix configured. */
-  const rowHasNoPrefix = (coreType: string): boolean =>
-    commonData.repairType === 'OGP' && Boolean(activeAgency) && !rowJobNoPrefix(coreType);
-
   const addTransformer = () => {
+    // Validate existing rows before adding another transformer
+    for (let i = 0; i < transformers.length; i++) {
+      const t = transformers[i];
+      if (!t.jobNo?.trim()) {
+        const msg = `Please enter or ensure Job No is present for Transformer #${i + 1} before adding another transformer.`;
+        setErrorMsg(msg);
+        setModalAlertMessage(msg);
+        return;
+      }
+      if (!t.serialNo?.trim() || !t.make?.trim()) {
+        const msg = `Please enter Serial No and Make for Transformer #${i + 1} before adding another transformer.`;
+        setErrorMsg(msg);
+        setModalAlertMessage(msg);
+        return;
+      }
+      if (!t.capacityKva || isNaN(Number(t.capacityKva))) {
+        const msg = `Please select a valid Capacity (kVA) for Transformer #${i + 1} before adding another transformer.`;
+        setErrorMsg(msg);
+        setModalAlertMessage(msg);
+        return;
+      }
+    }
+
+    setErrorMsg(null);
     const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
     const lastKva = transformers.length > 0 ? transformers[transformers.length - 1].capacityKva : '63';
     const lastStar = transformers.length > 0 ? (transformers[transformers.length - 1].starRating || '3 Star & other') : '3 Star & other';
 
-    // SUGGESTED, not reserved. This used to await reserveJobNos and could fail with a
-    // modal; adding a row is now synchronous and cannot fail, because it asks the counter
-    // for nothing (F70).
-    setTransformers([
-      ...transformers,
-      {
-        rowKey: newRowKey(),
-        jobNo: suggestNextJobNo(lastCoreType, transformers),
-        capacityKva: lastKva,
-        make: '',
-        serialNo: '',
-        coreType: lastCoreType,
-        starRating: lastStar,
-        ratingLevel: lastStar,
-        prevAtNo: '',
-        prevJobNo: '',
-        prevDeliveryDate: '',
-        gpReason: ''
-      }
-    ]);
+    const newRow: TransformerEntry = {
+      rowKey: newRowKey(),
+      jobNo: '',
+      capacityKva: lastKva,
+      make: '',
+      serialNo: '',
+      coreType: lastCoreType,
+      starRating: lastStar,
+      ratingLevel: lastStar,
+      prevAtNo: '',
+      prevJobNo: '',
+      prevDeliveryDate: '',
+      gpReason: ''
+    };
+
+    const nextTransformers = [...transformers, newRow];
+    if (commonData.repairType === 'OGP') {
+      newRow.jobNo = getAutoJobNo(transformers.length, lastCoreType, commonData.division, commonData.repairType, nextTransformers);
+    }
+
+    setTransformers(nextTransformers);
   };
 
   const duplicateTransformer = (index: number) => {
     const source = transformers[index];
+    if (!source.jobNo?.trim() || !source.make?.trim() || !source.serialNo?.trim()) {
+      const msg = `Please fill Serial No and Make for Transformer #${index + 1} before duplicating.`;
+      setErrorMsg(msg);
+      setModalAlertMessage(msg);
+      return;
+    }
 
-    // A duplicated row is a different transformer, so it never copies the source's number -
-    // it gets its own suggestion, stepped past everything already in the form.
+    setErrorMsg(null);
     const newEntry: TransformerEntry = {
       ...source,
       rowKey: newRowKey(),
-      jobNo: suggestNextJobNo(source.coreType, transformers),
+      jobNo: '',
       serialNo: '',
       autoFilledFrom: undefined
     };
 
     const next = [...transformers];
     next.splice(index + 1, 0, newEntry);
-    setTransformers(next);
-  };
 
+    if (commonData.repairType === 'OGP') {
+      const updated = next.map((t, idx) => ({
+        ...t,
+        jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, next)
+      }));
+      setTransformers(updated);
+    } else {
+      setTransformers(next);
+    }
+  };
 
   const removeTransformer = (index: number) => {
     if (transformers.length === 1) return;
     const newTransformers = [...transformers];
     newTransformers.splice(index, 1);
-    setTransformers(newTransformers);
+    
+    if (commonData.repairType === 'OGP') {
+      const updated = newTransformers.map((t, idx) => ({
+        ...t,
+        jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, newTransformers)
+      }));
+      setTransformers(updated);
+    } else {
+      setTransformers(newTransformers);
+    }
   };
 
   const handleAutoFillEmptyJobNos = () => {
@@ -1042,21 +924,11 @@ export default function NewJob() {
       return;
     }
 
-    // FILLS BLANK ROWS WITH SUGGESTIONS. Nothing is reserved (F70), so this is undoable by
-    // simply typing over it, and abandoning the form costs nothing.
-    //
-    // The skip-if-numbered rule is the important half and predates all of this: a row that
-    // already holds a number may have it written on the transformer, so this must never
-    // replace one.
-    setTransformers(prev => {
-      const next = [...prev];
-      for (let i = 0; i < next.length; i++) {
-        if (String(next[i].jobNo || '').trim()) continue;
-        // Passing `next` so each fill sees the ones before it and the numbers run on.
-        next[i] = { ...next[i], jobNo: suggestNextJobNo(next[i].coreType || 'CRGO', next) };
-      }
-      return next;
-    });
+    const updated = transformers.map((t, idx) => ({
+      ...t,
+      jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, transformers)
+    }));
+    setTransformers(updated);
   };
 
   // Derived Totals
@@ -1102,22 +974,16 @@ export default function NewJob() {
     }
     if (commonData.repairType === 'OGP') {
       for (const t of transformers) {
-        // WHAT THIS CATCHES NOW: an EMPTY number. The prefix half is all but unreachable -
-        // it is derived from the same division and core type it is checked against, so it
-        // cannot disagree unless a restored draft carries a number from another division,
-        // or the operator edits the prefix inside the box. Kept for both, and for the empty
-        // number, which is the case an operator will actually meet.
-        //
-        // setupGapForPrefix FIRST, before the prefix is used for anything. With no prefix
-        // configured, `info.prefix` is null and `info.prefix + '-'` composes the string
-        // "null-", so every row would be refused with a message naming a prefix that does
-        // not exist - a complaint about the job number for a fault in agency settings.
-        if (setupGapForPrefix(t.coreType)) return;
+        // Prefix only - validating the shape of a number already assigned.
         const info = getJobNoPrefix(commonData.division, t.coreType);
         if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
-          const err = !String(t.jobNo || '').trim()
-            ? `A transformer has no job number. Every unit needs the number the division wrote on the MR - the box already starts with "${info.prefix}-", so only the number is missing.`
-            : `Job number "${t.jobNo}" does not belong to ${commonData.division} / ${t.coreType || 'CRGO'}, which uses "${info.prefix}-". Check the division and core type on this row against the MR.`;
+          // Diagnose the REAL cause before reporting. 'JOB' is the fallback prefix
+          // returned when there is no AT master or no prefix configured for this
+          // division + core type, so the old message ("expected prefix JOB-") named the
+          // job number - the one thing that is not wrong - and sent the operator
+          // hunting through job numbers for a problem in agency settings.
+          if (setupGapForPrefix(t.coreType)) return;
+          const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
           return;
@@ -1223,14 +1089,11 @@ export default function NewJob() {
       // Check OGP prefix validation
       if (commonData.repairType === 'OGP') {
         for (const t of transformers) {
-          // Same test and the SAME ORDERING as the pre-save check above: the setup gap is
-          // tested before the prefix is composed into anything.
-          if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
+          // Prefix only - validating the shape of an already-assigned number.
           const info = getJobNoPrefix(commonData.division, t.coreType);
           if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
-            const err = !String(t.jobNo || '').trim()
-              ? `A transformer has no job number. Every unit needs the number the division wrote on the MR - the box already starts with "${info.prefix}-", so only the number is missing.`
-              : `Job number "${t.jobNo}" does not belong to ${commonData.division} / ${t.coreType || 'CRGO'}, which uses "${info.prefix}-". Check the division and core type on this row against the MR.`;
+            if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
+            const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
@@ -1391,22 +1254,28 @@ export default function NewJob() {
           return;
         }
 
-        // NAME THE CONFLICT, DO NOT REPLACE IT. This used to reserve a fresh number for each
-        // clashing row and offer it - which meant a refused save spent numbers, and the
-        // offered number was the app's guess rather than anything the division had agreed.
-        //
-        // The number is on the MR. If it collides with a job already in this agency, either
-        // the operator mistyped it or the division has reissued a number, and both are
-        // resolved by looking at the paper - not by taking the next one off a counter (F70).
-        setRefusalPrompt({
-          rows: clashRows
-            .map(c => ({
-              index: c.index,
-              from: c.jobNo,
-              fromLabel: c.existing.map(describe).join('; '),
-            }))
-            .sort((x, y) => x.index - y.index),
+        const offers: { index: number; from: string; fromLabel: string; to: string }[] = [];
+        const usedCandidates = new Set<string>();
+
+        clashRows.forEach(c => {
+          const coreType = transformers[c.index].coreType || 'CRGO';
+          const info = predictNextJobNo(commonData.division, coreType, commonData.repairType);
+          let candidateNum = info.nextNum;
+          let candidate = `${info.prefix}-${candidateNum}`;
+          while (usedCandidates.has(candidate)) {
+            candidateNum++;
+            candidate = `${info.prefix}-${candidateNum}`;
+          }
+          usedCandidates.add(candidate);
+          offers.push({
+            index: c.index,
+            from: c.jobNo,
+            fromLabel: c.existing.map(describe).join('; '),
+            to: candidate
+          });
         });
+
+        setRefusalPrompt({ rows: offers.sort((x, y) => x.index - y.index) });
         setLoading(false);
         return;
       }
@@ -1578,16 +1447,24 @@ export default function NewJob() {
         const maxJobNoMap: Record<string, number> = {};
         const jobEntries: { ref: any; data: any }[] = [];
 
-        // ONE PARSING RULE, shared with MrLedger (F70). The number is whatever the operator
-        // typed, so how it is read back off the field decides whether the counter advances -
-        // and a second copy that drifted would let one screen quietly stop advancing it.
-        // GP reuses the original number from a previous repair and never moves a counter.
-        if (commonData.repairType !== 'GP') {
-          Object.assign(maxJobNoMap, highWaterJobNos(transformers, commonData.division));
-        }
-
         for (const t of transformers) {
           if (!t.jobNo) continue;
+
+          // Only update sequence counter for OGP repairs. GP warranty repairs reuse the original Job Number from 1st repair.
+          if (commonData.repairType !== 'GP') {
+            // counterKey only - the number itself was reserved when the row was created.
+            const counterKey = getJobNoPrefix(commonData.division, t.coreType).counterKey;
+
+            const parts = t.jobNo.split('-');
+            if (parts.length > 1) {
+              const num = parseInt(parts[parts.length - 1], 10);
+              if (!isNaN(num)) {
+                if (!maxJobNoMap[counterKey] || num > maxJobNoMap[counterKey]) {
+                  maxJobNoMap[counterKey] = num;
+                }
+              }
+            }
+          }
 
           const newJobRef = doc(collection(db, 'jobs'));
             // Previous AT & GP Warranty Metadata (Computed directly from row's Last Repaired Date & Agency GP Validation setting)
@@ -1653,32 +1530,23 @@ export default function NewJob() {
           createdJobsList.push({ id: newJobRef.id, ...jobData });
         }
 
-        // ⚠ THIS IS THE ONLY PLACE THE COUNTER MOVES. Nothing before save touches it.
+        // RECONCILIATION, NOT ALLOCATION - and it is no longer how numbers are issued.
         //
-        // The counter is a HIGH-WATER MARK of numbers actually recorded, not an allocator:
-        // it advances to the highest number the saved rows carry, inside the same
-        // transaction that writes them. So a form that is opened, typed into and abandoned
-        // costs nothing, and the suggestion the next intake sees is derived from real jobs
-        // rather than from numbers someone drew and walked away from (AUDIT F70).
+        // Every number now comes from `reserveJobNos`, which advances the counter inside
+        // its own transaction before the operator ever sees the number (AUDIT F60). This
+        // block survives for the one case reservation does not cover: the job-number field
+        // is editable, and a hand-typed number higher than the counter must still push it
+        // forward or the next reservation would reissue it.
         //
-        // It only ever advances - `maxNum > currentLast` - so an intake saved with numbers
-        // below the mark (a backdated MR, a gap being filled) cannot rewind it and hand the
-        // same numbers out again as suggestions.
+        // It only ever advances - `maxNum > currentLast` - so it cannot rewind the counter
+        // below a number that was reserved and then burned.
         const nextCounters = { ...currentCounters };
         let hasCounterChange = false;
 
         for (const [counterKey, maxNum] of Object.entries(maxJobNoMap)) {
-          const currentLast = Number(currentCounters[counterKey]) || 0;
+          const currentLast = currentCounters[counterKey] || 0;
           if (maxNum > currentLast) {
             nextCounters[counterKey] = maxNum;
-            hasCounterChange = true;
-          }
-          // CRGO lives under `<div>_CRGO` and a bare `<div>`, and both move together so the
-          // pair cannot disagree about where the sequence is. Nothing reads the counter for
-          // a suggestion any more - saved jobs answer that - so a stale half would not be
-          // wrong today; it is one refactor away from being wrong. MrLedger does the same.
-          if (counterKey.endsWith('_CRGO') && maxNum > (Number(currentCounters[commonData.division]) || 0)) {
-            nextCounters[commonData.division] = maxNum;
             hasCounterChange = true;
           }
         }
@@ -1717,11 +1585,12 @@ export default function NewJob() {
   return (
     <div className="w-full max-w-full overflow-x-hidden space-y-4 pb-24 sm:pb-16 print:m-0 print:p-0">
       
-      {/* DUPLICATE JOB NUMBER - names the conflict, does not resolve it.
-          The number came off the MR, so a clash means either a mistype or a number the
-          division has issued twice, and both are settled by looking at the paper. The
-          dialog used to offer a reserved replacement; that spent a number on every refused
-          save and put the app's guess where the division's number belongs (AUDIT F70). */}
+      {/* REFUSAL OFFER - a rejected save comes with replacements, not just a complaint.
+          Every clashing row is offered at once: an operator refused on four rows re-marks
+          four transformers and clicks once, rather than meeting this dialog four times and
+          editing numbers by hand between each (AUDIT F62).
+          Cancel changes nothing - the numbers stay, nothing is written, and the operator
+          can edit by hand if they prefer. This is an offer, not a gate. */}
       {refusalPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-xl w-full border border-rose-200 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
@@ -1753,29 +1622,46 @@ export default function NewJob() {
                   <div className="text-[11px] text-slate-600 mt-0.5 pl-3 border-l-2 border-slate-200">
                     {r.fromLabel}
                   </div>
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <span className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Next free</span>
+                    <span className="font-mono font-black text-slate-900 text-lg">{r.to}</span>
+                  </div>
                 </div>
               ))}
             </div>
 
             <p className="text-xs text-slate-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
-              <strong>Check the MR.</strong> These numbers are the division&rsquo;s, not this
-              app&rsquo;s - so either one was typed wrongly, or the division has issued a number
-              that is already on a transformer here. Correct the entry, or take it up with the
-              division before saving.
+              <strong>
+                {refusalPrompt.rows.length === 1
+                  ? 'Re-mark the transformer with the new number before saving.'
+                  : 'Re-mark each transformer with its new number before saving.'}
+              </strong>{' '}
+              The number on the tank and the number in this record have to match - nothing
+              downstream can reconcile them if they differ.
             </p>
 
-            <div className="flex justify-end mt-4">
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
               <button
                 type="button"
                 onClick={() => setRefusalPrompt(null)}
-                className="px-4 py-2 text-xs font-bold text-white bg-slate-800 hover:bg-slate-900 rounded-lg"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300"
               >
-                Close and fix the numbers
+                Cancel - leave the numbers as they are
+              </button>
+              <button
+                type="button"
+                onClick={applyRefusalOffer}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm"
+              >
+                {refusalPrompt.rows.length === 1
+                  ? `Re-mark this transformer as ${refusalPrompt.rows[0].to}`
+                  : `Re-mark all ${refusalPrompt.rows.length} transformers`}
               </button>
             </div>
           </div>
         </div>
       )}
+
 
 
       {/* ERROR MODAL */}
@@ -2148,18 +2034,11 @@ export default function NewJob() {
                       )}
                     </label>
                     <div className="relative">
-                      {/* ONE BOX, HOLDING THE WHOLE NUMBER.
-                          The prefix is already in it - pre-filled from the division and the
-                          row's core type - so nobody types it by hand, but it is not
-                          visually separated: the operator reads and edits "SU-27" as one
-                          thing, which is how it appears on the MR and on the tank.
-
-                          The prefix is therefore EDITABLE, and the save-time check is what
-                          catches an edited one. That is the trade against a fixed addon,
-                          which made a wrong prefix unconstructible but split a single
-                          identifier into two controls.
-
-                          Nothing here reserves; the counter moves at save (AUDIT F70). */}
+                      {/* PLACEHOLDER, NOT A PROVISIONAL NUMBER (AUDIT F67).
+                          The number goes on the transformer, so anything shown here that
+                          looks like one is a commitment. Until the operator starts entering
+                          the unit, the field says what will happen rather than showing a
+                          figure that might change. */}
                       <input
                         required
                         type="text"
@@ -2167,55 +2046,18 @@ export default function NewJob() {
                         placeholder={
                           commonData.repairType === 'GP'
                             ? 'Type the original job number'
-                            : rowJobNoPrefix(t.coreType || 'CRGO')
-                              ? `${rowJobNoPrefix(t.coreType || 'CRGO')}-  (number from the MR)`
-                              : 'no prefix configured'
+                            : 'e.g. MSBT-24'
                         }
                         value={t.jobNo}
                         onChange={(e) => {
                           const val = e.target.value;
                           handleTransformerChange(index, 'jobNo', val);
-                          // GP: NEVER auto-apply while typing. Do not reinstate this as
-                          // a "convenience" - it was removed deliberately.
-                          //
-                          // The old onChange auto-applied on an exact single match and
-                          // popped the disambiguation modal on multiple, both mid-
-                          // keystroke. Two problems. First it fights the operator: a
-                          // partial number can exactly equal a shorter real job number
-                          // on the way to a longer one, so passing through "MSBT-1" en
-                          // route to "MSBT-12" silently overwrote make, serial, kVA and
-                          // prevDeliveryDate with the wrong transformer's - and
-                          // prevDeliveryDate is what the guarantee window is measured
-                          // from. Second, a modal opening on a keystroke is an
-                          // interruption the operator did not ask for.
-                          //
-                          // Selection is explicit: pick from the suggestion list, or get
-                          // the manual date panel when nothing matches. The blur lookup
-                          // and the save-time safety net cover typing a full number and
-                          // moving on without clicking.
-                          //
-                          // Any prefix is accepted - a unit repaired under an earlier AT
-                          // may carry a completely different one.
                           if (commonData.repairType === 'GP') {
                             setJobNoSuggestFor(val.trim() ? index : null);
                           }
                         }}
-                        onFocus={(e) => {
-                          if (commonData.repairType === 'GP') {
-                            if (t.jobNo.trim()) setJobNoSuggestFor(index);
-                            return;
-                          }
-                          // CURSOR AFTER THE PREFIX. The operator is here to change the
-                          // number, not the "SU-", so focus selects the digits: type and
-                          // they are replaced, or press End and edit. Selecting the whole
-                          // value would make the first keystroke wipe the prefix too, which
-                          // is the mistake this field is meant to prevent.
-                          const head = `${rowJobNoPrefix(t.coreType || 'CRGO')}-`;
-                          if (t.jobNo.toUpperCase().startsWith(head.toUpperCase())) {
-                            const el = e.currentTarget;
-                            const len = t.jobNo.length;
-                            requestAnimationFrame(() => el.setSelectionRange(head.length, len));
-                          }
+                        onFocus={() => {
+                          if (commonData.repairType === 'GP' && t.jobNo.trim()) setJobNoSuggestFor(index);
                         }}
                         onBlur={() => {
                           // Delay so a click on a suggestion registers before the list closes.
@@ -2228,33 +2070,6 @@ export default function NewJob() {
                             : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
                         }`}
                       />
-
-                      {/* NO PREFIX CONFIGURED - say so, do not invent a number.
-                          This is the case the 'JOB' sentinel hid: getJobNoPrefix returned
-                          a plausible string, the box filled with "JOB-1", and nothing
-                          anywhere said that the division had no prefix (AUDIT F71).
-                          Inline rather than a modal - the operator may be filling other
-                          fields, and the save-time SetupGapDialog still blocks with the
-                          same route if they get that far without fixing it. */}
-                      {rowHasNoPrefix(t.coreType || 'CRGO') && (
-                        <div className="mt-1 flex items-start gap-1.5 text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5">
-                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />
-                          <span>
-                            No prefix configured for{' '}
-                            <strong>{commonData.division || 'this division'} / {t.coreType || 'CRGO'}</strong>.
-                            Job numbers cannot be suggested until one is set.{' '}
-                            <Link
-                              to={activeAtMaster
-                                ? `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(t.coreType || 'CRGO')}`
-                                : '/agency-settings?section=at'}
-                              onClick={saveIntakeDraft}
-                              className="font-bold underline hover:text-amber-950"
-                            >
-                              {activeAtMaster ? 'Configure prefixes' : 'Set up an AT'}
-                            </Link>
-                          </span>
-                        </div>
-                      )}
 
                       {/* GP SUGGESTION DROPDOWN - partial, case-insensitive, anywhere in
                           the string; agency-scoped pastJobs, most recent first. */}
