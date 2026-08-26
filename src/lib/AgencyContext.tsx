@@ -384,11 +384,40 @@ export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType
   return at.atPercentage !== undefined && !isNaN(Number(at.atPercentage)) ? Number(at.atPercentage) : 4;
 }
 
+/**
+ * WHICH RATE SCHEDULE PRICES THIS WORK.
+ *
+ * THE AT COMES FIRST (AUDIT F73). Rates belong to the tender, not to the agency: a tender
+ * is negotiated with its own schedule and a rollover is a new schedule. The resolution order
+ * is now
+ *
+ *     the AT's own section  ->  the agency's  ->  public_config  ->  the shipped defaults
+ *
+ * with every rung below the first exactly as it was. The AT rung is additive, so an AT that
+ * holds nothing prices precisely as it did before the move.
+ *
+ * ⚠ THE SOURCE IS AN OBJECT, NOT TWO POSITIONAL ARGUMENTS, and that is deliberate.
+ * `Agency` and `AtMaster` now carry IDENTICAL section field names, so a positional
+ * `getEstimateMasterForCore(agency, at, …)` would typecheck - structurally they match - and
+ * would silently resolve from the wrong document. This repo has no `strictNullChecks` and
+ * would not catch it either (F71). Naming the fields makes the mistake unwritable.
+ *
+ * PASS THE JOB'S OWN AT, never the session's: `atForJob(job, atMasters) ?? activeAtMaster`.
+ * Passing the selected AT re-prices historical work at the current tender's schedule, which
+ * is the whole defect this exists to close (F72).
+ *
+ * FALLING THROUGH IS NOT AN ERROR HERE. An AT with no sections resolves from the agency and
+ * prices correctly. Whether an AT is ALLOWED to be in that state is a separate question,
+ * answered by `ratesSource` and enforced by the pricing screens - not by this function,
+ * which must keep returning usable rates whatever the configuration.
+ */
 export function getEstimateMasterForCore(
-  agency: Agency | null | undefined, 
+  source: { at?: AtMaster | null; agency?: Agency | null } | null | undefined,
   coreType: string = 'CRGO',
   fallbackDefaults?: GlobalDefaultEstimateMaster | null
 ): EstimateItem[] {
+  const at = source?.at;
+  const agency = source?.agency;
   const globalDef = fallbackDefaults || cachedGlobalDefaultEstimateMaster;
   const type = (coreType || 'CRGO').trim().toUpperCase();
 
@@ -398,6 +427,9 @@ export function getEstimateMasterForCore(
   }));
 
   if (type === 'OH' || type.includes('OVERHAUL')) {
+    if (at?.estimateMasterOverhauling && at.estimateMasterOverhauling.length > 0) {
+      return withMissingDefaults(normalizeUnits(at.estimateMasterOverhauling), defaultOverhaulingEstimateData);
+    }
     if (agency?.estimateMasterOverhauling && agency.estimateMasterOverhauling.length > 0) {
       return withMissingDefaults(normalizeUnits(agency.estimateMasterOverhauling), defaultOverhaulingEstimateData);
     }
@@ -408,6 +440,9 @@ export function getEstimateMasterForCore(
   }
 
   if (type.includes('AMORPHOUS') || type.includes('AM')) {
+    if (at?.estimateMasterAmorphous && at.estimateMasterAmorphous.length > 0) {
+      return withMissingDefaults(normalizeUnits(at.estimateMasterAmorphous), defaultAmorphousEstimateData);
+    }
     if (agency?.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0) {
       return withMissingDefaults(normalizeUnits(agency.estimateMasterAmorphous), defaultAmorphousEstimateData);
     }
@@ -433,11 +468,20 @@ export function getEstimateMasterForCore(
     const isLegacy = (arr?: EstimateItem[]) =>
       arr !== undefined && checkMasterSection('WOUND_CORE', arr).holdsCrgoCard;
 
+    // Same isLegacy test as every other Wound Core rung - an AT can hold a CRGO card
+    // mis-stored as Wound Core exactly as an agency can, and it must be rejected here too
+    // or the move would reintroduce F27 one document up.
+    if (at?.estimateMasterWoundCore && at.estimateMasterWoundCore.length > 0 && !isLegacy(at.estimateMasterWoundCore)) {
+      return withMissingDefaults(normalizeUnits(at.estimateMasterWoundCore), defaultWoundCoreEstimateData);
+    }
     if (agency?.estimateMasterWoundCore && agency.estimateMasterWoundCore.length > 0 && !isLegacy(agency.estimateMasterWoundCore)) {
       return withMissingDefaults(normalizeUnits(agency.estimateMasterWoundCore), defaultWoundCoreEstimateData);
     }
     if (globalDef?.estimateMasterWoundCore && globalDef.estimateMasterWoundCore.length > 0 && !isLegacy(globalDef.estimateMasterWoundCore)) {
       return withMissingDefaults(normalizeUnits(globalDef.estimateMasterWoundCore), defaultWoundCoreEstimateData);
+    }
+    if (at?.estimateMasterAmorphous && at.estimateMasterAmorphous.length > 0 && !isLegacy(at.estimateMasterAmorphous)) {
+      return withMissingDefaults(normalizeUnits(at.estimateMasterAmorphous), defaultWoundCoreEstimateData);
     }
     if (agency?.estimateMasterAmorphous && agency.estimateMasterAmorphous.length > 0 && !isLegacy(agency.estimateMasterAmorphous)) {
       return withMissingDefaults(normalizeUnits(agency.estimateMasterAmorphous), defaultWoundCoreEstimateData);
@@ -448,6 +492,10 @@ export function getEstimateMasterForCore(
     return defaultWoundCoreEstimateData;
   }
 
+  // CRGO
+  if (at?.estimateMasterCRGO && at.estimateMasterCRGO.length > 0) {
+    return withMissingDefaults(at.estimateMasterCRGO, defaultEstimateData);
+  }
   // CRGO
   if (agency?.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
     return withMissingDefaults(agency.estimateMasterCRGO, defaultEstimateData);

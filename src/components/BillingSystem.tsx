@@ -152,7 +152,7 @@ export default function BillingSystem() {
 
   // NOTE: there is deliberately no single "masterData" here. This screen prices jobs
   // of mixed core types, and the correct master is per job - calculateJobTotal already
-  // resolves it via getEstimateMasterForCore(activeAgency, job.coreType). A CRGO-only
+  // resolves it via getEstimateMasterForCore({ at, agency }, job.coreType). A CRGO-only
   // `activeAgency.estimateMaster` used to sit here; it never fed pricing, only a
   // useMemo dependency, where it silently failed to invalidate when the Amorphous,
   // Wound Core or Overhauling master changed.
@@ -522,7 +522,7 @@ export default function BillingSystem() {
   const calculateJobTotal = (job: any) => {
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-    const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+    const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
     const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
 
     // A scrap transformer is ONE flat charge, resolved by the mapped scrap item code
@@ -603,7 +603,7 @@ export default function BillingSystem() {
     selectedJobsData.forEach(job => {
       const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
       if (!isScrapJob) return;
-      const master = getEstimateMasterForCore(activeAgency, job.coreType);
+      const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
       const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
       if (error && !seen.has(error)) {
         seen.add(error);
@@ -1202,7 +1202,7 @@ export default function BillingSystem() {
     const unresolvedScrap: string[] = [];
     jobsForBillType(sendTargetMr).forEach(job => {
       if (!(job.status === 'Scrap' || job.condition === 'Scrap')) return;
-      const master = getEstimateMasterForCore(activeAgency, job.coreType);
+      const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
       const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
       if (error && !unresolvedScrap.includes(error)) unresolvedScrap.push(error);
     });

@@ -221,7 +221,14 @@ export function buildSingleJobEstimateData(
   const kvaNum = Number(kva) || 0;
   const band = bandForKva(kvaNum);
   const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
-  const masterList = getEstimateMasterForCore(agency, coreType);
+  // `atMaster` here is ALREADY the job's own AT - both callers pass
+  // `atForJob(job, atMasters) ?? activeAtMaster` (F72), so the rates and the AT
+  // percentage on this sheet come from the same tender.
+  //
+  // ⚠ The compiler could not check this call. `agency` is `any` here, so the old
+  // positional form raised no error when the signature changed - seven of the eight
+  // call sites errored and this one was silent. Found by counting, not by tsc.
+  const masterList = getEstimateMasterForCore({ at: atMaster, agency }, coreType);
   const atPercentage = getAtPercentageForCore(atMaster, coreType);
 
   const isScrap = job.status === 'Scrap' || job.condition === 'Scrap' || internalData?.condition === 'Scrap';

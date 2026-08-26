@@ -352,7 +352,7 @@ export default function EstimateGenerate() {
 
     // Items
     const itemsList = selectedJobsData.length > 0 
-      ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
+      ? getEstimateMasterForCore({ at: atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster, agency: activeAgency }, selectedJobsData[0].coreType)
       : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData);
 
     // ITEM ROWS COME FROM THE SAME BUILDER AS THE TOTALS ROWS BELOW.
@@ -1662,7 +1662,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
 
                           {/* Items */}
                           {(selectedJobsData.length > 0 
-                            ? getEstimateMasterForCore(activeAgency, selectedJobsData[0].coreType)
+                            ? getEstimateMasterForCore({ at: atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster, agency: activeAgency }, selectedJobsData[0].coreType)
                             : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
                           ).map((item, idx) => (
                             <tr key={idx} className="border-b border-slate-300">
@@ -1671,7 +1671,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                                 <span className="truncate">{item.itemName}</span>
                               </td>
                               {selectedJobsData.map(job => {
-                                const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+                                const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
                                 const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
                                 // Same builder as the totals rows below and as the Excel
                                 // export. The three sub-cells are unchanged; only where

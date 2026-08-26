@@ -116,7 +116,7 @@ export default function Reports() {
     try {
       const kva = String(job.capacityKva);
       const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-      const jobMasterData = getEstimateMasterForCore(activeAgency, job.coreType);
+      const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
 
       // A scrap transformer is one flat charge, resolved by the mapped scrap item
       // code for its core type via the shared helper (lib/estimateCalc.ts) - the same
