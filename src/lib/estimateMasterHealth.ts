@@ -233,9 +233,46 @@ export function storedSection(agency: any, section: MasterSection): EstimateItem
   return agency?.__storedMasters?.[section] ?? agency?.[STORED[section]];
 }
 
-export function validateEstimateMaster(agency: any, coreType: string): MasterHealth {
+/**
+ * IS THE SCHEDULE THAT WILL PRICE THIS WORK USABLE?
+ *
+ * TAKES THE AT AS WELL AS THE AGENCY (AUDIT F73). Rates live on the tender now, so checking
+ * only the agency would pass an AT holding a mis-filed section and fail an AT holding a good
+ * one - it would be checking a document that no longer decides the price.
+ *
+ * Checks whichever document the resolver would actually read: the AT's section when it has
+ * one, the agency's otherwise. That mirrors getEstimateMasterForCore's top two rungs, per
+ * section, and it must keep mirroring them.
+ */
+export function validateEstimateMaster(at: any, agency: any, coreType: string): MasterHealth {
   const section = sectionForCoreType(coreType);
-  return checkMasterSection(section, storedSection(agency, section));
+  const fromAt = storedSection(at, section);
+  const stored = (Array.isArray(fromAt) && fromAt.length > 0) ? fromAt : storedSection(agency, section);
+  return checkMasterSection(section, stored);
+}
+
+/**
+ * HAS THIS AT BEEN GIVEN RATES AT ALL?
+ *
+ * A separate question from whether the rates are well formed, and it has to stay separate:
+ * an AT with no `ratesSource` prices from the agency's sections and produces perfectly
+ * valid-looking numbers, so nothing about the FIGURES can reveal that nobody has confirmed
+ * them against this tender. Only the absence of the stamp can.
+ *
+ * Returns a reason string when the AT is not ready, null when it is.
+ */
+export function atRatesReadiness(at: any): { blocked: boolean; reason: string | null } {
+  if (!at) {
+    return { blocked: true, reason: 'No AT is selected. Rates belong to a tender, so there is nothing to price against.' };
+  }
+  const src = String(at.ratesSource || '').trim();
+  if (!src) {
+    return {
+      blocked: true,
+      reason: `AT "${at.atNumber || at.name || at.id}" has no rates of its own. A new tender starts with no schedule - enter its rates, or copy them from a published AT, before issuing anything priced from it.`,
+    };
+  }
+  return { blocked: false, reason: null };
 }
 
 /** Every section of an agency's master, for the health line on the master screen. */

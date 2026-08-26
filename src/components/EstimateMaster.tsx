@@ -10,7 +10,7 @@ import {
 } from '../lib/estimateData';
 import { 
   Edit2, Save, FileSpreadsheet, Loader2, X, ChevronDown, ChevronUp, Plus, Trash2, 
-  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown
+  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown, Database
 } from 'lucide-react';
 import { serverTimestamp } from 'firebase/firestore';
 import { auth } from '../lib/firebase';
@@ -313,10 +313,10 @@ export default function EstimateMaster() {
     updateAtMaster,
     publishedAts,
     isSuperAdmin,
-    updateAllAgenciesEstimateMaster, 
-    saveGlobalDefaultEstimateMaster,
     countOverridesForApply,
-    applyEstimateMasterToOwnAgencies,
+    applyRatesToOwnAts,
+    publishAtTemplate,
+    adoptPublishedAt,
     globalDefaultEstimateMaster,
     globalConfigError,
     dismissGlobalConfigError
@@ -354,9 +354,13 @@ export default function EstimateMaster() {
   const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>('SINGLE');
 
   // Full Sync Modal
-  const [showFullSyncModal, setShowFullSyncModal] = useState(false);
   const [showApplyModal, setShowApplyModal] = useState(false);
   const [applyTargets, setApplyTargets] = useState<string[]>([]);
+  /** The "publish this AT as a template" dialog. Replaces publishing to public_config. */
+  const [showPublishTplModal, setShowPublishTplModal] = useState(false);
+  const [publishTplName, setPublishTplName] = useState('');
+  const [publishTplNotes, setPublishTplNotes] = useState('');
+  const [publishTplTargetId, setPublishTplTargetId] = useState<string>('');
   const [applyCounts, setApplyCounts] = useState<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number>; sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> }> | null>(null);
   const [countingOverrides, setCountingOverrides] = useState(false);
   const [syncSuccessMsg, setSyncSuccessMsg] = useState<string | null>(null);
@@ -1046,52 +1050,22 @@ export default function EstimateMaster() {
   };
 
   // Execute Save based on chosen scope (Admin modal)
+  /**
+   * ONE DESTINATION: THE ACTIVE AT (AUDIT F73).
+   *
+   * This branched on `saveScope`: 'SINGLE' wrote the agency, 'ALL' wrote `public_config`.
+   * That second branch was a SECOND PUBLISH PATH, writing to a different layer from the
+   * template publisher - and two publish paths writing to different layers is how a
+   * baseline and the things derived from it drift apart. `public_config` already holds two
+   * 100-KVA rates no agency has, which is that drift, already happened, silently.
+   *
+   * Publishing is now one action: "Publish this AT as a template", writing `published_ats`.
+   * `public_config` stays the resolution fallback for agencies with no AT rates, and
+   * nothing writes to it.
+   */
   const handleConfirmSaveSection = async () => {
     if (!pendingSaveSection) return;
-    const section = pendingSaveSection;
-    if (saveScope !== 'ALL' || !isSuperAdmin) {
-      return handleSaveSectionToActiveAgency(section);
-    }
-
-    if (blockPublishIfFallbackResolved([section])) return;
-
-    setIsSaving(true);
-    try {
-      // STORED when unedited, screen state when edited - see publishPlanFor.
-      const plan = publishPlanFor(section);
-      const updatePayload: any = {};
-      if (section === 'CRGO') {
-        updatePayload.estimateMasterCRGO = plan.payload;
-        // No `estimateMaster` mirror. It is the pre-sections CRGO field, nothing reads
-        // it on any reachable path, and writing it kept a shadow copy correct only by
-        // remembering to do so at five separate call sites. See AUDIT D4.
-      } else if (section === 'AMORPHOUS') {
-        updatePayload.estimateMasterAmorphous = plan.payload;
-      } else if (section === 'WOUND_CORE') {
-        updatePayload.estimateMasterWoundCore = plan.payload;
-      } else if (section === 'OVERHAULING') {
-        updatePayload.estimateMasterOverhauling = plan.payload;
-      } else if (section === 'CIRCLE_LIMITS') {
-        updatePayload.estimateMasterCircleLimits = plan.payload;
-      }
-
-      // Save as global system default in Firestore and across all agencies
-      await updateAllAgenciesEstimateMaster(updatePayload);
-      setEditedSections(prev => ({ ...prev, [section]: false }));
-      // Says what it did. The old wording claimed "all users & agencies", which was never
-      // true for an agency holding its own section - getEstimateMasterForCore reads the
-      // agency before the baseline - and became plainly false once F56 removed the fan-out.
-      setSyncSuccessMsg(`✓ Published ${section} to the shared baseline. New agencies will inherit these rates; existing agencies keep their own.`);
-
-      setEditingSection(null);
-      setPendingSaveSection(null);
-      setTimeout(() => setSyncSuccessMsg(null), 5000);
-    } catch (err) {
-      alert(`Failed to publish ${section} Estimate Master data globally.`);
-      console.error(err);
-    } finally {
-      setIsSaving(false);
-    }
+    return handleSaveSectionToActiveAgency(pendingSaveSection);
   };
 
   /**
@@ -1118,10 +1092,44 @@ export default function EstimateMaster() {
    * the whole purpose of the dialog is to say what this destroys. A dialog that cannot yet
    * say it must not offer the button.
    */
+  /**
+   * THE ATs THIS USER COULD COPY RATES TO.
+   *
+   * ACROSS AGENCIES, not just this one - an owner with several agencies now has several
+   * tenders, and copying a schedule between tenders is the useful action. Copying between
+   * AGENCY documents writes to the fallback rung, which would silently re-price every
+   * tender that has no schedule of its own.
+   *
+   * Carries the agency name because an AT number does not identify an AT: "2026-27" exists
+   * under two different agencies in live data.
+   *
+   * CLOSED TENDERS ARE OFFERED BUT MARKED, never silently included. Copying rates into a
+   * retired tender re-prices the jobs still under it, and AARATI's only AT is Closed with a
+   * job beneath it - so this is a real case, not a hypothetical.
+   */
+  const applyCandidateAts = useMemo(() => {
+    const uid = activeAgency?.ownerId;
+    const ownedAgencyIds = new Set(agencies.filter(a => a.ownerId === uid).map(a => a.id));
+    return atMasters
+      .filter(t => t.id !== activeAtMaster?.id && t.ownerId === uid && ownedAgencyIds.has(t.agencyId))
+      .map(t => ({
+        id: t.id,
+        label: t.atNumber || t.name || t.id,
+        agencyName: agencies.find(a => a.id === t.agencyId)?.name || '(unknown agency)',
+        closed: String(t.status || '').toLowerCase() === 'closed',
+        ratesSource: String((t as any).ratesSource || '') || null,
+      }))
+      .sort((a, b) => a.agencyName.localeCompare(b.agencyName) || a.label.localeCompare(b.label));
+  }, [atMasters, agencies, activeAgency, activeAtMaster]);
+
   const openApplyToMyAgencies = async () => {
-    const others = agencies.filter(a => a.id !== activeAgency?.id);
+    if (!activeAtMaster) {
+      alert('No AT is selected. Rates belong to a tender, so there is nothing to copy from.');
+      return;
+    }
+    const others = applyCandidateAts;
     if (others.length === 0) {
-      alert('You only have one agency. There is nothing to apply this to.');
+      alert('You have no other AT to copy these rates to. Rates belong to a tender, so this copies between tenders - create another AT first.');
       return;
     }
     // REFUSE WHEN NOTHING WAS EDITED. Writing five sections of unchanged data to four
@@ -1145,79 +1153,104 @@ export default function EstimateMaster() {
     // section this agency does not actually have stored is how one wrong card became four.
     if (blockPublishIfFallbackResolved(edited)) return;
 
-    setApplyTargets(others.map(a => a.id));
+    // Closed tenders are NOT pre-ticked. They are still offered - an operator may genuinely
+    // need to correct a retired tender's rates - but ticking one has to be a decision.
+    setApplyTargets(others.filter(a => !a.closed).map(a => a.id));
     setApplyCounts(null);
     setShowApplyModal(true);
     setCountingOverrides(true);
     try {
-      setApplyCounts(await countOverridesForApply(buildSectionPayload(), others.map(a => a.id)));
+      setApplyCounts(await countOverridesForApply(buildSectionPayload(), others.map(a => a.id), 'atMasters'));
     } catch (err) {
       console.error(err);
       setShowApplyModal(false);
-      alert('Could not read the other agencies to check what this would overwrite. Nothing was changed.');
+      alert('Could not read the other ATs to check what this would overwrite. Nothing was changed.');
     } finally {
       setCountingOverrides(false);
+    }
+  };
+
+  /**
+   * PUBLISH THIS AT'S RATES AS A NAMED TEMPLATE. Admin only.
+   *
+   * REPLACES publishing to `public_config`. Rates belong to a tender, so a baseline that
+   * everyone inherits should be a published TENDER, not an agency-level document. Two
+   * publish paths writing to different layers is how a baseline and the things derived from
+   * it drift apart - `public_config` already holds two 100-KVA rates no agency has.
+   *
+   * `public_config` stays as the resolution fallback for agencies with no AT rates. Nothing
+   * new writes to it.
+   */
+  const handlePublishTemplate = async () => {
+    if (!publishTplName.trim()) { alert('Give the template a name operators will recognise, e.g. "UGVCL 2026-27 Schedule A".'); return; }
+    // The same guard the old publish path used: never publish a section that is on screen
+    // only because a fallback resolved it. Publishing a card this AT does not actually
+    // store is how one wrong schedule reaches everyone who copies it.
+    if (blockPublishIfFallbackResolved(touchedSections().length ? touchedSections() : (['CRGO','AMORPHOUS','WOUND_CORE','OVERHAULING','CIRCLE_LIMITS'] as const).slice() as any)) return;
+    setIsSaving(true);
+    try {
+      const id = await publishAtTemplate(
+        { id: publishTplTargetId || undefined, name: publishTplName.trim(), atNumber: activeAtMaster?.atNumber, notes: publishTplNotes.trim() },
+        buildSectionPayload(),
+      );
+      setShowPublishTplModal(false);
+      setPublishTplNotes('');
+      setPublishTplTargetId('');
+      const tpl = publishedAts.find(t => t.id === id);
+      setSyncSuccessMsg(`✓ Published "${publishTplName.trim()}"${tpl ? ` v${tpl.version}` : ''}. Any user can now copy it onto their own AT. Nobody's existing rates changed.`);
+      setTimeout(() => setSyncSuccessMsg(null), 7000);
+    } catch (err) {
+      console.error(err);
+      alert('Could not publish the template. Nothing was written.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  /** Copy a published template onto the ACTIVE AT. A copy, with the version stamped. */
+  const handleAdoptTemplate = async (templateId: string) => {
+    if (!activeAtMaster) { alert('No AT is selected, so there is nowhere to copy these rates to.'); return; }
+    const tpl = publishedAts.find(t => t.id === templateId);
+    if (!tpl) return;
+    const ok = window.confirm(
+      `Copy "${tpl.name}" v${tpl.version} onto AT ${activeAtMaster.atNumber || activeAtMaster.name}?\n\n`
+      + `This REPLACES the rates currently on this AT. It is a copy, so later revisions of the template will not change your rates - `
+      + `you will simply be told the template has moved on.`
+    );
+    if (!ok) return;
+    setIsSaving(true);
+    try {
+      await adoptPublishedAt(activeAtMaster.id, templateId);
+      setSyncSuccessMsg(`✓ Copied "${tpl.name}" v${tpl.version} onto AT ${activeAtMaster.atNumber || activeAtMaster.name}.`);
+      setTimeout(() => setSyncSuccessMsg(null), 6000);
+    } catch (err) {
+      console.error(err);
+      alert('Could not copy that template. Nothing was changed.');
+    } finally {
+      setIsSaving(false);
     }
   };
 
   const handleApplyToMyAgencies = async () => {
     setIsSaving(true);
     try {
-      await applyEstimateMasterToOwnAgencies(buildSectionPayload(), applyTargets);
+      await applyRatesToOwnAts(buildSectionPayload(), applyTargets);
       setShowApplyModal(false);
-      const names = agencies.filter(a => applyTargets.includes(a.id)).map(a => a.name).join(', ');
-      setSyncSuccessMsg(`✓ Rates from ${activeAgency.name} applied to ${names}.`);
+      const names = applyCandidateAts.filter(a => applyTargets.includes(a.id))
+        .map(a => `${a.label} (${a.agencyName})`).join(', ');
+      setSyncSuccessMsg(`✓ Rates from AT ${activeAtMaster?.atNumber || activeAtMaster?.name} applied to ${names}.`);
       setTimeout(() => setSyncSuccessMsg(null), 6000);
     } catch (err) {
       console.error(err);
-      alert('Failed to apply rates to your other agencies.');
+      alert('Failed to apply rates to your other ATs. Nothing was changed.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  // Execute full sync of all sections across all agencies and save as global default for all users (Admin only)
-  const handleExecuteFullSync = async () => {
-    if (!isSuperAdmin) {
-      alert('Permission Denied: Only system administrators can publish global default rates.');
-      setShowFullSyncModal(false);
-      return;
-    }
-    // Every section is being published here, so every section is checked.
-    if (blockPublishIfFallbackResolved(['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING'])) {
-      setShowFullSyncModal(false);
-      return;
-    }
-    setIsSaving(true);
-    try {
-      // Each section independently: stored when untouched, screen state when edited.
-      const pCrgo = publishPlanFor('CRGO');
-      const fullPayload = {
-        estimateMasterCRGO: pCrgo.payload,
-        // No `estimateMaster` mirror. It is the pre-sections CRGO field, nothing reads
-        // it on any reachable path, and writing it kept a shadow copy correct only by
-        // remembering to do so at five separate call sites. See AUDIT D4.
-        estimateMasterAmorphous: publishPlanFor('AMORPHOUS').payload,
-        estimateMasterWoundCore: publishPlanFor('WOUND_CORE').payload,
-        estimateMasterOverhauling: publishPlanFor('OVERHAULING').payload,
-        estimateMasterCircleLimits: publishPlanFor('CIRCLE_LIMITS').payload,
-      };
-
-      await saveGlobalDefaultEstimateMaster(fullPayload);
-      setShowFullSyncModal(false);
-      // Says what it did, not what it sounds like it did. The old wording claimed "ALL
-      // users and agencies", which was never true for an agency holding its own sections.
-      setSyncSuccessMsg(`✓ Published all five sections to the shared baseline. New agencies will inherit these rates; existing agencies keep their own. Use "Apply to my agencies" to update yours.`);
-      setTimeout(() => {
-        setSyncSuccessMsg(null);
-      }, 6000);
-    } catch (err) {
-      alert('Failed to save default master rates for all users.');
-      console.error(err);
-    } finally {
-      setIsSaving(false);
-    }
-  };
+  // THE FULL-SYNC PUBLISH IS DELETED (AUDIT F73). `handleExecuteFullSync` wrote all five
+  // sections into `public_config` and re-seeded the shared baseline - the second publish
+  // path. See handleConfirmSaveSection above for why one is all there can be.
 
   const handleCancelSection = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     if (section === 'CRGO') {
@@ -1897,16 +1930,34 @@ export default function EstimateMaster() {
           nothing saying which it was. */}
       {(() => {
         if (ratesState.kind === 'no-at') {
+          // TWO DIFFERENT PROBLEMS, and telling them apart is the whole value of the
+          // message. "None selected" is a click away; "none exists" is a setup step the
+          // app never asked for - the nav has no Tenders entry and AT creation sits below
+          // the agency form in Settings, so a new agency reaches THIS screen first and
+          // meets a wall. Saying "cannot save" without saying "create a tender" leaves
+          // them at the wall.
+          const agencyHasAnyAt = atMasters.some(t => t.agencyId === activeAgency.id);
           return (
             <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 text-sm text-rose-900 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
-                <p className="font-bold">No AT is selected, so there is nowhere to save rates.</p>
-                <p className="text-xs mt-1">
-                  Rates belong to a tender. Select or create an AT in Agency Settings before editing.
+                <p className="font-bold">
+                  {agencyHasAnyAt
+                    ? 'No AT is selected, so there is nowhere to save rates.'
+                    : `${activeAgency.name} has no AT (tender) yet, so it has no rates to set.`}
                 </p>
-                <Link to="/agency-settings?section=at" className="text-xs font-bold underline mt-1 inline-block">
-                  Go to AT settings
+                <p className="text-xs mt-1">
+                  {agencyHasAnyAt
+                    ? <>Rates belong to a tender. Select which AT you are editing, then come back.</>
+                    : <>Rates are part of a tender, not of the agency &mdash; each AT carries the schedule it
+                       was awarded under. <strong>Create the AT first</strong>, then set its rates here. The
+                       figures below are the shipped defaults and are shown for reference only.</>}
+                </p>
+                <Link
+                  to="/agency-settings?section=at"
+                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold"
+                >
+                  {agencyHasAnyAt ? 'Choose an AT' : 'Create an AT for this agency'}
                 </Link>
               </div>
             </div>
@@ -1990,6 +2041,127 @@ export default function EstimateMaster() {
         );
       })()}
 
+      {/* ADOPT A PUBLISHED TEMPLATE. Shown to everyone: this is the second of the two ways
+          a user gets rates - enter them, or take a published AT. It sits above the tables
+          because for an AT with none, it is the fastest correct action on the screen. */}
+      {activeAtMaster && publishedAts.length > 0 && (
+        <div className="bg-white border border-slate-200 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-2">
+            <Database className="w-4 h-4 text-indigo-600" />
+            <h3 className="text-sm font-bold text-slate-900">Published AT templates</h3>
+            <span className="text-[11px] text-slate-500">
+              copy one onto AT {activeAtMaster.atNumber || activeAtMaster.name}
+            </span>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            {publishedAts.map(t => {
+              const isSource = ratesState.kind === 'published' && (ratesState as any).id === t.id;
+              const usedVersion = Number((activeAtMaster as any)?.publishedAtVersion ?? 0);
+              return (
+                <div key={t.id} className="border border-slate-200 rounded-lg p-3 flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-800 truncate">{t.name}</div>
+                    <div className="text-[11px] text-slate-500">
+                      v{t.version}
+                      {t.atNumber ? ` · AT ${t.atNumber}` : ''}
+                      {isSource && usedVersion < Number(t.version) && (
+                        <span className="ml-1 text-amber-700 font-bold">· you have v{usedVersion}</span>
+                      )}
+                      {isSource && usedVersion >= Number(t.version) && (
+                        <span className="ml-1 text-emerald-700 font-bold">· in use</span>
+                      )}
+                    </div>
+                    {t.notes && <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">{t.notes}</div>}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleAdoptTemplate(t.id)}
+                    disabled={isSaving}
+                    className="shrink-0 px-2.5 py-1.5 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg disabled:opacity-50"
+                  >
+                    {isSource && usedVersion < Number(t.version) ? `Update to v${t.version}` : 'Copy to this AT'}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* PUBLISH AS A TEMPLATE — admin only. */}
+      {showPublishTplModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-purple-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-3 mb-3 text-purple-700">
+              <div className="bg-purple-100 p-2.5 rounded-xl shrink-0"><Crown className="w-6 h-6" /></div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Publish this AT as a template</h3>
+                <p className="text-xs text-purple-700 font-medium">
+                  Any user can copy it onto their own tender. Nobody&rsquo;s existing rates change.
+                </p>
+              </div>
+            </div>
+
+            <label className="block text-xs font-bold text-slate-700 mt-3">Template name</label>
+            <input
+              value={publishTplName}
+              onChange={e => setPublishTplName(e.target.value)}
+              placeholder="UGVCL 2026-27 Schedule A"
+              className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500"
+            />
+
+            <label className="block text-xs font-bold text-slate-700 mt-3">What changed in this version</label>
+            <textarea
+              value={publishTplNotes}
+              onChange={e => setPublishTplNotes(e.target.value)}
+              rows={2}
+              placeholder="Shown to anyone whose copy is behind this version."
+              className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-1 focus:ring-purple-500"
+            />
+
+            {publishedAts.length > 0 && (
+              <>
+                <label className="block text-xs font-bold text-slate-700 mt-3">Publish as</label>
+                <select
+                  value={publishTplTargetId}
+                  onChange={e => {
+                    setPublishTplTargetId(e.target.value);
+                    const t = publishedAts.find(x => x.id === e.target.value);
+                    if (t) setPublishTplName(t.name);
+                  }}
+                  className="w-full mt-1 px-3 py-2 text-sm border border-slate-300 rounded-lg"
+                >
+                  <option value="">A NEW template</option>
+                  {publishedAts.map(t => (
+                    <option key={t.id} value={t.id}>Revise &ldquo;{t.name}&rdquo; (now v{t.version} &rarr; v{Number(t.version) + 1})</option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            {/* A NEW VERSION IS A NEW NUMBER, NOT A NEW DOCUMENT. Whoever copied v3 keeps
+                v3's rates and is shown that the template has moved on; replacing the
+                document would leave their publishedAtVersion pointing at nothing. */}
+            <p className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg p-3 mt-3">
+              Revising a template <strong>bumps its version</strong>. Anyone who already copied it keeps the rates
+              they copied &mdash; a copy never follows the template, or a live estimate would move under them &mdash;
+              and their Estimate Master screen tells them a newer version exists.
+            </p>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setShowPublishTplModal(false)}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300">
+                Cancel
+              </button>
+              <button type="button" onClick={handlePublishTemplate} disabled={isSaving}
+                      className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm disabled:opacity-50">
+                {publishTplTargetId ? 'Publish new version' : 'Publish template'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Page Header */}
       <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-5 sm:p-6 rounded-xl shadow-xs border border-slate-200 gap-4">
         <div>
@@ -2070,27 +2242,30 @@ export default function EstimateMaster() {
               public_config changes the default every future agency inherits, for every
               user, and cannot be undone by you on their behalf. Naming one of those two
               is how someone publishes a baseline meaning to update their own agencies. */}
-          {agencies.length > 1 && (
+          {/* Gated on ATs, not on how many AGENCIES exist. One agency with two tenders is
+              exactly the case this is for, and it used to be hidden. */}
+          {applyCandidateAts.length > 0 && (
             <button
               type="button"
               onClick={openApplyToMyAgencies}
-              disabled={isSaving}
+              disabled={isSaving || !activeAtMaster}
               className="flex items-center px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 shadow-2xs transition-colors disabled:opacity-50"
-              title={`Copy these rates from ${activeAgency.name} into your other agencies. You will see what it replaces before anything is written.`}
+              title={`Copy these rates onto your other ATs. You will see what it replaces before anything is written.`}
             >
               <Building2 className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
-              Apply to my agencies
+              Apply to my other ATs
             </button>
           )}
           {isSuperAdmin && (
             <button
               type="button"
-              onClick={() => setShowFullSyncModal(true)}
-              className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors"
-              title="Admin only: write these rates into public_config, the baseline every new agency inherits. Does NOT change your own agencies - use 'Apply to my agencies' for that."
+              onClick={() => { setPublishTplName(activeAtMaster?.atNumber ? `UGVCL ${activeAtMaster.atNumber}` : ''); setShowPublishTplModal(true); }}
+              disabled={!activeAtMaster}
+              className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors disabled:opacity-50"
+              title="Admin only: publish these rates as a named AT template that any user can copy onto their own tender. Does not change anyone's existing rates."
             >
               <Crown className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
-              Publish as shared default
+              Publish this AT as a template
             </button>
           )}
           <div className="flex items-center space-x-1.5 border-l border-slate-200 pl-2">
@@ -2348,7 +2523,7 @@ export default function EstimateMaster() {
                   <Building2 className="w-6 h-6" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-bold text-slate-900">Apply to my agencies</h3>
+                  <h3 className="text-lg font-bold text-slate-900">Apply these rates to my other ATs</h3>
                   <p className="text-xs text-slate-500">
                     Copy all five sections from <span className="font-semibold text-slate-700">{activeAgency.name}</span> into the agencies you select.
                   </p>
@@ -2363,7 +2538,7 @@ export default function EstimateMaster() {
             {countingOverrides && (
               <div className="flex items-center gap-2 text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Reading each agency to check what this would replace…
+                Reading each AT to check what this would replace…
               </div>
             )}
 
@@ -2384,7 +2559,29 @@ export default function EstimateMaster() {
                         className="mt-0.5 w-4 h-4 accent-sky-600"
                       />
                       <div className="min-w-0">
-                        <div className="text-xs font-bold text-slate-800">{c.name}</div>
+                        {/* THE AGENCY NAME IS PART OF THE IDENTITY. `c.name` is whatever the
+                            target document's `name` field holds, which for an AT is often
+                            blank - and "2026-27" exists under two different agencies in live
+                            data, so the number alone names nothing. */}
+                        {(() => {
+                          const cand = applyCandidateAts.find(a => a.id === c.id);
+                          return (
+                            <div className="text-xs font-bold text-slate-800 flex flex-wrap items-center gap-1.5">
+                              <span>AT {cand?.label || c.name || c.id}</span>
+                              <span className="font-normal text-slate-500">{cand?.agencyName}</span>
+                              {cand?.closed && (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-100 text-rose-800 text-[10px] font-bold">
+                                  CLOSED — jobs under it would be re-priced
+                                </span>
+                              )}
+                              {cand && !cand.ratesSource && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 text-[10px] font-bold">
+                                  no rates yet
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })()}
                         {c.overrides > 0 ? (
                           <div className="text-[11px] text-amber-700 font-semibold">
                             {c.overrides} customised rate{c.overrides === 1 ? '' : 's'} would be replaced
@@ -2476,134 +2673,8 @@ export default function EstimateMaster() {
         </div>
       )}
 
-      {showFullSyncModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
-                  <Globe2 className="w-6 h-6" />
-                </div>
-                <div>
-                  <h3 className="text-lg font-bold text-slate-900">
-                    Publish as shared default
-                  </h3>
-                  <p className="text-xs text-slate-500">
-                    Sets the baseline every NEW agency inherits. Does not change existing agencies.
-                  </p>
-                </div>
-              </div>
-              <button 
-                onClick={() => setShowFullSyncModal(false)}
-                disabled={isSaving}
-                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* The full-sync publish MODAL is deleted with its handler (AUDIT F73). */}
 
-            <div className="space-y-3 text-xs text-slate-600">
-              <p className="bg-blue-50/70 p-3 rounded-lg border border-blue-100 text-blue-950 font-medium">
-                This writes all five sections from <span className="font-bold text-blue-900">{activeAgency.name}</span> into the shared baseline (<code className="text-[10px]">public_config</code>). Every <strong>newly created</strong> agency inherits it, and any agency whose own section is empty resolves through it.
-                {' '}<strong>It does not change agencies that already have their own rates</strong> — including yours. To update your own agencies, use <span className="font-semibold">Apply to my agencies</span>.
-              </p>
-
-              {/* Per section, in rows, which version is being sent. The counts below are
-                  the SCREEN's counts and can differ from what is published - that is the
-                  whole point of this block. */}
-              <div className="border border-slate-300 rounded-xl p-3 space-y-1 bg-white">
-                <div className="font-bold text-slate-800 text-xs mb-1">Exactly what will be published:</div>
-                {(['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS'] as const).map(sec => {
-                  const plan = publishPlanFor(sec);
-                  return (
-                    <div key={sec} className={`px-2 py-1 rounded text-[11px] leading-relaxed border ${
-                      plan.useStored
-                        ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                        : 'bg-amber-50 border-amber-200 text-amber-900'
-                    }`}>
-                      {publishSummary(sec)}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="border border-slate-200 rounded-xl p-3.5 space-y-2 bg-slate-50/50">
-                <div className="font-bold text-slate-800 text-xs mb-1">Rows currently on screen (not necessarily what is published):</div>
-                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-center">
-                  <div className="bg-white p-2 rounded-lg border border-slate-200">
-                    <span className="block text-xs font-bold text-blue-700">{crgoData.length}</span>
-                    <span className="text-[10px] text-slate-500">CRGO Items</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-slate-200">
-                    <span className="block text-xs font-bold text-amber-700">{amorphousData.length}</span>
-                    <span className="text-[10px] text-slate-500">Amorphous</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-slate-200">
-                    <span className="block text-xs font-bold text-indigo-700">{woundCoreData.length}</span>
-                    <span className="text-[10px] text-slate-500">Wound Core</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-slate-200">
-                    <span className="block text-xs font-bold text-teal-700">{overhaulingData.length}</span>
-                    <span className="text-[10px] text-slate-500">Overhauling</span>
-                  </div>
-                  <div className="bg-white p-2 rounded-lg border border-slate-200 col-span-2 sm:col-span-1">
-                    <span className="block text-xs font-bold text-rose-700">{circleLimitsData.length}</span>
-                    <span className="text-[10px] text-slate-500">Circle Limits</span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <span className="font-semibold text-slate-700">Agencies receiving default rates:</span>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {agencies.map(ag => (
-                    <span 
-                      key={ag.id} 
-                      className={`text-[11px] px-2.5 py-1 rounded-md border ${
-                        ag.id === activeAgency.id 
-                          ? 'bg-blue-50 text-blue-700 border-blue-200 font-semibold' 
-                          : 'bg-white text-slate-800 border-slate-300 font-medium'
-                      }`}
-                    >
-                      {ag.name} {ag.id === activeAgency.id ? '(Active)' : '✓'}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Actions */}
-            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-200">
-              <button
-                type="button"
-                onClick={() => setShowFullSyncModal(false)}
-                disabled={isSaving}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleExecuteFullSync}
-                disabled={isSaving}
-                className="flex items-center px-5 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-sm transition-colors disabled:opacity-50"
-              >
-                {isSaving ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-                    Saving Defaults...
-                  </>
-                ) : (
-                  <>
-                    <Globe2 className="w-4 h-4 mr-1.5" />
-                    Save as Default for All Users
-                  </>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

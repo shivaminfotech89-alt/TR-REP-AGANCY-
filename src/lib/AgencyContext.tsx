@@ -620,6 +620,7 @@ interface AgencyContextType {
   countOverridesForApply: (
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],
+    targetCollection?: 'agencies' | 'atMasters',
   ) => Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number>; sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> }>>;
   applyEstimateMasterToOwnAgencies: (
     payload: Record<string, EstimateItem[] | undefined>,
@@ -975,6 +976,13 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const countOverridesForApply = async (
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],
+    /**
+     * WHICH COLLECTION THE TARGETS LIVE IN. 'agencies' was the only answer until rates moved
+     * onto tenders (AUDIT F73); the apply action now copies between ATs, and this dialog's
+     * whole job is to say what a write DESTROYS, so it has to read the documents that are
+     * actually going to be written.
+     */
+    targetCollection: 'agencies' | 'atMasters' = 'agencies',
   ): Promise<Array<{ id: string; name: string; overrides: number; inheritingCellsFrozen: number; sections: Record<string, number>; sectionWrites: Array<{ field: string; rowsBefore: number; rowsAfter: number; added: number; removed: number }> }>> => {
     const KVA_KEYS = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'];
     const num = (v: any): number | null =>
@@ -982,7 +990,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
     const results = [];
     for (const id of targetAgencyIds) {
-      const snap = await getDoc(doc(db, 'agencies', id));
+      const snap = await getDoc(doc(db, targetCollection, id));
       if (!snap.exists()) continue;
       const stored: any = snap.data();
       let overrides = 0;

@@ -14,7 +14,7 @@ import { defaultEstimateData, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, isGpJob } from '../lib/estimateCalc';
 import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
 import { mrStageSummary } from '../lib/inspectionStage';
-import { validateEstimateMaster } from '../lib/estimateMasterHealth';
+import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
@@ -304,12 +304,47 @@ export default function EstimateGenerate() {
     [selectedJobsData, atMasters]
   );
 
+  /** The AT that prices the MR on screen - the first job's own, falling back to the session's. */
+  const atForThisMrOverall = () => {
+    const first = selectedJobsData[0];
+    return first ? (atForJob(first, atMasters) ?? activeAtMaster) : activeAtMaster;
+  };
+
   const blockIfMasterMisfiled = (action: string) => {
+    // ⚠ HAS THIS TENDER BEEN GIVEN RATES AT ALL? (AUDIT F73)
+    //
+    // Checked BEFORE the section health, because the two answer different questions and
+    // this one comes first. An AT with no `ratesSource` still prices - it falls through to
+    // the agency's sections and produces perfectly ordinary-looking figures - so nothing
+    // about the NUMBERS can reveal that nobody has confirmed them against this tender.
+    // Only the missing stamp can, and issuing a document priced from an unconfirmed
+    // schedule is exactly what this is here to stop.
+    const readiness = atRatesReadiness(atForThisMrOverall());
+    if (readiness.blocked) {
+      setSetupGap({
+        title: 'This AT has no rates',
+        problem: `The estimate cannot be ${action}. ${readiness.reason}`,
+        detail: [
+          'Rates belong to a tender: each AT carries the schedule it was awarded under.',
+          'Enter them on the Estimate Master screen, or copy them from a published AT.',
+          'Until then, any figure shown comes from the agency or the shipped defaults and has not been checked against this tender.',
+        ],
+        actionLabel: 'Open Estimate Master',
+        actionTo: '/estimate-master',
+      });
+      return true;
+    }
+
+
     const cores: string[] = Array.from(new Set<string>(
       jobs.filter((j: any) => j.mrNo === selectedMrNo).map((j: any) => String(j.coreType || 'CRGO'))
     ));
     for (const core of cores) {
-      const health = validateEstimateMaster(activeAgency, core);
+      // The AT that will actually price this MR's jobs, not the agency behind it (F73).
+      const atForThisMr = selectedJobsData[0]
+        ? (atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster)
+        : activeAtMaster;
+      const health = validateEstimateMaster(atForThisMr, activeAgency, core);
       if (!health.blocking) continue;
       setSetupGap({
         title: `${health.label} estimate master holds the wrong schedule`,

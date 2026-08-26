@@ -6,7 +6,7 @@ import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimat
 import { classifyCoreType } from './SingleJobEstimateReport';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
-import { validateEstimateMaster } from '../lib/estimateMasterHealth';
+import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
@@ -964,11 +964,41 @@ export default function BillingSystem() {
    * billed, cannot block a bill over a master it does not price from.
    */
   const blockIfMasterMisfiled = (action: string) => {
+    // ⚠ HAS THIS TENDER BEEN GIVEN RATES AT ALL? (AUDIT F73)
+    //
+    // Before the section health, because the two answer different questions and this one
+    // comes first. An AT with no `ratesSource` still prices - it falls through to the
+    // agency's sections - so nothing about the FIGURES can reveal that nobody has confirmed
+    // them against this tender. Only the missing stamp can, and a tax invoice is the last
+    // document that should carry unconfirmed rates.
+    const atForThisBill = selectedJobsData[0]
+      ? (atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster)
+      : activeAtMaster;
+    const readiness = atRatesReadiness(atForThisBill);
+    if (readiness.blocked) {
+      setSetupGap({
+        title: 'This AT has no rates',
+        problem: `The bill cannot be ${action}. ${readiness.reason}`,
+        detail: [
+          'Rates belong to a tender: each AT carries the schedule it was awarded under.',
+          'Enter them on the Estimate Master screen, or copy them from a published AT.',
+          'Until then, every amount comes from the agency or the shipped defaults and has not been checked against this tender.',
+        ],
+        actionLabel: 'Open Estimate Master',
+        actionTo: '/estimate-master',
+      });
+      return true;
+    }
+
     const cores: string[] = Array.from(new Set<string>(
       selectedJobsData.map((j: any) => String(j.coreType || 'CRGO'))
     ));
     for (const core of cores) {
-      const health = validateEstimateMaster(activeAgency, core);
+      // The AT that will actually price this MR's jobs, not the agency behind it (F73).
+      const atForThisMr = selectedJobsData[0]
+        ? (atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster)
+        : activeAtMaster;
+      const health = validateEstimateMaster(atForThisMr, activeAgency, core);
       if (!health.blocking) continue;
       setSetupGap({
         title: `${health.label} estimate master holds the wrong schedule`,
