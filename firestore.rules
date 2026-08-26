@@ -266,14 +266,34 @@ service cloud.firestore {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin() || (('email' in resource.data) && resource.data.email == request.auth.token.email) || (('sharedWithEmails' in resource.data) && request.auth.token.email in resource.data.sharedWithEmails));
       allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidAgency(incoming());
       allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin() || (('email' in existing()) && existing().email == request.auth.token.email) || (('sharedWithEmails' in existing()) && request.auth.token.email in existing().sharedWithEmails)) && (incoming().ownerId == existing().ownerId || isSuperAdmin() || !('ownerId' in existing())) && isValidAgency(incoming());
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin());
+      // ⚠ DELETE IS REFUSED OUTRIGHT (AUDIT F72).
+      //
+      // No caller exists - nothing in src/ deletes an agency - and an agency owns every AT,
+      // job, inspection and oil transaction beneath it, none of which is reachable to clean
+      // up once its parent is gone. A rule cannot express "does this agency have anything
+      // under it": Firestore rules cannot query another collection. So the choice is an
+      // unguarded delete or none, and none is right for a record nothing needs to remove.
+      //
+      // This narrows a permission rather than widening one. The Firebase console and the
+      // Admin SDK are unaffected - a human deleting from the console is already exercising
+      // the judgement this rule cannot.
+      allow delete: if false;
     }
 
     match /atMasters/{atMasterId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
       allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidAtMaster(incoming());
       allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin()) && incoming().ownerId == existing().ownerId && isValidAtMaster(incoming());
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin());
+      // ⚠ DELETE IS REFUSED OUTRIGHT (AUDIT F72).
+      //
+      // An AT is a tender record. Deleting one that still has jobs under it leaves every
+      // one of them naming a tender that no longer exists, and they then price from
+      // whichever AT is selected today - the exact defect F72 removed. `status: 'Closed'`
+      // already expresses retiring a tender, which is the only thing anyone actually wants.
+      //
+      // No caller exists: AtSettings creates and updates, nothing deletes. And a rule
+      // cannot check for jobs under this AT, so a conditional delete is not expressible.
+      allow delete: if false;
     }
 
     match /oilTransactions/{txId} {
