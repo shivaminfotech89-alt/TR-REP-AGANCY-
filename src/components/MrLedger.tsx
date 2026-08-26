@@ -111,6 +111,44 @@ const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatch
 export default function MrLedger() {
   const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix } = useAgency();
   const [loading, setLoading] = useState(true);
+  /**
+   * WORK THAT BELONGS TO NO TENDER (AUDIT F82).
+   *
+   * Every screen now shows the active AT's work, and a job with no `atId` matches no tender
+   * and appears under none. That is correct and it is also how a paid invoice disappears:
+   * MSBT-12 is estimated, billed AND paid, and carries no atId.
+   *
+   * A filter working exactly as written while the thing it is about vanishes is the shape
+   * this audit has recorded five times in checks. So unassigned work is not hidden - it is
+   * surfaced HERE, as a backlog, reachable and countable, until someone attributes it.
+   *
+   * ⚠ IT CANNOT BE ATTRIBUTED AUTOMATICALLY. All twelve unassigned jobs sit on MRs where NO
+   * job names a tender, so there is nothing to infer from - scripts/admin/assign-at.js
+   * refuses all twelve for exactly that reason. Each needs a human with the MR paperwork.
+   */
+  const [unassignedJobs, setUnassignedJobs] = useState<any[]>([]);
+  const [showUnassigned, setShowUnassigned] = useState(false);
+
+  useEffect(() => {
+    if (!auth.currentUser || !activeAgency) { setUnassignedJobs([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'jobs'),
+          where('ownerId', '==', auth.currentUser!.uid),
+          where('agencyId', '==', activeAgency.id),
+          where('atId', '==', ''),
+        ));
+        if (!cancelled) setUnassignedJobs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch {
+        // A failed read must not be reported as "none" - that is the same lie as hiding them.
+        if (!cancelled) setUnassignedJobs([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [activeAgency?.id, auth.currentUser?.uid]);
+
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
@@ -716,6 +754,69 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
         </div>
       </div>
 
+      {/* UNASSIGNED WORK — a backlog, not a disappearance (AUDIT F82).
+          Shown only when there is any, so a clean agency never sees it, and it empties as
+          each job is attributed. There is no bulk fix: all twelve in live data sit on MRs
+          where NO job names a tender, so nothing can be inferred from siblings and
+          scripts/admin/assign-at.js refuses every one. Each needs the MR paperwork. */}
+      {unassignedJobs.length > 0 && (
+        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowUnassigned(o => !o)}
+            className="w-full text-left p-3.5 flex items-start gap-2.5 hover:bg-amber-100/60"
+          >
+            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-amber-900">
+                {unassignedJobs.length} job{unassignedJobs.length === 1 ? '' : 's'} belong to no tender
+              </p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                They carry no AT, so they appear under no tender &mdash; including any that are
+                estimated, billed or paid. They are not lost; they are listed here until each is
+                attributed to the tender its MR belongs to.
+              </p>
+            </div>
+            <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 text-white">
+              {showUnassigned ? 'Hide' : 'Show'}
+            </span>
+          </button>
+
+          {showUnassigned && (
+            <div className="border-t-2 border-amber-300 bg-white divide-y divide-slate-100 max-h-80 overflow-y-auto">
+              {unassignedJobs.map((j: any) => {
+                const issued = [
+                  j.estimateSentDate && 'estimate sent',
+                  j.billNo && 'billed',
+                  j.paymentStatus === 'Paid' && 'PAID',
+                  j.challanNo && 'challan',
+                ].filter(Boolean);
+                return (
+                  <div key={j.id} className="p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                    <span className="font-mono font-bold text-slate-900">{j.jobNo || '(no job number)'}</span>
+                    <span className="text-slate-500">MR {j.mrNo || '-'}</span>
+                    <span className="text-slate-500">{j.division || '-'}</span>
+                    <span className="text-slate-500">{j.make || '-'} &middot; {j.serialNo || '-'}</span>
+                    {/* AN ISSUED DOCUMENT IS WHY THIS LIST EXISTS. Named loudly: these are the
+                        ones whose disappearance would have mattered. */}
+                    {issued.length > 0 && (
+                      <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-bold border border-rose-300">
+                        {issued.join(', ')}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              <div className="p-3 text-[11px] text-slate-600 bg-slate-50">
+                Attributing these needs the MR paperwork &mdash; nothing can infer them, because no
+                job on any of these MRs names a tender. Once a job on an MR carries an AT,
+                <code className="mx-1">scripts/admin/assign-at.js</code> can fill in its siblings.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Filter & Search Toolbar */}
       <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
         <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
@@ -1126,6 +1227,31 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     </h4>
                   </div>
                   
+                  {/* ⚠ AN ADDED UNIT JOINS THE MR'S TENDER, NOT THE ONE ON SCREEN (AUDIT F82).
+                      A unit added to MR 1563 belongs to the tender 1563 was issued under -
+                      that is F66 and it is correct. But now that every screen shows only the
+                      active tender's work, a unit added to an OLD MR while working under a
+                      NEW tender is stamped with the old one and disappears from view the
+                      moment it saves. Consistent behaviour that looks exactly like a bug, so
+                      the fix is saying it rather than changing it. */}
+                  {(() => {
+                    const mrAt = atForEditingMr();
+                    if ('error' in mrAt) return null;
+                    if (!activeAtMaster || mrAt.atId === activeAtMaster.id) return null;
+                    const mrAtDoc = atMasters.find(x => x.id === mrAt.atId);
+                    return (
+                      <div className="w-full basis-full p-2.5 rounded-lg bg-indigo-50 border border-indigo-300 text-[11px] text-indigo-900">
+                        <strong className="font-bold">
+                          This unit joins MR {editingMr.mrNo}, which belongs to AT{' '}
+                          {mrAtDoc?.atNumber || mrAtDoc?.name || '(unknown)'}.
+                        </strong>{' '}
+                        It will not appear under AT {activeAtMaster.atNumber || activeAtMaster.name},
+                        the tender you are working in &mdash; a unit added to an MR belongs to the
+                        tender that MR was issued under, and is priced and counted against it.
+                      </div>
+                    );
+                  })()}
+
                   <button
                     type="button"
                     onClick={handleAddTransformerToMr}
