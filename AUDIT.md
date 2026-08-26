@@ -3143,6 +3143,80 @@ being in another file and another language does not make it another change.
 
 ---
 
+### F76. The asymmetry test: a rare harmless case against a rare catastrophic one
+
+**The question was small: how do you delete an AT created by mistake?** `allow delete: if
+false` sits on `atMasters` because a tender is a record and `status: 'Closed'` exists to
+retire one — which leaves a typo permanent. Refusing to remove a typo is its own kind of
+wrong.
+
+**The obvious answer does not survive contact with the rules.** The guard that matters is
+"no job carries this atId", and a Firestore rule **cannot express it**: rules have `get()`
+and `exists()` on a *known document path* and no query at all. So an in-app delete needs the
+rule to permit any owner delete, with the guard living in the UI — where the Firebase
+console, the Admin SDK, and any bug in that screen all walk straight past it. The rule stops
+being a guarantee and becomes a convention.
+
+---
+
+**THE ARGUMENT WORTH REUSING — and it is not about ATs.**
+
+Two rare events. Weigh them by CONSEQUENCE and by WHO IS PRESENT, not by frequency.
+
+| | Deleting a typo AT | Deleting a live tender |
+|---|---|---|
+| how often | rare | rare |
+| urgency | never urgent | — |
+| who is there | someone who has **just noticed the mistake** | someone who thinks they are doing something else |
+| if it goes wrong | a stray document | every job under it becomes `at-missing`, prices from whatever AT is selected today, and **the printed estimate recomputes** — the paper in the file stops matching the screen with nothing announcing it (F72) |
+| noticed? | immediately | **silently, possibly never** |
+
+Both are rare, so frequency does not separate them. What separates them is that one failure
+announces itself to someone already paying attention, and the other does not announce itself
+at all. **Paying a minute on the harmless case to make the dangerous one impossible BY RULE
+rather than by convention is the trade.** The cost falls on the case where someone is already
+looking; the protection covers the case where nobody is.
+
+**THIS IS THE SHAPE THE RESERVATION MODEL GOT WRONG, INVERTED.** F70 recorded a design that
+spent a real, certain, frequent cost — a job number burned on **every dropdown flip** — to
+close a window that was rare and, since F62, already handled by a refused save. Here the
+certain cost is a minute on an action nobody takes twice a year, and what it buys is a
+catastrophic silent failure made unreachable. Same two quantities, weighed the right way
+round.
+
+The test that distinguishes them: **who bears the cost, and does the failure announce
+itself?** A guard whose cost lands on the attentive case and whose protection covers the
+unattended one is worth paying for. One that taxes the common path to cover a rare path that
+already has a safety net is not.
+
+---
+
+**REJECTED: a denormalised `jobCount` on the AT.** Rules *can* express
+`resource.data.jobCount == 0`, so the guard would be real. But every job create and delete
+would then have to write its AT transactionally, and a counter that drifts **wrong-low
+permits deleting a tender that has jobs** — precisely the outcome the guard exists to
+prevent. It converts a query we cannot do into an invariant we must maintain forever, and
+its failure mode is the disaster rather than an inconvenience.
+
+**REJECTED: admin-only delete in the app** (`allow delete: if isSuperAdmin()`). Genuinely
+rules-enforceable and a reasonable middle. Not taken because it still permits a live tender
+to be deleted — it narrows *who* can cause the catastrophe rather than making it
+unreachable.
+
+**CHOSEN: `scripts/admin/delete-at.js`.** `allow delete: if false` stays untouched, so no
+privilege widens and no path through the app can delete an AT. The Admin SDK bypasses rules
+anyway, so the script is not an exception carved into them — it is the only door, and the
+guard is enforced **by the same thing that performs the delete**, which is the one
+arrangement it cannot be walked around.
+
+It names the AT, its agency, status, period, `ratesSource`, rate sections, prefixes,
+counters, allotments and allotment history; refuses with the full job list if anything
+carries the `atId`, pointing at `Closed` instead; and **re-queries `jobs` immediately before
+deleting**, because the listing came from a snapshot taken at the start of the run and an
+intake saved in between would be orphaned silently. `MODE = 'dry-run'` in the repository.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D0. Job numbers are DERIVED, and typing over one does not persist
