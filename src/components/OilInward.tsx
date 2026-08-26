@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useAgency } from "../lib/AgencyContext";
+import { useAgency, atScope, NO_ACTIVE_AT } from "../lib/AgencyContext";
 import { db, auth, handleFirestoreError, OperationType } from "../lib/firebase";
 import * as XLSX from "xlsx";
 import {
@@ -36,6 +36,12 @@ export interface OilTransaction {
   division: string;
   oilType: "Fresh" | "Used";
   barrels: number;
+  /**
+   * WHICH TENDER THIS OIL BELONGS TO (AUDIT F82). Optional because every transaction written
+   * before oil was recorded per AT has none - those are unassigned, not wrong, and are not
+   * guessed at: three of the four in live data name an MR with no jobs to read a tender from.
+   */
+  atId?: string;
   grossLiters: number;
   filtrationLossPercent: number;
   netLiters: number;
@@ -153,9 +159,18 @@ export default function OilInward() {
       const [txSnap, jobsSnap, inspSnap] = await Promise.all([
         getDocs(
           query(
+            // ⚠ OIL IS PER TENDER (AUDIT F82), with ONE exception: the net balance at the
+            // close of a tender is what the agency owes or is owed, so it carries forward as
+            // the new tender's OPENING balance. Everything else starts empty.
+            //
+            // Transactions written before oil was stamped carry no atId and match no tender.
+            // They are NOT guessed at - three of the four in live data cannot be resolved at
+            // all, their MRs having no jobs to read a tender from - so they are surfaced as
+            // unassigned rather than attributed.
             collection(db, "oilTransactions"),
             where("ownerId", "==", auth.currentUser.uid),
             where("agencyId", "==", activeAgency.id),
+            where("atId", "==", atScope(activeAtMaster) ?? NO_ACTIVE_AT),
           ),
         ),
         getDocs(
@@ -163,6 +178,7 @@ export default function OilInward() {
             collection(db, "jobs"),
             where("ownerId", "==", auth.currentUser.uid),
             where("agencyId", "==", activeAgency.id),
+            where("atId", "==", atScope(activeAtMaster) ?? NO_ACTIVE_AT),
           ),
         ),
         getDocs(
@@ -252,6 +268,10 @@ export default function OilInward() {
           grossLiters: formData.grossLiters,
           filtrationLossPercent: formData.oilType === "Fresh" ? 0 : 5,
           netLiters,
+          // WHICH TENDER THIS OIL BELONGS TO. Stamped at entry from the active AT, the same
+          // way a job is - a transaction cannot be attributed later, because the MR it names
+          // may have no jobs to read a tender from (AUDIT F82).
+          atId: activeAtMaster?.id || '',
           createdAt: serverTimestamp(),
         };
         await addDoc(collection(db, "oilTransactions"), newTx);
@@ -429,9 +449,35 @@ export default function OilInward() {
     return filteredSummary.reduce((sum, item) => sum + item.totalReceived, 0);
   }, [filteredSummary]);
 
-  const subTotalNetBalance = useMemo(() => {
+  /**
+   * THE BALANCE THIS TENDER OPENED WITH — a recorded figure, not a computed one.
+   *
+   * Absent is NOT zero and is not shown as zero: an AT with no carried balance has had none
+   * confirmed, which is a different statement from "the previous tender closed level"
+   * (AUDIT F82).
+   */
+  const openingBalance = Number((activeAtMaster as any)?.openingOilBalance);
+  const hasOpeningBalance = Number.isFinite(openingBalance);
+
+  /** This tender's own movement, before anything carried in. */
+  const tenderNetMovement = useMemo(() => {
     return subTotalShortage - subTotalReceived;
   }, [subTotalShortage, subTotalReceived]);
+
+  /**
+   * WHAT IS ACTUALLY OWED: what carried in, plus what this tender moved. A tender that
+   * opened owing 210 litres and consumed none still owes 210, and a register that showed 0
+   * would be reporting the paperwork rather than the oil.
+   */
+  const subTotalNetBalance = useMemo(() => {
+    return (hasOpeningBalance ? openingBalance : 0) + tenderNetMovement;
+  }, [hasOpeningBalance, openingBalance, tenderNetMovement]);
+
+  /**
+   * THE FIGURE THAT WOULD CARRY FORWARD from this tender - offered for confirmation, never
+   * written on its own. See carryOilBalanceForward.
+   */
+  const closingBalanceForCarry = subTotalNetBalance;
 
   const exportToExcel = () => {
     const wsData: any[][] = [];
@@ -536,6 +582,26 @@ export default function OilInward() {
               </div>
               <div className="text-base font-mono font-bold text-blue-900">
                 {subTotalReceived.toFixed(2)} LTR
+              </div>
+            </div>
+
+            {/* WHAT CARRIED IN FROM THE PREVIOUS TENDER, shown beside what this one moved.
+                Absent is not zero: an AT with no carried balance has had none CONFIRMED, and
+                saying "0.00" would assert that the previous tender closed level (AUDIT F82). */}
+            <div className={`border rounded px-3 py-2 text-right ${
+              !activeAtMaster ? 'bg-slate-50 border-slate-200 text-slate-500'
+                : hasOpeningBalance ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
+                : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
+              <div className="text-[10px] uppercase font-bold opacity-80">Opening balance</div>
+              <div className="font-mono font-black text-sm">
+                {hasOpeningBalance
+                  ? `${openingBalance >= 0 ? '+' : ''}${openingBalance.toFixed(2)} LTR`
+                  : 'not carried forward'}
+              </div>
+              <div className="text-[9px] opacity-70">
+                {hasOpeningBalance
+                  ? `carried from the previous tender`
+                  : 'no balance has been confirmed for this tender'}
               </div>
             </div>
 

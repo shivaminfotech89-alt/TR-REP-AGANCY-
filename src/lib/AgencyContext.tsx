@@ -716,6 +716,12 @@ interface AgencyContextType {
   syncCountersState: (isAtMaster: boolean, id: string, newCounters: Record<string, number>) => void;
   /** Drop an AT that has been deleted elsewhere, and stop pointing at it. See forgetAtMaster. */
   forgetAtMaster: (atMasterId: string) => void;
+  /** Record a confirmed opening oil balance on an AT, carried from the tender that closed. */
+  carryOilBalanceForward: (
+    toAtId: string,
+    fromAtId: string,
+    litres: number,
+  ) => Promise<void>;
 
   /** Admin-published rate templates, readable by everyone. See PublishedAt. */
   publishedAts: PublishedAt[];
@@ -1611,6 +1617,39 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * places choosing a default differently is how a screen ends up on an AT the sidebar does
    * not agree with.
    */
+  /**
+   * CARRY THE CLOSING OIL BALANCE INTO A NEW TENDER — RECORDED, AND ONLY ON CONFIRMATION.
+   *
+   * A new AT starts fresh in every respect but this one: the net balance at the close of a
+   * tender is oil the agency owes, or is owed, and it does not reset because the paperwork
+   * did (AUDIT F82).
+   *
+   * ⚠ NOT DERIVED. Summing every transaction before this tender began would depend on
+   * `date` - a business date the operator types, not a tender boundary - and would silently
+   * change if a prior transaction were edited or deleted. A figure the DISCOM is owed
+   * against must not move because an old record was corrected.
+   *
+   * ⚠ AND NOT AUTOMATIC. The caller shows the computed figure and someone confirms it. A
+   * balance that appeared on its own is a number nobody agreed to, on a screen where the
+   * disagreement would be with the DISCOM.
+   *
+   * `openingOilBalanceFromAtId` records which tender it closed, so the figure can be checked
+   * against its inputs rather than believed. Writing it again overwrites - re-confirming
+   * after a correction is a legitimate act, and the stamp says when it last happened.
+   */
+  const carryOilBalanceForward = async (toAtId: string, fromAtId: string, litres: number) => {
+    if (!auth.currentUser) throw new Error('Not signed in.');
+    if (!Number.isFinite(litres)) throw new Error('That opening balance is not a number.');
+    const payload = {
+      openingOilBalance: Number(litres.toFixed(2)),
+      openingOilBalanceAt: Date.now(),
+      openingOilBalanceFromAtId: fromAtId,
+      openingOilBalanceBy: auth.currentUser.email || auth.currentUser.uid || '',
+    };
+    await updateDoc(doc(db, 'atMasters', toAtId), payload);
+    setAtMasters(prev => prev.map(a => a.id === toAtId ? { ...a, ...payload } : a));
+  };
+
   const forgetAtMaster = (atMasterId: string) => {
     const gone = atMasters.find(a => a.id === atMasterId);
     const remaining = atMasters.filter(a => a.id !== atMasterId);
@@ -1793,7 +1832,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
       predictNextJobNo, getJobNoPrefix, syncCountersState,
-      publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster
+      publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster,
+      carryOilBalanceForward
     }}>
       {children}
     </AgencyContext.Provider>
