@@ -2913,6 +2913,91 @@ decision.
 
 ---
 
+### F72. Pricing followed the session's AT, not the job's — and the plan for fixing it undercounted the sites by eleven
+
+**The defect.** Every pricing path passed `activeAtMaster` — whichever AT the operator has
+selected right now — to `getAtPercentageForCore`. Not one read `job.atId`. So selecting a
+new AT after a rollover silently re-priced every historical job at the new tender's
+percentage, and that percentage multiplies **every line of every estimate and every
+invoice**.
+
+It also reached paper. The printed estimate sheet and the printed tax invoice do not read
+stored figures — they **recompute at render** through `buildSingleJobEstimateData` and
+`calculateJobTotal`. So a reprint of an already-issued estimate would have restated it at
+the new percentage, and the copy in the file would no longer match the screen. The ledgers
+(`estimateAmount`, `billAmount`) are frozen and were never at risk; the documents were.
+
+Fixed by passing `atForJob(job, atMasters) ?? activeAtMaster`. The engines —
+`buildSingleJobEstimateData`, `calculateJobTotal`, `resolveRate`, `resolveScrapCharge` —
+are untouched. Only what is passed IN changed.
+
+---
+
+**THE COUNT WAS WRONG IN THE APPROVED PLAN: 25 sites, not 14.**
+
+The plan was approved on the strength of "the 14-site signature change is mechanical." The
+real figure was 25, and two whole files were missing from it:
+
+| | |
+|---|---|
+| 15 | `getAtPercentageForCore(activeAtMaster, X.coreType)` — EstimateGenerate ×9, BillingSystem ×6 |
+| 8 | the AT argument into `getJobFullEstimate` / `checkJobCircleLimit` — EstimateGenerate ×2 (**local wrappers**, covering ~14 callers between them), BillingSystem ×3, **Reports ×1**, **InternalInspection ×2** |
+| 2 | the `atMaster` prop on `SingleJobEstimateReport` — the sheet that recomputes |
+
+**`Reports.tsx` and `InternalInspection.tsx` were affected and absent from the plan.** Both
+compute estimates; both passed the session's AT.
+
+**The cause was a truncated grep.** The inventory was built from output piped through
+`head`, and the tail was never read — so the count reported was the count *displayed*, not
+the count that existed.
+
+This is the F41 shape exactly: a sweep whose result was reported with more confidence than
+its method supported. F41 was a sweep truncated before the judgement; this is a sweep
+truncated before the count. Both produced a number that looked like a finding.
+
+It is also the fourth time in this audit a check has reported outside its own model — the
+others are recorded in `read-counters.js` (delta-must-be-1) and
+`suggestion-source.js` (a counter key matched by division prefix rather than by core type).
+
+**The rule this leaves:** an inventory that is going to be *approved on* must be produced
+without `head`, `tail`, or `| head -N`, and the count must come from `grep -c` or `wc -l`
+over the whole result — never from reading a screen of it.
+
+---
+
+**THE THREE AT CASES, kept apart** (`atResolutionForJob`):
+
+| source | meaning | pricing | live count |
+|---|---|---|---|
+| `own` | `atId` names an AT that exists | that AT | 52 |
+| `no-at` | no `atId` — never recorded a tender | documented fallback | 12 |
+| `at-missing` | `atId` names an AT that is **gone** | documented fallback, **and warned** | 0 |
+
+`no-at` and `at-missing` take the same fallback deliberately — a job whose tender was
+deleted still has to be priceable, and blocking the estimate would strand real work. But
+collapsing them to one `null` was the defect one level down: a job that HAS a recorded
+tender priced from whatever is selected today, with nothing saying so. The estimate screen
+now names the affected job numbers and the AT they are actually being priced from.
+
+Built at zero live instances, which is the point: the first one would otherwise arrive
+unannounced.
+
+**The cause is unguarded, and is NOT fixed here.** Nothing prevents deleting an AT that
+still has jobs under it. The app has no AT delete at all — `AtSettings` creates and
+updates only — but `firestore.rules:264` permits it for the owner, so the console and the
+Admin SDK are open routes. The banner is a symptom fix. `allow delete: if false` on
+`atMasters` is the cause fix and is not applied: it is a privilege narrowing, and an AT is
+a tender record that `status: 'Closed'` already exists to retire.
+
+**Verification.** `scripts/admin/at-resolution-census.js`, run before and after: section 1
+("jobs whose printed figure moves") is empty in both. On this data every job that resolves
+its own AT sits under the AT active for its agency, so the fix is a provable **no-op** —
+which makes any price difference afterwards a regression, full stop. For `AMSBT-1` the two
+resolutions return the *same document* (`Unu1F8JR9koc9gamfgfL`), so the argument reaching
+the untouched engine is identical and the grand total cannot differ.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D1. The Scrap Delivered MR *list* uses the broad scrap test
