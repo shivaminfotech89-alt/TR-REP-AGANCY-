@@ -249,6 +249,27 @@ export interface AtMaster {
   publishedAtVersion?: number;
   /** When the rates were last set on this AT, whatever the source. */
   ratesUpdatedAt?: number;
+
+  /**
+   * THE OIL BALANCE THIS TENDER OPENS WITH (AUDIT F82).
+   *
+   * A new AT starts fresh in every respect except oil: the net balance at the close of one
+   * tender is what the agency owes, or is owed, at the start of the next.
+   *
+   * RECORDED, NOT DERIVED, and written only by an explicit act. Deriving it - summing every
+   * transaction before this tender began - depends on `date`, a business date the operator
+   * types rather than a tender boundary, and would silently change if a prior transaction
+   * were edited or deleted. This is oil the DISCOM is owed against; it must not move because
+   * an old record was corrected.
+   *
+   * `openingOilBalanceFromAtId` names the tender it closed, so the figure can be CHECKED
+   * against what it was computed from instead of merely believed. Absent means no balance
+   * has been carried forward, which is different from a balance of zero and is shown as such.
+   */
+  openingOilBalance?: number;
+  openingOilBalanceAt?: number;
+  openingOilBalanceFromAtId?: string;
+  openingOilBalanceBy?: string;
 }
 
 /**
@@ -343,6 +364,38 @@ export function getCounterKey(division: string, coreType: string = 'CRGO'): stri
  * looks a number up to suggest the next one. A stricter rule here than the one deciding real
  * job numbers is exactly the discrepancy this replaces.
  */
+/**
+ * THE TENDER SCOPE EVERY SCREEN APPLIES (AUDIT F82).
+ *
+ * A new AT starts fresh: no MRs, no jobs, no estimates, bills, challans or testing from the
+ * previous tender. Every screen therefore shows the work of the AT selected in the top bar,
+ * the same way it already shows only the active agency's.
+ *
+ * ⚠ RETURNS null WHEN THERE IS NO ACTIVE AT, and the caller must then show NOTHING rather
+ * than everything. Dropping the clause instead would make "no tender selected" display every
+ * tender's work at once - the one state that looks like data and is not.
+ *
+ * ⚠ AND IT DOES NOT MATCH UNASSIGNED WORK. A job with no `atId` belongs to no tender and
+ * cannot appear under one. Those are reachable through the unassigned view, deliberately -
+ * one of them, MSBT-12, is estimated, billed AND paid, and a filter that quietly removed a
+ * paid invoice from Billing would be a rule working exactly as written while the thing it is
+ * about disappears.
+ */
+/**
+ * A TENDER ID NO DOCUMENT CAN CARRY.
+ *
+ * With no AT selected the clause still has to be present, or the query silently widens to
+ * every tender at once - which looks like data and is not. Comparing against a value nothing
+ * holds returns nothing, which is the honest answer to "show me the selected tender's work"
+ * when none is selected.
+ */
+export const NO_ACTIVE_AT = '__no_active_at__';
+
+export function atScope(activeAtMaster: AtMaster | null | undefined): string | null {
+  const id = String(activeAtMaster?.id ?? '').trim();
+  return id || null;
+}
+
 export function jobNoSequence(jobNo: string | null | undefined): number | null {
   const raw = String(jobNo ?? '').trim();
   if (!raw) return null;

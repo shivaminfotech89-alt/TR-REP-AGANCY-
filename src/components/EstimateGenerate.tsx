@@ -1,5 +1,5 @@
 
-import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -133,9 +133,15 @@ export default function EstimateGenerate() {
       if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
       try {
         const jobsQ = query(
+          // ⚠ THE ACTIVE TENDER (AUDIT F82). A new AT starts fresh - no MRs, no jobs, no
+          // estimates, bills, challans or testing carry over - so every screen shows the work
+          // of the AT selected in the top bar, exactly as it already shows only the active
+          // agency's. Unassigned work (no atId) matches no tender and is reached through the
+          // unassigned view instead: it is not lost, and it is not pretended to belong here.
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid), 
-          where('agencyId', '==', activeAgency.id)
+          where('agencyId', '==', activeAgency.id),
+          where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT),
         );
         // Inspection records carry no agencyId (neither save path has ever written
         // one), so filtering on it here matched nothing and this screen silently

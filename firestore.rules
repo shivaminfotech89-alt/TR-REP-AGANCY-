@@ -216,6 +216,15 @@ service cloud.firestore {
              (!('ratesSource' in data) || (data.ratesSource is string && data.ratesSource.size() <= 200)) &&
              (!('publishedAtVersion' in data) || (data.publishedAtVersion is number)) &&
              (!('ratesUpdatedAt' in data) || isTimeValue(data.ratesUpdatedAt)) &&
+             // THE OIL BALANCE CARRIED FORWARD FROM THE PREVIOUS TENDER (AUDIT F82).
+             // RECORDED, not derived: it is oil the DISCOM is owed against, and a figure
+             // that silently changes because an old transaction was edited is not one
+             // anybody can be held to. The source AT is stored with it so the number can be
+             // checked against what it was computed from rather than merely believed.
+             (!('openingOilBalance' in data) || (data.openingOilBalance is number)) &&
+             (!('openingOilBalanceAt' in data) || isTimeValue(data.openingOilBalanceAt)) &&
+             (!('openingOilBalanceFromAtId' in data) || (data.openingOilBalanceFromAtId is string && data.openingOilBalanceFromAtId.size() <= 128)) &&
+             (!('openingOilBalanceBy' in data) || (data.openingOilBalanceBy is string && data.openingOilBalanceBy.size() <= 150)) &&
              (!('createdAt' in data) || isTimeValue(data.createdAt)) &&
              (!('updatedAt' in data) || isTimeValue(data.updatedAt));
     }
@@ -232,6 +241,11 @@ service cloud.firestore {
              (!('barrels' in data) || (data.barrels is number)) &&
              (!('filtrationLossPercent' in data) || (data.filtrationLossPercent is number)) &&
              (!('netLiters' in data) || (data.netLiters is number)) &&
+             // WHICH TENDER THIS OIL BELONGS TO (AUDIT F82). Oil is now recorded per AT and
+             // its net balance carries forward at a rollover, so a transaction names its
+             // tender. Absent on every transaction written before this - those are
+             // unassigned, not wrong, and nothing guesses a tender for them.
+             (!('atId' in data) || (data.atId is string && data.atId.size() <= 128)) &&
              (!('createdAt' in data) || isTimeValue(data.createdAt));
     }
 
