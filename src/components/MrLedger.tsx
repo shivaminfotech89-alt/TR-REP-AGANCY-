@@ -35,7 +35,10 @@ import {
   Sparkles,
   AlertTriangle,
   RotateCcw,
-  BookOpen
+  BookOpen,
+  Ban,
+  XCircle,
+  Check
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -60,6 +63,9 @@ interface Job {
   createdAt?: any;
   updatedAt?: any;
   isClosed?: boolean;
+  isCancelled?: boolean;
+  mrStatus?: string;
+  cancelledAt?: string | null;
 }
 
 interface MrGroup {
@@ -67,6 +73,8 @@ interface MrGroup {
   dateOfIssue: string;
   division: string;
   repairType: string;
+  isCancelled?: boolean;
+  cancelledAt?: string | null;
   jobs: Job[];
 }
 
@@ -83,6 +91,7 @@ interface EditableJobEntry {
   prevDeliveryDate?: string;
   gpReason?: string;
   isNew?: boolean;
+  isCancelled?: boolean;
 }
 
 interface MrEditState {
@@ -91,12 +100,13 @@ interface MrEditState {
   dateOfIssue: string;
   division: string;
   repairType: string;
+  isCancelled?: boolean;
   jobs: EditableJobEntry[];
   deletedJobIds: string[];
 }
 
 const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', '500'];
-const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair'];
+const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair', 'Cancelled'];
 
 export default function MrLedger() {
   const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix } = useAgency();
@@ -104,6 +114,7 @@ export default function MrLedger() {
   const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CANCELLED'>('ALL');
   const [expandedMrs, setExpandedMrs] = useState<Set<string>>(new Set());
   
   // Notification Toast
@@ -112,8 +123,14 @@ export default function MrLedger() {
   // Full MR Edit Modal State
   const [editingMr, setEditingMr] = useState<MrEditState | null>(null);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
-  const [deleteConfirmMr, setDeleteConfirmMr] = useState<MrGroup | null>(null);
-  const [isDeletingMr, setIsDeletingMr] = useState(false);
+  
+  // Cancel MR State
+  const [cancelConfirmMr, setCancelConfirmMr] = useState<MrGroup | null>(null);
+  const [isCancellingMr, setIsCancellingMr] = useState(false);
+  
+  // Reactivate MR State
+  const [reactivateConfirmMr, setReactivateConfirmMr] = useState<MrGroup | null>(null);
+  const [isReactivatingMr, setIsReactivatingMr] = useState(false);
 
   const fetchJobs = async () => {
     if (!auth.currentUser || !activeAgency) {
@@ -141,16 +158,19 @@ export default function MrLedger() {
             dateOfIssue: job.dateOfIssue || '',
             division: job.division || 'Unknown',
             repairType: job.repairType || 'OGP',
+            isCancelled: false,
             jobs: []
           };
         }
         groups[mrKey].jobs.push(job);
       });
+
+      // Mark MR as cancelled if all its jobs are marked Cancelled
+      Object.values(groups).forEach(g => {
+        g.isCancelled = g.jobs.length > 0 && g.jobs.every(j => j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled');
+      });
       
       // Sort MRs by date (newest first)
-      // Was `new Date(x || 0)` - a missing date became epoch 1970, which sorts last
-      // only by accident and would sort FIRST if the direction were ever flipped.
-      // byDateDesc sinks undated rows by construction, in either direction.
       const sortedGroups = [...Object.values(groups)].sort(byDateDesc((g: any) => g.dateOfIssue));
       
       setMrGroups(sortedGroups);
@@ -180,6 +200,9 @@ export default function MrLedger() {
     return Array.from(set).sort();
   }, [mrGroups, activeAgency, activeAtMaster]);
 
+  const activeCount = useMemo(() => mrGroups.filter(g => !g.isCancelled).length, [mrGroups]);
+  const cancelledCount = useMemo(() => mrGroups.filter(g => g.isCancelled).length, [mrGroups]);
+
   const toggleExpand = (mrNo: string) => {
     setExpandedMrs(prev => {
       const newSet = new Set(prev);
@@ -200,6 +223,7 @@ export default function MrLedger() {
       dateOfIssue: group.dateOfIssue,
       division: group.division,
       repairType: group.repairType || 'OGP',
+      isCancelled: group.isCancelled,
       jobs: group.jobs.map(j => ({
         id: j.id,
         jobNo: j.jobNo,
@@ -212,7 +236,8 @@ export default function MrLedger() {
         prevJobNo: j.prevJobNo || '',
         prevDeliveryDate: j.prevDeliveryDate || '',
         gpReason: j.gpReason || '',
-        isNew: false
+        isNew: false,
+        isCancelled: j.status === 'Cancelled' || j.isCancelled === true
       })),
       deletedJobIds: []
     });
@@ -220,11 +245,6 @@ export default function MrLedger() {
 
   /**
    * The AT this MR belongs to, read from its own jobs - never from the session (F66).
-   *
-   * A transformer added to MR 1563 belongs to the tender MR 1563 was issued under: it
-   * consumes that AT's allotment and prices at that AT's percentage, whichever AT happens
-   * to be selected months later. Returns an error string rather than guessing when the
-   * MR's jobs disagree or carry no AT at all - that is a data fault and should surface.
    */
   const atForEditingMr = (): { atId: string } | { error: string } => {
     if (!editingMr) return { error: 'No MR is open.' };
@@ -255,27 +275,8 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
 
-    // CONTINUE FROM THE HIGHEST NUMBER SAVED ON THIS MR (AUDIT F70).
-    //
-    // Not from the counter. Saved jobs are a record of what EXISTS and can go down when one
-    // is deleted; the counter only ever goes up. So an abandoned add suggests the same
-    // number again, and a cancelled job frees its number - the same rule intake follows.
-    //
-    // THE MR FIRST, the agency second. A unit added to MR 1563 continues 1563's own run of
-    // numbers, which is what the division sees on that MR. Only when this MR carries no
-    // number under this prefix at all - an Amorphous unit added to a CRGO-only MR - does it
-    // fall back to the highest saved anywhere in the agency, because there is nothing on
-    // this MR to continue from.
-    //
-    // The PREFIX still comes from the MR's own AT (F66): a unit added to MR 1563 belongs to
-    // the tender 1563 was issued under, not to whichever AT the session has selected, which
-    // is why atForEditingMr must resolve first and why an MR that disagrees with itself
-    // about its AT is refused rather than guessed at.
-    //
-    // NOTHING IS RESERVED. This row is held in memory until Save, so reserving here burned a
-    // number every time someone opened the dialog, added a row and thought better of it.
-    //
-    // GP reuses the original number from the previous repair and is suggested nothing.
+    // CONTINUE FROM THE HIGHEST ACTIVE NUMBER SAVED ON THIS MR (AUDIT F70).
+    // Cancelled jobs are excluded so their numbers are reused.
     let nextJobNo = '';
     if (activeAgency && editingMr.repairType !== 'GP') {
       const at = atForEditingMr();
@@ -293,13 +294,16 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
           return Number.isFinite(n) && n > 0 ? n : 0;
         };
 
-        // Rows in the dialog count alongside the saved ones, so adding three units gives
-        // three consecutive numbers rather than the same one three times.
-        const onThisMr = editingMr.jobs.reduce((m, j) => Math.max(m, tailOf(j.jobNo)), 0);
-        // Already loaded - mrGroups is the same agency-wide read fetchJobs performs, so
-        // this costs nothing extra.
-        const inAgency = mrGroups.reduce(
-          (m, g) => g.jobs.reduce((n, j) => Math.max(n, tailOf((j as any).jobNo)), m), 0);
+        const onThisMr = editingMr.jobs
+          .filter(j => j.status !== 'Cancelled' && !j.isCancelled && (editingMr.repairType || '').toUpperCase() !== 'GP')
+          .reduce((m, j) => Math.max(m, tailOf(j.jobNo)), 0);
+
+        const inAgency = mrGroups
+          .filter(g => !g.isCancelled && (g.repairType || '').toUpperCase() !== 'GP')
+          .reduce(
+            (m, g) => g.jobs
+              .filter(j => j.status !== 'Cancelled' && !j.isCancelled && (j.repairType || '').toUpperCase() !== 'GP' && !(j as any).isGp)
+              .reduce((n, j) => Math.max(n, tailOf((j as any).jobNo)), m), 0);
 
         const base = onThisMr > 0 ? onThisMr : inAgency;
         nextJobNo = `${prefix}-${base + 1}`;
@@ -323,7 +327,8 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             prevJobNo: '',
             prevDeliveryDate: lastJob?.prevDeliveryDate || '',
             gpReason: lastJob?.gpReason || '',
-            isNew: true
+            isNew: true,
+            isCancelled: false
           }
         ]
       };
@@ -371,7 +376,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     }
 
     if (editingMr.jobs.length === 0) {
-      alert('MR must contain at least one transformer. If you wish to remove the whole MR, click "Delete Entire MR".');
+      alert('MR must contain at least one transformer.');
       return;
     }
 
@@ -401,6 +406,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
       // 2. Update existing or insert new jobs
       for (const j of editingMr.jobs) {
+        const isJobCancelled = j.status === 'Cancelled' || j.isCancelled === true;
         if (j.id && !j.isNew) {
           // Existing Job update
           const docRef = doc(db, 'jobs', j.id);
@@ -416,6 +422,8 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             serialNo: j.serialNo.trim().toUpperCase(),
             coreType: j.coreType,
             status: j.status,
+            isCancelled: isJobCancelled,
+            mrStatus: isJobCancelled ? 'Cancelled' : 'Active',
             prevAtNo: j.prevAtNo || '',
             prevJobNo: j.prevJobNo || '',
             prevDeliveryDate: j.prevDeliveryDate || '',
@@ -438,16 +446,9 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             serialNo: j.serialNo.trim().toUpperCase(),
             coreType: j.coreType || 'CRGO',
             status: j.status || 'Received',
+            isCancelled: isJobCancelled,
+            mrStatus: isJobCancelled ? 'Cancelled' : 'Active',
             isClosed: false,
-            // THE MR'S OWN AT, not the session's (AUDIT F66). A transformer added to an
-            // MR issued under an earlier tender belongs to that tender - it consumes its
-            // allotment and prices at its percentage. Stamping the active AT here is the
-            // same defect as the estimate reading the active AT instead of the job's own:
-            // the session's selection standing in for the job's tender.
-            //
-            // The add path already refuses when the MR has no single AT, so by the time a
-            // row reaches this write the answer is known. `activeAtMaster` remains the
-            // fallback only for the impossible case of an MR with no jobs at all.
             atId: (() => {
               const ids = [...new Set(editingMr.jobs
                 .map(x => String((x as any).atId ?? '').trim())
@@ -468,22 +469,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
       await batch.commit();
 
-      // ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (AUDIT F70).
-      //
-      // This screen never wrote `lastJobNumbers` at all. It did not have to while adding a
-      // unit RESERVED its number - the reservation moved the counter before the row existed.
-      // Now that nothing is reserved, this is the only thing that moves it, and without it a
-      // number saved here would be handed straight back to the next intake as a suggestion.
-      //
-      // Separate from the batch because advancing needs a read, and a writeBatch cannot read.
-      // Not atomic with the job writes, and that is survivable in a way the reverse is not:
-      // if this fails the counter is merely stale, the next suggestion repeats a number, and
-      // the duplicate check refuses it at save with the conflict named. A counter advanced
-      // for jobs that never saved would silently skip numbers the division has allotted.
+      // ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (ACTIVE JOBS ONLY)
       if (editingMr.repairType !== 'GP') {
         const at = atForEditingMr();
         if (!('error' in at)) {
-          const highWater = highWaterJobNos(editingMr.jobs, editingMr.division);
+          const activeJobs = editingMr.jobs.filter(j => j.status !== 'Cancelled' && !j.isCancelled);
+          const highWater = highWaterJobNos(activeJobs, editingMr.division);
           if (Object.keys(highWater).length > 0) {
             try {
               const atRef = doc(db, 'atMasters', at.atId);
@@ -494,8 +485,6 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 let changed = false;
                 for (const [key, num] of Object.entries(highWater)) {
                   if (num > (Number(counters[key]) || 0)) { counters[key] = num; changed = true; }
-                  // CRGO lives under `<div>_CRGO` and a bare `<div>`; both move together or
-                  // the pair disagrees about where the sequence is. NewJob's save does the same.
                   if (key.endsWith('_CRGO') && num > (Number(counters[editingMr.division]) || 0)) {
                     counters[editingMr.division] = num; changed = true;
                   }
@@ -503,7 +492,6 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 if (changed) tx.update(atRef, { lastJobNumbers: counters });
               });
             } catch (counterErr) {
-              // Reported, never fatal - the jobs are already saved and are the record.
               console.error('MR saved, but the job-number counter could not be advanced:', counterErr);
             }
           }
@@ -530,35 +518,97 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     }
   };
 
-  // Delete entire MR and all its jobs
-  const handleDeleteEntireMr = async () => {
-    if (!deleteConfirmMr || !auth.currentUser || !activeAgency) return;
+  // Cancel entire MR (releases job numbers for reuse and blocks downstream processing)
+  const handleCancelEntireMr = async () => {
+    if (!cancelConfirmMr || !auth.currentUser || !activeAgency) return;
     
-    setIsDeletingMr(true);
+    setIsCancellingMr(true);
     try {
       const batch = writeBatch(db);
-      for (const j of deleteConfirmMr.jobs) {
+      const nowIso = new Date().toISOString();
+      const nowTime = Date.now();
+      for (const j of cancelConfirmMr.jobs) {
         const docRef = doc(db, 'jobs', j.id);
-        batch.delete(docRef);
+        batch.update(docRef, {
+          status: 'Cancelled',
+          isCancelled: true,
+          mrStatus: 'Cancelled',
+          cancelledAt: nowIso,
+          updatedAt: nowTime
+        });
       }
       await batch.commit();
 
       setNotification({
         type: 'success',
-        message: `✓ MR #${deleteConfirmMr.mrNo} and its ${deleteConfirmMr.jobs.length} transformer(s) deleted successfully.`
+        message: `✓ MR #${cancelConfirmMr.mrNo} cancelled. All ${cancelConfirmMr.jobs.length} transformer job numbers released for reuse.`
       });
-      setTimeout(() => setNotification(null), 5000);
+      setTimeout(() => setNotification(null), 6000);
 
-      setDeleteConfirmMr(null);
-      if (editingMr?.originalMrNo === deleteConfirmMr.mrNo) {
+      setCancelConfirmMr(null);
+      if (editingMr?.originalMrNo === cancelConfirmMr.mrNo) {
         setEditingMr(null);
       }
       await fetchJobs();
     } catch (err) {
-      console.error('Error deleting MR:', err);
-      handleFirestoreError(err, OperationType.DELETE, 'jobs');
+      console.error('Error cancelling MR:', err);
+      handleFirestoreError(err, OperationType.UPDATE, 'jobs');
     } finally {
-      setIsDeletingMr(false);
+      setIsCancellingMr(false);
+    }
+  };
+
+  // Reactivate a Cancelled MR
+  const handleReactivateMr = async (group: MrGroup) => {
+    if (!auth.currentUser || !activeAgency) return;
+    setIsReactivatingMr(true);
+    try {
+      // Check if any job number is currently used by another active job in the agency
+      const q = query(
+        collection(db, 'jobs'),
+        where('ownerId', '==', auth.currentUser.uid),
+        where('agencyId', '==', activeAgency.id)
+      );
+      const snap = await getDocs(q);
+      const otherActiveJobs = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as any))
+        .filter(j => !group.jobs.some(gj => gj.id === j.id) && j.status !== 'Cancelled' && !j.isCancelled && j.mrStatus !== 'Cancelled');
+
+      const activeJobNos = new Set(otherActiveJobs.map(j => (j.jobNo || '').trim().toUpperCase()));
+      const clashingJob = group.jobs.find(j => activeJobNos.has((j.jobNo || '').trim().toUpperCase()));
+
+      if (clashingJob) {
+        alert(`Cannot reactivate MR #${group.mrNo} because Job No "${clashingJob.jobNo}" has already been assigned to another active transformer in the agency. Please edit its Job Number first before reactivating.`);
+        setIsReactivatingMr(false);
+        return;
+      }
+
+      const batch = writeBatch(db);
+      const nowTime = Date.now();
+      for (const j of group.jobs) {
+        const docRef = doc(db, 'jobs', j.id);
+        batch.update(docRef, {
+          status: 'Received',
+          isCancelled: false,
+          mrStatus: 'Active',
+          cancelledAt: null,
+          updatedAt: nowTime
+        });
+      }
+      await batch.commit();
+
+      setNotification({
+        type: 'success',
+        message: `✓ MR #${group.mrNo} reactivated successfully.`
+      });
+      setTimeout(() => setNotification(null), 5000);
+      setReactivateConfirmMr(null);
+      await fetchJobs();
+    } catch (err) {
+      console.error('Error reactivating MR:', err);
+      handleFirestoreError(err, OperationType.UPDATE, 'jobs');
+    } finally {
+      setIsReactivatingMr(false);
     }
   };
 
@@ -597,7 +647,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     
     const matchesDivision = selectedDivision === 'All' || group.division.toLowerCase() === selectedDivision.toLowerCase();
     
-    return matchesSearch && matchesDivision;
+    const matchesStatus = 
+      statusFilter === 'ALL' ? true :
+      statusFilter === 'ACTIVE' ? !group.isCancelled :
+      group.isCancelled;
+
+    return matchesSearch && matchesDivision && matchesStatus;
   });
 
   return (
@@ -632,7 +687,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
           </div>
           <div>
             <h1 className="text-base sm:text-lg font-bold text-slate-900">MR Register (Material Receipts)</h1>
-            <p className="text-xs text-slate-500">Inward transformer intake records with full MR batch editing</p>
+            <p className="text-xs text-slate-500">Inward transformer intake records, full MR editing, and MR cancellation</p>
           </div>
         </div>
 
@@ -673,7 +728,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             </div>
 
             {/* Division Filter Dropdown */}
-            <div className="flex items-center gap-1.5 min-w-0 sm:w-64">
+            <div className="flex items-center gap-1.5 min-w-0 sm:w-56">
               <div className="relative w-full">
                 <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
                 <select
@@ -694,6 +749,38 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
               </div>
             </div>
+
+            {/* Status Filter Toggle */}
+            <div className="flex items-center bg-slate-200/80 p-1 rounded-lg text-xs font-bold shrink-0">
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ALL')}
+                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                  statusFilter === 'ALL' ? 'bg-white text-slate-900 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                All ({mrGroups.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('ACTIVE')}
+                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                  statusFilter === 'ACTIVE' ? 'bg-white text-blue-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Active ({activeCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setStatusFilter('CANCELLED')}
+                className={`px-2.5 py-1 rounded-md transition-all cursor-pointer ${
+                  statusFilter === 'CANCELLED' ? 'bg-white text-rose-700 shadow-2xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Cancelled ({cancelledCount})
+              </button>
+            </div>
+
           </div>
 
           {/* Counts badge */}
@@ -719,7 +806,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             </div>
           ) : (
             filteredGroups.map(group => (
-              <div key={group.mrNo} className="bg-white hover:bg-slate-50/50 transition-colors">
+              <div 
+                key={group.mrNo} 
+                className={`transition-colors ${
+                  group.isCancelled ? 'bg-rose-50/20 hover:bg-rose-50/40 opacity-90' : 'bg-white hover:bg-slate-50/50'
+                }`}
+              >
                 
                 {/* MR HEADER ROW */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 gap-3">
@@ -734,9 +826,16 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <h3 className="font-bold text-slate-900 text-sm">
-                          MR No: <span className="font-mono text-blue-600 font-black">{group.mrNo}</span>
+                        <h3 className={`font-bold text-sm ${group.isCancelled ? 'text-slate-600 line-through' : 'text-slate-900'}`}>
+                          MR No: <span className={`font-mono font-black ${group.isCancelled ? 'text-rose-700 no-underline' : 'text-blue-600'}`}>{group.mrNo}</span>
                         </h3>
+
+                        {group.isCancelled ? (
+                          <span className="text-[10px] font-black uppercase text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded flex items-center gap-1 shadow-2xs">
+                            <Ban className="w-3 h-3 text-rose-600" /> CANCELLED
+                          </span>
+                        ) : null}
+
                         <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
                           {group.division}
                         </span>
@@ -757,7 +856,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     </div>
                   </div>
                   
-                  {/* RIGHT: FULL MR EDIT & ACTION BUTTONS */}
+                  {/* RIGHT: ACTION BUTTONS */}
                   <div className="flex items-center space-x-2 pl-8 sm:pl-0 shrink-0">
                     <button
                       type="button"
@@ -769,14 +868,28 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                       <span>Full Edit MR</span>
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => setDeleteConfirmMr(group)}
-                      className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg border border-transparent hover:border-rose-200 transition-colors cursor-pointer"
-                      title="Delete entire MR"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {group.isCancelled ? (
+                      <button
+                        type="button"
+                        onClick={() => handleReactivateMr(group)}
+                        disabled={isReactivatingMr}
+                        className="inline-flex items-center space-x-1 text-xs font-bold text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-300 hover:border-emerald-600 px-2.5 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                        title="Reactivate this cancelled MR"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                        <span>Reactivate MR</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setCancelConfirmMr(group)}
+                        className="inline-flex items-center space-x-1 text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-300 hover:border-rose-600 px-2.5 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
+                        title="Cancel this MR (release job numbers for reuse and stop downstream processing)"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>Cancel MR</span>
+                      </button>
+                    )}
                   </div>
 
                 </div>
@@ -785,13 +898,18 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 {expandedMrs.has(group.mrNo) && (
                   <div className="bg-slate-50/90 p-3 sm:p-4 border-t border-slate-200 overflow-x-auto">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs font-bold text-slate-700">
-                        Transformers in MR #{group.mrNo} ({group.jobs.length})
+                      <span className="text-xs font-bold text-slate-700 flex items-center gap-2">
+                        <span>Transformers in MR #{group.mrNo} ({group.jobs.length})</span>
+                        {group.isCancelled && (
+                          <span className="text-[10px] text-rose-700 font-bold bg-rose-100 border border-rose-200 px-2 py-0.5 rounded">
+                            Job numbers released for reuse
+                          </span>
+                        )}
                       </span>
                       <button
                         type="button"
                         onClick={() => handleOpenFullMrEdit(group)}
-                        className="text-[11px] text-blue-600 hover:underline font-bold flex items-center gap-1"
+                        className="text-[11px] text-blue-600 hover:underline font-bold flex items-center gap-1 cursor-pointer"
                       >
                         <Edit className="w-3 h-3" /> Edit Batch / Add Transformers
                       </button>
@@ -813,7 +931,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                       </thead>
                       <tbody className="divide-y divide-slate-200/70">
                         {group.jobs.map((job, idx) => (
-                          <tr key={job.id} className="hover:bg-white">
+                          <tr key={job.id} className={group.isCancelled ? 'opacity-70 hover:bg-rose-50/20' : 'hover:bg-white'}>
                             <td className="py-2 px-2.5 text-slate-400 font-mono">{idx + 1}</td>
                             <td className="py-2 px-2.5 font-mono font-bold text-slate-900">{job.jobNo}</td>
                             <td className="py-2 px-2.5 text-slate-700 uppercase">{job.make}</td>
@@ -822,7 +940,9 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                             <td className="py-2 px-2.5 font-medium text-slate-700">{job.coreType || 'CRGO'}</td>
                             <td className="py-2 px-2.5">
                               <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                                job.status === 'Dispatched' 
+                                job.status === 'Cancelled' || job.isCancelled
+                                  ? 'bg-rose-100 text-rose-800 border border-rose-300 font-bold'
+                                  : job.status === 'Dispatched' 
                                   ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' 
                                   : job.status?.includes('Tested')
                                   ? 'bg-blue-100 text-blue-800 border border-blue-300'
@@ -874,9 +994,16 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                   <Edit className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm sm:text-base">
-                    Full MR Edit: <span className="font-mono text-blue-300">MR #{editingMr.originalMrNo}</span>
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-sm sm:text-base">
+                      Full MR Edit: <span className="font-mono text-blue-300">MR #{editingMr.originalMrNo}</span>
+                    </h3>
+                    {editingMr.isCancelled && (
+                      <span className="text-[10px] font-black uppercase text-rose-300 bg-rose-900/60 border border-rose-400 px-2 py-0.5 rounded">
+                        CANCELLED
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[11px] text-slate-300">
                     Edit MR Header information, change category, and modify all {editingMr.jobs.length} transformer unit(s)
                   </p>
@@ -890,6 +1017,18 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 <X className="w-5 h-5" />
               </button>
             </div>
+
+            {/* CANCELLED WARNING BANNER */}
+            {editingMr.isCancelled && (
+              <div className="p-3 bg-rose-50 border-b border-rose-200 text-xs text-rose-900 flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <Ban className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>
+                    <strong>This MR is currently Cancelled.</strong> Its job numbers have been released for reuse, and downstream workflow (inspections, testing, dispatch) is disabled.
+                  </span>
+                </div>
+              </div>
+            )}
 
             {/* MODAL BODY (SCROLLABLE) */}
             <div className="overflow-y-auto p-4 sm:p-6 space-y-5 flex-1 bg-slate-50/50">
@@ -981,8 +1120,6 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     </h4>
                   </div>
                   
-                  {/* No spinner: adding a unit is synchronous and cannot fail now that it
-                      asks the counter for nothing (AUDIT F70). */}
                   <button
                     type="button"
                     onClick={handleAddTransformerToMr}
@@ -1189,13 +1326,31 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             {/* MODAL FOOTER */}
             <div className="p-4 bg-slate-100 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 shrink-0">
               
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any })}
-                className="text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-2 rounded-xl transition-colors cursor-pointer self-start sm:self-auto"
-              >
-                Delete Entire MR
-              </button>
+              <div>
+                {!editingMr.isCancelled ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCancelConfirmMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any });
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-2 rounded-xl transition-colors cursor-pointer border border-rose-200"
+                  >
+                    <Ban className="w-4 h-4 text-rose-600" />
+                    <span>Cancel Entire MR</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      handleReactivateMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any });
+                    }}
+                    className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-3 py-2 rounded-xl transition-colors cursor-pointer border border-emerald-300"
+                  >
+                    <RotateCcw className="w-4 h-4 text-emerald-600" />
+                    <span>Reactivate Entire MR</span>
+                  </button>
+                )}
+              </div>
 
               <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
                 <button
@@ -1203,7 +1358,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                   onClick={() => setEditingMr(null)}
                   className="px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
-                  Cancel
+                  Close
                 </button>
 
                 <button
@@ -1233,52 +1388,58 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
       )}
 
       {/* ========================================================================= */}
-      {/* DELETE MR CONFIRMATION MODAL */}
+      {/* CANCEL MR CONFIRMATION MODAL */}
       {/* ========================================================================= */}
-      {deleteConfirmMr && (
+      {cancelConfirmMr && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in">
           <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200">
             <div className="flex items-center gap-3 mb-3 text-rose-600">
               <div className="bg-rose-100 p-2.5 rounded-xl shrink-0">
-                <AlertTriangle className="w-6 h-6" />
+                <Ban className="w-6 h-6" />
               </div>
               <div>
-                <h3 className="text-base font-bold text-slate-900">Delete Entire MR?</h3>
-                <p className="text-xs text-rose-600 font-medium">Permanent Action</p>
+                <h3 className="text-base font-bold text-slate-900">Cancel MR #{cancelConfirmMr.mrNo}?</h3>
+                <p className="text-xs text-rose-600 font-medium">Releases job numbers for reuse</p>
               </div>
             </div>
 
-            <p className="text-slate-700 text-xs sm:text-sm mb-5 leading-relaxed bg-slate-50 p-3 rounded-xl border border-slate-200">
-              Are you sure you want to delete <strong>MR #{deleteConfirmMr.mrNo}</strong> ({deleteConfirmMr.division})?
-              <br />
-              This will permanently delete all <strong>{deleteConfirmMr.jobs.length} transformer record(s)</strong> associated with this MR.
-            </p>
+            <div className="text-slate-700 text-xs sm:text-sm mb-5 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-2">
+              <p>
+                Are you sure you want to cancel <strong>MR #{cancelConfirmMr.mrNo}</strong> ({cancelConfirmMr.division} Division)?
+              </p>
+              <ul className="list-disc pl-4 text-slate-600 text-xs space-y-1">
+                <li>Marks all <strong>{cancelConfirmMr.jobs.length} transformer unit(s)</strong> as <strong>Cancelled</strong>.</li>
+                <li><strong>Releases all Job Numbers</strong> assigned to this MR so they can be immediately reused for new intakes.</li>
+                <li>Blocks further work (inspections, testing, dispatch, billing) for this MR.</li>
+                <li>Preserves historical audit trail in the MR register.</li>
+              </ul>
+            </div>
 
             <div className="flex justify-end gap-2">
               <button
                 type="button"
-                disabled={isDeletingMr}
-                onClick={() => setDeleteConfirmMr(null)}
+                disabled={isCancellingMr}
+                onClick={() => setCancelConfirmMr(null)}
                 className="px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
               >
-                Cancel
+                No, Keep Active
               </button>
 
               <button
                 type="button"
-                disabled={isDeletingMr}
-                onClick={handleDeleteEntireMr}
+                disabled={isCancellingMr}
+                onClick={handleCancelEntireMr}
                 className="px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                {isDeletingMr ? (
+                {isCancellingMr ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>Deleting...</span>
+                    <span>Cancelling MR...</span>
                   </>
                 ) : (
                   <>
-                    <Trash2 className="w-4 h-4" />
-                    <span>Yes, Delete MR</span>
+                    <Ban className="w-4 h-4" />
+                    <span>Yes, Cancel MR</span>
                   </>
                 )}
               </button>

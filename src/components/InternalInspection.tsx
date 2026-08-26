@@ -594,6 +594,7 @@ export default function InternalInspection() {
 
   const mrGroups: Record<string, any[]> = {};
   jobs.forEach(j => {
+    if (j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled') return;
     if (divisionFilter !== 'All' && j.division !== divisionFilter) return;
     if (!matchesGpFilter(j, gpFilter)) return;
     if (!mrGroups[j.mrNo]) mrGroups[j.mrNo] = [];

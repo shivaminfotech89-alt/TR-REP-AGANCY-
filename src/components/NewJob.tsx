@@ -212,7 +212,7 @@ export default function NewJob() {
 
   // Past jobs cache across ALL user data / ATs for instant global lookup
   const [pastJobs, setPastJobs] = useState<any[]>([]);
-  const [pastJobsLoading, setPastJobsLoading] = useState(false);
+  const [pastJobsLoading, setPastJobsLoading] = useState(true);
   const [showPastPickerRowIndex, setShowPastPickerRowIndex] = useState<number | null>(null);
   // More than one past job matched the value typed - the operator must choose which
   // physical transformer this is. Never auto-applied: job numbers are not uniquely
@@ -256,7 +256,7 @@ export default function NewJob() {
       capacityKva: '63', 
       make: '', 
       serialNo: '', 
-      coreType: 'CRGO',
+      coreType: '',
       starRating: '3 Star & other',
       ratingLevel: '3 Star & other',
       prevAtNo: '',
@@ -283,7 +283,7 @@ export default function NewJob() {
     }
   }, [availableDivisions, activeAgency, activeAtMaster]);
 
-  // Helper to compute predicted job number in memory without advancing database counters
+  // Helper to compute predicted job number in memory from active saved MR jobs
   const getAutoJobNo = (
     rowIndex: number,
     currentCoreType: string,
@@ -291,33 +291,61 @@ export default function NewJob() {
     currentRepairType: string,
     allRows: TransformerEntry[]
   ): string => {
-    if (currentRepairType === 'GP' || !activeAgency || !currentDivision) return '';
-    const { prefix, nextNum, counterKey } = predictNextJobNo(currentDivision, currentCoreType || 'CRGO', currentRepairType);
-    
+    if (currentRepairType === 'GP' || !activeAgency || !currentDivision || !currentCoreType) return '';
+    const { prefix, counterKey } = getJobNoPrefix(currentDivision, currentCoreType);
+    if (!prefix) return '';
+
+    // Find the highest job number among ACTIVE (non-cancelled) OGP saved jobs in this agency
+    // GP jobs are excluded because they reuse original job numbers from prior repairs and arrive randomly.
+    const head = `${prefix.toUpperCase()}-`;
+    const tailOf = (v: unknown): number => {
+      const raw = String(v ?? '').trim().toUpperCase();
+      if (!raw.startsWith(head)) return 0;
+      const n = parseInt(raw.slice(head.length), 10);
+      return Number.isFinite(n) && n > 0 ? n : 0;
+    };
+
+    const activeOgpJobs = pastJobs.filter(j => 
+      j.status !== 'Cancelled' && 
+      !j.isCancelled && 
+      j.mrStatus !== 'Cancelled' &&
+      (j.repairType || '').toUpperCase() !== 'GP' &&
+      !j.isGp
+    );
+    const activeSavedMax = activeOgpJobs.reduce((m, j) => Math.max(m, tailOf(j.jobNo)), 0);
+
     let countBefore = 0;
     for (let i = 0; i < rowIndex; i++) {
       const row = allRows[i];
-      if (!row) continue;
-      const rKey = getJobNoPrefix(currentDivision, row.coreType || 'CRGO').counterKey;
+      if (!row || !row.coreType) continue;
+      const rKey = getJobNoPrefix(currentDivision, row.coreType).counterKey;
       if (rKey === counterKey) {
         countBefore++;
       }
     }
-    
-    return `${prefix}-${nextNum + countBefore}`;
+
+    return `${prefix}-${activeSavedMax + 1 + countBefore}`;
   };
 
-  // Fill any blank / initial job numbers once agency & division context are ready in OGP mode.
+  // Sync and populate exact job numbers once agency, division & pastJobs cache are ready in OGP mode.
   useEffect(() => {
-    if (commonData.repairType === 'OGP' && activeAgency && commonData.division) {
+    if (commonData.repairType === 'OGP' && activeAgency && commonData.division && !pastJobsLoading) {
       setTransformers(prev => {
         let changed = false;
         const next = prev.map((t, idx) => {
-          if (!t.jobNo || !t.jobNo.trim()) {
+          if (!t.coreType) {
+            if (t.jobNo) {
+              changed = true;
+              return { ...t, jobNo: '' };
+            }
+            return t;
+          }
+          const correctNo = getAutoJobNo(idx, t.coreType, commonData.division, commonData.repairType, prev);
+          if (t.jobNo !== correctNo) {
             changed = true;
             return {
               ...t,
-              jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, prev)
+              jobNo: correctNo
             };
           }
           return t;
@@ -325,7 +353,7 @@ export default function NewJob() {
         return changed ? next : prev;
       });
     }
-  }, [commonData.division, commonData.repairType, activeAgency, activeAtMaster]);
+  }, [commonData.division, commonData.repairType, activeAgency, activeAtMaster, pastJobs, pastJobsLoading]);
 
   // Past jobs for the GP lookup: across all AT masters of the CURRENT AGENCY.
   useEffect(() => {
@@ -366,7 +394,7 @@ export default function NewJob() {
         setTransformers(prev => {
           return prev.map((t, idx) => ({
             ...t,
-            jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', value, commonData.repairType, prev)
+            jobNo: t.coreType ? getAutoJobNo(idx, t.coreType, value, commonData.repairType, prev) : ''
           }));
         });
       }
@@ -394,7 +422,7 @@ export default function NewJob() {
     capacityKva: '63',
     make: '',
     serialNo: '',
-    coreType: 'CRGO',
+    coreType: '',
     starRating: '3 Star & other',
     ratingLevel: '3 Star & other',
     prevAtNo: '',
@@ -521,8 +549,8 @@ export default function NewJob() {
   const performRepairTypeSwitch = (type: 'OGP' | 'GP') => {
     const firstDiv = availableDivisions[0] || 'SABARMATI';
     const initRow = blankTransformerRow();
-    if (type === 'OGP' && activeAgency) {
-      initRow.jobNo = getAutoJobNo(0, 'CRGO', firstDiv, 'OGP', [initRow]);
+    if (type === 'OGP' && activeAgency && initRow.coreType) {
+      initRow.jobNo = getAutoJobNo(0, initRow.coreType, firstDiv, 'OGP', [initRow]);
     }
     setCommonData({
       mrNo: '',
@@ -624,7 +652,7 @@ export default function NewJob() {
         capacityKva: '',
         make: '',
         serialNo: '',
-        coreType: 'CRGO',
+        coreType: '',
         prevAtNo: '',
         prevJobNo: '',
         prevDeliveryDate: '',
@@ -803,7 +831,7 @@ export default function NewJob() {
       newTransformers[index].coreType = value as string;
       const updated = newTransformers.map((t, idx) => ({
         ...t,
-        jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, newTransformers)
+        jobNo: t.coreType ? getAutoJobNo(idx, t.coreType, commonData.division, commonData.repairType, newTransformers) : ''
       }));
       setTransformers(updated);
       return;
@@ -817,7 +845,7 @@ export default function NewJob() {
     for (let i = 0; i < transformers.length; i++) {
       const t = transformers[i];
       if (!t.jobNo?.trim()) {
-        const msg = `Please enter or ensure Job No is present for Transformer #${i + 1} before adding another transformer.`;
+        const msg = `Please enter or select Core Type to generate Job No for Transformer #${i + 1} before adding another transformer.`;
         setErrorMsg(msg);
         setModalAlertMessage(msg);
         return;
@@ -837,7 +865,7 @@ export default function NewJob() {
     }
 
     setErrorMsg(null);
-    const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : 'CRGO';
+    const lastCoreType = transformers.length > 0 ? transformers[transformers.length - 1].coreType : '';
     const lastKva = transformers.length > 0 ? transformers[transformers.length - 1].capacityKva : '63';
     const lastStar = transformers.length > 0 ? (transformers[transformers.length - 1].starRating || '3 Star & other') : '3 Star & other';
 
@@ -857,7 +885,7 @@ export default function NewJob() {
     };
 
     const nextTransformers = [...transformers, newRow];
-    if (commonData.repairType === 'OGP') {
+    if (commonData.repairType === 'OGP' && lastCoreType) {
       newRow.jobNo = getAutoJobNo(transformers.length, lastCoreType, commonData.division, commonData.repairType, nextTransformers);
     }
 
@@ -888,7 +916,7 @@ export default function NewJob() {
     if (commonData.repairType === 'OGP') {
       const updated = next.map((t, idx) => ({
         ...t,
-        jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, next)
+        jobNo: t.coreType ? getAutoJobNo(idx, t.coreType, commonData.division, commonData.repairType, next) : ''
       }));
       setTransformers(updated);
     } else {
@@ -904,7 +932,7 @@ export default function NewJob() {
     if (commonData.repairType === 'OGP') {
       const updated = newTransformers.map((t, idx) => ({
         ...t,
-        jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, newTransformers)
+        jobNo: t.coreType ? getAutoJobNo(idx, t.coreType, commonData.division, commonData.repairType, newTransformers) : ''
       }));
       setTransformers(updated);
     } else {
@@ -926,7 +954,7 @@ export default function NewJob() {
 
     const updated = transformers.map((t, idx) => ({
       ...t,
-      jobNo: getAutoJobNo(idx, t.coreType || 'CRGO', commonData.division, commonData.repairType, transformers)
+      jobNo: t.coreType ? getAutoJobNo(idx, t.coreType, commonData.division, commonData.repairType, transformers) : ''
     }));
     setTransformers(updated);
   };
@@ -939,7 +967,7 @@ export default function NewJob() {
   const coreTypeSummary = useMemo(() => {
     const counts: Record<string, number> = {};
     transformers.forEach(t => {
-      const ct = t.coreType || 'CRGO';
+      const ct = t.coreType || 'Unassigned';
       counts[ct] = (counts[ct] || 0) + 1;
     });
     return counts;
@@ -973,7 +1001,14 @@ export default function NewJob() {
       return;
     }
     if (commonData.repairType === 'OGP') {
-      for (const t of transformers) {
+      for (let i = 0; i < transformers.length; i++) {
+        const t = transformers[i];
+        if (!t.coreType || !t.coreType.trim()) {
+          const err = `Please select Core / Job Type for Transformer #${i + 1}.`;
+          setErrorMsg(err);
+          setModalAlertMessage(err);
+          return;
+        }
         // Prefix only - validating the shape of a number already assigned.
         const info = getJobNoPrefix(commonData.division, t.coreType);
         if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
@@ -983,7 +1018,7 @@ export default function NewJob() {
           // job number - the one thing that is not wrong - and sent the operator
           // hunting through job numbers for a problem in agency settings.
           if (setupGapForPrefix(t.coreType)) return;
-          const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
+          const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please select a Core Type or enter a valid job number.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
           return;
@@ -1088,12 +1123,20 @@ export default function NewJob() {
 
       // Check OGP prefix validation
       if (commonData.repairType === 'OGP') {
-        for (const t of transformers) {
+        for (let i = 0; i < transformers.length; i++) {
+          const t = transformers[i];
+          if (!t.coreType || !t.coreType.trim()) {
+            const err = `Please select Core / Job Type for Transformer #${i + 1}.`;
+            setErrorMsg(err);
+            setModalAlertMessage(err);
+            setLoading(false);
+            return;
+          }
           // Prefix only - validating the shape of an already-assigned number.
           const info = getJobNoPrefix(commonData.division, t.coreType);
           if (!t.jobNo || !t.jobNo.startsWith(info.prefix + '-')) {
             if (setupGapForPrefix(t.coreType)) { setLoading(false); return; }
-            const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please enter a valid job number or use auto-generate.`;
+            const err = `Invalid Job Number prefix for OGP job "${t.jobNo || 'Empty'}". Expected prefix starting with "${info.prefix}-". Please select a Core Type or enter a valid job number.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
@@ -1138,7 +1181,7 @@ export default function NewJob() {
         }
       }
 
-      // Check MR No duplication
+      // Check MR No duplication (ignoring cancelled MRs)
       const mrQuery = query(
         collection(db, 'jobs'), 
         where('ownerId', '==', auth.currentUser.uid), 
@@ -1150,7 +1193,9 @@ export default function NewJob() {
       mrDocs.forEach(docSnap => {
          const d = docSnap.data();
          if (d.ownerId === auth.currentUser.uid && d.division === commonData.division && d.agencyId === activeAgency.id) {
-            isDuplicateMR = true;
+            if (d.status !== 'Cancelled' && !d.isCancelled && d.mrStatus !== 'Cancelled') {
+              isDuplicateMR = true;
+            }
          }
       });
       
@@ -1168,12 +1213,7 @@ export default function NewJob() {
       // after failing within the guarantee period. The test is the TRANSFORMER, not
       // the repair type - serialNo, make and capacityKva must all match.
       //
-      // Checked across the whole agency and every AT master under it, because job
-      // numbers are not uniquely allocated: counters live per AT master while
-      // prefixes are shared per division, so a new AT master reissues numbers that
-      // already exist (AUDIT.md O2, path 4). Without this, a duplicate silently makes
-      // every later reference to that number ambiguous - including the GP lookup,
-      // which would then price a guarantee claim against the wrong unit's history.
+      // Cancelled MR jobs are excluded: their numbers are freed and reusable.
       const normKey = (v: any) => String(v ?? '').trim().toUpperCase();
       const isSameTransformer = (a: any, b: any) =>
         normKey(a.serialNo) === normKey(b.serialNo) &&
@@ -1188,6 +1228,9 @@ export default function NewJob() {
       const existingByJobNo: Record<string, any[]> = {};
       agencyJobsSnap.docs.forEach(d => {
         const data = d.data() as any;
+        if (data.status === 'Cancelled' || data.isCancelled || data.mrStatus === 'Cancelled') {
+          return; // Freed for reuse!
+        }
         const key = normKey(data.jobNo);
         if (key) (existingByJobNo[key] ||= []).push(data);
       });
@@ -1401,7 +1444,10 @@ export default function NewJob() {
                return data.ownerId === auth.currentUser.uid && data.agencyId === activeAgency.id && data.atId === (activeAtMaster?.id || '');
              });
              if (jnDocsFiltered.length > 0) {
-                 const activeCycles = jnDocsFiltered.filter(d => d.data().isClosed !== true);
+                 const activeCycles = jnDocsFiltered.filter(d => {
+                   const dt = d.data();
+                   return dt.isClosed !== true && dt.status !== 'Cancelled' && !dt.isCancelled && dt.mrStatus !== 'Cancelled';
+                 });
                  if (activeCycles.length > 0) {
                    setErrorMsg(`Job No "${jn}" already exists and is active. Please enter or generate a new unique Job Number.`);
                    setLoading(false);
@@ -2046,7 +2092,7 @@ export default function NewJob() {
                         placeholder={
                           commonData.repairType === 'GP'
                             ? 'Type the original job number'
-                            : 'e.g. MSBT-24'
+                            : (t.coreType ? 'e.g. MSBT-24' : 'Select Core Type first')
                         }
                         value={t.jobNo}
                         onChange={(e) => {
@@ -2186,10 +2232,14 @@ export default function NewJob() {
                       Core / Job Type <span className="text-red-500">*</span>
                     </label>
                     <select
-                      value={t.coreType}
+                      required
+                      value={t.coreType || ''}
                       onChange={(e) => handleTransformerChange(index, 'coreType', e.target.value)}
-                      className="w-full px-3 py-2 text-xs sm:text-sm font-bold border border-slate-200 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white cursor-pointer"
+                      className={`w-full px-3 py-2 text-xs sm:text-sm font-bold border rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white cursor-pointer ${
+                        !t.coreType ? 'border-amber-300 text-slate-500 bg-amber-50/20' : 'border-slate-200 text-slate-900'
+                      }`}
                     >
+                      <option value="">-- Select Core Type --</option>
                       <option value="CRGO">CRGO</option>
                       <option value="Amorphous">Amorphous</option>
                       <option value="Wound Core">Wound Core</option>

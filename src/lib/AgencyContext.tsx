@@ -243,11 +243,12 @@ export function getCounterKey(division: string, coreType: string = 'CRGO'): stri
  * is worth more than sharing five lines.
  */
 export function highWaterJobNos(
-  rows: { jobNo?: string | null; coreType?: string | null }[],
+  rows: { jobNo?: string | null; coreType?: string | null; repairType?: string | null; isGp?: boolean }[],
   division: string,
 ): Record<string, number> {
   const out: Record<string, number> = {};
   for (const r of rows) {
+    if ((r.repairType || '').toUpperCase() === 'GP' || r.isGp) continue;
     const raw = String(r.jobNo ?? '').trim();
     if (!raw) continue;
     // The tail after the LAST dash - prefixes themselves may contain one ("21 IS", "OH-A").
@@ -1068,6 +1069,10 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         ));
         jobSnap.docs.forEach(d => {
           const j: any = d.data();
+          // DO NOT consider GP jobs or Cancelled jobs for seeding last job number counters
+          if ((j.repairType || '').toUpperCase() === 'GP' || j.isGp || j.status === 'Cancelled' || j.isCancelled || j.mrStatus === 'Cancelled') {
+            return;
+          }
           seedJobsScanned++;
           const division = String(j.division ?? '').trim();
           if (!division) return;
