@@ -475,6 +475,13 @@ ${intakeGate.reason}`);
   const openingBalance = Number((activeAtMaster as any)?.openingOilBalance);
   const hasOpeningBalance = Number.isFinite(openingBalance);
 
+  /**
+   * PER DIVISION (AUDIT F86). Oil is settled with a division, so an opening position of
+   * "+40 SABARMATI, -30 KALOL" is two facts, not one net of +10 - and the DISCOM is owed
+   * 40 in one place while the agency holds 30 in another.
+   */
+  const openingByDivision = ((activeAtMaster as any)?.openingOilBalanceByDivision || {}) as Record<string, number>;
+
   /** This tender's own movement, before anything carried in. */
   const tenderNetMovement = useMemo(() => {
     return subTotalShortage - subTotalReceived;
@@ -619,6 +626,20 @@ ${intakeGate.reason}`);
                   ? `carried from the previous tender`
                   : 'no balance has been confirmed for this tender'}
               </div>
+              {/* THE DIVISIONS BEHIND THE TOTAL. A single figure hides that one division is
+                  owed oil while another holds it, and that is what gets settled. */}
+              {hasOpeningBalance && Object.keys(openingByDivision).length > 0 && (
+                <div className="mt-1 pt-1 border-t border-indigo-200 space-y-0.5">
+                  {Object.entries(openingByDivision).sort(([a], [b]) => a.localeCompare(b)).map(([div, v]) => (
+                    <div key={div} className="flex items-baseline justify-between gap-2 text-[10px]">
+                      <span className="font-semibold opacity-80">{div}</span>
+                      <span className="font-mono font-bold">
+                        {Number(v) >= 0 ? '+' : ''}{Number(v).toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className={`border rounded px-3 py-2 text-right ${subTotalNetBalance > 0 ? 'bg-rose-50 border-rose-200 text-rose-900' : subTotalNetBalance < 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-slate-50 border-slate-200 text-slate-900'}`}>

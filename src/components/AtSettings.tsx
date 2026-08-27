@@ -6,7 +6,7 @@ import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
 import { formatDDMMYYYY } from '../lib/utils';
 import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
-import { computeOilBalance } from '../lib/oilBalance';
+import { computeOilBalance, openingMapFrom } from '../lib/oilBalance';
 import { otherActiveAts } from '../lib/AgencyContext';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
@@ -89,7 +89,7 @@ export function AtSettings() {
    * A tender's closing balance is what it OPENED with plus what it moved - a tender that
    * opened owing 210 and consumed none still owes 210.
    */
-  const [oilByAt, setOilByAt] = useState<Record<string, { net: number; jobs: number; txns: number }>>({});
+  const [oilByAt, setOilByAt] = useState<Record<string, { net: number; jobs: number; txns: number; byDivision: Record<string, number> }>>({});
 
   useEffect(() => {
     const uid = auth.currentUser?.uid;
@@ -106,18 +106,28 @@ export function AtSettings() {
         const inspections = inspSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
         const txns = txSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
 
-        const out: Record<string, { net: number; jobs: number; txns: number }> = {};
+        const out: Record<string, { net: number; jobs: number; txns: number; byDivision: Record<string, number> }> = {};
         for (const at of atMasters.filter(t => t.agencyId === activeAgency.id)) {
           const b = computeOilBalance({
             jobs: jobs.filter(j => String(j.atId ?? '') === at.id),
             inspections,
             transactions: txns.filter(t => String(t.atId ?? '') === at.id),
           });
+          // ⚠ THE OPENING BALANCE IS ADDED PER DIVISION, not to the total alone (AUDIT F86).
+          // A tender that opened owing 40 in SABARMATI still owes it at close, and folding
+          // that into one number would let another division's surplus cancel it - which is
+          // the concealment the per-division split exists to prevent.
+          const openingMap = ((at as any).openingOilBalanceByDivision || {}) as Record<string, number>;
+          const closing = openingMapFrom(b);
+          for (const [div, v] of Object.entries(openingMap)) {
+            closing[div] = Number(((closing[div] || 0) + (Number(v) || 0)).toFixed(2));
+          }
           const opening = Number((at as any).openingOilBalance);
           out[at.id] = {
             net: Number(((Number.isFinite(opening) ? opening : 0) + b.net).toFixed(2)),
             jobs: b.jobsCounted,
             txns: b.transactionsCounted,
+            byDivision: closing,
           };
         }
         if (!cancelled) setOilByAt(out);
@@ -140,14 +150,14 @@ export function AtSettings() {
     return earlier[0] || null;
   };
 
-  const [carryTarget, setCarryTarget] = useState<{ to: AtMaster; from: AtMaster; litres: number } | null>(null);
+  const [carryTarget, setCarryTarget] = useState<{ to: AtMaster; from: AtMaster; litres: number; byDivision: Record<string, number> } | null>(null);
   const [carrying, setCarrying] = useState(false);
 
   const runCarry = async () => {
     if (!carryTarget) return;
     setCarrying(true);
     try {
-      await carryOilBalanceForward(carryTarget.to.id, carryTarget.from.id, carryTarget.litres);
+      await carryOilBalanceForward(carryTarget.to.id, carryTarget.from.id, carryTarget.byDivision, carryTarget.litres);
       setCarryTarget(null);
     } catch (err) {
       alert('Could not record the opening balance. Nothing was changed.\n\n' + (err instanceof Error ? err.message : String(err)));
@@ -556,8 +566,27 @@ export function AtSettings() {
               <div className="text-[11px] uppercase font-bold tracking-widest text-indigo-700">
                 Closing balance of AT {carryTarget.from.atNumber || carryTarget.from.name}
               </div>
-              <div className="font-mono font-black text-2xl text-indigo-900">
-                {carryTarget.litres >= 0 ? '+' : ''}{carryTarget.litres.toFixed(2)} LTR
+              {/* PER DIVISION, because that is what is carried and what is settled.
+                  The total is shown too, and is what gets recorded as openingOilBalance -
+                  a person confirms both (AUDIT F86). */}
+              <div className="mt-1 space-y-0.5">
+                {Object.entries(carryTarget.byDivision).sort(([a], [b]) => a.localeCompare(b)).map(([div, v]) => (
+                  <div key={div} className="flex items-baseline justify-between gap-3 text-xs">
+                    <span className="font-bold text-indigo-900">{div}</span>
+                    <span className="font-mono font-black text-indigo-900">
+                      {v >= 0 ? '+' : ''}{v.toFixed(2)} LTR
+                    </span>
+                  </div>
+                ))}
+                {Object.keys(carryTarget.byDivision).length === 0 && (
+                  <div className="text-xs text-indigo-800">No division has any oil movement in this tender.</div>
+                )}
+              </div>
+              <div className="mt-1.5 pt-1.5 border-t border-indigo-300 flex items-baseline justify-between gap-3">
+                <span className="text-[11px] uppercase font-bold tracking-widest text-indigo-700">Agency total</span>
+                <span className="font-mono font-black text-xl text-indigo-900">
+                  {carryTarget.litres >= 0 ? '+' : ''}{carryTarget.litres.toFixed(2)} LTR
+                </span>
               </div>
               <div className="text-[11px] text-indigo-800 mt-0.5">
                 {carryTarget.litres > 0
@@ -836,10 +865,15 @@ export function AtSettings() {
                                 const src = atMasters.find(x => x.id === (at as any).openingOilBalanceFromAtId);
                                 return (
                                   <span
-                                    title={`Carried from AT ${src?.atNumber || src?.name || '(unknown)'}`}
+                                    title={`Carried from AT ${src?.atNumber || src?.name || '(unknown)'} — ` +
+                                      Object.entries(((at as any).openingOilBalanceByDivision || {}) as Record<string, number>)
+                                        .map(([d, v]) => `${d} ${Number(v) >= 0 ? '+' : ''}${Number(v).toFixed(2)}`)
+                                        .join(', ')}
                                     className="text-[11px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1.5 rounded-lg"
                                   >
                                     Opening oil {carried >= 0 ? '+' : ''}{carried.toFixed(2)} L
+                                    {Object.keys(((at as any).openingOilBalanceByDivision || {})).length > 0 &&
+                                      ` (${Object.keys((at as any).openingOilBalanceByDivision).length} div)`}
                                   </span>
                                 );
                               }
@@ -848,7 +882,7 @@ export function AtSettings() {
                               if (!prev || !bal) return null;
                               return (
                                 <button
-                                  onClick={(e) => { e.stopPropagation(); setCarryTarget({ to: at, from: prev, litres: bal.net }); }}
+                                  onClick={(e) => { e.stopPropagation(); setCarryTarget({ to: at, from: prev, litres: bal.net, byDivision: bal.byDivision }); }}
                                   className="text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg"
                                 >
                                   Carry oil from {prev.atNumber || prev.name}

@@ -222,6 +222,11 @@ service cloud.firestore {
              // anybody can be held to. The source AT is stored with it so the number can be
              // checked against what it was computed from rather than merely believed.
              (!('openingOilBalance' in data) || (data.openingOilBalance is number)) &&
+             // PER DIVISION (AUDIT F86). Oil is settled with a division, not with the DISCOM
+             // as a whole - SABARMATI's shortage is not offset by KALOL's surplus. The map is
+             // what carries forward; the total above is kept alongside it because it is what
+             // a person confirmed and must not change if a division key is later corrected.
+             (!('openingOilBalanceByDivision' in data) || (data.openingOilBalanceByDivision is map)) &&
              (!('openingOilBalanceAt' in data) || isTimeValue(data.openingOilBalanceAt)) &&
              (!('openingOilBalanceFromAtId' in data) || (data.openingOilBalanceFromAtId is string && data.openingOilBalanceFromAtId.size() <= 128)) &&
              (!('openingOilBalanceBy' in data) || (data.openingOilBalanceBy is string && data.openingOilBalanceBy.size() <= 150)) &&

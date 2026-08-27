@@ -30,8 +30,11 @@ import {
 } from 'lucide-react';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
+/** The Dashboard's "every tender" scope. Its own value - see the note on dashScope. */
+const DASH_ALL = '__all_tenders__';
+
 export default function Dashboard() {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters } = useAgency();
   
   const [jobs, setJobs] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
@@ -44,6 +47,39 @@ export default function Dashboard() {
    * after a rollover (AUDIT F85).
    */
   const [allAgencyJobs, setAllAgencyJobs] = useState<any[]>([]);
+
+  /**
+   * THE DASHBOARD CHOOSES ITS OWN SCOPE — and changes nothing else (AUDIT F86).
+   *
+   * ⚠ LOCAL, AND THIS IS THE SAME DECISION AS THE ESTIMATE MASTER TENDER SELECTOR (F79).
+   * Written out here so a third scope selector follows it rather than re-deciding: a control
+   * on a VIEWING screen must not change what the app WORKS in. Letting this set the active
+   * AT would mean opening the overview silently re-points what New Job books against, which
+   * allotment is checked, and what every other screen shows - a read causing a mutation,
+   * the shape removed in F70 and F72.
+   *
+   * It DEFAULTS to the sidebar's tender, so the two agree unless the operator chooses
+   * otherwise, and the divergence is stated when it exists.
+   *
+   * ⚠ `DASH_ALL` IS ITS OWN VALUE, NOT AN OVERLOADED null. Null already means "no tender /
+   * not loaded yet"; during the initial load it would otherwise read as "show every tender
+   * at once" and flash cross-tender figures before the real ones arrive.
+   */
+  const [dashScope, setDashScope] = useState<string | null>(null);
+  const effectiveScope = dashScope ?? activeAtMaster?.id ?? DASH_ALL;
+  const showingAll = effectiveScope === DASH_ALL;
+  const scopedAt = showingAll ? null : (atMasters.find(t => t.id === effectiveScope) || null);
+  const dashDiverged = !showingAll && Boolean(activeAtMaster) && effectiveScope !== activeAtMaster?.id;
+
+  /** The jobs the counts are built from: one tender's, or every tender's. */
+  const scopedJobs = useMemo(
+    () => showingAll ? allAgencyJobs : allAgencyJobs.filter((j: any) => String(j.atId ?? '') === effectiveScope),
+    [allAgencyJobs, showingAll, effectiveScope],
+  );
+  const scopedOil = useMemo(
+    () => showingAll ? oilTransactions : oilTransactions.filter((t: any) => String(t.atId ?? '') === effectiveScope),
+    [oilTransactions, showingAll, effectiveScope],
+  );
   const [loading, setLoading] = useState(true);
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [activeKvaTab, setActiveKvaTab] = useState<'repaired' | 'under_repair' | 'scrap'>('repaired');
@@ -68,13 +104,11 @@ export default function Dashboard() {
       // same reason New Job's GP lookup is not filtered either: scoping it to the current
       // tender would show zero the day after a rollover and hide the entire population that
       // panel exists to watch.
-      const [jobsSnap, allJobsSnap, oilSnap] = await Promise.all([
-        getDocs(query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id),
-          where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT)
-        )),
+      // ONE AGENCY-WIDE READ, scoped in memory. The Dashboard's scope is a LOCAL control
+      // that can be "all tenders", so re-querying on every change would cost a round trip
+      // to answer a question the data already in hand can answer. It also removes the one
+      // way a tender-scoped query and an agency-wide one can disagree: there is only one.
+      const [allJobsSnap, allOilSnap] = await Promise.all([
         getDocs(query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid),
@@ -83,14 +117,13 @@ export default function Dashboard() {
         getDocs(query(
           collection(db, 'oilTransactions'),
           where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id),
-          where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT)
+          where('agencyId', '==', activeAgency.id)
         ))
       ]);
 
-      const fetchedJobs = jobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       const fetchedAllJobs = allJobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const fetchedOil = oilSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      const fetchedJobs = fetchedAllJobs;
+      const fetchedOil = allOilSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setAllAgencyJobs(fetchedAllJobs);
 
       // Sort newest jobs first
@@ -132,10 +165,13 @@ export default function Dashboard() {
   }, [activeAtMaster, activeAgency, jobs]);
 
   // Filter jobs based on selected Division on top
+  // ⚠ scopedJobs, NOT `jobs` (AUDIT F86). `jobs` now holds every tender's work - the fetch
+  // is agency-wide so the local scope can switch without a round trip - and every count on
+  // this screen must respect the scope the operator chose.
   const filteredJobs = useMemo(() => {
-    if (selectedDivision === 'All') return jobs;
-    return jobs.filter(j => (j.division || '').trim().toLowerCase() === selectedDivision.trim().toLowerCase());
-  }, [jobs, selectedDivision]);
+    if (selectedDivision === 'All') return scopedJobs;
+    return scopedJobs.filter((j: any) => (j.division || '').trim().toLowerCase() === selectedDivision.trim().toLowerCase());
+  }, [scopedJobs, selectedDivision]);
 
   // Primary Metrics and Pipeline Calculations
   const stats = useMemo(() => {
@@ -292,7 +328,7 @@ export default function Dashboard() {
     let totalGrossLiters = 0;
     let totalBarrels = 0;
 
-    oilTransactions.forEach((tx: any) => {
+    scopedOil.forEach((tx: any) => {
       totalGrossLiters += Number(tx.grossLiters || 0);
       totalBarrels += Number(tx.barrels || 0);
     });
@@ -305,9 +341,9 @@ export default function Dashboard() {
       totalBarrels,
       filtrationLoss,
       netUsableLiters,
-      transactionCount: oilTransactions.length
+      transactionCount: scopedOil.length
     };
-  }, [oilTransactions]);
+  }, [scopedOil]);
 
   // Guarantee Monitoring
   const guaranteeStats = useMemo(() => {
@@ -348,6 +384,47 @@ export default function Dashboard() {
   return (
     <div className="space-y-4 max-w-[1440px] mx-auto pb-10 px-1 sm:px-2">
       
+      {/* THE DASHBOARD'S OWN SCOPE — local, and it changes nothing else (AUDIT F86).
+          Same decision as the Estimate Master tender selector (F79): a control on a viewing
+          screen must not change what the app works in. Defaults to the sidebar's tender;
+          says so when the two differ. */}
+      <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2">
+        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Showing</span>
+        <select
+          value={effectiveScope}
+          onChange={e => setDashScope(e.target.value)}
+          className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 bg-white text-slate-900"
+        >
+          <option value={DASH_ALL}>All tenders</option>
+          {atMasters
+            .filter(t => t.agencyId === activeAgency?.id)
+            .slice()
+            .sort((x, y) => (y.startDate || 0) - (x.startDate || 0))
+            .map(t => (
+              <option key={t.id} value={t.id}>
+                AT {t.atNumber || t.name}
+                {String(t.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
+              </option>
+            ))}
+        </select>
+        {showingAll && (
+          <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+            totals across every tender
+          </span>
+        )}
+        {dashDiverged && (
+          <span className="text-[11px] text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full">
+            Not the tender you are working in &mdash; New Job books against AT{' '}
+            {activeAtMaster?.atNumber || activeAtMaster?.name}
+          </span>
+        )}
+        {showingAll && activeAtMaster && (
+          <span className="text-[11px] text-slate-600">
+            New Job books against AT {activeAtMaster.atNumber || activeAtMaster.name}
+          </span>
+        )}
+      </div>
+
       {/* 1. COMPACT HEADER & TOP DIVISION SELECTOR BAR */}
       <div className="bg-slate-900 rounded-xl sm:rounded-2xl p-3.5 sm:p-4 text-white shadow-md border border-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -931,8 +1008,17 @@ export default function Dashboard() {
             </div>
 
             <div className="space-y-1 text-[11px]">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Active Warranty Cover:</span>
+              {/* ⚠ ACROSS ALL TENDERS, and it says so (AUDIT F85/F86). A unit dispatched
+                  under 26-27 stays inside its guarantee window for eighteen months, which
+                  outlives the tender - so this panel alone ignores the scope above. Unlabelled
+                  it would read as this tender's figure and be wrong by every earlier tender. */}
+              <div className="flex justify-between items-baseline gap-2">
+                <span className="text-slate-500">
+                  Active Warranty Cover:
+                  <span className="ml-1 text-[9px] uppercase font-bold tracking-wide text-indigo-700 bg-indigo-50 border border-indigo-200 rounded px-1 py-0.5">
+                    across all tenders
+                  </span>
+                </span>
                 <span className="font-bold text-slate-900">{guaranteeStats.activeGuaranteeCount} Units</span>
               </div>
               <div className="flex justify-between">

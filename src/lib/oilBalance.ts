@@ -23,6 +23,15 @@ export interface OilBalanceInput {
   transactions: any[];
 }
 
+export interface OilDivisionBalance {
+  shortage: number;
+  received: number;
+  /** shortage - received, for this division alone. */
+  net: number;
+  jobsCounted: number;
+  transactionsCounted: number;
+}
+
 export interface OilBalance {
   /** Litres short, from external inspections. */
   shortage: number;
@@ -34,6 +43,19 @@ export interface OilBalance {
   jobsCounted: number;
   /** How many transactions contributed. */
   transactionsCounted: number;
+
+  /**
+   * THE SAME FIGURES, PER DIVISION (AUDIT F86).
+   *
+   * Oil is settled with a division, not with the DISCOM as a whole - SABARMATI's shortage
+   * is not offset by KALOL's surplus, and a tender that closes owing 40 litres in one and
+   * holding 30 in another owes 40 and holds 30. A single net conceals that, and it is the
+   * figure carried into the next tender, so it would conceal it permanently.
+   *
+   * The agency total is the sum of these and is kept alongside rather than derived at the
+   * point of use - see openingOilBalance on AtMaster for why both are stored.
+   */
+  byDivision: Record<string, OilDivisionBalance>;
 }
 
 /** The external inspection for a job, by any of the four ways they are linked. */
@@ -69,21 +91,43 @@ export function jobOilShortage(job: any, inspections: any[]): number {
   return lessOil + oilRecd * 0.05;
 }
 
+/** Division names are compared as typed but grouped case-insensitively on the trimmed value. */
+const divisionKey = (v: unknown): string => String(v ?? '').trim() || '(no division)';
+
 export function computeOilBalance({ jobs, inspections, transactions }: OilBalanceInput): OilBalance {
+  const byDivision: Record<string, OilDivisionBalance> = {};
+  const bucket = (div: string): OilDivisionBalance =>
+    (byDivision[div] ||= { shortage: 0, received: 0, net: 0, jobsCounted: 0, transactionsCounted: 0 });
+
   let shortage = 0;
   let jobsCounted = 0;
   for (const job of jobs) {
     if (!job?.mrNo) continue;      // the register keys on MR; a job without one contributes nothing
-    shortage += jobOilShortage(job, inspections);
+    const n = jobOilShortage(job, inspections);
+    shortage += n;
     jobsCounted++;
+    const b = bucket(divisionKey(job.division));
+    b.shortage += n;
+    b.jobsCounted++;
   }
 
   let received = 0;
   let transactionsCounted = 0;
   for (const tx of transactions) {
     if (!tx?.mrNo) continue;
-    received += Number(tx.netLiters) || 0;
+    const n = Number(tx.netLiters) || 0;
+    received += n;
     transactionsCounted++;
+    const b = bucket(divisionKey(tx.division));
+    b.received += n;
+    b.transactionsCounted++;
+  }
+
+  for (const d of Object.keys(byDivision)) {
+    const b = byDivision[d];
+    b.shortage = Number(b.shortage.toFixed(2));
+    b.received = Number(b.received.toFixed(2));
+    b.net = Number((b.shortage - b.received).toFixed(2));
   }
 
   return {
@@ -92,5 +136,13 @@ export function computeOilBalance({ jobs, inspections, transactions }: OilBalanc
     net: Number((shortage - received).toFixed(2)),
     jobsCounted,
     transactionsCounted,
+    byDivision,
   };
+}
+
+/** The per-division opening balances a tender would carry forward. */
+export function openingMapFrom(balance: OilBalance): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [div, b] of Object.entries(balance.byDivision)) out[div] = b.net;
+  return out;
 }

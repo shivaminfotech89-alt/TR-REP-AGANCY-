@@ -267,6 +267,20 @@ export interface AtMaster {
    * has been carried forward, which is different from a balance of zero and is shown as such.
    */
   openingOilBalance?: number;
+  /**
+   * PER DIVISION — the figure that actually carries forward (AUDIT F86).
+   *
+   * Oil is settled with a division, not with the DISCOM as a whole: SABARMATI's shortage is
+   * not offset by KALOL's surplus, and a tender closing 40 short in one and 30 over in
+   * another owes 40 and holds 30. A single net conceals that, and since it is what the next
+   * tender opens with, it would conceal it permanently.
+   *
+   * BOTH ARE STORED. The total above is not derived from this map at the point of use: it
+   * is what a person confirmed, and it must not change silently if a division key is later
+   * added or corrected. Keeping both is what makes the drift checkable, the same reason
+   * openingOilBalanceFromAtId exists.
+   */
+  openingOilBalanceByDivision?: Record<string, number>;
   openingOilBalanceAt?: number;
   openingOilBalanceFromAtId?: string;
   openingOilBalanceBy?: string;
@@ -828,7 +842,8 @@ interface AgencyContextType {
   carryOilBalanceForward: (
     toAtId: string,
     fromAtId: string,
-    litres: number,
+    byDivision: Record<string, number>,
+    total: number,
   ) => Promise<void>;
 
   /** Admin-published rate templates, readable by everyone. See PublishedAt. */
@@ -1796,11 +1811,25 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * against its inputs rather than believed. Writing it again overwrites - re-confirming
    * after a correction is a legitimate act, and the stamp says when it last happened.
    */
-  const carryOilBalanceForward = async (toAtId: string, fromAtId: string, litres: number) => {
+  const carryOilBalanceForward = async (
+    toAtId: string,
+    fromAtId: string,
+    byDivision: Record<string, number>,
+    total: number,
+  ) => {
     if (!auth.currentUser) throw new Error('Not signed in.');
-    if (!Number.isFinite(litres)) throw new Error('That opening balance is not a number.');
+    if (!Number.isFinite(total)) throw new Error('That opening balance is not a number.');
+    // Every division figure is checked, not just the total. A NaN in one key would be
+    // written and would silently poison the next tender's opening position for that
+    // division while the total still looked right.
+    for (const [div, v] of Object.entries(byDivision)) {
+      if (!Number.isFinite(v)) throw new Error(`The opening balance for ${div} is not a number.`);
+    }
     const payload = {
-      openingOilBalance: Number(litres.toFixed(2)),
+      openingOilBalance: Number(total.toFixed(2)),
+      openingOilBalanceByDivision: Object.fromEntries(
+        Object.entries(byDivision).map(([d, v]) => [d, Number(v.toFixed(2))]),
+      ),
       openingOilBalanceAt: Date.now(),
       openingOilBalanceFromAtId: fromAtId,
       openingOilBalanceBy: auth.currentUser.email || auth.currentUser.uid || '',
