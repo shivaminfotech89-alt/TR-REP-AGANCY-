@@ -12,7 +12,7 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useAgency, highWaterJobNos, atScope, NO_ACTIVE_AT, isIntakeOpen } from '../lib/AgencyContext';
+import { useAgency, highWaterJobNos, atClause, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
 import { 
   Loader2, 
   Search, 
@@ -109,7 +109,7 @@ const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', 
 const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair', 'Cancelled'];
 
 export default function MrLedger() {
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders } = useAgency();
   const [loading, setLoading] = useState(true);
   /**
    * WORK THAT BELONGS TO NO TENDER (AUDIT F82).
@@ -132,7 +132,7 @@ export default function MrLedger() {
    * under a tender is finished under it.
    */
   const intakeGate = useMemo(
-    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id)),
+    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id), viewingAllTenders),
     [activeAtMaster, atMasters, activeAgency?.id],
   );
 
@@ -144,13 +144,26 @@ export default function MrLedger() {
     let cancelled = false;
     (async () => {
       try {
+        // ⚠ AGENCY-WIDE READ, FILTERED IN MEMORY — AND IT CANNOT BE A QUERY (AUDIT F87).
+        //
+        // This was `where('atId','==','')`, which found 4 of the 12. Firestore equality does
+        // not match a document whose field is ABSENT, and 8 of the 12 predate the field
+        // entirely - including MSBT-12, the estimated, billed and PAID job this banner exists
+        // to keep reachable. It reported a plausible wrong count for a fortnight, which is
+        // worse than reporting none: a banner reading "4 jobs belong to no tender" asserts
+        // that four is the number, and nobody re-counts an answer that looks like one.
+        //
+        // There is no query that fixes it. Firestore has no "field is missing" predicate, so
+        // "unassigned" cannot be expressed as a filter at all - it can only be recognised
+        // after reading, where `isUnassigned` treats absent and empty alike. The cost is one
+        // agency-wide read; the alternative is a number that is quietly wrong.
         const snap = await getDocs(query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser!.uid),
           where('agencyId', '==', activeAgency.id),
-          where('atId', '==', ''),
         ));
-        if (!cancelled) setUnassignedJobs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(isUnassigned);
+        if (!cancelled) setUnassignedJobs(rows);
       } catch {
         // A failed read must not be reported as "none" - that is the same lie as hiding them.
         if (!cancelled) setUnassignedJobs([]);
@@ -197,7 +210,7 @@ export default function MrLedger() {
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
         where('agencyId', '==', activeAgency.id),
-        where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT),
+        ...atClause(activeAtMaster, viewingAllTenders),
       );
       const snapshot = await getDocs(q);
       const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
@@ -769,7 +782,10 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
           each job is attributed. There is no bulk fix: all twelve in live data sit on MRs
           where NO job names a tender, so nothing can be inferred from siblings and
           scripts/admin/assign-at.js refuses every one. Each needs the MR paperwork. */}
-      {unassignedJobs.length > 0 && (
+      {/* HIDDEN IN "ALL TENDERS" MODE, because there the tender clause is dropped and these
+          jobs are already IN the list below - the banner would be counting them twice and
+          calling one of the copies missing (AUDIT F87). */}
+      {!viewingAllTenders && unassignedJobs.length > 0 && (
         <div className="bg-amber-50 border-2 border-amber-300 rounded-xl overflow-hidden">
           <button
             type="button"

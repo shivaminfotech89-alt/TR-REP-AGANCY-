@@ -1,5 +1,5 @@
 
-import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -44,7 +44,7 @@ const ROWS_FIRST_PAGE = 14;
 const ROWS_PER_PAGE = 22;
 
 export default function EstimateGenerate() {
-  const { activeAgency, activeAtMaster, atMasters, updateAgency } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, updateAgency, viewingAllTenders } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -141,7 +141,7 @@ export default function EstimateGenerate() {
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid), 
           where('agencyId', '==', activeAgency.id),
-          where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT),
+          ...atClause(activeAtMaster, viewingAllTenders),
         );
         // Inspection records carry no agencyId (neither save path has ever written
         // one), so filtering on it here matched nothing and this screen silently

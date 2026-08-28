@@ -1,5 +1,6 @@
 
-import { useAgency } from '../lib/AgencyContext';
+import { useAgency, matchesAtScope } from '../lib/AgencyContext';
+import { OtherTenderNote } from './OtherTenderNote';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -71,10 +72,28 @@ const defaultTestingData: TestingData = {
 };
 
 export default function TestingReport() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
+
+  /**
+   * ⚠ THE SCOPE IS APPLIED HERE, NOT AT THE QUERY (AUDIT F99). The fetch is agency-wide and
+   * re-runs whenever the form closes; filtering where the list is BUILT means one place to
+   * get right rather than one per fetch. It also pays for the note below from the same read.
+   */
+  const scopedJobs = useMemo(
+    () => jobs.filter(j => matchesAtScope(j, activeAtMaster, viewingAllTenders)),
+    [jobs, activeAtMaster, viewingAllTenders],
+  );
+
+  /** Jobs awaiting TESTING under a different tender: internally done, not yet tested. */
+  const otherTenderPending = useMemo(() => {
+    if (viewingAllTenders) return 0;
+    return jobs.filter(j =>
+      !matchesAtScope(j, activeAtMaster, viewingAllTenders) &&
+      (j as any).status === 'Internal Done').length;
+  }, [jobs, activeAtMaster, viewingAllTenders]);
   const [loading, setLoading] = useState(true);
   
   const [tab, setTab] = useState<'Pending' | 'Completed'>('Pending');
@@ -116,27 +135,27 @@ export default function TestingReport() {
   }, [activeAgency, isFormOpen]); // Refetch when returning from form
 
   const divisions = useMemo(() => {
-    const divs = new Set(jobs.map(j => j.division || 'Unknown'));
+    const divs = new Set(scopedJobs.map(j => j.division || 'Unknown'));
     return ['All', ...Array.from(divs).sort()];
-  }, [jobs]);
+  }, [scopedJobs]);
 
   // Jobs grouped by MR, so testing visibility can be gated on the whole MR's
   // external+internal readiness, not just this one job's own status.
   const mrGroups = useMemo(() => {
     const groups: Record<string, Job[]> = {};
-    jobs.forEach(j => {
+    scopedJobs.forEach(j => {
       if (!groups[j.mrNo]) groups[j.mrNo] = [];
       groups[j.mrNo].push(j);
     });
     return groups;
-  }, [jobs]);
+  }, [scopedJobs]);
 
   // Jobs that are actually eligible to show up in the current tab, before the
   // division/job-no/MR-no text filters narrow that further. This is also the set
   // the MR dropdown is built from, so its options always reflect what's really
   // available in this tab regardless of what's typed into the other filters.
   const tabEligibleJobs = useMemo(() => {
-    return jobs.filter(j => {
+    return scopedJobs.filter(j => {
       const jobsForMr = mrGroups[j.mrNo] || [j];
       if (!isMrReadyForTesting(jobsForMr, inspections)) return false;
 
@@ -144,7 +163,7 @@ export default function TestingReport() {
       if (tab === 'Completed' && (j.status === 'Received' || j.status === 'External Done' || j.status === 'Internal Done')) return false;
       return true;
     });
-  }, [jobs, mrGroups, inspections, tab]);
+  }, [scopedJobs, mrGroups, inspections, tab]);
 
 
   /** MR date for sorting: MR NUMBERS ARE NOT CHRONOLOGICAL, so number is the tiebreak
@@ -601,6 +620,8 @@ export default function TestingReport() {
           </div>
         </div>
       </div>
+
+      {!isFormOpen && <OtherTenderNote count={otherTenderPending} noun="testing job" />}
 
       {!isFormOpen ? (
         <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">

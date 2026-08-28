@@ -11,6 +11,7 @@ import {
   EstimateItem
 } from './estimateData';
 import { checkMasterSection } from './estimateMasterHealth';
+import { computeOilBalance, openingMapFrom } from './oilBalance';
 
 export interface GlobalDefaultEstimateMaster {
   estimateMasterCRGO?: EstimateItem[];
@@ -283,6 +284,13 @@ export interface AtMaster {
   openingOilBalanceByDivision?: Record<string, number>;
   openingOilBalanceAt?: number;
   openingOilBalanceFromAtId?: string;
+  /**
+   * SET WHEN THE CARRIED FIGURE IS KNOWN TO BE SHORT (AUDIT F96). The source tender had work
+   * belonging to no tender, which no per-tender balance can include, so the opening balance
+   * is an approximation. Recorded rather than refused - blocking a rollover over old
+   * unstamped rows is worse - and printed on the register so the figure never looks exact.
+   */
+  openingOilBalanceIncomplete?: { jobs: number; txns: number };
   openingOilBalanceBy?: string;
 }
 
@@ -406,6 +414,66 @@ export function getCounterKey(division: string, coreType: string = 'CRGO'): stri
 export const NO_ACTIVE_AT = '__no_active_at__';
 
 /**
+ * THE SCOPE VALUE MEANING "EVERY TENDER AT ONCE" (AUDIT F87).
+ *
+ * ⚠ ITS OWN VALUE, NOT AN OVERLOADED null. Null already means "no tender selected", and that
+ * state must show NOTHING while this one shows EVERYTHING - the two are opposites, so one
+ * value cannot carry both. Conflating them was rejected once already for the Dashboard's
+ * local selector and the reasoning is unchanged now that the selector is the global one.
+ *
+ * ⚠ IT IS A VIEWING STATE, NOT A WORKING ONE. Nothing can be BOOKED into "all tenders": a job
+ * belongs to one AT, is priced from that AT's rates and counts against that AT's allotment.
+ * So `activeAtMaster` resolves to null here and the three intake paths refuse, exactly as
+ * they refuse with no tender selected - the reason shown differs, the refusal does not.
+ */
+export const ALL_TENDERS = '__all_tenders__';
+
+/**
+ * THE TENDER CLAUSE FOR A QUERY — the ONE place the three scope states become a filter.
+ *
+ * Spreading `[]` drops the clause entirely; that is what "all tenders" has to do, because
+ * Firestore has no value meaning "any". Every screen goes through here so the ALL case cannot
+ * be handled in five places and forgotten in a sixth.
+ *
+ * ⚠ THIS CLAUSE CANNOT FIND UNASSIGNED WORK, AND NO EQUALITY CAN (AUDIT F87). A document whose
+ * `atId` is ABSENT is not matched by `== '<id>'`, by `== ''`, or by anything else - Firestore
+ * equality does not match a missing field, where JavaScript's `String(x.atId ?? '')` happily
+ * turns it into `''`. The two tests are not interchangeable and reasoning about one from the
+ * other is how a backlog banner came to report 4 of 12 for a fortnight. Unassigned work is
+ * found by reading agency-wide and filtering IN MEMORY - see MrLedger and OilInward - never
+ * by a query.
+ */
+export function atClause(activeAtMaster: AtMaster | null | undefined, viewingAllTenders: boolean) {
+  return viewingAllTenders ? [] : [where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT)];
+}
+
+/**
+ * THE SAME SCOPE RULE, APPLIED IN MEMORY (AUDIT F99).
+ *
+ * `atClause` filters at the query; this filters a row already read. Declared beside it on
+ * purpose: two expressions of one rule that can drift is the shape F87 recorded, where a
+ * JavaScript `?? ''` guard and a Firestore `== ''` clause were assumed to agree and did not.
+ * Both forms handle the SAME three states - all tenders, one tender, none - and a change to
+ * one is a change to the other.
+ *
+ * Use the in-memory form when a screen needs BOTH the scoped rows and the ones outside scope
+ * (to say how many there are), so one agency-wide read answers both questions instead of two
+ * reads that can disagree.
+ */
+export function matchesAtScope(
+  row: any,
+  activeAtMaster: AtMaster | null | undefined,
+  viewingAllTenders: boolean,
+): boolean {
+  if (viewingAllTenders) return true;          // every tender, unassigned included
+  if (!activeAtMaster) return false;           // no tender selected shows nothing
+  return String(row?.atId ?? '') === activeAtMaster.id;
+}
+
+/** Is this document unattributed to any tender? True for BOTH an absent atId and an empty one. */
+export const isUnassigned = (row: any): boolean => !String(row?.atId ?? '').trim();
+
+/**
  * IS THIS TENDER OPEN TO NEW WORK? (AUDIT F83)
  *
  * Once a new AT starts, the old one accepts NO NEW WORK - no new MRs, no new jobs, no new
@@ -461,10 +529,23 @@ export function currentTenderFor(agencyAts: AtMaster[]): AtMaster | null {
 export function isIntakeOpen(
   at: AtMaster | null | undefined,
   agencyAts: AtMaster[],
+  /** Optional: lets the refusal say "All tenders" instead of "nothing selected" (F87). */
+  viewingAllTenders = false,
 ): IntakeGate {
   const currentAt = currentTenderFor(agencyAts);
 
   if (!at) {
+    // TWO DIFFERENT NULLS, ONE REFUSAL (AUDIT F87). "All tenders" is a scope the operator
+    // deliberately chose, so telling them nothing is selected is simply wrong and sends them
+    // looking for a setting they already set. The refusal is identical either way - there is
+    // no single AT to book into - only the explanation differs.
+    if (viewingAllTenders) {
+      return {
+        open: false,
+        reason: 'The scope is All tenders. New work is recorded against ONE tender, so pick the tender this MR belongs to.',
+        currentAt,
+      };
+    }
     return { open: false, reason: 'No tender is selected. New work is recorded against a tender.', currentAt };
   }
 
@@ -822,6 +903,11 @@ interface AgencyContextType {
   
   atMasters: AtMaster[];
   activeAtMaster: AtMaster | null;
+  /**
+   * Scope is "every tender at once". `activeAtMaster` is null here and intake still refuses -
+   * this only distinguishes THIS null from "no tender selected" when saying why (AUDIT F87).
+   */
+  viewingAllTenders: boolean;
   setActiveAtMasterId: (id: string) => void;
   addAtMaster: (atData: Omit<AtMaster, 'id' | 'ownerId'>) => Promise<{ id: string; seed: AtSeedReport } | undefined>;
   updateAtMaster: (id: string, atData: Partial<AtMaster>) => Promise<void>;
@@ -837,14 +923,6 @@ interface AgencyContextType {
    */
   atSupersededNotice: { movedTo: string; wasOn: string } | null;
   dismissAtSupersededNotice: () => void;
-
-  /** Record a confirmed opening oil balance on an AT, carried from the tender that closed. */
-  carryOilBalanceForward: (
-    toAtId: string,
-    fromAtId: string,
-    byDivision: Record<string, number>,
-    total: number,
-  ) => Promise<void>;
 
   /** Admin-published rate templates, readable by everyone. See PublishedAt. */
   publishedAts: PublishedAt[];
@@ -920,6 +998,16 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     // restoring it later means guessing which agency it belonged to. Not persisting is
     // better than persisting something unattributable.
     if (!activeAgencyId) return;
+    if (id === ALL_TENDERS) {
+      // ⚠ "ALL TENDERS" IS NEVER THE PERSISTED DEFAULT (AUDIT F87). It survives the session,
+      // like any other look at something other than the current tender, but a new tab must
+      // not open in a state that refuses New Job - the operator would meet a wall with no
+      // memory of having chosen it. The localStorage key is cleared, not overwritten, so the
+      // sign-in default recomputes the current tender instead of restoring a viewing state.
+      localStorage.removeItem(`activeAtMasterId_${activeAgencyId}`);
+      try { sessionStorage.setItem(`atSessionPick_${activeAgencyId}`, id); } catch { /* private mode */ }
+      return;
+    }
     if (id) {
       localStorage.setItem(`activeAtMasterId_${activeAgencyId}`, id);
       // THE SESSION'S OWN CHOICE. Survives a reload, dies with the tab - so looking at an
@@ -1092,7 +1180,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         const sessionPick = targetAgId ? sessionStorage.getItem(`atSessionPick_${targetAgId}`) : null;
         const storedIsCurrent = Boolean(scopedStoredAt && currentTender && scopedStoredAt === currentTender.id);
 
-        if (sessionPick && agencyAts.some(at => at.id === sessionPick)) {
+        // ALL_TENDERS counts as a session pick: it is a deliberate choice to look wider, and
+        // it survives a reload for the same reason looking at an old tender does. It lives in
+        // sessionStorage only, so a NEW tab still opens on the current tender (AUDIT F87).
+        if (sessionPick === ALL_TENDERS) {
+          setActiveAtMasterIdState(ALL_TENDERS);
+        } else if (sessionPick && agencyAts.some(at => at.id === sessionPick)) {
           // Chosen in this session, deliberately. Not overridden and not announced.
           setActiveAtMasterIdState(sessionPick);
         } else if (storedIsCurrent && scopedStoredAt) {
@@ -1145,7 +1238,17 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   }, [auth.currentUser]);
 
   const activeAgency = agencies.find(a => a.id === activeAgencyId) || null;
-  const activeAtMaster = atMasters.find(a => a.id === activeAtMasterId && a.agencyId === activeAgencyId) || null;
+
+  /**
+   * ⚠ NULL IN "ALL TENDERS" MODE, AND THAT IS THE POINT (AUDIT F87). There is no single AT to
+   * book into, price from or count an allotment against, so every path that needs one already
+   * refuses on `!activeAtMaster` and keeps refusing without a line changing. `viewingAllTenders`
+   * exists to tell the two nulls apart WHEN EXPLAINING the refusal - never to permit it.
+   */
+  const viewingAllTenders = Boolean(activeAgencyId) && activeAtMasterId === ALL_TENDERS;
+  const activeAtMaster = viewingAllTenders
+    ? null
+    : atMasters.find(a => a.id === activeAtMasterId && a.agencyId === activeAgencyId) || null;
 
   const isSuperAdmin = auth.currentUser?.email?.toLowerCase().trim() === 'shivaminfotech89@gmail.com';
 
@@ -1583,7 +1686,98 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         jobsScanned: seedJobsScanned,
       };
 
-      const newAt = { ...atData, lastJobNumbers: seededCounters, ownerId: auth.currentUser.uid };
+      /**
+       * THE OPENING OIL BALANCE, CARRIED AUTOMATICALLY (AUDIT F96).
+       *
+       * ⚠ THIS WAS A BUTTON AND A CONFIRMATION DIALOG, AND IT NEVER ONCE WROTE A FIGURE.
+       * Every guard added to make the manual version safe - refuse while work is unassigned,
+       * refuse while the count is unknown - was another way for it to decline, and the whole
+       * apparatus produced nothing across a week of trying. The operator was being asked to
+       * confirm a number the app computes, at a moment the app already knows.
+       *
+       * A rollover IS the event that carries the balance. So it happens here, in the same
+       * write that creates the tender, and nobody is asked anything.
+       *
+       * THE RULES:
+       *   - previous tender = this agency's most recent AT by `startDate` STRICTLY BEFORE
+       *     this one's. Not creation order: an AT created later can start earlier.
+       *   - no previous tender -> NO opening balance. The first tender starts at nothing,
+       *     and absent is not zero.
+       *   - previous tender with NO records at all -> also no opening balance. "We have no
+       *     account of what happened" is not "it closed level", and writing 0.00 would
+       *     convert the first into the second permanently (F82, F92). A tender that really
+       *     did close level HAS records netting to zero, and that zero is written.
+       *   - unassigned work in the source -> STILL CARRY, and record that it was incomplete.
+       *     Refusing to create a tender because of old unstamped rows is worse than an
+       *     approximate figure that says it is approximate; the register prints the caveat.
+       *
+       * A FAILED READ DOES NOT BLOCK THE ROLLOVER. Same reasoning as the counter seed above:
+       * the tender is created either way, with no opening balance rather than a wrong one.
+       */
+      let openingFields: Record<string, any> = {};
+      try {
+        const priorAts = atMasters
+          .filter(a => a.agencyId === agencyIdForSeed && (a.startDate || 0) < (atData.startDate || 0))
+          .sort((a, b) => (b.startDate || 0) - (a.startDate || 0));
+        const prev = priorAts[0] || null;
+
+        if (prev) {
+          const [pJobSnap, pInspSnap, pTxSnap] = await Promise.all([
+            getDocs(query(collection(db, 'jobs'),
+              where('ownerId', '==', auth.currentUser.uid),
+              where('agencyId', '==', agencyIdForSeed))),
+            getDocs(query(collection(db, 'inspections'),
+              where('ownerId', '==', auth.currentUser.uid))),
+            getDocs(query(collection(db, 'oilTransactions'),
+              where('ownerId', '==', auth.currentUser.uid),
+              where('agencyId', '==', agencyIdForSeed))),
+          ]);
+          const pJobs = pJobSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+          const pTx = pTxSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+          const pInsp = pInspSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+
+          const balance = computeOilBalance({
+            jobs: pJobs.filter(j => String(j.atId ?? '') === prev.id),
+            inspections: pInsp,
+            transactions: pTx.filter(t => String(t.atId ?? '') === prev.id),
+          });
+
+          // Records exist, so a zero here is a real settled position rather than an absence.
+          if (balance.jobsCounted > 0 || balance.transactionsCounted > 0) {
+            const carriedMap = openingMapFrom(balance);
+            // The source tender's OWN opening is part of what it closes with - a tender that
+            // opened owing 40 and moved nothing still closes owing 40 (F86).
+            const prevOpeningMap = ((prev as any).openingOilBalanceByDivision || {}) as Record<string, number>;
+            for (const [div, v] of Object.entries(prevOpeningMap)) {
+              carriedMap[div] = Number(((carriedMap[div] || 0) + (Number(v) || 0)).toFixed(2));
+            }
+            const prevOpening = Number((prev as any).openingOilBalance);
+            const total = Number(
+              ((Number.isFinite(prevOpening) ? prevOpening : 0) + balance.net).toFixed(2),
+            );
+
+            const strayJobs = pJobs.filter(j => j.agencyId === agencyIdForSeed && isUnassigned(j)).length;
+            const strayTx = pTx.filter(t => t.agencyId === agencyIdForSeed && isUnassigned(t)).length;
+
+            openingFields = {
+              openingOilBalance: total,
+              openingOilBalanceByDivision: carriedMap,
+              openingOilBalanceFromAtId: prev.id,
+              openingOilBalanceAt: Date.now(),
+              // ⚠ THE FIGURE IS SHORT BY WHATEVER THESE HOLD, and the register says so rather
+              // than presenting an approximate number as exact (F96).
+              ...(strayJobs > 0 || strayTx > 0
+                ? { openingOilBalanceIncomplete: { jobs: strayJobs, txns: strayTx } }
+                : {}),
+            };
+          }
+        }
+      } catch (carryErr) {
+        openingFields = {};
+        console.warn('Could not carry the opening oil balance; the tender is created without one:', carryErr);
+      }
+
+      const newAt = { ...atData, ...openingFields, lastJobNumbers: seededCounters, ownerId: auth.currentUser.uid };
       // Creation time from the server clock - see the note in addAgency. `startDate` is the
       // TENDER period start, a business date the operator types; two ATs created a month
       // apart can carry the same one, and one created later can start earlier. It was never
@@ -1811,33 +2005,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * against its inputs rather than believed. Writing it again overwrites - re-confirming
    * after a correction is a legitimate act, and the stamp says when it last happened.
    */
-  const carryOilBalanceForward = async (
-    toAtId: string,
-    fromAtId: string,
-    byDivision: Record<string, number>,
-    total: number,
-  ) => {
-    if (!auth.currentUser) throw new Error('Not signed in.');
-    if (!Number.isFinite(total)) throw new Error('That opening balance is not a number.');
-    // Every division figure is checked, not just the total. A NaN in one key would be
-    // written and would silently poison the next tender's opening position for that
-    // division while the total still looked right.
-    for (const [div, v] of Object.entries(byDivision)) {
-      if (!Number.isFinite(v)) throw new Error(`The opening balance for ${div} is not a number.`);
-    }
-    const payload = {
-      openingOilBalance: Number(total.toFixed(2)),
-      openingOilBalanceByDivision: Object.fromEntries(
-        Object.entries(byDivision).map(([d, v]) => [d, Number(v.toFixed(2))]),
-      ),
-      openingOilBalanceAt: Date.now(),
-      openingOilBalanceFromAtId: fromAtId,
-      openingOilBalanceBy: auth.currentUser.email || auth.currentUser.uid || '',
-    };
-    await updateDoc(doc(db, 'atMasters', toAtId), payload);
-    setAtMasters(prev => prev.map(a => a.id === toAtId ? { ...a, ...payload } : a));
-  };
-
   const forgetAtMaster = (atMasterId: string) => {
     const gone = atMasters.find(a => a.id === atMasterId);
     const remaining = atMasters.filter(a => a.id !== atMasterId);
@@ -2013,7 +2180,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   return (
     <AgencyContext.Provider value={{
       agencies, activeAgency, setActiveAgencyId,
-      atMasters, activeAtMaster, setActiveAtMasterId,
+      atMasters, activeAtMaster, viewingAllTenders, setActiveAtMasterId,
       loading, isSuperAdmin, globalDefaultEstimateMaster,
       globalConfigError, globalConfigLoaded, dismissGlobalConfigError,
       addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
@@ -2021,7 +2188,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAtMaster, updateAtMaster,
       predictNextJobNo, getJobNoPrefix, syncCountersState,
       publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster,
-      carryOilBalanceForward, atSupersededNotice, dismissAtSupersededNotice
+      atSupersededNotice, dismissAtSupersededNotice
     }}>
       {children}
     </AgencyContext.Provider>

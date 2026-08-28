@@ -203,7 +203,7 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState, setActiveAtMasterId } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState, setActiveAtMasterId, viewingAllTenders } = useAgency();
 
   const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
   const [loading, setLoading] = useState(false);
@@ -525,7 +525,7 @@ export default function NewJob() {
    * refused, and New Job is the path that creates them.
    */
   const intakeGate = useMemo(
-    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id)),
+    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id), viewingAllTenders),
     [activeAtMaster, atMasters, activeAgency?.id],
   );
 

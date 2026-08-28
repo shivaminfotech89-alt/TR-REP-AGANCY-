@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency, getEstimateMasterForCore, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
+import { useAgency, getEstimateMasterForCore, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
@@ -34,7 +34,7 @@ import { resolveScrapCharge, getScrapItemCodeForCore, getJobFullEstimate } from 
 import { atForJob } from '../lib/AgencyContext';
 
 export default function Reports() {
-  const { activeAgency, activeAtMaster, atMasters } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -77,7 +77,7 @@ export default function Reports() {
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid), 
         where('agencyId', '==', activeAgency.id),
-        where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT),
+        ...atClause(activeAtMaster, viewingAllTenders),
       );
 
       const inspQ = query(

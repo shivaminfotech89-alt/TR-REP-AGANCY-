@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
+import { useAgency, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { 
@@ -35,7 +35,7 @@ import { triggerUniversalPrint } from '../lib/printUtils';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function DispatchChallan() {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
   const [allJobs, setAllJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -84,7 +84,7 @@ export default function DispatchChallan() {
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid), 
         where('agencyId', '==', activeAgency.id),
-        where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT),
+        ...atClause(activeAtMaster, viewingAllTenders),
       );
       const snapshot = await getDocs(q);
       const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));

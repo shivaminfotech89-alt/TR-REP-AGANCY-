@@ -11,7 +11,11 @@ import {
 } from 'lucide-react';
 
 export default function AdminPanel() {
-  const { agencies, updateAgency, publishedAts, atMasters } = useAgency();
+  // ⚠ `updateAgency` is deliberately NOT destructured here (AUDIT G1). AdminPanel's agency
+  // list is an unfiltered read across every account, so any writer reached from this screen
+  // is a cross-account write by construction. Leaving the function in scope is leaving the
+  // hazard one line from being used again.
+  const { agencies, publishedAts, atMasters } = useAgency();
   const currentUser = auth.currentUser;
   const isSuperAdminEmail = currentUser?.email === 'shivaminfotech89@gmail.com';
 
@@ -116,26 +120,22 @@ export default function AdminPanel() {
     );
   }
 
-  // --- AGENCY ACTIONS ---
-  const handleUpdateSubscription = async (agencyId: string, status: 'active' | 'trial' | 'expired' | 'suspended', planAmount: number = 3999) => {
-    try {
-      const now = Date.now();
-      const oneYearMs = 365 * 24 * 60 * 60 * 1000;
-      const updatePayload = {
-        subscriptionStatus: status,
-        subscriptionPlanAmount: planAmount,
-        subscriptionLastPaid: now,
-        subscriptionExpiryDate: now + oneYearMs,
-      };
-
-      await updateAgency(agencyId, updatePayload);
-      alert(`Agency subscription updated to ${status.toUpperCase()} for ₹${planAmount}/year! Expiry set to 1 year from now.`);
-      fetchAdminData();
-    } catch (err) {
-      console.error('Error updating agency subscription:', err);
-      alert('Failed to update agency subscription.');
-    }
-  };
+  /**
+   * ⚠ THE SUBSCRIPTION WRITER IS REMOVED, NOT COMMENTED OUT (AUDIT G1).
+   *
+   * It called `updateAgency` against `allAgencies`, which is an UNFILTERED read of every
+   * agency on every account - so it wrote to customers' documents. The rules no longer allow
+   * that, and the fields it wrote were read by nothing anywhere in the codebase (O34): an
+   * admin set an expiry, saw a confirmation, and no screen or gate ever consulted it.
+   *
+   * When subscription is built for real it belongs in a VENDOR-OWNED collection keyed by
+   * agency id - never as fields on the agency document. That is what lets the vendor hold
+   * its own commercial data without holding write access to the customer's records, and it
+   * is the reason the rules could be tightened before the billing work rather than after.
+   *
+   * Deleted rather than left dormant because a cross-account write path one call site away
+   * from being reused is exactly what this change exists to remove.
+   */
 
   // --- USER ROLE ACTIONS ---
   const handleSaveUserRole = async (e: React.FormEvent) => {
@@ -535,20 +535,19 @@ export default function AdminPanel() {
                         {formatDDMMYYYY(expiryMs)}
                       </td>
                       <td className="p-3 text-right">
+                        {/* ⚠ DISABLED, NOT REMOVED (AUDIT G1). These wrote to the customer's
+                            AGENCY document across accounts, which the tightened rules no
+                            longer permit - and the fields they wrote are read by nothing
+                            (O34). Left visible and inert so the panel still shows what is
+                            recorded, and labelled so the next reader does not meet a button
+                            that fails with `permission-denied` and diagnose it as a bug. */}
                         <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleUpdateSubscription(agency.id, 'active', 3999)}
-                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg shadow-sm"
-                            title="Renew +1 Year for ₹3,999"
+                          <span
+                            title="Subscription writes are deferred until the Razorpay work. They wrote to the customer's agency document across accounts, which the vendor no longer has permission to do — see AUDIT G1. When built, subscription belongs in its own vendor-owned collection, not on the agency."
+                            className="text-[10px] font-bold uppercase tracking-wide text-slate-500 bg-slate-100 border border-slate-300 px-2.5 py-1.5 rounded-lg"
                           >
-                            +1 Year (₹3,999)
-                          </button>
-                          <button
-                            onClick={() => handleUpdateSubscription(agency.id, subStatus === 'suspended' ? 'active' : 'suspended', planAmt)}
-                            className="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-[10px] px-2.5 py-1.5 rounded-lg"
-                          >
-                            {subStatus === 'suspended' ? 'Unsuspend' : 'Suspend'}
-                          </button>
+                            Deferred until Razorpay
+                          </span>
                         </div>
                       </td>
                     </tr>

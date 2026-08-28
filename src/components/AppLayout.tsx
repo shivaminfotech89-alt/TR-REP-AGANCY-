@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
-import { useAgency, isIntakeOpen } from '../lib/AgencyContext';
+import { useAgency, isIntakeOpen, ALL_TENDERS } from '../lib/AgencyContext';
 import { useTheme } from '../lib/ThemeContext';
 import { auth } from '../lib/firebase';
 import { User, signOut } from 'firebase/auth';
@@ -26,7 +26,8 @@ import {
   ShieldCheck,
   Crown,
   Sun,
-  Moon
+  Moon,
+  ChevronsUpDown
 } from 'lucide-react';
 import ThemeSelectorModal from './ThemeSelectorModal';
 import Dashboard from './Dashboard';
@@ -49,7 +50,7 @@ import AgencySwitcher from './AgencySwitcher';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function AppLayout({ user }: { user: User }) {
-  const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId,
+  const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
           atSupersededNotice, dismissAtSupersededNotice } = useAgency();
   const { currentTheme, themeId } = useTheme();
   const location = useLocation();
@@ -215,37 +216,109 @@ export default function AppLayout({ user }: { user: User }) {
                   to="/agency-settings?section=at"
                   className="mt-2 block p-2.5 rounded-lg border border-amber-400/50 bg-amber-500/10"
                 >
-                  <span className="text-[9px] uppercase font-bold tracking-wider text-amber-400">Tender</span>
-                  <div className="text-xs font-bold text-amber-300 mt-0.5">No AT — set one up</div>
+                    <span className={`text-[9px] uppercase font-bold tracking-wider ${isLight ? 'text-amber-700' : 'text-amber-400'}`}>Tender</span>
+                  {/* Theme-aware for the same reason as the control below (AUDIT F98). */}
+                  <div className={`text-xs font-bold mt-0.5 ${isLight ? 'text-amber-800' : 'text-amber-300'}`}>No tender — set one up</div>
                 </Link>
               );
             }
+            /**
+             * ⚠ THE ONLY TENDER SCOPE CONTROL IN THE APP (AUDIT F87).
+             *
+             * The Dashboard had a second one, local to itself, and two controls for one word
+             * turned out to be worse than the problem it solved: the operator could not tell
+             * which governed what New Job would book into. This is the survivor because scope
+             * is a WORKING setting - removing it and keeping the Dashboard's would have left
+             * the only route to changing the working tender running through a read-only
+             * screen, which is the read-causing-a-mutation shape rejected in F70, F72 and F86.
+             *
+             * "ALL TENDERS" IS A VIEWING STATE and says so. Intake refuses in it - there is no
+             * single AT to book into - and the caption below states that rather than letting
+             * New Job explain it after the operator has started typing.
+             */
+            const all = viewingAllTenders;
+
+            /**
+             * ⚠ IT HAS TO LOOK LIKE A CONTROL, AND IT DID NOT (AUDIT F98).
+             *
+             * The select was `bg-transparent`, borderless, with no chevron and text styled
+             * almost identically to the caption beneath it. Three lines - label, value,
+             * state - read as one block of static text, so nothing said the middle line
+             * could be clicked. The only way to find the other tenders was to click it and
+             * meet the native option list, which is what "a cramped stack of options" was:
+             * the OPEN dropdown, not a layout. A collapsed native select shows one option.
+             *
+             * ⚠ IT IS DELIBERATELY THE SAME KIND OF CONTROL AS THE AGENCY SWITCHER. Both
+             * choose the scope you work in; they sit in different places only because one
+             * is the outer scope. The same ChevronsUpDown glyph, the same rounded-lg field,
+             * the same bold-primary / quiet-secondary weighting - so the tender does not
+             * read as a lesser setting than the agency.
+             *
+             * STILL A NATIVE <select>. Keyboard behaviour and the mobile picker are earned
+             * by the native control and would have to be re-earned by a popover; the option
+             * list is drawn by the OS and is not stylable, which is accepted rather than
+             * worked around.
+             */
+            const tone = all ? 'indigo' : gate.open ? 'emerald' : 'amber';
+            const card = all ? 'border-indigo-400/50 bg-indigo-500/10'
+              : gate.open ? 'border-emerald-500/40 bg-emerald-500/10'
+              : 'border-amber-400/50 bg-amber-500/10';
+            // ⚠ THEME-AWARE. The previous colours were fixed light-on-dark (text-emerald-200),
+            // which is close to invisible on a light sidebar - a latent fault this restyle
+            // would otherwise have preserved.
+            const dot = all ? 'bg-indigo-400' : gate.open ? 'bg-emerald-400' : 'bg-amber-400';
+            const chipText = all ? (isLight ? 'text-indigo-700' : 'text-indigo-300')
+              : gate.open ? (isLight ? 'text-emerald-700' : 'text-emerald-300')
+              : (isLight ? 'text-amber-700' : 'text-amber-300');
+            const labelText = isLight ? 'text-slate-500' : 'text-slate-400';
+            const fieldText = isLight ? 'text-slate-900' : 'text-white';
+            const fieldBg = isLight
+              ? 'bg-white border-slate-300 hover:bg-slate-50'
+              : 'bg-white/10 border-white/20 hover:bg-white/15';
+            const stateLabel = all ? 'All tenders' : gate.open ? 'Open' : 'Closed';
+
             return (
-              <div className={`mt-2 p-2.5 rounded-lg border ${
-                gate.open ? 'border-emerald-500/40 bg-emerald-500/10' : 'border-amber-400/50 bg-amber-500/10'
-              }`}>
-                <span className={`text-[9px] uppercase font-bold tracking-wider ${gate.open ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  Tender
-                </span>
-                <select
-                  value={activeAtMaster?.id || ''}
-                  onChange={e => setActiveAtMasterId(e.target.value || null)}
-                  className={`mt-0.5 w-full bg-transparent text-xs font-bold outline-none cursor-pointer ${
-                    gate.open ? 'text-emerald-200' : 'text-amber-200'
-                  }`}
-                >
-                  {mine
-                    .slice()
-                    .sort((x, y) => (y.startDate || 0) - (x.startDate || 0))
-                    .map(t => (
-                      <option key={t.id} value={t.id} className="text-slate-900">
-                        AT {t.atNumber || t.name}
-                        {String(t.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
-                      </option>
-                    ))}
-                </select>
-                <div className={`text-[9px] font-bold mt-0.5 uppercase tracking-wide ${gate.open ? 'text-emerald-400' : 'text-amber-400'}`}>
-                  {gate.open ? 'Open to new work' : 'Closed to new work — viewing only'}
+              <div className={`mt-2 p-2.5 rounded-lg border ${card}`} data-tone={tone}>
+                {/* THE STATE AS A CHIP ON THE LABEL ROW, not a line of body text beneath the
+                    value. "Can I book against this?" is a property of the tender, so it sits
+                    with the tender rather than reading as a third equal row. */}
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-[9px] uppercase font-bold tracking-wider ${labelText}`}>
+                    Tender
+                  </span>
+                  <span
+                    title={all
+                      ? 'Viewing every tender. New work is recorded against one tender, so intake is refused in this scope.'
+                      : gate.open ? 'Open to new work — New Job books against this tender.' : gate.reason}
+                    className={`flex items-center gap-1 text-[9px] uppercase font-bold tracking-wider ${chipText}`}
+                  >
+                    <span className={`w-1.5 h-1.5 rounded-full ${dot} shrink-0`} />
+                    {stateLabel}
+                  </span>
+                </div>
+
+                <div className="relative mt-1">
+                  <select
+                    value={all ? ALL_TENDERS : (activeAtMaster?.id || '')}
+                    onChange={e => setActiveAtMasterId(e.target.value || null)}
+                    title="Change the tender every screen is scoped to"
+                    className={`appearance-none w-full min-h-[38px] pl-2.5 pr-7 py-1.5 rounded-lg border text-xs sm:text-sm font-bold cursor-pointer outline-none transition-colors focus:ring-2 focus:ring-blue-500/40 ${fieldBg} ${fieldText}`}
+                  >
+                    {mine
+                      .slice()
+                      .sort((x, y) => (y.startDate || 0) - (x.startDate || 0))
+                      .map(t => (
+                        <option key={t.id} value={t.id} className="text-slate-900">
+                          AT {t.atNumber || t.name}
+                          {String(t.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
+                        </option>
+                      ))}
+                    <option value={ALL_TENDERS} className="text-slate-900">All tenders — viewing only</option>
+                  </select>
+                  {/* The agency switcher's glyph, on purpose - see the note above. */}
+                  <ChevronsUpDown
+                    className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 shrink-0 ${labelText}`}
+                  />
                 </div>
               </div>
             );

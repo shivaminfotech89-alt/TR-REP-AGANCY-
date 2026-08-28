@@ -230,6 +230,9 @@ service cloud.firestore {
              (!('openingOilBalanceAt' in data) || isTimeValue(data.openingOilBalanceAt)) &&
              (!('openingOilBalanceFromAtId' in data) || (data.openingOilBalanceFromAtId is string && data.openingOilBalanceFromAtId.size() <= 128)) &&
              (!('openingOilBalanceBy' in data) || (data.openingOilBalanceBy is string && data.openingOilBalanceBy.size() <= 150)) &&
+             // The carried figure is short by whatever the source tender left unassigned, and
+             // records that rather than refusing the rollover over it (AUDIT F96).
+             (!('openingOilBalanceIncomplete' in data) || (data.openingOilBalanceIncomplete is map)) &&
              (!('createdAt' in data) || isTimeValue(data.createdAt)) &&
              (!('updatedAt' in data) || isTimeValue(data.updatedAt));
     }
@@ -251,6 +254,18 @@ service cloud.firestore {
              // tender. Absent on every transaction written before this - those are
              // unassigned, not wrong, and nothing guesses a tender for them.
              (!('atId' in data) || (data.atId is string && data.atId.size() <= 128)) &&
+             // GROSS LITERS WAS TYPED, NOT COMPUTED (AUDIT F97). A division can send a barrel
+             // short, so `barrels x 210` is a default rather than a rule; this records that the
+             // operator overrode it, and the register marks the row so 195 beside "1 barrel"
+             // does not read as a typo to whoever reconciles it months later.
+             //
+             // ⚠ ADDED FOR COMPLETENESS, NOT BECAUSE THE WRITE WOULD FAIL. This validator names
+             // fields; it does NOT use `keys().hasOnly(...)`, so an unnamed field passes
+             // silently. F75 was a TYPE mismatch on a named field (serverTimestamp resolving to
+             // `timestamp` against a clause reading `is number || is string`), not an
+             // unknown-field rejection. An unvalidated field is still a gap - nothing bounds its
+             // type or size - which is the reason to name it.
+             (!('grossLitersManual' in data) || (data.grossLitersManual is bool)) &&
              (!('createdAt' in data) || isTimeValue(data.createdAt));
     }
 
@@ -305,24 +320,52 @@ service cloud.firestore {
 
     // --- Match Rules ---
 
+
+    /**
+     * ⚠ WRITE ACCESS IS THE OWNER'S ALONE. THE VENDOR MAY READ, AND MAY NOT WRITE (AUDIT G1).
+     *
+     * `isSuperAdmin()` used to appear in every create, update and delete below. It was never
+     * reached from the UI - `AgencyContext` loads `where('ownerId','==',uid)`, so no screen
+     * could target another account's document - but that is a CLIENT-SIDE CONVENTION, not a
+     * boundary. A super-admin session with a browser console could write any record on any
+     * account, and this database holds two paying customers' data beside the vendor's own.
+     *
+     * The restraint is now enforced rather than observed.
+     *
+     * ⚠ WHY THE VENDOR SHOULD NOT HAVE IT. A vendor who can edit a customer's rates,
+     * estimates or bills is a liability rather than a capability: if the figures are wrong,
+     * the customer cannot say it was not us. Support is answered by SEEING state and telling
+     * the operator which control to press - never by reaching in.
+     *
+     * `allow get, list` DELIBERATELY KEEPS `isSuperAdmin()`. Diagnosing a customer's problem
+     * requires reading their state; authoring their records does not follow from it.
+     *
+     * ⚠ THIS IS NOT A ROUTE TO REINSTATE FOR CONVENIENCE. Correcting several accounts at once
+     * is a deliberate script with a dry run and a named operator (AUDIT O32) - which leaves a
+     * record of who did what, where a UI button does not.
+     */
     match /jobs/{jobId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidJob(incoming());
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin()) && incoming().ownerId == existing().ownerId && isValidJob(incoming());
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidJob(incoming());
+      allow update: if isSignedIn() && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && isValidJob(incoming());
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
 
     match /inspections/{inspectionId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidInspection(incoming());
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin()) && incoming().ownerId == existing().ownerId && isValidInspection(incoming());
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidInspection(incoming());
+      allow update: if isSignedIn() && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && isValidInspection(incoming());
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
 
     match /agencies/{agencyId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin() || (('email' in resource.data) && resource.data.email == request.auth.token.email) || (('sharedWithEmails' in resource.data) && request.auth.token.email in resource.data.sharedWithEmails));
-      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidAgency(incoming());
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin() || (('email' in existing()) && existing().email == request.auth.token.email) || (('sharedWithEmails' in existing()) && request.auth.token.email in existing().sharedWithEmails)) && (incoming().ownerId == existing().ownerId || isSuperAdmin() || !('ownerId' in existing())) && isValidAgency(incoming());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidAgency(incoming());
+      // ⚠ THE SECOND CLAUSE IS ownerId IMMUTABILITY, NOT PERMISSION - and `isSuperAdmin()`
+      // in it was an OWNERSHIP-TRANSFER capability nobody asked for, reading like a
+      // permission check. Nothing in src/ ever writes ownerId on update; it is set once at
+      // create, from the signed-in uid. It is now immutable (AUDIT G1).
+      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || (('email' in existing()) && existing().email == request.auth.token.email) || (('sharedWithEmails' in existing()) && request.auth.token.email in existing().sharedWithEmails)) && (incoming().ownerId == existing().ownerId || !('ownerId' in existing())) && isValidAgency(incoming());
       // ⚠ DELETE IS REFUSED OUTRIGHT (AUDIT F72).
       //
       // No caller exists - nothing in src/ deletes an agency - and an agency owns every AT,
@@ -339,8 +382,8 @@ service cloud.firestore {
 
     match /atMasters/{atMasterId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidAtMaster(incoming());
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin()) && incoming().ownerId == existing().ownerId && isValidAtMaster(incoming());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidAtMaster(incoming());
+      allow update: if isSignedIn() && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && isValidAtMaster(incoming());
       // ⚠ DELETE IS REFUSED OUTRIGHT (AUDIT F72).
       //
       // An AT is a tender record. Deleting one that still has jobs under it leaves every
@@ -355,9 +398,9 @@ service cloud.firestore {
 
     match /oilTransactions/{txId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create: if isSignedIn() && (incoming().ownerId == request.auth.uid || isSuperAdmin()) && isValidOilTransaction(incoming());
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin()) && incoming().ownerId == existing().ownerId && isValidOilTransaction(incoming());
-      allow delete: if isSignedIn() && (existing().ownerId == request.auth.uid || isSuperAdmin());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidOilTransaction(incoming());
+      allow update: if isSignedIn() && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && isValidOilTransaction(incoming());
+      allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
 
     match /support_tickets/{ticketId} {

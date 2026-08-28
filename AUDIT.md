@@ -698,6 +698,48 @@ the second time an Excel export has been the path outside both traces.
 
 ---
 
+## Pattern: every guard individually correct, together making the feature impossible
+
+**The oil carry-forward existed for a week and never once wrote a figure.** Not because any
+part of it was wrong — because each guard was right, and nothing ever evaluated them together.
+
+| guard | why it was added | why it was correct |
+|---|---|---|
+| a deliberate act, not part of tender creation (F82) | an oil balance appearing inside a creation flow is a number the operator confirms without reading | true, and it is the reasoning the whole confirm-before-writing discipline rests on |
+| refuse while any work belongs to no tender (F87) | a per-tender closing balance cannot include unassigned rows, so the figure would be short | true, and it caught a real `+0.00 LTR` offered against oil the DISCOM was owed |
+| refuse while that count is merely unknown (F93) | a figure recorded against a tender must not rest on a count nobody has | true, and it closed a genuine staleness where one agency's count survived into another |
+
+Each was reviewed on its own and passed. **The conjunction was never reviewed at all**, because
+there is no moment at which anyone is asked to. A guard is added in response to a specific
+failure; the question it answers is "does this prevent the bad case?", never "what is left
+after this and everything before it?"
+
+The result: in live data there was **no agency where the button both appeared and would fire**.
+Four of five were blocked by unassigned work; the fifth had only one tender, so no carry was
+offered. The nearest miss produced nothing for a reason that was, at the time, silent — and it
+was reported as a rendering bug, which cost a round of investigation into code that worked.
+
+**This class cannot be found by reading one guard.** Every individual review returns "correct".
+It cannot be found by reading the diff that introduced any one of them either. It is only
+visible from the question *"under what conditions does this feature actually run?"* — which is
+a different question from *"is this check right?"*, and one nothing in a normal review prompts.
+
+**The tell: a feature that has never successfully completed.** Not one that fails — one that
+declines, plausibly, every time. Failures get reported. Declines look like the system working,
+because a guard firing is indistinguishable from a guard being *needed*.
+
+**The remedy that worked** was not to relax a guard. It was to notice the operator was being
+asked to confirm a number the app computes, at a moment the app already knows it, and remove
+the decision point entirely — the carry now happens inside `addAtMaster` (F96). The guards
+became unnecessary rather than being weakened, and **needing three guards to make one
+confirmation safe was itself the signal that the confirmation was in the wrong place.**
+
+The general rule: **when a feature accumulates guards, count the paths that survive them.** If
+the answer is zero, or the answer is "only in states the live data never reaches", the guards
+are not protecting the feature — they are describing why it should not exist in that shape.
+
+---
+
 ## Pattern: a comparison against a literal the producing code never emits
 
 Three instances this session, and they are the same defect:
@@ -733,6 +775,1033 @@ consumer share one declaration: a union type plus a parse function per field, so
 unrecognised value is a compile error at the producer and a `null` at the consumer.
 `classifyWindingMaterial` in SingleJobEstimateReport.tsx is the first instance of that shape.
 See the sweep results at O23.
+
+---
+
+## F87. `?? ''` in JavaScript and `== ''` in a Firestore query are not the same test
+
+**JavaScript coalesces a missing field; Firestore refuses to match one.** Every place this
+codebase uses one to reason about what the other will return is suspect.
+
+```js
+String(job.atId ?? '') === ''          // TRUE for absent AND for empty
+where('atId', '==', '')                // matches ONLY empty. Never absent.
+```
+
+There is no Firestore predicate for "this field is missing" — not `== ''`, not `== null`,
+not `!=` anything. A document without the field is invisible to every equality on it. So
+"unassigned" is **not expressible as a query at all**; it can only be recognised after
+reading, in memory.
+
+**Where it bit.** The MR Ledger backlog banner — added in F82 precisely so that jobs
+belonging to no tender would not vanish behind the new tender filter — was written as
+`where('atId','==','')`. Live data holds 12 unassigned jobs: **4 with `atId: ''`, 8 with the
+field absent.** The banner found 4. Among the 8 it could not see was `MSBT-12`, estimated
+₹5,661, billed ₹6,413 and **paid** — the exact job the banner was built to keep reachable.
+
+The same query shape in the Oil register excluded **all four** oil transactions, every one of
+them field-absent: **843.75 LTR** that the DISCOM is owed, rendering as an empty register and,
+worse, as a carry-forward dialog offering **"+0.00 LTR"** — a figure indistinguishable from a
+tender that genuinely closed level, presented for a person to confirm.
+
+### 1. A plausible wrong count is worse than nothing
+
+A banner reading *"4 jobs belong to no tender"* **asserts that four is the number.** Nobody
+re-counts an answer that looks like one. Had it shown zero, the operator would have
+questioned it immediately — zero is a claim that invites checking; four is a claim that
+closes the question.
+
+This is the same shape as F81 and as the whole "Recurring theme" essay below: an error that
+renders as a plausible value is indefinitely survivable, where a dash, a blank or a crash
+is self-reporting. Here it is sharper than usual, because **the wrong number was produced by
+the very mechanism installed to prevent the loss.** A safety net reporting a third of what it
+catches is not a partial safety net; it is a false negative wearing a safety net's clothes.
+
+### 2. Two tools measured the same quantity by different means, and nobody put the numbers side by side
+
+This is the transferable part.
+
+| | how it filtered | what it reported |
+|---|---|---|
+| `scripts/admin/assign-at.js` | JavaScript: `!String(j.atId ?? '').trim()` | **12** unassigned jobs |
+| the app's banner | Firestore: `where('atId','==','')` | **4** unassigned jobs |
+
+Both numbers were reported to the user in this session, days apart. **Neither of us noticed
+they disagreed.** Each was individually plausible, each arrived in its own context, and
+nothing in either presentation invited comparison with the other.
+
+The script was right and the app was wrong, but that is incidental. The finding is that **a
+discrepancy between two measurements of one quantity is invisible unless something puts them
+in the same place.** Verifying each in isolation cannot detect it — both passed inspection.
+
+The working rule: **when a script and the app answer the same question, print both numbers
+together and assert they match.** Not "the script confirms the app" — that is what was
+believed here — but a literal side-by-side. `scripts/admin/unassigned-census.js` now does
+this: it replays the app's own client-side rule against live data and prints the count the
+screen will show, so the two can only diverge loudly.
+
+The wider version of this rule was already recorded for estimates (F41/F55), job numbering
+(F68) and job-number parsing (F81), each time as "one implementation, not two". This is the
+case where the two implementations are in **different languages against different engines**,
+which is exactly where "keep one copy" cannot be applied and the side-by-side check is the
+only available substitute.
+
+### 3. What was swept, and what it found
+
+Every Firestore equality against a falsy literal, and every JavaScript `?? ''` guard used to
+reason about a query's results:
+
+| site | shape | verdict |
+|---|---|---|
+| `MrLedger.tsx` banner | `where('atId','==','')` | **the defect.** Now an agency-wide read filtered by `isUnassigned` |
+| `OilInward.tsx` ×2 | `where('atId','==', <id>)` | **the defect.** Now one agency-wide read split in memory |
+| `AtSettings.tsx` carry-forward | `String(t.atId ?? '') === at.id` | correct as a per-tender filter — `''` is never an AT id — but it **silently drops** unassigned rows from the closing balance. Now counted and the carry **refused** while any exist |
+| `Dashboard.tsx` scoping | `String(j.atId ?? '') === scope` | same: correct filter, silent exclusion. Now states the excluded count |
+| five screens' tender clause | `where('atId','==', atScope(at) ?? NO_ACTIVE_AT)` | **correct.** A positive match on a real id; unassigned work matching no tender is intended |
+| `NewJob.tsx:793` GP lookup | `where('agencyId','==', activeAgency?.id \|\| '')` | same shape, benign today — no job has `agencyId` absent, and with no agency the empty match returning nothing is the wanted outcome. Left alone, recorded here because the shape is identical |
+| `AgencyContext.tsx:1850` | `String(a.status \|\| '') === 'Active'` | in-memory only, no query counterpart. An AT with no `status` is never "Active" — correct by rule 3 of `isIntakeOpen`, which treats blank as open |
+| ~60 `x.trim() === ''` in inspection forms | in-memory field validation | not this class. No query counterpart to disagree with |
+
+**The tell for the future:** a `?? ''` or `|| ''` whose result is then compared to something,
+where the *same field* is also used in a `where()` clause somewhere else. The two will agree
+for every document that has the field and disagree for every document that does not — and
+which documents lack it depends on when they were written, so the divergence grows with the
+age of the data rather than with anything visible in the code.
+
+**Two helpers now exist so this cannot be re-decided per site:** `isUnassigned(row)` (absent
+and empty alike, the test no query can make) and `atClause(at, viewingAll)` — the single
+place the three scope states become a filter, carrying the warning that it cannot find
+unassigned work and that nothing can.
+
+---
+
+## F88. A signed figure that never said which direction it ran
+
+`-2120.00 LTR` does not say who owes whom. The Oil register showed the sign and left the
+direction to be inferred — from a column heading two screens away, or from the fact that
+positive was coloured red.
+
+**What the register showed after a carry-forward, before this entry:**
+
+| question | answer |
+|---|---|
+| is the opening balance a line in the register? | **no** — a figure in a stat card above it, outside the ledger |
+| is the sign preserved and meaningful? | preserved; **not stated**. Nothing on screen said which way it ran |
+| is the source tender named? | **no** — "carried from the previous tender", while the record holds exactly which one in `openingOilBalanceFromAtId` |
+| per-division lines, or only the total? | divisions appeared, but as 10px rows **inside the stat card**, not as register lines |
+
+### The convention, and the fact that the first attempt at it was backwards
+
+**Positive = the division owes the agency. Negative = the agency owes the division.**
+
+**This was shipped stating the exact opposite,** and was corrected only because it was
+checked against a real document rather than reasoned about. The first version read the app's
+own column heading — *"Net Pending / Shortage (LTR)"*, positive coloured red — concluded that
+red-and-pending meant the agency's liability, and wrote "agency owes the division" onto the
+screen. Every prose statement of the convention elsewhere in the codebase had been written
+during this audit from that same reading, so the codebase agreed with itself and was wrong.
+
+**The source that settled it:** `03 SBT CO Oil Account MARCH-2026.xlsx` — the UGVCL
+agency-wise oil accounting workbook, sheets SGP / RGP / OGP, ~2,300 rows per sheet.
+
+```
+Total oil in         = Opening balance + Oil required to top up failed X'mer + Filtration loss
+Balance oil with agency = Total oil in − Oil Issued to agency
+```
+
+Verified on real rows — CHINTAMANI LAMINATION `122 + 394 = 516`; KRYFS TRANSFORMERS
+`−172 + 140 = −32`; NAKODA `−85.50 + 165 = 79.50`.
+
+The balance **rises** with oil the agency puts into transformers and **falls** with oil the
+DISCOM issues. A quantity that grows when you spend and shrinks when you are supplied is a
+**receivable**, so positive means the division owes the agency. The sheet confirms it twice
+over by dividing that balance to produce *"Oil consumption per X'mer"* — it is measuring
+consumption, not stock.
+
+**The trap that produced the wrong answer.** The column names cut the other way: *"Opening
+balance of oil with agencies"* and *"Balance oil with agency"* both read as oil physically
+sitting in the agency's shed, which would make positive a liability. The arithmetic rules
+that out — **filtration loss destroys oil and yet increases the balance**, which no measure
+of stock on hand can do. The names are loose; the formula is not. Reading the header and
+stopping is exactly what the first attempt did.
+
+The app's *sign* was already right — `shortage − received` is the same arithmetic as the
+DISCOM's, with the 5% filtration loss inside the shortage. **Only the words were wrong**, and
+they were wrong in the dangerous direction: previously only a sign was shown, and a sign is
+ambiguous enough that a reader checks. Words are believed. Making the direction explicit
+raised the cost of getting it backwards, and the first attempt got it backwards.
+
+**The rule this yields:** when a figure crosses an organisational boundary, do not derive its
+direction from the application's own labels — the application is where the misunderstanding
+would live. Derive it from the counterparty's document, and prefer its **arithmetic** to its
+**column headings**.
+
+The field carrying this for colouring is deliberately named `agencyIsOwed`, not `agencyOwes`:
+the earlier name asserted the wrong direction, and a misnamed boolean is how a wrong
+convention gets copied into the next call site without anyone re-deriving it.
+
+### Two defects found while building it
+
+**1. The opening balance ignored the division filter.** `subTotalNetBalance` added the
+*agency-wide* opening figure to a *division-filtered* movement. Filtering the register to
+KALOL showed KALOL's shortage plus every division's carried balance, labelled as KALOL's net.
+The per-division map recorded in F86 is what makes the right answer available; nothing was
+reading it. Now `openingForFilter` selects the division's own opening, and a division absent
+from the map opens at zero — correct, since the map holds every division that moved.
+
+**2. The Excel export's total already included the opening balance, with no row to explain
+it.** The exported rows did not sum to the exported total. Anyone reconciling it would
+conclude the *total* was wrong, which is the opposite of the truth. The opening rows are now
+exported above the ledger, with the direction written per line — a bare `-2120` in a cell
+opened six months later says nothing at all.
+
+**A signed quantity that crosses an organisational boundary must carry its direction in
+words, not in its sign.** The sign is a convention held in one file; the reader is a person
+settling an account with a division. This is the same class as the "Terminology hazard"
+entries below — a value whose meaning depends on context the reader does not have — but
+sharper, because unlike an ambiguous *label* an ambiguous *sign* still looks fully specified.
+
+### ⚠ Shipped unexercised
+
+**No AT has ever had a carry-forward recorded** — `openingOilBalance` is absent on all seven
+in live data, and the carry is now correctly refused for four of the five agencies because
+unassigned work exists (F87). So **every rendering added here — the opening rows, the
+transactions panel, the export rows, the division-filtered opening — has never been displayed
+against real data.** What was exercised: `tsc` clean, and `describeOil` checked at its edges
+(2120, −2120, 0, ±0.004, −0.01, NaN, undefined).
+
+This is recorded rather than left implied because the first thing that will exercise these
+paths is a real carry-forward on a real tender, and whoever performs it is the first person
+to see the output. The division-filter fix in particular changes an arithmetic that has never
+run with a non-zero opening balance.
+
+### The general form
+
+One helper, `describeOil(litres)`, now produces the signed string and the direction phrase
+together, so no site can print one without the other. It rounds to two decimals **before**
+choosing the sign, so `-0.004` renders `0.00 LTR / settled level` rather than the nonsense
+`-0.00 LTR / division owes the agency`. Five call sites use it: the register's opening rows,
+the sub-total row, the transactions panel, both stat cards, and the carry-forward dialog.
+
+---
+
+## F89. A refusal built on an objection that applied to a different figure
+
+The Oil register refused to render in "All tenders" mode. The argument was that oil cannot be
+summed across tenders, because each tender's balance already opens with the previous tender's
+closing figure, so adding them counts the same litres twice.
+
+**That is true of the per-tender NETS, and nobody was proposing to sum those.** Summing the
+raw movement — shortage from inspections, oil received from transactions — cannot double-count,
+because an opening balance never appears in it. The objection was correct about a figure that
+was never on the table, and it was used to withhold one that was well-defined all along.
+
+Two questions, two correct answers, and neither is the other with a filter relaxed:
+
+| scope | net |
+|---|---|
+| one tender | opening balance + that tender's movement |
+| all tenders | movement alone — `Σ shortage − Σ received`, opening balances excluded |
+
+The second is the DISCOM's own subtraction with its opening column dropped. `openingForFilter`
+returns 0 in all-tenders mode, and the F88 opening lines do not render there — they are
+exactly what is being excluded.
+
+### The correction inside the correction
+
+The instruction as first given was "sum the TRANSACTIONS, ignoring opening balances". That
+undercounts by one whole side: **`oilTransactions` records only oil RECEIVED.** The shortage
+side lives in external inspections. Transactions alone would have produced:
+
+| agency | transactions only | both sides |
+|---|---|---|
+| AARATI TRANSFORMER | **0.00** — it has no transactions at all | **+333.80** |
+| ADMIN | **0.00** | **+2110.00** |
+| MEGHA | −423.75 | **+941.85** |
+
+AARATI would have read a flat zero while carrying 333.80 LTR the division owes it — the same
+class of failure as the empty register that started this thread, arriving through a different
+door. Worth recording because the phrase "sum the transactions" *sounds* like it names the
+whole ledger, and in this schema it names half of it.
+
+### The caveat that cannot be fixed from inside the app
+
+The agency-wide net is **the app's recorded history, not the division's.** The UGVCL workbook
+carries real opening balances that predate any app record — CHINTAMANI +122, KRYFS −172,
+ALFA −171, DISHA −20, all on the first row of the year. If an agency was not at zero with the
+division when its app records began, this figure differs from theirs by exactly that amount,
+**permanently**, and nothing inside the app can detect the difference.
+
+Both limits are stated on the screen and repeated in the Excel export, because a spreadsheet
+outlives the screen it came from and this is a figure someone may reconcile against the
+DISCOM's account months later.
+
+**It could not be checked against a real row.** None of the agencies in live data — MEGHA,
+AARATI, UPENDRA, DRISHIV, suchit — appears in any of the three tabs of the Sabarmati CO
+workbook, which lists ACCORD, ALFA, BAGADIA, CHINTAMANI, KRYFS and the rest. The *formula* is
+confirmed against their arithmetic; the *figures* are confirmed against nothing of theirs.
+
+`scripts/admin/oil-net-census.js` prints what the screen will show, copying the app's own
+`jobOilShortage` including its kVA capacity defaults and 5% filtration loss — the side-by-side
+discipline from F87, applied at the point the rule was written rather than after it failed.
+
+### Also fixed here
+
+The fetch effect listed only `[activeAgency]`. It survived while the query itself was
+tender-scoped; it does not survive now that one agency-wide read is **split** per tender in
+the component, since changing tender changes the split without changing the read. Switching
+tender would have left the previous tender's rows on screen.
+
+---
+
+## F90. A manual input for a figure the app can derive — built, then removed
+
+**Built and removed in the same session. Nothing was ever recorded through it, on any agency,
+so the removal stranded no data** — checked before deleting, since removing a field that holds
+live values is a different operation entirely.
+
+An agency joining mid-relationship with the DISCOM has a position that predates every record
+here, so the agency-wide oil net (F89) is wrong by that amount permanently and invisibly. The
+DISCOM's own workbook proves such positions are real and non-zero — CHINTAMANI +122,
+KRYFS −172, ALFA −171 on the first row of the year.
+
+The response was a form: per-division figures, a required free-text source, author and date,
+and an append-only edit trail. Guarded properly — the source requirement lived in the form,
+the context and `firestore.rules` at once, and absent was kept distinguishable from zero in
+three separate places.
+
+**It was the wrong shape, and the reason is worth keeping.**
+
+> This app automates. Where a previous AT exists the figure is already computed from its jobs
+> and transactions, and the carry-forward writes it. Asking someone to type a number the app
+> can derive is the wrong shape.
+
+The feature was justified by the case it could not reach — an agency's *first* tender, which
+has no predecessor to carry from — and then built as a general input available on every
+agency, including the ones where the automated path already produces the number. **A remedy
+scoped to the exception, offered as the rule, competes with the derivation it was meant to
+supplement.** Two ways to establish one figure is the shape this audit has removed repeatedly:
+F41/F55 in estimates, F68 in job numbering, F81 in job-number parsing.
+
+Removed: the form, the five agency fields plus history, the rules clause, the term in the
+all-tenders net, the export rows. `firestore.rules` redeployed. **The carry-forward stays** —
+that is the automated path.
+
+### The caveat outlives the remedy
+
+The all-tenders register used to end its caveat with a link to the form. The limit the link
+offered a remedy for is unchanged and still true: a position predating the app's first record
+cannot be seen from inside the app. So the caveat stays and stops pretending there is a button
+for it, ending instead with what a person can actually do — reconcile against the division's
+own oil account before quoting the figure.
+
+**A limit stated without a fix is honest; a limit dropped because nothing can be done about it
+is not.** The temptation on removing a feature is to remove the warning that motivated it,
+which would leave the register asserting a figure with no qualification at all — strictly
+worse than before either existed.
+
+⚠ **The residual gap, recorded so it is not rediscovered as a bug:** an agency whose FIRST
+tender in the app opens with a real position carries that error forever, and there is now no
+path — automated or manual — to state it. This is a known and accepted limit, not an oversight.
+
+## F91. Deleting the unassigned test data — what moved, and what was kept
+
+`scripts/admin/delete-unassigned.js`, applied 2026-08-27. **9 jobs, 3 inspections and 4 oil
+transactions removed. 3 jobs refused and kept.**
+
+Nothing creates unassigned records any more — New Job, MrLedger's add-unit and Oil Inward all
+stamp the active tender at creation (F82) — so the set was closed and could not refill.
+
+### The agency-wide oil nets moved, permanently
+
+These are the figures an agency reconciles with a division (F89), and they are recorded here
+because after the delete there is no way to derive what they used to be.
+
+| agency | before | after | moved by |
+|---|---|---|---|
+| MEGHA | +941.85 | **+1365.60** | +423.75 |
+| AARATI TRANSFORMER | +333.80 | **+112.00** | −221.80 |
+| DRISHIV | −210.00 | **0.00** | +210.00 — the agency has no oil records left at all |
+| suchit | −198.00 | **0.00** | +198.00 |
+| UPENDRA | +28.15 | **0.00** | −28.15 |
+| ADMIN | +2110.00 | +2110.00 | unchanged |
+
+Positive means the division owes the agency (F88).
+
+**MEGHA's net went UP by deleting oil it had received** — 423.75 LTR of credit removed. That
+is arithmetically correct and worth stating plainly, because "we deleted some oil records and
+the agency is now owed more" reads as a fault until the sign convention is applied.
+
+⚠ **If any of these 843.75 litres was real oil rather than test data, there is now no way to
+restate it.** The day-one opening position that would have held such a claim was removed (F90),
+and these litres cannot be recovered from the records — the records are gone. The all-tenders
+caveat covers it: reconcile against the division's own oil account.
+
+### What was kept, and why
+
+**MSBT-12 / MR 1 (MEGHA)** — kept indefinitely. It carries estimate ₹5,661, BILL/1 ₹6,413,
+**paid ₹6,680** and challan `yrtr2`. The 267 overpayment is C3's refund and **this job is its
+only evidence**. O33 named this exact record as the one the app's delete path would destroy in
+two clicks. It is also referenced by name in this file, so deleting it would leave an audit
+entry pointing at a document that does not exist.
+
+**MSBT-12 / MR 9344 and MSBT-1 / MR 9344 (MEGHA)** — challans 12 and 232, both `Dispatched`,
+no bills. Undecided at time of writing; they block MEGHA's oil carry-forward (see below).
+
+Two of the three blocks came from a **challan alone**. A guard testing only `billNo` would
+have deleted both. The issued-document test in the script is deliberately broad — amounts,
+payment date and `issuedByAgencyId` included — on the principle that a false positive costs a
+decision and a false negative destroys evidence.
+
+### Nothing was stranded, and that was checked rather than assumed
+
+The script deletes an eligible job's inspections in the same batch, closing O33's second gap
+instead of reproducing it. It then looks for what its own cleanup would have missed:
+inspections naming a deleted job through any of the four link rules but not matched, and oil
+transactions keyed to an MR losing all its jobs — the `mrNo`-not-`jobId` route. **Both empty.**
+That is a statement about this set, not a claim that orphaning is impossible.
+
+**MR 9344 spans two agencies.** AARATI's job `101` was deleted from it while MEGHA's two jobs
+remain. Five MRs disappeared entirely (5933, 34, 000001, 214, 125); 9344 survived with two.
+MR numbers are not unique across agencies — `scripts/admin/mr-across-agencies.js` exists for
+this, and it is the reason the delete is per job rather than per MR.
+
+### The cleanup unblocks four agencies and not the fifth
+
+An unassigned job blocks that agency's oil carry-forward (F87), and the block is agency-scoped:
+
+| agency | unassigned after | carry-forward |
+|---|---|---|
+| AARATI, suchit, DRISHIV | 0 | unblocked |
+| **UPENDRA** | 0 | **unblocked, and it has a real previous-tender pair** (24-25 → AT2026-27) |
+| ADMIN | 0 | was never blocked |
+| **MEGHA** | **3 jobs** | **still refused** |
+
+⚠ **The MEGHA block is latent, not active.** MEGHA has one tender, so `previousAtFor` returns
+null and no carry button is offered at all — the refusal changes nothing today. It bites at
+MEGHA's next rollover, when a second tender exists and the carry is wanted. Keeping three
+unassigned jobs means that carry can never be offered until they are assigned or removed.
+
+---
+
+## F92. Two positions left standing on purpose
+
+Neither of these is a defect to fix. Both are states that will look like defects to whoever
+meets them next, and both were decided rather than overlooked.
+
+### MEGHA's three unassigned jobs, and the refusal that follows
+
+**MEGHA holds three jobs with no `atId`, and this is the settled position — there is no
+deadline on it.**
+
+| job | MR | carries |
+|---|---|---|
+| MSBT-12 | 1 | estimate ₹5,661, BILL/1 ₹6,413, **paid ₹6,680**, challan `yrtr2` |
+| MSBT-12 | 9344 | challan 12, Dispatched |
+| MSBT-1 | 9344 | challan 232, Dispatched |
+
+**The consequence: MEGHA's oil carry-forward will refuse at its next rollover**, with the
+accurate reason *"Cannot carry oil — 3 jobs belong to no tender"* (F87). It refuses because a
+closing balance computed per tender necessarily excludes work belonging to no tender, so the
+figure would be short by whatever those jobs hold.
+
+⚠ **The refusal is latent, not active.** MEGHA has one tender, so `previousAtFor` returns null
+and no carry is offered at all today. It bites when a second tender exists.
+
+**Two resolutions, and only one of them works:**
+
+1. **Assign them a tender from the paperwork.** This is the only resolution that clears the
+   refusal — and it must cover all three, because MSBT-12/MR 1 stays regardless of what
+   happens to the other two and alone keeps the block in place. `scripts/admin/assign-at.js`.
+2. **Accept the refusal as accurate.** It is not a bug; it is the check reporting a real gap.
+
+**What was explicitly rejected:** assigning all three to `AT 26-27` because it is the only
+tender MEGHA has. *Being the only candidate is not evidence.* That would convert "we do not
+know which tender these belong to" into a recorded claim that they belong to this one — the
+same absent-vs-zero collapse F90 was built around and F82 drew first, arriving as a
+convenience.
+
+MSBT-12 / MR 1 is kept indefinitely regardless: it is C3's only evidence, and it is named in
+this file, so deleting it would leave an audit entry pointing at a document that does not
+exist.
+
+### UPENDRA can exercise F88's carried-balance rendering — and should not
+
+After F91, UPENDRA is the only agency with a real previous-tender pair (`24-25` →
+`AT2026-27`) and zero unassigned records, so it is the only place the F88 rendering — shipped
+unexercised — could be run.
+
+**What its carry would write:**
+
+```
+openingOilBalance           = 0
+openingOilBalanceByDivision = {}          <- empty; no division has any movement
+openingOilBalanceFromAtId   = <AT 24-25>
+```
+
+**Because UPENDRA now has no records at all** — its only two jobs were among the twelve
+unassigned, and F91 deleted them. `AT 24-25` contains zero jobs and zero transactions.
+
+**Recording it would assert that AT 24-25 closed level, which the app cannot support.** No
+records is *"we have no account of what happened"*, not *"nothing happened"* — the distinction
+F82 drew for the tender carry, and which F90 was built around before being removed. This is the
+`+0.00 LTR` dialog that started the whole oil thread, arriving with a different cause: then
+the zero came from a query excluding everything, now it comes from an empty history. The
+figure is honest and the assertion is not.
+
+**And it is one-way.** Once `openingOilBalance` holds any finite number, including zero, the
+Tenders card shows the badge and the carry button is unreachable — nothing else in `src/`
+writes the field. So recording a zero to exercise a rendering would **permanently consume the
+only route to recording a real figure later**, in exchange for testing a display against
+all-zero data.
+
+⚠ **The code comment at that branch used to claim the opposite** — "re-carrying after a
+correction is possible through the same action". It is not, and never was; the branch returns
+the badge before reaching the button. Corrected in place. This is the third time in this audit
+a comment written during the work asserted behaviour the code did not have (see F87's
+"the context refetches on its own", and F88's direction convention), and the pattern is
+consistent: **a comment describing intent gets written in the same pass as the code and is
+never re-read against it.**
+
+The gap is recorded rather than quietly closed, because making the carry re-runnable means
+deciding what a corrected carry does to a figure someone may already have settled with a
+division — which is a question for the person holding the paperwork, not a code change.
+
+---
+
+## F93. A refusal that closed the dialog and said nothing
+
+The oil carry-forward's confirm-time guard did this:
+
+```js
+if (unassignedOil.txns > 0 || unassignedOil.jobs > 0) {
+  setCarryTarget(null);
+  return;            // dialog closes. No message. Nothing written.
+}
+```
+
+**A silent refusal is indistinguishable from success.** The dialog closes exactly as it would
+after a successful write; the only way to discover nothing happened is to read the register
+later and find 0.00 — which is precisely how this surfaced, as a suspected rendering bug in
+the F88 opening lines. It cost a round of investigation into code that was working.
+
+**F87 built the BUTTON's refusal to state its reason and left this one mute** — the same
+defect, in the same feature, a few lines from the fix for it. The reasoning that produced the
+first was never carried to the second because the second is on the *write* path and the first
+is on the *render* path, and they were written in different passes.
+
+The refusal now renders **in the dialog, which stays open**, naming what blocks it in the same
+words the button uses. There is no longer a branch that returns without a message.
+
+### The staleness behind it: an absence read as a fact
+
+`unassignedOil` was initialised to `{ txns: 0, jobs: 0, litres: 0 }`. **Zero is the value that
+unblocks the carry**, so before the read resolved, after a read that failed, and while
+`activeAgency` was briefly null, the component asserted *"nothing is unassigned"* on no
+evidence. Nothing reset it on an agency change either, so a count from a previous agency could
+survive into the current one — MEGHA's three unassigned jobs blocking, or failing to block, a
+carry on ADMIN.
+
+This is the **`pastJobsLoading` shape** exactly: an absence or a staleness read as a fact, and
+the fact it is read as is the permissive one. The fix is the same — **make not-knowing its own
+value** so every consumer must handle it:
+
+- `null` means not known. It is set **synchronously at the top of the effect, before any
+  await and before the early return**, so no window exists in which the previous agency's
+  count is attributed to this one.
+- A failed read sets it back to `null`, never to zero.
+- The button renders *"Checking for unassigned work…"* rather than offering itself.
+- `runCarry` refuses `null` with its own message, distinct from the has-unassigned-work one.
+
+⚠ **The compiler could not catch the null dereference this introduced.** `tsconfig.json` sets
+no `strict`, so there is no `strictNullChecks`: reading `.txns` off a `null` typechecks
+cleanly and throws at runtime. `npm run lint` passed on the intermediate state. The explicit
+`=== null` branch is doing the job the type system would otherwise do, and that is worth
+knowing before relying on a green typecheck for any nullable state in this codebase.
+
+### Instrumentation, left in place
+
+Twelve `[CARRY]` console lines cover the whole path — read starting (with the reset), read
+resolved (with the counts and the unassigned job numbers), read failed, dialog opened, confirm
+pressed, each refusal branch, the write attempt, and the write result. Added because the
+alternative was a theory: the stored fields proved the write never landed, but nothing in the
+data could show *which* branch stopped it. This is the same approach that ended the burning
+job numbers (F60) — instrument the path, reproduce, read the output.
+
+---
+
+## F95. The same error, corrected in a message and left standing in the code
+
+**F89 records this error being made in conversation and corrected: "sum the transactions"
+names only half the oil ledger, because `oilTransactions` holds the RECEIVED side and the
+shortage side lives in external inspections.** The correction was written up, the all-tenders
+net was built on the right definition, and a census script was added to hold it.
+
+**The identical error was already in the Dashboard's oil card, and nobody looked.**
+
+```js
+scopedOil.forEach(tx => { totalGrossLiters += tx.grossLiters; totalBarrels += tx.barrels; });
+const netUsableLiters = totalGrossLiters - totalGrossLiters * 0.05;
+```
+
+Receipts only. No inspections read; `computeOilBalance` never called. The card is titled
+**"Oil Account Ledger"**, links to the Oil Account, and measured a different quantity:
+
+| | Oil Account register | the card |
+|---|---|---|
+| formula | `Σ shortage − Σ received` | `Σ grossLiters × 0.95` |
+| inputs | inspections **and** transactions | transactions only |
+| meaning | what is owed, signed | how much usable oil arrived |
+| can be negative | yes | never |
+
+### Why correcting one instance did not find the other
+
+**Correcting an error is not the same as searching for it.** The conversational correction
+closed the question — the definition was settled, the code built on it was right, and
+attention moved to the next thing. Nothing in "I got that wrong, here is the right formula"
+prompts the follow-up "where else is that formula already written?"
+
+It is the same failure the sweep discipline exists for and did not get applied to, because a
+correction *feels* like a completed unit of work in a way a bug report does not. The rule that
+would have caught it is the one already recorded at F87 and used since: **when a definition is
+corrected, grep for every other site computing the same quantity, before moving on.** Two
+minutes here, against a card that had been wrong for the life of the feature.
+
+### It was only visible once the number went away
+
+While four oil transactions existed the card showed *a* figure, and nobody reconciled it with
+the register. F91 deleted the last of them, and the card read **"No oil records logged yet."**
+against a register showing **+2110.00 LTR** for the same tender — a contradiction stark enough
+to report as a bug. Before that the disagreement was a mismatch between two plausible numbers,
+which is the harder failure to notice, exactly as the closing essay describes.
+
+That is also why it was initially reported as a scope or filter fault. It was neither.
+
+### Fixed
+
+- The card calls `computeOilBalance` — the shared implementation (F82), so it cannot disagree
+  with the register.
+- The Dashboard's fetch gains `inspections`. Not agency-filtered, because the collection
+  carries no `agencyId`; `computeOilBalance` matches each job to its own inspection, so extra
+  rows are inert, and the register reads it the same way.
+- Barrels and gross litres are dropped. The card shows shortage, received, the signed net and
+  **the direction in words** from `describeOil` (F88).
+- A zero from an empty set is still distinguished from a settled account — `hasAnything`
+  counts the inputs rather than testing the total.
+
+Per-tender figures the card will now show, verified against live data:
+MEGHA `AT 26-27` **+1201.60**, ADMIN `2026_27` **+2110.00**, AARATI `2026-27` **+12.00**;
+the other four tenders hold nothing and say so.
+
+### And the scope case that was right by accident
+
+```js
+oilTransactions.filter(t => String(t.atId ?? '') === activeAtMaster?.id)
+```
+
+With no tender selected this compares a string to `undefined` — never equal, so nothing
+matches, so the screen shows nothing. **The right answer, reached by a coincidence of types
+rather than any statement of intent**, and one tidy-up away from silently showing every tender
+at once. `strictNullChecks` is off in this project (F93), so the compiler had nothing to say
+about it either. Now three explicit branches: all tenders, one tender, none.
+
+---
+
+## F96. Every guard that made the manual path safe was another way for it to decline
+
+The oil carry-forward was a button and a confirmation dialog. **Across a week of work it never
+once wrote a figure.**
+
+The history is the argument, and it is written up as its own entry above — *"every guard
+individually correct, together making the feature impossible"* — because the shape generalises
+past oil. F82 built it as a deliberate act, on the reasoning that an oil
+balance appearing inside tender creation is a number the operator would confirm without
+reading. F87 then had it refuse while any work belonged to no tender — correct, since a
+per-tender balance cannot include unassigned rows. F93 had it refuse while that count was
+merely *unknown* — also correct, since a figure recorded against a tender must not rest on a
+count nobody has. Each guard was right on its own terms. **Together they meant that in live
+data there was no agency where the button both appeared and would fire**, and the one that
+came closest wrote nothing for a reason that was, at the time, silent.
+
+**The operator was being asked to confirm a number the app computes, at a moment the app
+already knows.** A rollover *is* the event that carries the balance. So it happens in
+`addAtMaster`, in the same write that creates the tender, and nobody is asked anything.
+
+### The rules, and the one that is not in the spec
+
+- previous tender = the agency's most recent AT by `startDate` **strictly before** this one's.
+  Not creation order — an AT created later can start earlier.
+- no previous tender → no opening balance. The first tender starts at nothing, and **absent is
+  not zero**.
+- **previous tender with no records at all → also no opening balance.** This was not in the
+  requirement and is added deliberately: *"we have no account of what happened"* is not *"it
+  closed level"*, and writing `0.00` converts the first into the second permanently (F82,
+  F92). A tender that genuinely closed level **has** records netting to zero, and that zero
+  **is** written — the test is `jobsCounted > 0 || transactionsCounted > 0`, not the total.
+- unassigned work in the source → **still carry**, and stamp `openingOilBalanceIncomplete`.
+  Refusing to create a tender because of old unstamped rows is worse than an approximate
+  figure that says it is approximate. The register prints *"Approximate — when this tender
+  opened, N jobs belonged to no tender…"* and the Tenders card shows the badge in amber with
+  *"— approximate"*.
+- a failed read does not block the rollover. Same reasoning as the job-number counter seed
+  directly above it: the tender is created either way, with no opening balance rather than a
+  wrong one.
+
+### Scope: oil only, and nothing else moved
+
+Confirmed against the code, not assumed. The change adds `openingOil*` fields to the new AT
+document and reads `jobs`, `inspections` and `oilTransactions` to compute them. **It writes
+nothing to any job, inspection, estimate, bill or challan, and it does not touch `atId` on any
+record.** Old work stays under the tender it was booked into and is completed there, priced
+from that tender's own rate schedule and AT percentage (F72) — untouched, because pricing
+resolves from the job's `atId` and no `atId` changes here. A new tender still starts empty of
+work and now opens only with the previous tender's oil position.
+
+### Removed
+
+The button, the dialog, the two refusal states, `carryOilBalanceForward`, `previousAtFor`, the
+`unassignedOil` count and all twelve `[CARRY]` instrumentation points. The Tenders card keeps a
+read-only badge: the carried figure, its source tender, the division count, and whether it is
+approximate.
+
+**The F93 fixes are not lost, they are obsolete.** The silent refusal and the
+zero-as-unknown staleness were both defects of a confirmation path that no longer exists.
+The lessons stand recorded; the code they applied to is gone. That is the better outcome —
+`unassignedOil` needed three guards to be safe, and needing three guards was the signal.
+
+### Backfill
+
+ATs created before this change have no opening balance and never will, since the moment that
+writes it has passed. `scripts/admin/backfill-opening-oil.js`, dry run:
+
+```
+WOULD WRITE (1)
+  ADMIN — AT 2028-09   carried from AT 2026_27
+     DEESA  +2110.00 LTR   division owes the agency
+
+SKIPPED (6)
+  five ATs — no previous tender
+  UPENDRA AT2026-27 — AT 24-25 holds no jobs and no transactions
+```
+
+**Exactly one qualifies**, and the rule that excludes UPENDRA is the same one built into
+`addAtMaster` rather than a special case: its source tender is empty, so there is nothing to
+carry and a `0.00` would be an assertion the data cannot support.
+
+⚠ **A backfill snapshots today's data, not the data at rollover.** The automatic version
+computes the source tender's closing net **at the instant the new tender is created**; a
+backfill computes it **now**. For ADMIN — created recently, against data that has not moved
+since — those are the same number. For an older tender they would not be, and **the difference
+would be silent**: nothing in the stored fields distinguishes a figure captured at rollover
+from one reconstructed months later, and `openingOilBalanceAt` records when it was *written*,
+not what it was computed *from*.
+
+That is the whole reason this is a one-off script requiring approval rather than something the
+app runs on load. An automatic backfill would quietly restate history for every tender it
+touched.
+
+**Applied 2026-08-28.** One tender written:
+
+```
+AT 2028-09   openingOilBalance           2110
+             openingOilBalanceByDivision { "DEESA": 2110 }
+             openingOilBalanceFromAtId   krdXRrzgCl0aTbJNTiL4  (AT 2026_27)
+             openingOilBalanceIncomplete ABSENT — ADMIN has no unassigned work
+```
+
+The register reads **+2110.00 LTR — division owes the agency**, sourced from AT 2026_27. This
+is F88's opening-line rendering running against real data for the first time; it shipped
+unexercised and stayed that way through F92 for want of a tender that could carry anything.
+
+---
+
+## F97. A correct figure that reads as a typo
+
+Fresh oil's Gross Liters field was `readOnly`, with the tooltip *"Fresh oil is fixed at 210L
+per barrel."* A division can send a barrel short, so it is not fixed — the field enforced as
+policy what was only ever a convenience, and the tooltip stated it as fact.
+
+Now: the field accepts a typed value, a typed value survives a barrels change (the job-number
+field's rule), and `grossLitersManual` records that the default was overridden.
+
+### The interesting half is the display, not the input
+
+A short barrel stores `barrels: 1, grossLiters: 195`. **Every other Fresh row in the ledger is
+a multiple of 210**, so 195 beside "1 barrel" reads as a data-entry slip — and the person most
+likely to "correct" it is someone reconciling against the division months later, who has no way
+to know it was deliberate.
+
+**This is the audit's recurring plausible-value finding running backwards.** The usual case is
+a wrong number that looks right, and is therefore never questioned. Here it is a *right* number
+that looks *wrong*, and is therefore questioned — inviting a correction that would make it
+wrong. Both come from the same absence: nothing on the record distinguishes *recorded* from
+*mistaken*. A stored flag supplies it; recomputing the number cannot.
+
+The register shows a **manual** chip with the default in its tooltip; the Excel export carries
+a **"Gross source"** column reading `manual (default 210)` or `default` — a column rather than
+a symbol, because a spreadsheet is sorted, filtered and re-read by people who never saw the
+screen.
+
+### Fresh only
+
+`grossLitersManual` is never set for Used oil. Used has no default to override — its gross is
+measured every time — so a flag there would mark every row and mean nothing. A marker that
+fires on everything is not a marker.
+
+Nor is it set when the typed value *equals* the default: typing 210 back is agreeing with the
+default, not overriding it, and it restores the recompute-on-barrels-change behaviour.
+
+### Details that would have bitten
+
+- **`isValidOilTransaction` would NOT have rejected the new field.** The premise for checking
+  was right but the mechanism was not: that validator *names* fields and has no
+  `keys().hasOnly(...)`, so an unnamed field passes silently. F75 was a **type** mismatch on a
+  **named** field — `serverTimestamp()` resolving to `timestamp` against a clause reading
+  `is number || is string` — not an unknown-field rejection. The clause was added anyway: an
+  unvalidated field is a gap, since nothing bounds its type or size.
+- **`isManualGross` is computed once and used by both writes.** A flag set on create and
+  forgotten on update is how a corrected row loses its marker and starts reading as a typo
+  again — the one-call-site-guarded shape of F73, F81, F82.
+- **The edit path already loaded the stored gross** (`handleEdit`, not the line reported), so
+  no recomputation bug existed there. It now loads the flag too — and the compiler caught the
+  omission, because the form-state type made the field required.
+- **`FRESH_LITRES_PER_BARREL` is module scope**, so the number appears once instead of in the
+  four places that were drifting apart: initial state, cancel-reset, and the two recompute
+  handlers.
+
+### Deferred, not missing
+
+**A "why was the barrel short" note field was considered and declined.** It is a different
+requirement from "was this figure typed": the flag answers whether a reader should trust the
+number, the note answers what happened. An optional free-text field would be blank on the vast
+majority of rows, and a field that is usually empty trains people to skip it — including on the
+rows where it would have mattered. If the reason needs capturing, `remarks` on the transaction
+is the better shape and should be decided on its own terms, not smuggled in behind this.
+
+---
+
+## F98. A bug report describing the open dropdown, not the layout
+
+The sidebar tender control was reported as rendering a cramped stack:
+
+```
+Tender
+AT 2028-09
+AT 2026_27
+All tenders — viewing only
+Open to new work
+```
+
+**A collapsed native `<select>` can only ever show one option.** Two different AT numbers and
+the all-tenders option cannot appear at once, so that is not a layout — it is the **open
+dropdown overlaying the card**, with the label above and the state caption below still visible
+around it.
+
+Collapsed, it rendered three lines: label, selected option, state caption.
+
+### What was actually wrong
+
+```jsx
+className="mt-0.5 w-full bg-transparent text-xs font-bold outline-none cursor-pointer"
+```
+
+**No background, no border, no chevron, no padding** — and text weight nearly identical to the
+9px caption beneath it. The three lines read as one block of static text, and nothing said the
+middle one could be clicked. The alternatives *were* already behind the dropdown, exactly as
+the requirement asked; they only looked printed in the card because the control gave the OS
+option list nothing to sit against.
+
+**The symptom and the cause were in different places**, which is why the first proposed fix —
+move the control to the top bar — would have relocated the problem intact. A borderless select
+in a header reads as static text just as well as one in a sidebar.
+
+The general form, and the reason this is worth an entry: **a description of what a screen looks
+like is a description of a moment, and interactive controls have more than one.** "It renders
+as a stack" was true of the instant the reporter was looking at. Reconstructing which state
+that was is part of diagnosing it, and here it inverted the fix.
+
+### The restyle
+
+Same `<select>`, same values, same `setActiveAtMasterId` — no behaviour change. It now has a
+field background, a border, padding, a focus ring, and the **same `ChevronsUpDown` glyph the
+agency switcher uses**, deliberately: both controls choose the scope you work in, and a
+different visual treatment made the tender read as a lesser setting than the agency rather
+than its peer.
+
+The state moved from a body-text line beneath the value to a **dot-and-word chip on the label
+row** — `● Open`, `● Closed`, `● All tenders` — because "can I book against this?" is a
+property of the tender, not a third equal row. The full `gate.reason` moved to `title`.
+
+### The native control was kept, and the limit accepted
+
+A custom popover could style the option list too. It would also have to re-earn keyboard
+behaviour and the mobile picker, which the native element provides for free — not a trade worth
+making for a styling problem. **The open list is drawn by the OS and is not stylable. That is
+accepted and recorded, not worked around.**
+
+### A latent fault found while restyling
+
+The block used fixed light-on-dark colours — `text-emerald-200`, `text-amber-300` — with no
+reference to `isLight`, while every sibling element in the sidebar is theme-aware. On a light
+sidebar the tender name was close to invisible. **A restyle that preserved the palette would
+have preserved that**, so both the control and the no-tender branch are now theme-aware.
+
+---
+
+## F99. Three screens, five fetches — and why the count matters
+
+The tender filter reached six screens. External Inspection, Internal Inspection and Testing
+Report were excluded on the grounds that **they create nothing** — true, and beside the point:
+they *list pending work*, and that list was agency-scoped. An operator on AT 27-28 saw 26-27's
+pending inspections.
+
+### The count was three screens and five fetches
+
+**Both inspection screens fetch jobs twice** — once on mount, once in the save path to refresh
+after a batch commit. Only the mount fetch is visible from the top of the file.
+
+| screen | mount | save-path refresh |
+|---|---|---|
+| ExternalInspection | `:101` | **`:550`** |
+| InternalInspection | `:75` | **`:573`** |
+| TestingReport | `:97` | — (refetches via an effect on `isFormOpen`) |
+
+**Fixing the three obvious fetches and missing the two in the save paths would have produced a
+list that is correct on load and wrong after a save** — the intermittent version of the bug.
+That version is strictly harder to deal with than the original: it is harder to reproduce,
+harder to describe, and it presents as a refresh problem, which invites the wrong fix
+(re-query, add a key, force a remount) and can be dismissed as flakiness. The original bug at
+least fails the same way every time.
+
+This is the second time in this file that a save path has been the copy nobody looked at —
+see F45, where inspections were denied on create and worked on edit, and it "looked
+intermittent rather than broken".
+
+### The structural fix removes the possibility, rather than fixing both sites
+
+**The scope is applied where the list is BUILT, not on the queries.** Both fetches still read
+agency-wide and both call `setJobs`; a single derived `scopedJobs` filters what the screen
+renders. There is one place to get right and no second site to forget — a *count* of one
+instead of a discipline of two.
+
+It also pays for the note below from the same read: the one agency-wide fetch answers both
+"what is in scope" and "how much is not", instead of a scoped query plus a second agency-wide
+one that could disagree.
+
+`matchesAtScope(row, at, viewingAll)` is declared **beside** `atClause` in `AgencyContext`, and
+that adjacency is the point: two expressions of one rule that can drift is exactly F87, where a
+JavaScript `?? ''` guard and a Firestore `== ''` clause were assumed to agree and did not. Both
+handle the same three states, and a change to one is a change to the other.
+
+### The note
+
+A correct filter that makes work vanish with nothing explaining where it went **reads as data
+loss**. An operator whose 26-27 inspections have disappeared cannot tell "filtered" from
+"gone", and the second reading is the one that prompts re-entering the job.
+
+`OtherTenderNote` names the remedy rather than only the fact: *"3 pending external inspections
+belong to other tenders — switch tender in the sidebar to work on them."* Shown only when the
+count is non-zero, and never in all-tenders mode — there is no elsewhere when the scope is
+everywhere. Same reasoning as the MR Ledger's unassigned backlog banner (F82, F87).
+
+### Two optional-chained writes, worse than the queries they resembled
+
+`activeAgency?.id` appeared in four places across the two inspection screens. Two were query
+clauses — `where('agencyId','==', undefined)`, which matches nothing and returns an empty list
+rather than failing. **The other two were WRITES**: `agencyId: activeAgency?.id` inside an
+inspection payload, where `undefined` is dropped by Firestore, producing **an inspection with
+no `agencyId` at all** — invisible to every agency-scoped query, and indistinguishable from the
+pre-backfill records the surrounding comment was about.
+
+That is the empty-string-`atId` shape (F87) arriving on the write side: a value that silently
+means *belongs to nothing* instead of failing. All four normalised.
+
+⚠ **And the first comment written for the fix was wrong.** It said the enclosing handler
+returns when there is no active agency; it does not — the *component* returns early, so the
+form cannot be on screen without one. Corrected to name the real guard, because a comment
+asserting the wrong protection is what lets someone remove the right one. That is the fourth
+time this session a comment written alongside the code claimed behaviour the code did not have
+(F87, F88, F92).
+
+---
+
+## G1. The restraint was a `where` clause, not a boundary
+
+`isSuperAdmin()` appeared in **every** `allow create`, `update` and `delete` on `jobs`,
+`inspections`, `agencies`, `atMasters` and `oilTransactions`. O32 recorded this and drew the
+right conclusion about not exposing it in the UI; what it did not do was close it.
+
+**Nothing in the app reached it** — `AgencyContext` loads `where('ownerId','==',uid)`, so no
+screen could target another account's document. **That is a client-side convention.** A
+super-admin session with a browser console could write any record on any account, and
+`scripts/seed-agencies-from-public-config.js` is already write-capable in exactly that shape.
+
+This is not hypothetical. Live data holds three owners:
+
+```
+bhagwatielectricals20@gmail.com  → IDEAL ENGINEERING COMPANY
+utparekh007@gmail.com            → MEGHA, suchit, DRISHIV, AARATI TRANSFORMER
+shivaminfotech89@gmail.com       → ADMIN, UPENDRA          ← the vendor / super admin
+```
+
+**Two paying customers' records sat behind a `where` clause.**
+
+### What was removed
+
+`isSuperAdmin()` from create, update and delete on all five. `allow get, list` **keeps** it —
+diagnosing a customer's problem requires reading their state; authoring their records does not
+follow from it. The vendor-owned collections (`published_ats`, `public_config`,
+`system_config`, `user_roles`, `support_tickets`) are untouched and correctly still require it.
+
+Two powers were found in the sweep that were not in the original scope:
+
+1. **`allow create`** permitted authoring a document *owned by someone else* — the same
+   liability from the other end. Nothing writes an `ownerId` other than the signed-in uid.
+2. **The agencies `ownerId`-immutability clause** —
+   `(incoming().ownerId == existing().ownerId || isSuperAdmin() || ...)` — reads like a
+   permission check and was in fact an **ownership-transfer capability**. No path in the app
+   performs a transfer. `ownerId` is now immutable.
+
+### The check that made it safe
+
+Removing `isSuperAdmin()` leaves `existing().ownerId == request.auth.uid` as the only route,
+so **any document lacking an `ownerId` would become unwritable by everyone.** Verified before
+deploying: agencies 7, jobs 55, inspections 103, atMasters 7, oilTransactions 1 — **zero
+without one.** Nothing was orphaned.
+
+Confirmed unaffected: the admin scripts (`scripts/admin/_db.js` initialises `firebase-admin`,
+which bypasses rules entirely) and the `deleteIfEmpty` Cloud Function (`functions/index.js`
+uses the same SDK, so its `ref.delete()` never depended on the `atMasters` delete rule — which
+is `if false` regardless).
+
+### The one thing that broke, and why that was the moment to do it
+
+`AdminPanel.handleUpdateSubscription` called `updateAgency` against `allAgencies` — an
+**unfiltered** read of every agency on every account — so it wrote to customers' documents.
+It is the only app-side dependency that existed.
+
+**It wrote fields nothing reads** (O34), so the tightening broke a decoration. Subscription
+being deferred until the Razorpay work is what freed the ordering: subscription was the sole
+legitimate reason for cross-account write, and deferring it meant the rules could be tightened
+*first* and the feature built against them later.
+
+The controls are now inert and labelled *"Deferred until Razorpay"*, with the reason in a
+tooltip — **a control that fails loudly against a permission deliberately removed reads as a
+bug to whoever meets it next.** The writer itself was deleted rather than commented out, and
+`updateAgency` was removed from AdminPanel's destructure entirely: on a screen whose agency
+list is unfiltered by construction, any writer in scope is a cross-account write one call site
+from being reused.
+
+### The rule this leaves
+
+**When subscription is built, it belongs in a vendor-owned collection keyed by agency id —
+never as fields on the agency document.** That is what lets the vendor hold its own commercial
+data without holding write access to the customer's records. Putting it on the agency is what
+dragged blanket write permission along with it in the first place.
+
+And the general form: **"we won't build it" is not a control.** A capability that exists in the
+rules exists, whatever the UI chooses to reach. The audit had recorded the reasoning for a year
+of not exposing it; the reasoning was sound and the door was open the whole time.
 
 ---
 

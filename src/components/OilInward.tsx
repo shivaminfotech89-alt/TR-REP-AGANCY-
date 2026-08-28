@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { useAgency, atScope, NO_ACTIVE_AT, isIntakeOpen } from "../lib/AgencyContext";
+import { useAgency, isUnassigned, isIntakeOpen } from "../lib/AgencyContext";
 import { db, auth, handleFirestoreError, OperationType } from "../lib/firebase";
 import * as XLSX from "xlsx";
 import {
@@ -13,6 +13,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { formatDDMMYYYY, getMrDateIso } from '../lib/utils';
+import { describeOil } from '../lib/oilBalance';
 import {
   Droplet,
   Plus,
@@ -43,21 +44,58 @@ export interface OilTransaction {
    */
   atId?: string;
   grossLiters: number;
+  /**
+   * THE OPERATOR TYPED THIS GROSS RATHER THAN ACCEPTING `barrels x 210` (AUDIT F97).
+   *
+   * ⚠ FRESH ONLY, AND DELIBERATELY. Fresh oil arrives in sealed barrels, so 210 per barrel is
+   * the default and a deviation is a fact about the delivery - a division sent one short.
+   * USED oil has no such default: its gross is measured every time, so a flag on it would
+   * mark every row and mean nothing.
+   *
+   * ⚠ IT IS WHAT STOPS A CORRECT FIGURE LOOKING LIKE A TYPO. Every other Fresh row is a
+   * multiple of 210, so "1 barrel / 195.00" reads as a slip - and the person most likely to
+   * 'fix' it is someone reconciling months later who cannot know it was deliberate. The
+   * register and the Excel export mark the row.
+   */
+  grossLitersManual?: boolean;
   filtrationLossPercent: number;
   netLiters: number;
   createdAt?: any;
   ownerId?: string;
 }
 
-export default function OilInward() {
-  const { activeAgency, activeAtMaster, atMasters } = useAgency();
 /**
+ * FRESH OIL'S DEFAULT GROSS — a DEFAULT, not a rule (AUDIT F97).
+ *
+ * A sealed barrel holds 210 L, so that is what the form fills in. It is not a constraint: a
+ * division can send a barrel short, and the operator types the real figure over it. The field
+ * used to be `readOnly` for Fresh with a tooltip saying the quantity was fixed, which stated
+ * as policy something that was only ever a convenience.
+ *
+ * Module scope, so the form's initial state can use it - and so the number appears once
+ * rather than in four places that could drift.
+ */
+const FRESH_LITRES_PER_BARREL = 210;
+const defaultGrossFor = (barrels: number) => barrels * FRESH_LITRES_PER_BARREL;
+
+export default function OilInward() {
+  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
+
+  /**
    * NEW OIL ENTRIES OBEY THE TENDER GATE (AUDIT F83). Oil already recorded under this
    * tender stays visible and stays in its balance; only NEW entries are refused.
    */
-  const intakeGate = isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id));
+  const intakeGate = isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id), viewingAllTenders);
 
   const [transactions, setTransactions] = useState<OilTransaction[]>([]);
+  /**
+   * OIL BELONGING TO NO TENDER — held separately, shown separately, counted in NEITHER
+   * balance (AUDIT F87). Folding it into the tender's figures would attribute litres to a
+   * tender nobody said they belong to; dropping it is what the broken query already did.
+   */
+  const [unassignedTx, setUnassignedTx] = useState<OilTransaction[]>([]);
+  const [unassignedJobCount, setUnassignedJobCount] = useState(0);
+  const [showUnassignedOil, setShowUnassignedOil] = useState(false);
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,7 +116,8 @@ export default function OilInward() {
     division: "",
     oilType: "Fresh" as "Fresh" | "Used",
     barrels: 1,
-    grossLiters: 210,
+    grossLiters: FRESH_LITRES_PER_BARREL,
+    grossLitersManual: false,
   });
 
   const parseDateToTimestamp = (dateVal: any): number => {
@@ -155,28 +194,38 @@ export default function OilInward() {
       setInspections([]);
       setLoading(false);
     }
-  }, [activeAgency]);
+    // ⚠ THE TENDER IS A DEPENDENCY (AUDIT F89). The read is agency-wide but the SPLIT is
+    // per tender, so changing tender - or switching to "all tenders" - changes what the
+    // register must show. This listed only `activeAgency`, which was survivable while the
+    // query itself was tender-scoped only because switching tender also happened to
+    // remount; it is not survivable now that the split is done here.
+  }, [activeAgency, activeAtMaster?.id, viewingAllTenders]);
 
   const fetchData = async () => {
     setLoading(true);
     try {
       if (!auth.currentUser || !activeAgency) return;
 
+      // ⚠ ONE AGENCY-WIDE READ, SPLIT IN MEMORY (AUDIT F87). This used to be two
+      // tender-scoped queries, and both were `where("atId","==", <id>)` - which matched NONE
+      // of the four transactions in live data, because every one of them has the field
+      // ABSENT rather than empty and Firestore equality does not match a missing field. The
+      // register rendered empty against oil the DISCOM is owed.
+      //
+      // No query can fix that: "unassigned" is not expressible as a Firestore filter. Reading
+      // the agency's oil and splitting it here is the only way to show BOTH the tender's
+      // transactions and the ones belonging to no tender, and it removes the way two queries
+      // over the same data can disagree.
+      //
+      // OIL IS STILL PER TENDER (AUDIT F82), with one exception: the net balance at the close
+      // of a tender is what the agency owes or is owed, so it carries forward as the next
+      // tender's OPENING balance. Everything else starts empty.
       const [txSnap, jobsSnap, inspSnap] = await Promise.all([
         getDocs(
           query(
-            // ⚠ OIL IS PER TENDER (AUDIT F82), with ONE exception: the net balance at the
-            // close of a tender is what the agency owes or is owed, so it carries forward as
-            // the new tender's OPENING balance. Everything else starts empty.
-            //
-            // Transactions written before oil was stamped carry no atId and match no tender.
-            // They are NOT guessed at - three of the four in live data cannot be resolved at
-            // all, their MRs having no jobs to read a tender from - so they are surfaced as
-            // unassigned rather than attributed.
             collection(db, "oilTransactions"),
             where("ownerId", "==", auth.currentUser.uid),
             where("agencyId", "==", activeAgency.id),
-            where("atId", "==", atScope(activeAtMaster) ?? NO_ACTIVE_AT),
           ),
         ),
         getDocs(
@@ -184,7 +233,6 @@ export default function OilInward() {
             collection(db, "jobs"),
             where("ownerId", "==", auth.currentUser.uid),
             where("agencyId", "==", activeAgency.id),
-            where("atId", "==", atScope(activeAtMaster) ?? NO_ACTIVE_AT),
           ),
         ),
         getDocs(
@@ -195,13 +243,35 @@ export default function OilInward() {
         ),
       ]);
 
-      const txDocs = txSnap.docs.map(
+      const allTx = txSnap.docs.map(
         (d) => ({ id: d.id, ...d.data() }) as OilTransaction,
       );
-      txDocs.sort((a, b) => b.date - a.date);
-      setTransactions(txDocs);
+      allTx.sort((a, b) => b.date - a.date);
+      const allJobs = jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any);
 
-      setJobs(jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      /**
+       * ⚠ "ALL TENDERS" TAKES EVERYTHING, INCLUDING UNASSIGNED (AUDIT F89).
+       *
+       * The agency-wide net is every litre the agency was short and every litre it was
+       * issued, across its whole recorded history. Work belonging to no tender is still work
+       * the agency did, so excluding it here would reproduce the defect the unassigned
+       * section exists to fix - and the section is hidden in this mode precisely because the
+       * rows are already counted in the figures below.
+       *
+       * A single tender still takes only its own, and unassigned is surfaced separately.
+       * Two questions, two answers - see `openingForFilter` for the other half of it.
+       */
+      if (viewingAllTenders) {
+        setTransactions(allTx);
+        setJobs(allJobs);
+      } else {
+        // Unassigned is recognised, never queried for - `isUnassigned` treats an absent atId
+        // and an empty one alike, which is exactly what the query could not do.
+        setTransactions(allTx.filter(t => !isUnassigned(t) && String((t as any).atId) === activeAtMaster?.id));
+        setJobs(allJobs.filter(j => !isUnassigned(j) && String(j.atId) === activeAtMaster?.id));
+      }
+      setUnassignedTx(allTx.filter(isUnassigned));
+      setUnassignedJobCount(allJobs.filter(isUnassigned).length);
 
       const inspDocs = inspSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setInspections(inspDocs.filter((i: any) => i.type === "External"));
@@ -214,8 +284,12 @@ export default function OilInward() {
 
   const handleBarrelsChange = (barrelsStr: string) => {
     const barrels = parseFloat(barrelsStr) || 0;
-    if (formData.oilType === "Fresh") {
-      setFormData((prev) => ({ ...prev, barrels, grossLiters: barrels * 210 }));
+    // ⚠ A TYPED GROSS SURVIVES A BARRELS CHANGE (AUDIT F97), the same rule the job-number
+    // field follows: once the operator has stated a figure, an unrelated edit must not
+    // silently overwrite it. The hint under the field names the default and offers the way
+    // back, so gross refusing to move is explained rather than looking broken.
+    if (formData.oilType === "Fresh" && !formData.grossLitersManual) {
+      setFormData((prev) => ({ ...prev, barrels, grossLiters: defaultGrossFor(barrels) }));
     } else {
       setFormData((prev) => ({ ...prev, barrels }));
     }
@@ -223,13 +297,13 @@ export default function OilInward() {
 
   const handleOilTypeChange = (type: "Fresh" | "Used") => {
     if (type === "Fresh") {
-      setFormData((prev) => ({
-        ...prev,
-        oilType: type,
-        grossLiters: prev.barrels * 210,
-      }));
+      // Switching TO Fresh restores the default unless a figure was typed. Switching to Used
+      // clears the flag: Used has no default to have overridden (AUDIT F97).
+      setFormData((prev) => prev.grossLitersManual
+        ? { ...prev, oilType: type }
+        : { ...prev, oilType: type, grossLiters: defaultGrossFor(prev.barrels) });
     } else {
-      setFormData((prev) => ({ ...prev, oilType: type }));
+      setFormData((prev) => ({ ...prev, oilType: type, grossLitersManual: false }));
     }
   };
 
@@ -258,6 +332,14 @@ ${intakeGate.reason}`);
         formData.oilType,
       );
 
+      // ⚠ ONE DEFINITION, USED BY BOTH WRITES (AUDIT F97). A flag set on create and forgotten
+      // on update is how a corrected row loses its marker and starts reading as a typo again.
+      // A value that MATCHES the default is not manual, whatever was typed to reach it - there
+      // is nothing for a reader to be warned about.
+      const isManualGross =
+        formData.oilType === "Fresh" &&
+        Number(formData.grossLiters) !== defaultGrossFor(Number(formData.barrels));
+
       if (editingId) {
         const txRef = doc(db, "oilTransactions", editingId);
         await updateDoc(txRef, {
@@ -268,6 +350,7 @@ ${intakeGate.reason}`);
           oilType: formData.oilType,
           barrels: formData.barrels,
           grossLiters: formData.grossLiters,
+          grossLitersManual: isManualGross,
           filtrationLossPercent: formData.oilType === "Fresh" ? 0 : 5,
           netLiters,
         });
@@ -282,6 +365,7 @@ ${intakeGate.reason}`);
           oilType: formData.oilType,
           barrels: formData.barrels,
           grossLiters: formData.grossLiters,
+          grossLitersManual: isManualGross,
           filtrationLossPercent: formData.oilType === "Fresh" ? 0 : 5,
           netLiters,
           // WHICH TENDER THIS OIL BELONGS TO. Stamped at entry from the active AT, the same
@@ -308,7 +392,11 @@ ${intakeGate.reason}`);
       division: tx.division,
       oilType: tx.oilType,
       barrels: tx.barrels,
+      // ⚠ THE STORED VALUE, NEVER RECOMPUTED (AUDIT F97). Deriving it here would silently
+      // restore 210 on any row where a division sent a barrel short - the edit would undo the
+      // correction just by being opened.
       grossLiters: tx.grossLiters,
+      grossLitersManual: Boolean(tx.grossLitersManual),
     });
     setEditingId(tx.id!);
     setShowAddForm(true);
@@ -326,7 +414,8 @@ ${intakeGate.reason}`);
       division: divisions[0] || "",
       oilType: "Fresh",
       barrels: 1,
-      grossLiters: 210,
+      grossLiters: FRESH_LITRES_PER_BARREL,
+      grossLitersManual: false,
     });
   };
 
@@ -482,6 +571,72 @@ ${intakeGate.reason}`);
    */
   const openingByDivision = ((activeAtMaster as any)?.openingOilBalanceByDivision || {}) as Record<string, number>;
 
+  /** The tender the opening balance was carried FROM, named rather than implied (AUDIT F88). */
+  const openingSourceAt = useMemo(
+    () => atMasters.find(t => t.id === (activeAtMaster as any)?.openingOilBalanceFromAtId) || null,
+    [atMasters, activeAtMaster],
+  );
+  const openingSourceLabel = openingSourceAt
+    ? `AT ${openingSourceAt.atNumber || openingSourceAt.name}`
+    : 'the previous tender';
+
+  /**
+   * THE OPENING BALANCE THAT APPLIES TO WHAT IS ON SCREEN (AUDIT F88).
+   *
+   * ⚠ IT MUST FOLLOW THE DIVISION FILTER, and it did not. `subTotalNetBalance` added the
+   * AGENCY-WIDE opening figure to a division-filtered movement, so filtering the register to
+   * KALOL showed KALOL's shortage plus every division's carried balance and called the result
+   * KALOL's net. The per-division map recorded in F86 is exactly what makes the right answer
+   * available; nothing was reading it here.
+   *
+   * A division with no entry in the map opens at zero, which is correct: the map holds every
+   * division that had any movement in the source tender, so absence means no position.
+   */
+  const openingForFilter = useMemo(() => {
+    // ⚠ ZERO IN "ALL TENDERS" MODE, AND NOT BECAUSE THERE IS NO OPENING (AUDIT F89).
+    //
+    // An opening balance is not oil. It is a bookkeeping figure carried between tenders, and
+    // every litre behind it is ALREADY in the transaction and inspection history that the
+    // agency-wide view sums. Adding it would count those litres twice.
+    //
+    // The agency-wide question is a different question, with its own correct answer:
+    //   per tender  -> opening balance + that tender's movement
+    //   all tenders -> movement alone, across the agency's whole recorded history
+    // Both are right. Neither is the other with a filter relaxed.
+    if (viewingAllTenders) return 0;
+    if (!hasOpeningBalance) return 0;
+    if (filterDivision === 'All') return openingBalance;
+    return Number(openingByDivision[filterDivision] || 0);
+  }, [viewingAllTenders, hasOpeningBalance, openingBalance, openingByDivision, filterDivision]);
+
+  /** The F88 opening lines are per tender, so they do not exist in the agency-wide view. */
+  const showOpeningLines = hasOpeningBalance && !viewingAllTenders;
+
+  /**
+   * THE CARRIED FIGURE IS KNOWN TO BE SHORT (AUDIT F96). Set at rollover when the source
+   * tender held work belonging to no tender, which no per-tender balance can include. Carried
+   * anyway - blocking a rollover over old unstamped rows is worse than an approximate figure -
+   * so the register is where it must stop looking exact.
+   */
+  const openingIncomplete = (activeAtMaster as any)?.openingOilBalanceIncomplete as
+    { jobs: number; txns: number } | undefined;
+
+  /**
+   * THE OPENING POSITION AS LINES — one per division, plus the agency total (AUDIT F88).
+   *
+   * ONE SOURCE FOR EVERY PLACE IT IS SHOWN: the summary table's opening rows, the panel above
+   * the transactions table, and the Excel export. Three renderings of one computation, not
+   * three computations - the shape F82 and F87 were both about.
+   */
+  const openingLines = useMemo(() => {
+    if (!hasOpeningBalance) return [];
+    const divs = Object.entries(openingByDivision)
+      .filter(([div]) => filterDivision === 'All' || div === filterDivision)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([division, v]) => ({ division, litres: Number(v) || 0 }));
+    return divs;
+  }, [hasOpeningBalance, openingByDivision, filterDivision]);
+
   /** This tender's own movement, before anything carried in. */
   const tenderNetMovement = useMemo(() => {
     return subTotalShortage - subTotalReceived;
@@ -489,29 +644,75 @@ ${intakeGate.reason}`);
 
   /**
    * WHAT IS ACTUALLY OWED: what carried in, plus what this tender moved. A tender that
-   * opened owing 210 litres and consumed none still owes 210, and a register that showed 0
+   * opened at +210 litres and recorded no movement still stands at +210, and a register showing 0
    * would be reporting the paperwork rather than the oil.
    */
   const subTotalNetBalance = useMemo(() => {
-    return (hasOpeningBalance ? openingBalance : 0) + tenderNetMovement;
-  }, [hasOpeningBalance, openingBalance, tenderNetMovement]);
+    return openingForFilter + tenderNetMovement;
+  }, [openingForFilter, tenderNetMovement]);
 
   /**
    * THE FIGURE THAT WOULD CARRY FORWARD from this tender - offered for confirmation, never
-   * written on its own. See carryOilBalanceForward.
+   * written on its own. The carry happens automatically on tender creation (AUDIT F96).
    */
   const closingBalanceForCarry = subTotalNetBalance;
 
   const exportToExcel = () => {
     const wsData: any[][] = [];
 
-    const filterInfo = `Division: ${filterDivision} | Mode: ${filterDateMode === "upto" ? `Up to ${formatDDMMYYYY(filterUptoDate)}` : filterDateMode === "exact" ? `Date: ${formatDDMMYYYY(filterExactDate)}` : "All Dates"}`;
+    const filterInfo = `Tender: ${viewingAllTenders ? "ALL TENDERS" : (activeAtMaster ? `AT ${activeAtMaster.atNumber || activeAtMaster.name}` : "none")} | Division: ${filterDivision} | Mode: ${filterDateMode === "upto" ? `Up to ${formatDDMMYYYY(filterUptoDate)}` : filterDateMode === "exact" ? `Date: ${formatDDMMYYYY(filterExactDate)}` : "All Dates"}`;
+
+    /**
+     * THE OPENING POSITION IN THE EXPORT TOO (AUDIT F88).
+     *
+     * ⚠ THE SUB TOTAL ALREADY INCLUDED IT AND NOTHING SAID SO. `subTotalNetBalance` has
+     * carried the opening balance since F82, so the exported total was right while the rows
+     * above it did not add up to it - a spreadsheet that fails its own arithmetic check with
+     * no line to explain the difference. Whoever reconciled it would conclude the total was
+     * wrong, which is the opposite of what is true.
+     *
+     * The direction is written out per line, because a bare "-2120" in a cell someone opens
+     * six months from now says nothing about who owes whom.
+     */
+    /**
+     * THE AGENCY-WIDE CAVEATS TRAVEL WITH THE FILE (AUDIT F89). A spreadsheet outlives the
+     * screen it was exported from, and this one carries a figure someone may reconcile
+     * against the DISCOM's own account months later. Both limits are stated in the sheet.
+     */
+    const pushScopeNote = (width: number) => {
+      const pad = (cells: any[]) => [...cells, ...Array(Math.max(0, width - cells.length)).fill("")];
+      if (!viewingAllTenders) return;
+      wsData.push(pad(["SCOPE: ALL TENDERS — net from movement alone"]));
+      wsData.push(pad(["Opening balances are EXCLUDED: every litre behind them is already in the rows below, and including them would count those litres twice."]));
+      wsData.push(pad(["This is the app's recorded history. It matches the DISCOM's oil account only if the agency stood at zero with the division when these records began — any earlier position is not represented here."]));
+      wsData.push([]);
+    };
+
+    const pushOpeningRows = (width: number) => {
+      if (!showOpeningLines) return;
+      const pad = (cells: any[]) => [...cells, ...Array(Math.max(0, width - cells.length)).fill("")];
+      wsData.push(pad([`PREVIOUS AT NET PENDING — carried forward from ${openingSourceLabel}`]));
+      wsData.push(pad(["Division", "Net pending (LTR)", "Direction"]));
+      openingLines.forEach(({ division, litres }) => {
+        const d = describeOil(litres);
+        wsData.push(pad([division, Number(litres.toFixed(2)), d.direction]));
+      });
+      if (filterDivision === 'All') {
+        const d = describeOil(openingBalance);
+        wsData.push(pad(["All divisions", Number(openingBalance.toFixed(2)), d.direction]));
+      }
+      wsData.push([]);
+    };
 
     if (viewMode === "transactions") {
       wsData.push(["OIL INWARD TRANSACTIONS LEDGER"]);
       wsData.push([`Agency: ${activeAgency?.name || ""}`, filterInfo]);
       wsData.push([]);
-      wsData.push(["Receive Date", "MR No.", "MR Date", "Division", "Oil Type", "Barrels", "Gross (LTR)", "Loss %", "Net (LTR)"]);
+      pushScopeNote(10);
+      pushOpeningRows(10);
+      // "Gross source" rather than a symbol beside the number: a spreadsheet is sorted,
+      // filtered and re-read by people who never saw this screen (AUDIT F97).
+      wsData.push(["Receive Date", "MR No.", "MR Date", "Division", "Oil Type", "Barrels", "Gross (LTR)", "Gross source", "Loss %", "Net (LTR)"]);
       filteredTransactions.forEach((tx) => {
         const date = formatDDMMYYYY(tx.date);
         const mrDate = tx.mrDate || getMrDate(tx.mrNo);
@@ -523,6 +724,7 @@ ${intakeGate.reason}`);
           tx.oilType,
           tx.barrels,
           Number(tx.grossLiters.toFixed(2)),
+          tx.grossLitersManual ? `manual (default ${tx.barrels * FRESH_LITRES_PER_BARREL})` : "default",
           tx.filtrationLossPercent,
           Number(tx.netLiters.toFixed(2))
         ]);
@@ -530,11 +732,13 @@ ${intakeGate.reason}`);
       const totalGross = filteredTransactions.reduce((sum, item) => sum + item.grossLiters, 0);
       const totalNet = filteredTransactions.reduce((sum, item) => sum + item.netLiters, 0);
       wsData.push([]);
-      wsData.push(["Sub Total", "", "", "", "", "", Number(totalGross.toFixed(2)), "", Number(totalNet.toFixed(2))]);
+      wsData.push(["Sub Total", "", "", "", "", "", Number(totalGross.toFixed(2)), "", "", Number(totalNet.toFixed(2))]);
     } else {
       wsData.push(["OIL MR-WISE SHORTAGE & INWARD SUMMARY"]);
       wsData.push([`Agency: ${activeAgency?.name || ""}`, filterInfo]);
       wsData.push([]);
+      pushScopeNote(6);
+      pushOpeningRows(6);
       wsData.push(["MR No.", "MR Date", "Division", "Total Shortage (LTR)", "Oil Received (LTR)", "Net Pending / Shortage (LTR)"]);
       filteredSummary.forEach((summary) => {
         const pending = summary.totalShortage - summary.totalReceived;
@@ -556,6 +760,7 @@ ${intakeGate.reason}`);
         Number(subTotalReceived.toFixed(2)),
         Number(subTotalNetBalance.toFixed(2))
       ]);
+      wsData.push(["", "", "", "", "Direction", describeOil(subTotalNetBalance).direction]);
     }
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
@@ -575,6 +780,107 @@ ${intakeGate.reason}`);
 
   return (
     <div className="space-y-6">
+      {/* THE AGENCY-WIDE VIEW SAYS WHAT IT IS AND WHAT IT IS NOT (AUDIT F89).
+          Both caveats are on the screen rather than in a tooltip, because this figure is the
+          one an operator would quote to a division. */}
+      {viewingAllTenders && (
+        <div className="bg-indigo-50 border-2 border-indigo-300 rounded-xl p-3.5 space-y-2">
+          <p className="text-sm font-bold text-indigo-900">
+            Every tender &mdash; net from movement alone
+          </p>
+          <p className="text-xs text-indigo-900">
+            <strong>Opening balances are excluded.</strong> An opening balance is not oil; it is a
+            bookkeeping figure carried from one tender to the next, and every litre behind it is
+            already counted in the shortage and inward records below. Including it would count
+            those litres twice. This net is
+            {' '}<strong>total shortage &minus; total oil received</strong>, across every tender,
+            which is the same subtraction the DISCOM&rsquo;s oil account performs without its
+            opening column.
+          </p>
+          {/* ⚠ A CAVEAT WITH NO REMEDY IN THE APP, AND IT STILL HAS TO BE SAID (AUDIT F94).
+              It used to end with a link to a manual "record your day-one position" form. That
+              form is gone: where a previous tender exists the figure is DERIVED from its jobs
+              and transactions and the carry-forward records it, so asking someone to type a
+              number the app can compute was the wrong shape.
+
+              What the link offered a remedy for is unchanged and still true - a position that
+              predates the app's first record cannot be seen from inside the app. So the caveat
+              stays and simply stops pretending there is a button for it. A limit stated without
+              a fix is honest; a limit dropped because nothing can be done about it is not. */}
+          <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded-lg p-2.5">
+            <strong>This is the app&rsquo;s recorded history, not the division&rsquo;s.</strong> It matches
+            the DISCOM&rsquo;s oil account only if the agency stood at zero with the division when
+            these records began. Any position that predates them is not represented here, and the
+            two figures will differ by exactly that amount for as long as the account runs.
+            Reconcile against the division&rsquo;s own oil account before quoting this figure.
+          </p>
+        </div>
+      )}
+      {/* OIL BELONGING TO NO TENDER — reachable, countable, and NOT in the balance above
+          (AUDIT F87). The same treatment the unassigned jobs backlog gets in MrLedger, and
+          for the same reason: a filter working exactly as written while litres the DISCOM is
+          owed vanish from the screen is the shape this audit keeps recording. These are shown
+          whichever tender is selected, because they belong to none of them. */}
+      {/* HIDDEN IN "ALL TENDERS" MODE: there these rows are INCLUDED in the figures
+          below, so listing them separately would present counted work as missing
+          (AUDIT F89). Same reasoning as the MR Ledger banner. */}
+      {!viewingAllTenders && (unassignedTx.length > 0 || unassignedJobCount > 0) && (() => {
+        const litres = unassignedTx.reduce((s, t) => s + (Number((t as any).netLiters) || 0), 0);
+        return (
+          <div className="bg-amber-50 border-2 border-amber-300 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowUnassignedOil(o => !o)}
+              className="w-full text-left p-3.5 flex items-start gap-2.5 hover:bg-amber-100/60"
+            >
+              <Droplet className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-amber-900">
+                  {unassignedTx.length > 0 && (
+                    <>{unassignedTx.length} oil transaction{unassignedTx.length === 1 ? '' : 's'}
+                    {' '}({litres.toFixed(2)} LTR){unassignedJobCount > 0 ? ' and ' : ' '}</>
+                  )}
+                  {unassignedJobCount > 0 && (
+                    <>{unassignedJobCount} job{unassignedJobCount === 1 ? '' : 's'} </>
+                  )}
+                  belong to no tender
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
+                  They carry no AT, so they are in no tender&rsquo;s balance &mdash; not this
+                  one&rsquo;s and not any other&rsquo;s. Until each is attributed to the tender its
+                  MR belongs to, the balance below is the selected tender&rsquo;s alone and does
+                  not account for {unassignedTx.length > 0 ? `these ${litres.toFixed(2)} litres` : 'these jobs'}.
+                </p>
+              </div>
+              <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 text-white">
+                {showUnassignedOil ? 'Hide' : 'Show'}
+              </span>
+            </button>
+
+            {showUnassignedOil && unassignedTx.length > 0 && (
+              <div className="border-t-2 border-amber-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                {unassignedTx.map(t => (
+                  <div key={t.id} className="p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                    <span className="font-mono font-bold text-slate-900">MR {t.mrNo || '(no MR)'}</span>
+                    <span className="text-slate-600">{t.division || '(no division)'}</span>
+                    <span className="text-slate-600">{t.oilType}</span>
+                    <span className="font-mono font-bold text-slate-900">
+                      {(Number((t as any).netLiters) || 0).toFixed(2)} LTR
+                    </span>
+                    <span className="text-slate-500">
+                      {(() => {
+                        const ms = parseDateToTimestamp(t.date);
+                        return ms ? formatDDMMYYYY(new Date(ms).toISOString().slice(0, 10)) : '(no date)';
+                      })()}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* Top Header & Stat Cards */}
       <div className="bg-white p-6 rounded shadow-sm border border-slate-200 space-y-4">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -617,13 +923,17 @@ ${intakeGate.reason}`);
                 : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
               <div className="text-[10px] uppercase font-bold opacity-80">Opening balance</div>
               <div className="font-mono font-black text-sm">
-                {hasOpeningBalance
-                  ? `${openingBalance >= 0 ? '+' : ''}${openingBalance.toFixed(2)} LTR`
-                  : 'not carried forward'}
+                {viewingAllTenders ? 'excluded'
+                  : hasOpeningBalance ? describeOil(openingBalance).signed : 'not carried forward'}
               </div>
               <div className="text-[9px] opacity-70">
-                {hasOpeningBalance
-                  ? `carried from the previous tender`
+                {/* THE SOURCE TENDER BY NAME, and the direction in words (AUDIT F88). It said
+                    "the previous tender" while the record names exactly which one, and showed
+                    a sign with nothing saying which way it ran. */}
+                {viewingAllTenders
+                  ? 'not applicable across tenders — the movement below already contains it'
+                  : hasOpeningBalance
+                  ? `${describeOil(openingBalance).direction} · from ${openingSourceLabel}`
                   : 'no balance has been confirmed for this tender'}
               </div>
               {/* THE DIVISIONS BEHIND THE TOTAL. A single figure hides that one division is
@@ -647,7 +957,10 @@ ${intakeGate.reason}`);
                 Net Balance
               </div>
               <div className="text-base font-mono font-black">
-                {subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR
+                {describeOil(subTotalNetBalance).signed}
+              </div>
+              <div className="text-[9px] font-bold uppercase tracking-wide opacity-80">
+                {describeOil(subTotalNetBalance).direction}
               </div>
             </div>
           </div>
@@ -981,25 +1294,57 @@ ${intakeGate.reason}`);
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
                   Gross Liters
                 </label>
+                {/* ⚠ NO LONGER readOnly FOR FRESH, AND THE TOOLTIP NO LONGER SAYS IT IS
+                    (AUDIT F97). It read "Fresh oil is fixed at 210L per barrel", which was a
+                    policy statement the field enforced and which is not true: a division can
+                    send a barrel short. A tooltip left contradicting the control it labels is
+                    worse than no tooltip. */}
                 <input
                   required
                   type="number"
                   step="0.01"
                   value={formData.grossLiters}
-                  onChange={(e) =>
-                    setFormData({
-                      ...formData,
-                      grossLiters: parseFloat(e.target.value) || 0,
-                    })
-                  }
-                  className="w-full px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                  readOnly={formData.oilType === "Fresh"}
+                  onChange={(e) => {
+                    const typed = parseFloat(e.target.value) || 0;
+                    setFormData((prev) => ({
+                      ...prev,
+                      grossLiters: typed,
+                      // Typing the default back is not "manual" - it is agreeing with it, and
+                      // it restores the recompute-on-barrels-change behaviour.
+                      grossLitersManual:
+                        prev.oilType === "Fresh" && typed !== defaultGrossFor(prev.barrels),
+                    }));
+                  }}
+                  className={`w-full px-3 py-2 text-sm border rounded focus:ring-1 focus:ring-blue-500 bg-white ${
+                    formData.grossLitersManual ? 'border-amber-400 ring-1 ring-amber-200' : ''
+                  }`}
                   title={
                     formData.oilType === "Fresh"
-                      ? "Fresh oil is fixed at 210L per barrel"
+                      ? `Defaults to ${FRESH_LITRES_PER_BARREL} L per barrel. Type over it if the division sent a barrel short.`
                       : "Enter actual received quantity for used oil"
                   }
                 />
+                {/* THE HINT: why gross did not move, and the way back (AUDIT F97). Without it,
+                    typing barrels and seeing gross stay put reads as a broken field. */}
+                {formData.grossLitersManual && (
+                  <p className="mt-1 text-[11px] text-amber-800">
+                    <strong>Manual figure.</strong> The default for {formData.barrels}{' '}
+                    barrel{formData.barrels === 1 ? '' : 's'} would be{' '}
+                    {defaultGrossFor(formData.barrels)} L, and changing barrels will not
+                    overwrite what you typed.{' '}
+                    <button
+                      type="button"
+                      onClick={() => setFormData((prev) => ({
+                        ...prev,
+                        grossLiters: defaultGrossFor(prev.barrels),
+                        grossLitersManual: false,
+                      }))}
+                      className="font-bold underline hover:text-amber-900"
+                    >
+                      Use the default
+                    </button>
+                  </p>
+                )}
               </div>
 
               <div className="col-span-1 md:col-span-2 lg:col-span-1 flex items-end">
@@ -1056,6 +1401,79 @@ ${intakeGate.reason}`);
                 )}
               </div>
             </form>
+          </div>
+        )}
+
+        {/* THE OPENING POSITION ABOVE THE TRANSACTIONS LEDGER (AUDIT F88).
+            The same lines the summary register carries as rows, from the same computation -
+            rendered as a panel here only because this table's columns (barrels, gross, loss %)
+            have no meaning for a carried balance. The numbers are `openingLines`, never a
+            second derivation of them. */}
+        {!loading && showOpeningLines && viewMode === "transactions" && (
+          <div className="mx-4 mb-3 rounded-lg border border-indigo-200 bg-indigo-50 overflow-hidden">
+            <div className="px-3 py-2 border-b border-indigo-200 bg-indigo-100/70">
+              <span className="text-[10px] uppercase font-black tracking-widest text-indigo-900">
+                Previous AT net pending
+              </span>
+              <span className="ml-2 text-[11px] font-bold text-indigo-800">
+                carried forward from {openingSourceLabel}
+              </span>
+              {/* NEVER PRESENTED AS EXACT WHEN IT IS NOT (AUDIT F96). The rollover carried the
+                  figure rather than refusing over old unstamped rows; this is where that
+                  trade-off is disclosed. */}
+              {openingIncomplete && (
+                <div className="mt-1 text-[11px] text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1">
+                  <strong>Approximate.</strong> When this tender opened,{' '}
+                  {[openingIncomplete.txns > 0 && `${openingIncomplete.txns} oil transaction${openingIncomplete.txns === 1 ? '' : 's'}`,
+                    openingIncomplete.jobs > 0 && `${openingIncomplete.jobs} job${openingIncomplete.jobs === 1 ? '' : 's'}`]
+                    .filter(Boolean).join(' and ')}{' '}
+                  belonged to no tender, so no tender&rsquo;s closing balance accounted for them.
+                  This figure is short by whatever they hold.
+                </div>
+              )}
+            </div>
+            <div className="divide-y divide-indigo-200/70">
+              {openingLines.map(({ division, litres }) => {
+                const d = describeOil(litres);
+                return (
+                  <div key={`opening-panel-${division}`} className="px-3 py-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                    <span className="text-xs font-bold text-indigo-900">{division}</span>
+                    <span className="flex items-baseline gap-2">
+                      <span className={`font-mono font-black text-sm ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                        {d.signed}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-800">
+                        {d.direction}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })}
+              {filterDivision === 'All' && (() => {
+                const d = describeOil(openingBalance);
+                return (
+                  <div className="px-3 py-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 bg-indigo-100">
+                    <span className="text-xs font-black uppercase tracking-wider text-indigo-900">
+                      All divisions
+                    </span>
+                    <span className="flex items-baseline gap-2">
+                      <span className={`font-mono font-black text-sm ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                        {d.signed}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-800">
+                        {d.direction}
+                      </span>
+                    </span>
+                  </div>
+                );
+              })()}
+              {openingLines.length === 0 && (
+                <div className="px-3 py-2 text-[11px] text-indigo-800">
+                  The carried balance has no per-division breakdown recorded
+                  {filterDivision !== 'All' ? ` for ${filterDivision}` : ''}.
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -1127,8 +1545,19 @@ ${intakeGate.reason}`);
                         <td className="px-4 py-3 text-right font-mono">
                           {tx.barrels}
                         </td>
+                        {/* THE MARKER (AUDIT F97). Every other Fresh row is a multiple of
+                            210, so 195 beside "1 barrel" reads as a typo without it - and the
+                            reader most likely to 'correct' it is reconciling months later. */}
                         <td className="px-4 py-3 text-right font-mono">
                           {tx.grossLiters.toFixed(2)}
+                          {tx.grossLitersManual && (
+                            <span
+                              title={`Typed by the operator. The default for ${tx.barrels} barrel(s) would be ${tx.barrels * FRESH_LITRES_PER_BARREL} L.`}
+                              className="ml-1.5 align-middle text-[9px] font-bold uppercase tracking-wide text-amber-800 bg-amber-100 border border-amber-300 px-1 py-0.5 rounded"
+                            >
+                              manual
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-slate-400">
                           {tx.filtrationLossPercent}%
@@ -1193,6 +1622,64 @@ ${intakeGate.reason}`);
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
+                {/* THE OPENING POSITION, AS LINES IN THE REGISTER (AUDIT F88).
+                    Not a figure in a summary card off to one side - a labelled line per
+                    division at the head of the ledger, naming the tender it came from and
+                    saying in words which way it runs. A carried balance is part of what is
+                    owed, so it belongs in the register that reports what is owed. */}
+                {!loading && showOpeningLines && (
+                  <>
+                    {openingLines.map(({ division, litres }) => {
+                      const d = describeOil(litres);
+                      return (
+                        <tr key={`opening-${division}`} className="bg-indigo-50/60">
+                          <td className="px-4 py-2.5 font-bold text-indigo-900" colSpan={2}>
+                            Previous AT net pending &mdash; carried from {openingSourceLabel}
+                          </td>
+                          <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-indigo-900">
+                            {division}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-indigo-400" colSpan={2}>
+                            &mdash;
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                              {d.signed}
+                            </span>
+                            {/* THE DIRECTION IN WORDS, beside the number and not inferable
+                                from it. "-2120.00" alone does not say who owes whom. */}
+                            <span className="block text-[10px] font-bold uppercase tracking-wide text-indigo-800">
+                              {d.direction}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                    {/* The agency total alongside the divisions, because both are settled:
+                        the divisions individually, and the agency's overall position. */}
+                    {filterDivision === 'All' && (() => {
+                      const d = describeOil(openingBalance);
+                      return (
+                        <tr className="bg-indigo-100 border-t border-indigo-200">
+                          <td className="px-4 py-2.5 font-black text-indigo-900 uppercase text-xs tracking-wider" colSpan={3}>
+                            Opening balance, all divisions &mdash; carried from {openingSourceLabel}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-mono text-indigo-400" colSpan={2}>
+                            &mdash;
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                              {d.signed}
+                            </span>
+                            <span className="block text-[10px] font-bold uppercase tracking-wide text-indigo-800">
+                              {d.direction}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })()}
+                  </>
+                )}
                 {loading ? (
                   <tr>
                     <td
@@ -1246,14 +1733,25 @@ ${intakeGate.reason}`);
                     );
                   })
                 )}
-                {/* Aggregate Totals Row */}
-                {!loading && filteredSummary.length > 0 && (
+                {/* Aggregate Totals Row.
+                    ⚠ ALSO RENDERED WITH NO MR ROWS, when a balance carried in (AUDIT F88). A
+                    tender that opened at +2120 litres and has recorded no movement yet still
+                    stands at +2120, and suppressing the total because the MR list is empty would
+                    report the paperwork rather than the oil. */}
+                {!loading && (filteredSummary.length > 0 || showOpeningLines) && (() => {
+                  const d = describeOil(subTotalNetBalance);
+                  return (
                   <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
                     <td
                       colSpan={3}
                       className="px-4 py-3 text-right uppercase text-xs tracking-wider"
                     >
                       SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${formatDDMMYYYY(filterUptoDate)}` : ''}):
+                      {showOpeningLines && (
+                        <span className="block normal-case tracking-normal text-[10px] font-semibold text-indigo-800">
+                          includes {describeOil(openingForFilter).signed} carried from {openingSourceLabel}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-right font-mono text-amber-700 font-bold">
                       {subTotalShortage.toFixed(2)}
@@ -1261,13 +1759,17 @@ ${intakeGate.reason}`);
                     <td className="px-4 py-3 text-right font-mono text-blue-700 font-bold">
                       {subTotalReceived.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono font-black">
-                      <span className={subTotalNetBalance > 0 ? 'text-red-700' : subTotalNetBalance < 0 ? 'text-emerald-700' : 'text-slate-900'}>
-                        {subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)}
+                    <td className="px-4 py-3 text-right">
+                      <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
+                        {d.signed}
+                      </span>
+                      <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-700">
+                        {d.direction}
                       </span>
                     </td>
                   </tr>
-                )}
+                  );
+                })()}
               </tbody>
             </table>
           )}

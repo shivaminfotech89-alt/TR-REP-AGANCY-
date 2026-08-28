@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useAgency, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
+import { useAgency, isUnassigned } from '../lib/AgencyContext';
+import { computeOilBalance, describeOil } from '../lib/oilBalance';
 import { AllotmentWidget } from './AllotmentWidget';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -30,14 +31,13 @@ import {
 } from 'lucide-react';
 import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
-/** The Dashboard's "every tender" scope. Its own value - see the note on dashScope. */
-const DASH_ALL = '__all_tenders__';
-
 export default function Dashboard() {
-  const { activeAgency, activeAtMaster, atMasters } = useAgency();
+  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
   
   const [jobs, setJobs] = useState<any[]>([]);
   const [oilTransactions, setOilTransactions] = useState<any[]>([]);
+  /** External inspections — the SHORTAGE side of the oil balance (AUDIT F95). */
+  const [inspections, setInspections] = useState<any[]>([]);
   /**
    * EVERY job of this agency, across all tenders — for guarantee tracking only.
    *
@@ -49,37 +49,62 @@ export default function Dashboard() {
   const [allAgencyJobs, setAllAgencyJobs] = useState<any[]>([]);
 
   /**
-   * THE DASHBOARD CHOOSES ITS OWN SCOPE — and changes nothing else (AUDIT F86).
+   * THE DASHBOARD HONOURS THE GLOBAL SCOPE — it no longer has one of its own (AUDIT F87).
    *
-   * ⚠ LOCAL, AND THIS IS THE SAME DECISION AS THE ESTIMATE MASTER TENDER SELECTOR (F79).
-   * Written out here so a third scope selector follows it rather than re-deciding: a control
-   * on a VIEWING screen must not change what the app WORKS in. Letting this set the active
-   * AT would mean opening the overview silently re-points what New Job books against, which
-   * allotment is checked, and what every other screen shows - a read causing a mutation,
-   * the shape removed in F70 and F72.
+   * It DID, deliberately and correctly, while the sidebar's selector was the working control
+   * and this one was for viewing (F86). Two selectors for the same word turned out to be the
+   * problem rather than the safeguard: the operator could not tell which one governed what
+   * New Job would book into, which is precisely the confusion the tender scope exists to
+   * remove. ONE CONTROL, ONE MEANING.
    *
-   * It DEFAULTS to the sidebar's tender, so the two agree unless the operator chooses
-   * otherwise, and the divergence is stated when it exists.
+   * ⚠ THE F86 REASONING STILL STANDS AND IS WHY THE SIDEBAR SELECTOR IS THE ONE THAT SURVIVED,
+   * not this one. A control on a VIEWING screen must not change what the app WORKS in - so
+   * making THIS selector global was rejected: it would mean opening the overview silently
+   * re-points intake, and that the only route to changing the working tender runs through a
+   * read-only screen. A read causing a mutation is the shape removed in F70 and F72.
    *
-   * ⚠ `DASH_ALL` IS ITS OWN VALUE, NOT AN OVERLOADED null. Null already means "no tender /
-   * not loaded yet"; during the initial load it would otherwise read as "show every tender
-   * at once" and flash cross-tender figures before the real ones arrive.
+   * Nothing here sets scope. The sidebar does, including "All tenders".
    */
-  const [dashScope, setDashScope] = useState<string | null>(null);
-  const effectiveScope = dashScope ?? activeAtMaster?.id ?? DASH_ALL;
-  const showingAll = effectiveScope === DASH_ALL;
-  const scopedAt = showingAll ? null : (atMasters.find(t => t.id === effectiveScope) || null);
-  const dashDiverged = !showingAll && Boolean(activeAtMaster) && effectiveScope !== activeAtMaster?.id;
+  const showingAll = viewingAllTenders;
+  const scopedAt = activeAtMaster;
 
-  /** The jobs the counts are built from: one tender's, or every tender's. */
-  const scopedJobs = useMemo(
-    () => showingAll ? allAgencyJobs : allAgencyJobs.filter((j: any) => String(j.atId ?? '') === effectiveScope),
-    [allAgencyJobs, showingAll, effectiveScope],
+  /**
+   * Work in NO tender. Counted from the agency-wide set already in hand - not queried for,
+   * because no Firestore equality matches an absent `atId` (AUDIT F87).
+   */
+  const unassignedCount = useMemo(
+    () => allAgencyJobs.filter(isUnassigned).length,
+    [allAgencyJobs],
   );
-  const scopedOil = useMemo(
-    () => showingAll ? oilTransactions : oilTransactions.filter((t: any) => String(t.atId ?? '') === effectiveScope),
-    [oilTransactions, showingAll, effectiveScope],
-  );
+
+  /**
+   * THE THREE SCOPE STATES, SPELLED OUT (AUDIT F95).
+   *
+   * ⚠ THE NO-TENDER CASE USED TO BE RIGHT BY ACCIDENT. The filter was
+   * `String(j.atId ?? '') === activeAtMaster?.id`, and with nothing selected that compares a
+   * string to `undefined` - never equal, so nothing matched, so the screen showed nothing.
+   * The right answer, reached by a coincidence of types rather than by any statement of
+   * intent, and one "tidy-up" away from silently showing every tender at once.
+   *
+   * `strictNullChecks` is off in this project, so the compiler had nothing to say about it
+   * either (F93). Written as an explicit branch instead:
+   *
+   *   all tenders  -> everything, unassigned included
+   *   one tender   -> that tender's rows
+   *   no tender    -> NOTHING, deliberately - the honest answer to "show me the selected
+   *                   tender's work" when none is selected (see NO_ACTIVE_AT).
+   */
+  const scopedJobs = useMemo(() => {
+    if (showingAll) return allAgencyJobs;
+    if (!activeAtMaster) return [];
+    return allAgencyJobs.filter((j: any) => String(j.atId ?? '') === activeAtMaster.id);
+  }, [allAgencyJobs, showingAll, activeAtMaster]);
+
+  const scopedOil = useMemo(() => {
+    if (showingAll) return oilTransactions;
+    if (!activeAtMaster) return [];
+    return oilTransactions.filter((t: any) => String(t.atId ?? '') === activeAtMaster.id);
+  }, [oilTransactions, showingAll, activeAtMaster]);
   const [loading, setLoading] = useState(true);
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [activeKvaTab, setActiveKvaTab] = useState<'repaired' | 'under_repair' | 'scrap'>('repaired');
@@ -89,6 +114,7 @@ export default function Dashboard() {
     if (!auth.currentUser || !activeAgency) {
       setJobs([]);
       setOilTransactions([]);
+      setInspections([]);
       setLoading(false);
       return;
     }
@@ -108,7 +134,16 @@ export default function Dashboard() {
       // that can be "all tenders", so re-querying on every change would cost a round trip
       // to answer a question the data already in hand can answer. It also removes the one
       // way a tender-scoped query and an agency-wide one can disagree: there is only one.
-      const [allJobsSnap, allOilSnap] = await Promise.all([
+      //
+      // ⚠ INSPECTIONS ARE READ TOO, and the oil card is the only reason (AUDIT F95). The oil
+      // balance is `shortage − received`, and the SHORTAGE side lives in external inspections,
+      // not in oilTransactions. Reading only transactions is what made this card a receipts
+      // summary wearing the account's name.
+      //
+      // Not agency-filtered, because `inspections` carries no agencyId - it is keyed to jobs.
+      // `computeOilBalance` matches each job to its own inspection, so the extra rows are
+      // inert; the register reads it exactly the same way.
+      const [allJobsSnap, allOilSnap, inspSnap] = await Promise.all([
         getDocs(query(
           collection(db, 'jobs'),
           where('ownerId', '==', auth.currentUser.uid),
@@ -118,6 +153,10 @@ export default function Dashboard() {
           collection(db, 'oilTransactions'),
           where('ownerId', '==', auth.currentUser.uid),
           where('agencyId', '==', activeAgency.id)
+        )),
+        getDocs(query(
+          collection(db, 'inspections'),
+          where('ownerId', '==', auth.currentUser.uid)
         ))
       ]);
 
@@ -135,6 +174,7 @@ export default function Dashboard() {
 
       setJobs(fetchedJobs);
       setOilTransactions(fetchedOil);
+      setInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (err) {
       handleFirestoreError(err, OperationType.LIST, 'jobs');
     } finally {
@@ -323,27 +363,36 @@ export default function Dashboard() {
     return map;
   }, [jobs]);
 
-  // Oil Accounting Summary
+  /**
+   * THE OIL ACCOUNT POSITION — the SAME computation the register runs (AUDIT F95).
+   *
+   * ⚠ THIS CARD USED TO MEASURE SOMETHING ELSE AND WAS TITLED AS THIS. It summed
+   * `grossLiters` and took 5% off, which is oil RECEIVED - the inward side alone. The Oil
+   * Account register shows `shortage − received`, a signed position that can run either way.
+   * Two different quantities, one card title, and a link between them.
+   *
+   * It only became visible when the last oil transaction was deleted (F91): the card read
+   * "No oil records logged yet" while the register showed +2110.00 LTR for the same tender.
+   * Before that it showed a number, and a number nobody could reconcile is the harder failure
+   * to notice - see the closing essay on plausible values.
+   *
+   * ⚠ ONE IMPLEMENTATION, NOT TWO. `computeOilBalance` is the shared one (F82). A second copy
+   * of a figure the DISCOM is settled against is the F41/F55, F68 and F81 shape, and this was
+   * an instance of it hiding behind a difference in units.
+   */
   const oilMetrics = useMemo(() => {
-    let totalGrossLiters = 0;
-    let totalBarrels = 0;
-
-    scopedOil.forEach((tx: any) => {
-      totalGrossLiters += Number(tx.grossLiters || 0);
-      totalBarrels += Number(tx.barrels || 0);
+    const balance = computeOilBalance({
+      jobs: scopedJobs,
+      inspections,
+      transactions: scopedOil,
     });
-
-    const filtrationLoss = totalGrossLiters * 0.05;
-    const netUsableLiters = totalGrossLiters - filtrationLoss;
-
     return {
-      totalGrossLiters,
-      totalBarrels,
-      filtrationLoss,
-      netUsableLiters,
-      transactionCount: scopedOil.length
+      ...balance,
+      // A zero from an empty set and a zero from a settled account are different statements,
+      // and the card says which - hence counting the inputs, not just the total.
+      hasAnything: balance.jobsCounted > 0 || balance.transactionsCounted > 0,
     };
-  }, [scopedOil]);
+  }, [scopedJobs, scopedOil, inspections]);
 
   // Guarantee Monitoring
   const guaranteeStats = useMemo(() => {
@@ -384,44 +433,37 @@ export default function Dashboard() {
   return (
     <div className="space-y-4 max-w-[1440px] mx-auto pb-10 px-1 sm:px-2">
       
-      {/* THE DASHBOARD'S OWN SCOPE — local, and it changes nothing else (AUDIT F86).
-          Same decision as the Estimate Master tender selector (F79): a control on a viewing
-          screen must not change what the app works in. Defaults to the sidebar's tender;
-          says so when the two differ. */}
+      {/* WHAT THESE FIGURES COVER — stated, not selected (AUDIT F87). The scope control is
+          the sidebar's, and it is the only one; this says what it currently means so the
+          numbers are never read as the agency's when they are one tender's. */}
       <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2">
         <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Showing</span>
-        <select
-          value={effectiveScope}
-          onChange={e => setDashScope(e.target.value)}
-          className="px-2.5 py-1 text-xs font-bold rounded-lg border border-slate-300 bg-white text-slate-900"
-        >
-          <option value={DASH_ALL}>All tenders</option>
-          {atMasters
-            .filter(t => t.agencyId === activeAgency?.id)
-            .slice()
-            .sort((x, y) => (y.startDate || 0) - (x.startDate || 0))
-            .map(t => (
-              <option key={t.id} value={t.id}>
-                AT {t.atNumber || t.name}
-                {String(t.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
-              </option>
-            ))}
-        </select>
-        {showingAll && (
+        {showingAll ? (
           <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
             totals across every tender
           </span>
-        )}
-        {dashDiverged && (
-          <span className="text-[11px] text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full">
-            Not the tender you are working in &mdash; New Job books against AT{' '}
-            {activeAtMaster?.atNumber || activeAtMaster?.name}
+        ) : scopedAt ? (
+          <span className="text-xs font-bold text-slate-900">
+            AT {scopedAt.atNumber || scopedAt.name}
+            {String(scopedAt.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
+          </span>
+        ) : (
+          <span className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full">
+            no tender selected &mdash; nothing to show
           </span>
         )}
-        {showingAll && activeAtMaster && (
-          <span className="text-[11px] text-slate-600">
-            New Job books against AT {activeAtMaster.atNumber || activeAtMaster.name}
-          </span>
+        <span className="text-[11px] text-slate-500">
+          Change it with the Tender selector in the sidebar.
+        </span>
+        {/* Unassigned work is in NO tender, so a tender-scoped Dashboard excludes it. Said
+            plainly rather than left to be discovered from a total that looks complete. */}
+        {!showingAll && unassignedCount > 0 && (
+          <Link
+            to="/mr-ledger"
+            className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full hover:bg-amber-100"
+          >
+            {unassignedCount} job{unassignedCount === 1 ? '' : 's'} belong to no tender &mdash; not counted here
+          </Link>
         )}
       </div>
 
@@ -1047,26 +1089,41 @@ export default function Dashboard() {
               </Link>
             </div>
 
-            {oilMetrics.transactionCount === 0 ? (
+            {/* BARRELS AND GROSS ARE GONE (AUDIT F95). They are a receipts detail, and on a
+                card titled "Oil Account Ledger" that links to the register they read as the
+                account position. The two lines below are the register's own subtraction. */}
+            {!oilMetrics.hasAnything ? (
               <div className="bg-slate-50 p-3 rounded-lg text-center text-xs text-slate-400">
                 No oil records logged yet.
               </div>
-            ) : (
-              <div className="space-y-1.5 text-[11px]">
-                <div className="flex justify-between">
-                  <span className="text-slate-500">Total Received:</span>
-                  <span className="font-mono font-bold text-slate-900">{oilMetrics.totalGrossLiters.toLocaleString()} L ({oilMetrics.totalBarrels} bbl)</span>
+            ) : (() => {
+              const d = describeOil(oilMetrics.net);
+              return (
+                <div className="space-y-1.5 text-[11px]">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Shortage:</span>
+                    <span className="font-mono font-bold text-amber-700">{oilMetrics.shortage.toFixed(2)} L</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">Oil received:</span>
+                    <span className="font-mono font-bold text-blue-700">{oilMetrics.received.toFixed(2)} L</span>
+                  </div>
+                  <div className="pt-1 border-t border-slate-100">
+                    <div className="flex justify-between">
+                      <span className="font-bold text-slate-900">Net balance:</span>
+                      <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
+                        {d.signed}
+                      </span>
+                    </div>
+                    {/* The direction in words, from the one helper — "-2120" alone does not
+                        say who owes whom (AUDIT F88). */}
+                    <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500 text-right">
+                      {d.direction}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-500">5% Filtration Norm:</span>
-                  <span className="font-mono text-red-600 font-bold">-{oilMetrics.filtrationLoss.toFixed(1)} L</span>
-                </div>
-                <div className="flex justify-between pt-1 border-t border-slate-100">
-                  <span className="font-bold text-slate-900">Net Usable:</span>
-                  <span className="font-mono font-black text-emerald-600">{oilMetrics.netUsableLiters.toFixed(1)} L</span>
-                </div>
-              </div>
-            )}
+              );
+            })()}
           </div>
 
           <Link to="/oil-inward" className="mt-3 pt-2 border-t border-slate-100 text-[11px] text-sky-700 font-bold flex items-center justify-between hover:underline">

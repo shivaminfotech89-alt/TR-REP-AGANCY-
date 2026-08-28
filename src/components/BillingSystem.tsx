@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
-import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atScope, NO_ACTIVE_AT } from '../lib/AgencyContext';
+import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate } from '../lib/estimateCalc';
 import { classifyCoreType } from './SingleJobEstimateReport';
@@ -50,7 +50,7 @@ export function numberToIndianWords(num: number): string {
 }
 
 export default function BillingSystem() {
-  const { activeAgency, activeAtMaster, atMasters, updateAgency } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, updateAgency, viewingAllTenders } = useAgency();
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams<{ mrNo?: string }>();
   const navigate = useNavigate();
@@ -172,7 +172,7 @@ export default function BillingSystem() {
             collection(db, 'jobs'),
             where('ownerId', '==', auth.currentUser.uid),
             where('agencyId', '==', activeAgency.id),
-            where('atId', '==', atScope(activeAtMaster) ?? NO_ACTIVE_AT),
+            ...atClause(activeAtMaster, viewingAllTenders),
           )),
           getDocs(query(
             collection(db, 'inspections'),

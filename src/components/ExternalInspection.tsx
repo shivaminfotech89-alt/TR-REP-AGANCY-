@@ -1,6 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
+import { matchesAtScope } from '../lib/AgencyContext';
+import { OtherTenderNote } from './OtherTenderNote';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles, Scale, Cpu, AlertTriangle, CheckCircle2, X } from 'lucide-react';
@@ -75,9 +77,35 @@ export const getStandardOilCapacity = (kva: number | string): number => {
 };
 
 export default function ExternalInspection() {
-  const { activeAgency } = useAgency();
+  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
+
+  /**
+   * ⚠ THE SCOPE IS APPLIED HERE, NOT AT THE QUERY — AND THAT IS THE POINT (AUDIT F99).
+   *
+   * This screen fetches jobs from TWO places: on mount, and again after a save. Putting the
+   * tender clause on the queries would mean fixing both, and missing the second would give a
+   * list that is right on load and wrong after a save - the intermittent version of the bug,
+   * harder to report and easy to dismiss as a refresh problem. Filtering where the list is
+   * BUILT means there is one place to get right and no second site to forget.
+   *
+   * It also pays for the note below with no extra read: the same agency-wide fetch answers
+   * "what is in scope" and "how much is not".
+   */
+  const scopedJobs = useMemo(
+    () => jobs.filter(j => matchesAtScope(j, activeAtMaster, viewingAllTenders)),
+    [jobs, activeAtMaster, viewingAllTenders],
+  );
+
+  /** Pending EXTERNAL inspections sitting under a different tender. */
+  const otherTenderPending = useMemo(() => {
+    if (viewingAllTenders) return 0;
+    return jobs.filter(j =>
+      !matchesAtScope(j, activeAtMaster, viewingAllTenders) &&
+      j.status !== 'Cancelled' && !j.isCancelled && j.mrStatus !== 'Cancelled' &&
+      !isJobExternallyDone(j, inspections)).length;
+  }, [jobs, inspections, activeAtMaster, viewingAllTenders]);
   const [loading, setLoading] = useState(true);
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
@@ -293,8 +321,8 @@ export default function ExternalInspection() {
 
   const mrJobs = useMemo(() => {
     if (!selectedMrNo) return [];
-    return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
-  }, [jobs, selectedMrNo]);
+    return scopedJobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
+  }, [scopedJobs, selectedMrNo]);
 
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
@@ -504,7 +532,17 @@ export default function ExternalInspection() {
           ownerId: auth.currentUser.uid,
           // Stamped for future agency-scoped queries. Existing records predate this
           // field, so nothing may filter on it until they're backfilled.
-          agencyId: activeAgency?.id,
+          //
+          // ⚠ NOT `activeAgency?.id` (AUDIT F99). Optional chaining here writes `undefined`,
+          // which Firestore drops - producing an inspection with NO agencyId, invisible to
+          // every agency-scoped query and indistinguishable from the pre-backfill records
+          // this comment is about. The same shape as an empty-string atId: a value that
+          // silently means "belongs to nothing" rather than failing.
+          //
+          // Safe because the COMPONENT returns early when there is no active agency, so this
+          // form cannot be on screen without one - not because this handler checks. If that
+          // render guard is ever removed, this line needs its own.
+          agencyId: activeAgency.id,
         };
         
         if (!jobData.inspectionId) {
@@ -549,7 +587,7 @@ export default function ExternalInspection() {
       const jobsQ = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
-        where('agencyId', '==', activeAgency?.id)
+        where('agencyId', '==', activeAgency.id)
       );
       const [jobsSnap, inspSnap] = await Promise.all([
         getDocs(jobsQ),
@@ -572,7 +610,7 @@ export default function ExternalInspection() {
 
   // Group OGP jobs by MR No for the selection list
   const mrGroups: Record<string, any[]> = {};
-  jobs.forEach(j => {
+  scopedJobs.forEach(j => {
     if (j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled') return;
     if (divisionFilter !== 'All' && j.division !== divisionFilter) return;
     if (!matchesGpFilter(j, gpFilter)) return;
@@ -591,7 +629,7 @@ export default function ExternalInspection() {
     return '';
   };
   
-  const availableDivisions = Array.from(new Set(jobs.map(j => j.division).filter(Boolean))).sort();
+  const availableDivisions = Array.from(new Set(scopedJobs.map(j => j.division).filter(Boolean))).sort();
   
   // Filter MRs by Pending/Completed based on job statuses
   const uniqueMrNos = Object.keys(mrGroups).filter(mr => {
@@ -956,6 +994,8 @@ export default function ExternalInspection() {
           </p>
         </div>
       </div>
+
+      {!selectedMrNo && <OtherTenderNote count={otherTenderPending} noun="external inspection" />}
 
       {!selectedMrNo ? (
         <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">

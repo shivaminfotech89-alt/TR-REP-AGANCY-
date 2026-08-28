@@ -12,7 +12,8 @@ import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 import { getJobFullEstimate, checkJobCircleLimit } from '../lib/estimateCalc';
-import { atForJob } from '../lib/AgencyContext';
+import { atForJob, matchesAtScope } from '../lib/AgencyContext';
+import { OtherTenderNote } from './OtherTenderNote';
 
 export interface InternalData {
   windingType: string;
@@ -47,10 +48,32 @@ export interface InternalData {
 }
 
 export default function InternalInspection() {
-  const { activeAgency, activeAtMaster, atMasters } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]); // Internal-type only
   const [externalInspections, setExternalInspections] = useState<any[]>([]);
+
+  /**
+   * ⚠ THE SCOPE IS APPLIED HERE, NOT AT THE QUERY (AUDIT F99). This screen fetches jobs on
+   * mount AND after a save; filtering where the list is built leaves one place to get right
+   * instead of two, and the second is the one that produces a list correct on load and wrong
+   * after a save. The same agency-wide read also answers "how much is out of scope" for the
+   * note, with no extra round trip.
+   */
+  const scopedJobs = useMemo(
+    () => jobs.filter(j => matchesAtScope(j, activeAtMaster, viewingAllTenders)),
+    [jobs, activeAtMaster, viewingAllTenders],
+  );
+
+  /** Pending INTERNAL inspections under a different tender: externally done, internally not. */
+  const otherTenderPending = useMemo(() => {
+    if (viewingAllTenders) return 0;
+    return jobs.filter(j =>
+      !matchesAtScope(j, activeAtMaster, viewingAllTenders) &&
+      j.status !== 'Cancelled' && !j.isCancelled && j.mrStatus !== 'Cancelled' &&
+      isJobExternallyDone(j, externalInspections) &&
+      !isJobInternallyDone(j, inspections)).length;
+  }, [jobs, inspections, externalInspections, activeAtMaster, viewingAllTenders]);
   const [loading, setLoading] = useState(true);
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
@@ -250,8 +273,8 @@ export default function InternalInspection() {
 
   const mrJobs = useMemo(() => {
     if (!selectedMrNo) return [];
-    return jobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
-  }, [jobs, selectedMrNo]);
+    return scopedJobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
+  }, [scopedJobs, selectedMrNo]);
 
   // Agency's configured "Circle Authority Estimate Approval Limit" master, for the
   // live Clause 4.0 indicator below - resolved once per agency, not per job.
@@ -507,7 +530,17 @@ export default function InternalInspection() {
           ownerId: auth.currentUser.uid,
           // Stamped for future agency-scoped queries. Existing records predate this
           // field, so nothing may filter on it until they're backfilled.
-          agencyId: activeAgency?.id,
+          //
+          // ⚠ NOT `activeAgency?.id` (AUDIT F99). Optional chaining here writes `undefined`,
+          // which Firestore drops - producing an inspection with NO agencyId, invisible to
+          // every agency-scoped query and indistinguishable from the pre-backfill records
+          // this comment is about. The same shape as an empty-string atId: a value that
+          // silently means "belongs to nothing" rather than failing.
+          //
+          // Safe because the COMPONENT returns early when there is no active agency, so this
+          // form cannot be on screen without one - not because this handler checks. If that
+          // render guard is ever removed, this line needs its own.
+          agencyId: activeAgency.id,
         };
         
         if (!jobData.inspectionId) {
@@ -572,7 +605,7 @@ export default function InternalInspection() {
       const jobsQ = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
-        where('agencyId', '==', activeAgency?.id)
+        where('agencyId', '==', activeAgency.id)
       );
       const [jobsSnap, inspSnap] = await Promise.all([
         getDocs(jobsQ),
@@ -594,7 +627,7 @@ export default function InternalInspection() {
   };
 
   const mrGroups: Record<string, any[]> = {};
-  jobs.forEach(j => {
+  scopedJobs.forEach(j => {
     if (j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled') return;
     if (divisionFilter !== 'All' && j.division !== divisionFilter) return;
     if (!matchesGpFilter(j, gpFilter)) return;
@@ -613,7 +646,7 @@ export default function InternalInspection() {
     return '';
   };
   
-  const availableDivisions = Array.from(new Set(jobs.map(j => j.division).filter(Boolean))).sort();
+  const availableDivisions = Array.from(new Set(scopedJobs.map(j => j.division).filter(Boolean))).sort();
   
   const uniqueMrNos = Object.keys(mrGroups).filter(mr => {
     const jobsForMr = mrGroups[mr];
@@ -1032,6 +1065,8 @@ export default function InternalInspection() {
           </p>
         </div>
       </div>
+
+      {!selectedMrNo && <OtherTenderNote count={otherTenderPending} noun="internal inspection" />}
 
       {!selectedMrNo ? (
         <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
