@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
@@ -80,11 +81,19 @@ const FALLBACK_CONTENT_MM = 259.1;
 const ROW_MM = 4.8;          // one item row
 const SECTION_ROW_MM = 4.9;  // PHYSICAL / INTERNAL / LABOUR header row (incl. "(contd.)" repeats)
 const TABLE_HEAD_MM = 9.1;   // column header, repeats every page
-const JOB_BOX_MM = 38.1;     // job metadata box, page 1 only
-const TOTALS_MM = 32.3;      // totals box, last page only
-const SIGN_MM = 18.0;        // signature block, last page only
+// ⚠ THESE THREE MOVED WITH THE CSS (AUDIT G7), and must keep moving with it. They are the
+// layout BUDGET; if they describe blocks that no longer exist the budget is a fiction, which
+// is the same defect as a comment asserting behaviour the code does not have. Derived from the
+// CSS deltas rather than re-measured on a printed sheet, and rounded UP - a budget that
+// over-reserves leaves a page slightly empty, one that under-reserves clips content.
+//   JOB_BOX 38.1 -> 30.5  leading-relaxed->snug (-4.6), p-2->p-1.5 (-1.1), mb-2->mb-1 (-2.1)
+//   TOTALS  32.3 -> 29.7  totals rows p-1 -> py-0.5
+//   SIGN    18.0 -> 15.0  mt-4 pt-3 -> mt-2 pt-2, i.e. 7.4mm of pure gap down to 4.2mm
+const JOB_BOX_MM = 30.5;     // job metadata box, page 1 only
+const TOTALS_MM = 29.7;      // totals box, last page only
+const SIGN_MM = 15.0;        // signature block, last page only
 const CONTINUED_MM = 5;      // "Continued on page N..." line
-const PAGENUM_MM = 5;        // "Page N of M" line
+const PAGENUM_MM = 5;        // "Page N of M" line — not charged on a 1-page run, see usableMm
 const SAFETY_MM = 4;
 
 type EstimateRow = SingleEstimateLineItem & { section: EstimateSection };
@@ -93,7 +102,17 @@ type EstimateRow = SingleEstimateLineItem & { section: EstimateSection };
 // a ref - see measureContentAreaRef in the component below), not derived from letterhead
 // header/footer dimensions: that area is already excluded from what PrintableA4Page reports.
 function usableMm(isFirst: boolean, isLast: boolean, contentMm: number): number {
-  return contentMm - TABLE_HEAD_MM - PAGENUM_MM - SAFETY_MM
+  // ⚠ THE PAGE-NUMBER LINE IS ONLY CHARGED WHEN IT WILL BE PRINTED (AUDIT G7). A single-page
+  // estimate renders no "Page 1 of 1", so reserving 5mm for it is 5mm the rows cannot use -
+  // against a shortfall that was 1.3mm.
+  //
+  // ⚠ THE RELIEF IS SAFE ONLY BECAUSE OF WHERE IT IS CLAIMED. `greedyFillToMax` calls this with
+  // isLast=false to decide HOW MANY pages are needed, so the relief never applies while that
+  // count is being made - it cannot talk itself into a page it then cannot honour. It applies
+  // only once a run has turned out to be a single page, which is exactly when the footer is
+  // not rendered.
+  const singlePage = isFirst && isLast;
+  return contentMm - TABLE_HEAD_MM - (singlePage ? 0 : PAGENUM_MM) - SAFETY_MM
     - (isFirst ? JOB_BOX_MM : 0)
     - (isLast ? TOTALS_MM + SIGN_MM : CONTINUED_MM);
 }
@@ -1068,6 +1087,34 @@ export default function SingleJobEstimateReport({
   const pages = layoutEstimatePages(allRows, contentMm);
   const totalPages = pages.length;
 
+  /**
+   * WHY THIS ESTIMATE PAGINATED, WHEN THE CAUSE IS THE LETTERHEAD RESERVATION (AUDIT G7).
+   *
+   * ⚠ THE LETTERHEAD CASE IS BOUNDED BY THE AGENCY'S OWN MARGINS, NOT BY THIS LAYOUT. A full-A4
+   * letterhead reserves `letterheadHeaderHeightMm` + `letterheadFooterHeightMm` - 38 + 24 by
+   * default, 62mm of a 297mm page - for the agency's printed stationery. A standard 29-item
+   * job needs about 154mm of rows against roughly 128mm of usable space in that configuration.
+   * It does not fit, and the honest answer is NOT to shrink the text: a rate table nobody can
+   * read at arm's length is worse than two pages.
+   *
+   * ⚠ BUT IT MUST NOT BE SILENT. Producing two pages with no explanation leaves the operator
+   * assuming the document is simply long, when a setting they own decides it. So the screen
+   * says which setting, and by how much - `2 pages… reduce the header reservation by ~26mm to
+   * fit one`. Same principle as every refusal in this codebase: state the cause and the remedy,
+   * not just the outcome.
+   *
+   * The threshold is deliberately "would one page have been enough without the reservation" -
+   * a genuinely long job (40 items) paginates for its own reasons and gets no notice, because
+   * changing the letterhead would not help it.
+   */
+  const letterheadReservedMm = Math.max(0, FALLBACK_CONTENT_MM - contentMm);
+  const rowsMm = allRows.reduce((mm, r, i) => mm + ROW_MM + (i === 0 || allRows[i - 1].section !== r.section ? SECTION_ROW_MM : 0), 0);
+  const wouldFitWithoutReservation = rowsMm <= usableMm(true, true, FALLBACK_CONTENT_MM);
+  const paginatedByLetterhead = totalPages > 1 && letterheadReservedMm > 0 && wouldFitWithoutReservation;
+  const shortfallMm = paginatedByLetterhead
+    ? Math.ceil(rowsMm - usableMm(true, true, contentMm))
+    : 0;
+
   const coreClass = classifyCoreType(job.coreType || 'CRGO');
 
   // Amorphous / CRGO Wound Core: fixed-rate document, entirely different printed
@@ -1086,6 +1133,28 @@ export default function SingleJobEstimateReport({
 
     return (
       <>
+        {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
+            the operator about a SETTING, not part of the estimate the division receives. */}
+        {paginatedByLetterhead && (
+          <div className="print:hidden mb-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3.5 py-2.5">
+            <p className="text-sm font-bold text-amber-900">
+              This estimate prints on {totalPages} pages because of the letterhead reservation
+            </p>
+            <p className="text-xs text-amber-900 mt-1">
+              The letterhead settings reserve <strong>{Math.round(letterheadReservedMm)} mm</strong> of
+              this page for pre-printed stationery, which leaves too little room for
+              {' '}{allRows.length} line items. Its content would fit on one page without that
+              reservation &mdash; it is short by about <strong>{shortfallMm} mm</strong>.
+            </p>
+            <p className="text-xs text-amber-900 mt-1">
+              Reduce <strong>letterhead header/footer height</strong> in{' '}
+              <Link to="/agency-settings" className="font-bold underline">Agency Settings</Link>{' '}
+              if the stationery does not really need that much space. The text is deliberately
+              <strong> not</strong> shrunk to fit &mdash; a rate table that cannot be read at arm&rsquo;s
+              length is worse than a second page.
+            </p>
+          </div>
+        )}
         {pages.map((rows, pageIdx) => {
           const isFirst = pageIdx === 0;
           const isLast = pageIdx === totalPages - 1;
@@ -1094,12 +1163,12 @@ export default function SingleJobEstimateReport({
             <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
               <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
                 <div>
-                  <div className="text-center mb-2 pb-1 border-b-2 border-black">
+                  <div className="text-center mb-1 pb-0.5 border-b-2 border-black">
                     <h2 className="text-sm font-black uppercase tracking-wider">{titleText}</h2>
                   </div>
 
                   {isFirst && (
-                    <div className="grid grid-cols-2 text-[10px] border border-black p-2 mb-2 leading-relaxed bg-white">
+                    <div className="grid grid-cols-2 text-[10px] border border-black p-1.5 mb-1 leading-snug bg-white">
                       <div className="space-y-0.5 border-r border-black pr-2">
                         <div className="flex">
                           <span className="font-bold w-24">Job No.:</span>
@@ -1175,7 +1244,7 @@ export default function SingleJobEstimateReport({
                     <p className="text-[9px] text-justify leading-relaxed mb-2">{clauseText}</p>
                   )}
 
-                  <table className="w-full border-collapse border border-black text-[8.5px]">
+                  <table className="w-full border-collapse border border-black text-[9.5px]">
                     <thead>
                       <tr className="bg-slate-100 print:bg-transparent font-bold border-b border-black text-center">
                         <th className="border border-black p-1 w-8">Sr. No.</th>
@@ -1221,7 +1290,7 @@ export default function SingleJobEstimateReport({
                       <table className="border-collapse border border-black w-64 text-right">
                         <tbody>
                           <tr className="border-b border-black">
-                            <td className="p-1 font-bold border-r border-black">Total Amount:</td>
+                            <td className="py-0.5 px-1 font-bold border-r border-black">Total Amount:</td>
                             <td className="p-1 font-mono font-bold w-24">{formatCurrency(estimate.baseTotal)}</td>
                           </tr>
                           <tr className="border-b border-black">
@@ -1245,7 +1314,7 @@ export default function SingleJobEstimateReport({
                 </div>
 
                 {isLast && estimate.rateErrors.length === 0 && (
-                  <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
+                  <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
                     <div className="text-left">
                       <div className="h-10"></div>
                       <p className="font-bold">For, {agency?.discomName || '-'}</p>
@@ -1258,7 +1327,7 @@ export default function SingleJobEstimateReport({
                 )}
               </div>
 
-              {agency?.showPageNumbers !== false && (
+              {agency?.showPageNumbers !== false && totalPages > 1 && (
                 <footer className="a4-page-footer">
                   Page {pageIdx + 1} of {totalPages}
                 </footer>
@@ -1272,6 +1341,28 @@ export default function SingleJobEstimateReport({
 
   return (
     <>
+        {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
+          the operator about a SETTING, not part of the estimate the division receives. */}
+      {paginatedByLetterhead && (
+        <div className="print:hidden mb-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3.5 py-2.5">
+          <p className="text-sm font-bold text-amber-900">
+            This estimate prints on {totalPages} pages because of the letterhead reservation
+          </p>
+          <p className="text-xs text-amber-900 mt-1">
+            The letterhead settings reserve <strong>{Math.round(letterheadReservedMm)} mm</strong> of
+            this page for pre-printed stationery, which leaves too little room for
+            {' '}{allRows.length} line items. Its content would fit on one page without that
+            reservation &mdash; it is short by about <strong>{shortfallMm} mm</strong>.
+          </p>
+          <p className="text-xs text-amber-900 mt-1">
+            Reduce <strong>letterhead header/footer height</strong> in{' '}
+            <Link to="/agency-settings" className="font-bold underline">Agency Settings</Link>{' '}
+            if the stationery does not really need that much space. The text is deliberately
+            <strong> not</strong> shrunk to fit &mdash; a rate table that cannot be read at arm&rsquo;s
+            length is worse than a second page.
+          </p>
+        </div>
+      )}
       {pages.map((rows, pageIdx) => {
         const isFirst = pageIdx === 0;
         const isLast = pageIdx === totalPages - 1;
@@ -1295,13 +1386,13 @@ export default function SingleJobEstimateReport({
             <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
               <div>
                 {/* Header Title */}
-                <div className="text-center mb-2 pb-1 border-b-2 border-black">
+                <div className="text-center mb-1 pb-0.5 border-b-2 border-black">
                   <h2 className="text-base font-black uppercase tracking-wider">ESTIMATION REPORT</h2>
                 </div>
 
                 {/* 2-Column Metadata Box (page 1 only) */}
                 {isFirst && (
-                  <div className="grid grid-cols-2 text-[10px] border border-black p-2 mb-2 leading-relaxed bg-white">
+                  <div className="grid grid-cols-2 text-[10px] border border-black p-1.5 mb-1 leading-snug bg-white">
                     <div className="space-y-0.5 border-r border-black pr-2">
                       <div className="flex">
                         <span className="font-bold w-24">Job No.:</span>
@@ -1367,7 +1458,7 @@ export default function SingleJobEstimateReport({
                 )}
 
                 {/* Line Items Table */}
-                <table className="w-full border-collapse border border-black text-[8.5px]">
+                <table className="w-full border-collapse border border-black text-[9.5px]">
                   <thead>
                     <tr className="bg-slate-100 print:bg-transparent font-bold border-b border-black text-center">
                       <th className="border border-black p-1 w-8">Sr. No.</th>
@@ -1419,7 +1510,7 @@ export default function SingleJobEstimateReport({
                     <table className="border-collapse border border-black w-64 text-right">
                       <tbody>
                         <tr className="border-b border-black">
-                          <td className="p-1 font-bold border-r border-black">Total Amount:</td>
+                          <td className="py-0.5 px-1 font-bold border-r border-black">Total Amount:</td>
                           <td className="p-1 font-mono font-bold w-24">{formatCurrency(estimate.baseTotal)}</td>
                         </tr>
                         <tr className="border-b border-black">
@@ -1454,7 +1545,7 @@ export default function SingleJobEstimateReport({
 
               {/* Dual Signatures Block (last page only, withheld along with the total) */}
               {isLast && estimate.rateErrors.length === 0 && (
-                <div className="mt-4 pt-3 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
+                <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
                   <div className="text-left">
                     <div className="h-10"></div>
                     <p className="font-bold">For, {agency?.discomName || '-'}</p>
@@ -1467,7 +1558,7 @@ export default function SingleJobEstimateReport({
               )}
             </div>
 
-            {agency?.showPageNumbers !== false && (
+            {agency?.showPageNumbers !== false && totalPages > 1 && (
               <footer className="a4-page-footer">
                 Page {pageIdx + 1} of {totalPages}
               </footer>

@@ -2099,6 +2099,176 @@ it withholds is genuinely absent rather than merely inconvenient to look up.
 
 ---
 
+## G7. Two print faults: a budget that missed by 1.3 mm, and one CSS declaration causing three symptoms
+
+Reference: RAVI ELECTRIC's estimate for job 21SRVOH-1 — **29 line items, header block, totals
+and signatory on a single A4 sheet.** A real document an agency produces and reads.
+
+### The estimate: not overflow, arithmetic
+
+`layoutEstimatePages` is budget-driven. For a single page it computed
+
+```
+usable = contentMm − TABLE_HEAD 9.1 − PAGENUM 5 − SAFETY 4 − JOB_BOX 38.1 − (TOTALS 32.3 + SIGN 18.0)
+```
+
+A standard job is 29 items + 3 section headers = **153.9 mm** of rows.
+
+| agency has | content | usable | needed | outcome |
+|---|---|---|---|---|
+| no letterhead | 259.1 | 152.6 | 153.9 | **short by 1.3 mm** — a third of one row |
+| full-A4 letterhead | 235.0 | 128.5 | 153.9 | short by 25.4 mm |
+
+**106.5 mm of fixed overhead — 41 % of the page — against a 1.3 mm shortfall.** The reference
+carries the same information in roughly 70 mm. The whole difference was whitespace, and the
+row height and font size were never the cause.
+
+**Font size turned out to be free.** Item rows are `<tr class="h-4">` — a fixed 16 px height —
+so `text-[8.5px]` → `text-[9.5px]` costs nothing in pagination. Legibility improved and the
+budget did not move.
+
+Recovered ≈ 18 mm: job box `leading-relaxed`→`leading-snug` and `p-2`→`p-1.5` (−7.8), signature
+`mt-4 pt-3`→`mt-2 pt-2` (−3.2, of which 7.4 mm was *pure gap*), totals rows `p-1`→`py-0.5`
+(−2.6), title `mb-2 pb-1`→`mb-1 pb-0.5` (−1.1), and **"Page 1 of 1" no longer printed or
+charged** (−5).
+
+```
+no letterhead, usable 170.8 mm
+  29 items  153.9  FITS   +16.9 mm spare
+  32 items  168.3  FITS    +2.5 mm spare
+  35 items  182.7  2 pages
+```
+
+**The 16.9 mm is left as spare, deliberately.** Spending it on larger text would buy one more
+point of size once; leaving it means a job with a few extra line items still fits one page,
+which is the more valuable property.
+
+⚠ **The constants were updated with the CSS, and that is not optional.** `JOB_BOX_MM`,
+`TOTALS_MM` and `SIGN_MM` *are* the budget. Leaving them describing blocks that no longer
+exist would make the budget a fiction — the same defect as a comment asserting behaviour the
+code does not have, which this session has recorded four times. They are derived from the CSS
+deltas rather than re-measured on paper, and rounded **up**: over-reserving leaves a page
+slightly empty, under-reserving clips content.
+
+### The single-page relief is safe only because of where it is claimed
+
+Not charging `PAGENUM_MM` on a one-page run is a budget relief that could, in principle, talk
+the layout into a page it cannot then honour. It cannot here: `greedyFillToMax` calls
+`usableMm` with `isLast=false` while deciding **how many** pages are needed, so the relief
+never applies during the count — only after a run has turned out to be a single page, which is
+exactly when the footer is not rendered.
+
+### The letterhead case is bounded by the agency's own margins — but no longer silently
+
+A full-A4 letterhead reserves `letterheadHeaderHeightMm + letterheadFooterHeightMm` — **38 + 24
+= 62 mm of a 297 mm page** — for the agency's pre-printed stationery. 29 items still do not
+fit, now by **7 mm** rather than 25 mm.
+
+**Shrinking the text to fit someone's letterhead art is the wrong trade**: a rate table nobody
+can read at arm's length is worse than a second page. But producing two pages with no
+explanation leaves the operator assuming the document is simply long, when a setting they own
+decides it. So the screen now names the cause, the magnitude and the remedy — *"prints on 2
+pages because of the letterhead reservation… reserves 24 mm… short by about 7 mm… reduce
+letterhead header/footer height in Agency Settings"* — and says explicitly that the text is not
+being shrunk to fit.
+
+**The notice is on screen only, never on the printed document**: it is a message to the
+operator about a setting, not part of what the division receives. And it fires only when the
+job *would* have fitted without the reservation — a genuinely long 35-item job paginates for
+its own reasons and gets no notice, because changing the letterhead would not help it.
+
+### The invoice: three symptoms, one declaration
+
+```jsx
+<div className="border-2 border-black text-black text-[10px] h-full flex flex-col justify-between">
+```
+
+`h-full` + `justify-between` with exactly **two** children — body and footer — so flexbox
+pushed the footer to the bottom of the sheet. The "gap between the totals and the signature"
+was not a gap; **it was the remainder of the page.** That one declaration produced all three
+reported faults: the totals-to-signature gap, the empty space after the net total, and the
+received-payment block and guarantee card landing at the page foot instead of following the
+total.
+
+**And two nested instances would have survived the fix.** Each footer half is also
+`flex flex-col justify-between`, pushing `For, <agency>` to the bottom of its own cell — so the
+signatory would still have floated even after the footer moved up. Fixing only the outer one
+would have produced a partial improvement that looked like the change had not worked.
+
+`h-full` is kept so the bordered box still reaches the bottom of the sheet; only the
+distribution changed.
+
+Invoice text: the `8 px` runs — amount in words, settlement line, bank row, guarantee text —
+raised to `8.5 px`. The amount-in-words line is what a division reads to verify the figure and
+was the smallest text on the document.
+
+---
+
+## G8. A fabricated document number on an issued page — found while deleting the page
+
+The multi-job summary matrix — a side-by-side comparison sheet, items down and jobs across —
+was removed as unwanted. 363 lines in `EstimateGenerate.tsx`, one of four estimate view modes,
+inline rather than a component.
+
+**Line 1614 of that block:**
+
+```jsx
+<p>NO : {Math.floor(Math.random() * 100) + 1}</p>
+```
+
+**A document number generated at render time, on a page that goes to a division.**
+
+⚠ **It is not merely arbitrary — it is unstable.** It is computed during render, so it is
+different every time the component renders: **two prints of the same estimate carry different
+document numbers**, and a reprint of one already sent to a division would not match the copy
+the division holds. A number that a recipient could use to refer to a document, that does not
+survive being looked at twice.
+
+This is the audit's plausible-value class at its sharpest. `NO : 47` is indistinguishable from
+a real reference — it is short, it is an integer, it is in the position a document number
+belongs. Nothing about it invites checking, and there is nothing to check it against.
+
+### Recorded as found-and-removed, not fixed
+
+**No fix was made, because the page it lives on no longer exists.** That is the honest
+description and it matters: an entry saying "fixed" would imply a correct document number now
+exists somewhere, and none does. If a matrix is ever wanted again it needs a real identifier —
+stored, stable across reprints, and unique — which is a design question nobody has answered.
+
+⚠ **It returns if the matrix is restored from history.** Whoever reinstates 363 lines from a
+git history to bring a view mode back will not read line 1614; that is the nature of restoring
+a block wholesale. A pointer now sits on the `estimateViewMode` declaration — the one line
+anyone reinstating this must edit — naming this entry.
+
+### What removal touched, and what it deliberately did not
+
+`builderLineFor` had **two** callers: the Excel export and the matrix's item cells. That was
+the F55 consolidation working — the export used to price items with `calculateJobItemDetails`
+(called with no inspection data, so every optional item was charged on every job) while its
+totals came from `buildSingleJobEstimateData`, so the sheet did not reconcile against itself.
+
+**The export is now the only caller, and `builderLineFor` stays for it alone.** Three comments
+that named "the printed matrix" as a caller were corrected in the same change — a comment
+describing a caller that no longer exists is the defect this session has now recorded five
+times. One of them now says explicitly that removing the export too would take the second half
+of F55 with it.
+
+The forwarding letter is independent: `renderForwardingLetterPages` builds its own job table
+and total from `selectedJobsData` and never read the matrix. It stays, unchanged.
+
+Also removed: the toggle button, its hint line, `'matrix'` from the union type, and the
+`Layers` icon import that became unused.
+
+### The estimate output after removal
+
+```
+batch_all (default)   Common Forwarding Letter  →  one estimate sheet per transformer
+forwarding_only       Common Forwarding Letter
+single_job            one estimate sheet
+```
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on

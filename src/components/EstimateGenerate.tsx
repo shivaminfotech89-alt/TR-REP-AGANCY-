@@ -6,7 +6,7 @@ import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/fir
 import { 
   Loader2, Printer, Search, FileSpreadsheet, Edit3, Check, Save, FileText, X,
   Lock, Unlock, AlertTriangle, RotateCcw, Calendar, Send, CheckCircle2, Clock, CheckSquare,
-  Eye, ArrowLeft, ArrowUpRight, Filter, IndianRupee, Scale, ShieldAlert, FileStack, Layers,
+  Eye, ArrowLeft, ArrowUpRight, Filter, IndianRupee, Scale, ShieldAlert, FileStack,
   FileCheck2, ChevronRight
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
@@ -35,10 +35,11 @@ import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 // back to "the first non-null rate in any capacity column" when a cell was blank, pricing
 // a 200 KVA job off the 10 KVA rate.
 //
-// Its two callers - the Excel export and the printed matrix - now read from the single
-// builder via `builderLineFor`. Nothing should reintroduce a second path: the reason a
-// spreadsheet could show item rows summing to more than its own total was that two engines
-// answered the same question and nobody could see both answers at once.
+// Its callers now read from the single builder via `builderLineFor`. It had TWO - the Excel
+// export and the printed multi-job matrix; the matrix was removed at G8, so the export is the
+// last one and `builderLineFor` exists for it alone. Nothing should reintroduce a second path:
+// the reason a spreadsheet could show item rows summing to more than its own total was that
+// two engines answered the same question and nobody could see both answers at once.
 
 const ROWS_FIRST_PAGE = 14;
 const ROWS_PER_PAGE = 22;
@@ -52,8 +53,16 @@ export default function EstimateGenerate() {
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
 
-  // Estimate view modes: 'batch_all' (Default official common forwarding letter + separate job estimates) | 'forwarding_only' | 'single_job' | 'matrix'
-  const [estimateViewMode, setEstimateViewMode] = useState<'batch_all' | 'forwarding_only' | 'single_job' | 'matrix'>('batch_all');
+  /**
+   * Estimate view modes. 'batch_all' is the default: one common forwarding letter, then one
+   * estimate sheet per transformer.
+   *
+   * ⚠ 'matrix' IS GONE AND SHOULD NOT COME BACK (AUDIT G8). It was a side-by-side comparison
+   * page - items down, jobs across - that printed to a division carrying
+   * `NO : {Math.floor(Math.random() * 100) + 1}` as its document number. See the audit entry
+   * before reinstating anything from history here.
+   */
+  const [estimateViewMode, setEstimateViewMode] = useState<'batch_all' | 'forwarding_only' | 'single_job'>('batch_all');
   const [activeSingleJobId, setActiveSingleJobId] = useState<string | null>(null);
 
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
@@ -538,9 +547,11 @@ export default function EstimateGenerate() {
    *
    * This replaces `calculateJobItemDetails`, a second ~366-line estimate engine that priced
    * the same jobs by different rules and received none of the fixes applied to the builder
-   * (F46, F47, F52). Both of its callers - the Excel export and the printed matrix - now
-   * read from `buildSingleJobEstimateData`, which is what makes the two halves of a
-   * spreadsheet agree with each other (AUDIT F54, F55).
+   * (F46, F47, F52). Its callers read from `buildSingleJobEstimateData`, which is what makes
+   * the two halves of a spreadsheet agree with each other (AUDIT F54, F55). There were two -
+   * the Excel export and the printed matrix - and the matrix was removed at G8, so THE EXCEL
+   * EXPORT IS NOW THE ONLY CALLER. That is why this function still exists; removing the
+   * export too would take the second half of the F55 consolidation with it.
    *
    * Two mismatches between "master rows" and "builder lines" are resolved here rather than
    * by changing what the builder emits, because the builder's `itemCode` is printed on the
@@ -554,7 +565,7 @@ export default function EstimateGenerate() {
    *    both emitted with `itemCode: entry.sr`, the capacity's code. Matching on the code
    *    alone would put Repairing Charge on the capacity row correctly and then leave the
    *    master's row '2' ("Labour charge per transformer") empty, dropping the labour amount
-   *    out of the matrix entirely. The description disambiguates them.
+   *    out of the exported sheet entirely. The description disambiguates them.
    */
   const estimateCache = new Map<string, any>();
   const builderLineFor = (masterItem: any, job: any) => {
@@ -1421,24 +1432,11 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 <FileCheck2 className="w-3.5 h-3.5" />
                 <span>Single Job Estimate Sheet</span>
               </button>
-              <button
-                onClick={() => setEstimateViewMode('matrix')}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
-                  estimateViewMode === 'matrix'
-                    ? 'bg-blue-600 text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
-                }`}
-                title="Traditional multi-column side-by-side comparison matrix"
-              >
-                <Layers className="w-3.5 h-3.5" />
-                <span>Multi-Job Summary Matrix</span>
-              </button>
             </div>
             <div className="text-[11px] text-slate-500 font-medium italic">
               {estimateViewMode === 'batch_all' && '📌 Standard format: 1 Common Forwarding Letter (Cover) + Individual Job Estimate Sheets'}
               {estimateViewMode === 'forwarding_only' && '📌 Common Forwarding Letter for MR submission'}
               {estimateViewMode === 'single_job' && '📌 Inspecting individual 3-section breakdown (Physical, Internal, Labour)'}
-              {estimateViewMode === 'matrix' && '📌 Side-by-side comparison format'}
             </div>
           </div>
 
@@ -1598,369 +1596,6 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               })()
             )}
 
-            {/* VIEW MODE 3: MULTI-JOB SUMMARY MATRIX */}
-            {estimateViewMode === 'matrix' && (
-              <>
-                <PrintableA4Page agency={activeAgency} documentTitle="ESTIMATE REPORT">
-                  <div className="flex flex-col justify-between h-full">
-                    <div>
-                      <div className="flex justify-between items-center text-[9px] font-bold uppercase text-black mb-1.5 border-b border-black pb-1">
-                        <div>
-                          <p>DIVISION : {selectedJobsData[0]?.division || 'SABARMATI'}</p>
-                          <p className="mt-0.5">ORDER NO : {activeAgency?.prefixes?.[selectedJobsData[0]?.division || 'SABARMATI'] ? 'UGVCL/EE-T-1/TRANS-REP/...' : '...'}</p>
-                        </div>
-                        <div className="text-center text-xs font-bold underline decoration-1 underline-offset-2">
-                          ESTIMATE REPORT
-                        </div>
-                        <div className="text-right">
-                          <p>NO : {Math.floor(Math.random() * 100) + 1}</p>
-                          <p className="mt-0.5">DATE : {letterDateText || dateString}</p>
-                        </div>
-                      </div>
-
-                      <table className="w-full text-black text-[8px] border-collapse border border-black">
-                        <tbody>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">TRANS TYPE</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.coreType || 'CRGO'}</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">JOB NO</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.jobNo}</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">MAKE</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.make}</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">KVA / KV</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.capacityKva} / 11</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">TSR NO.</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.serialNo}</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">MR NO. & DATE</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">{job.mrNo}</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">Oil Cap / Less Oil / Filter Oil</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">- / - / -</td>
-                            ))}
-                          </tr>
-                          <tr className="border-b border-black font-bold">
-                            <td className="p-0.5 border-r border-black">RATING / LEVEL (Clause 4.0)</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0.5 border-r border-black text-center">
-                                <select
-                                  value={job.starRating || job.ratingLevel || '3 Star & other'}
-                                  onChange={(e) => handleUpdateJobRating(job.id, e.target.value)}
-                                  className="text-[8px] font-bold bg-white border border-slate-300 rounded px-1 py-0.5 max-w-full print:border-none print:bg-transparent print:appearance-none text-center cursor-pointer"
-                                  title="Change Transformer Rating / Level for Circle Limit Approval Check"
-                                >
-                                  {RATING_LEVEL_OPTIONS.map(opt => (
-                                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                                  ))}
-                                </select>
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* Sub headers */}
-                          <tr className="border-b border-black font-bold bg-slate-100 print:bg-transparent">
-                            <td className="p-0.5 border-r border-black flex justify-between">
-                              <span>As Per AT Sr</span>
-                              <span className="text-center flex-1">ITEM</span>
-                            </td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-0 border-r border-black">
-                                <table className="w-full text-center text-[8px]">
-                                  <tbody>
-                                    <tr>
-                                      <td className="w-1/3 py-0.5 border-r border-black">QTY</td>
-                                      <td className="w-1/3 py-0.5 border-r border-black">RATE</td>
-                                      <td className="w-1/3 py-0.5">AMT.</td>
-                                    </tr>
-                                  </tbody>
-                                </table>
-                              </td>
-                            ))}
-                          </tr>
-
-                          {/* Items */}
-                          {(selectedJobsData.length > 0 
-                            ? getEstimateMasterForCore({ at: atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster, agency: activeAgency }, selectedJobsData[0].coreType)
-                            : (activeAgency?.estimateMaster?.length > 0 ? activeAgency.estimateMaster : defaultEstimateData)
-                          ).map((item, idx) => (
-                            <tr key={idx} className="border-b border-slate-300">
-                              <td className="p-0.5 border-r border-black flex gap-1">
-                                <span className="w-6 shrink-0">{item.itemCode}</span>
-                                <span className="truncate">{item.itemName}</span>
-                              </td>
-                              {selectedJobsData.map(job => {
-                                const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
-                                const itemForJob = jobMasterData.find(m => m.itemCode === item.itemCode || m.itemName === item.itemName) || item;
-                                // Same builder as the totals rows below and as the Excel
-                                // export. The three sub-cells are unchanged; only where
-                                // their numbers come from has changed.
-                                const line = builderLineFor(itemForJob, job);
-                                const qtyDisplay = line?.qty ?? '0';
-                                const rate = Number(line?.rate ?? 0);
-                                const amt = Number(line?.amt ?? 0);
-
-                                return (
-                                  <td key={job.id} className="p-0 border-r border-black">
-                                    <table className="w-full text-center text-[8px]">
-                                      <tbody>
-                                        <tr>
-                                          <td className="w-1/3 py-0.5 border-r border-slate-300">{qtyDisplay}</td>
-                                          <td className="w-1/3 py-0.5 border-r border-slate-300">{rate > 0 ? rate.toFixed(1) : '0.0'}</td>
-                                          <td className="w-1/3 py-0.5">{amt > 0 ? amt.toFixed(1) : '0.0'}</td>
-                                        </tr>
-                                      </tbody>
-                                    </table>
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          ))}
-                          
-                          {/* Totals */}
-                          <tr className="border-t border-black font-bold">
-                            <td className="p-1 border-r border-black text-right">Total</td>
-                            {selectedJobsData.map(job => (
-                              <td key={job.id} className="p-1 border-r border-black text-right font-mono">{calculateJobTotal(job).toFixed(2)}</td>
-                            ))}
-                          </tr>
-                          <tr className="border-t border-black font-bold">
-                            <td className="p-1 border-r border-black text-right">
-                              {(() => {
-                                if (selectedJobsData.length === 0) return 'Rise / Fall Total';
-                                const pcts = selectedJobsData.map(j => getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType));
-                                const allSame = pcts.every(p => p === pcts[0]);
-                                if (allSame) {
-                                  const p = pcts[0];
-                                  return p >= 0 ? `${p.toFixed(2)} % Rise Total` : `${Math.abs(p).toFixed(2)} % Fall Total`;
-                                }
-                                return 'AT % Rise / Fall Total';
-                              })()}
-                            </td>
-                            {selectedJobsData.map(job => {
-                              const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
-                              const baseTot = calculateJobTotal(job);
-                              const riseAmt = baseTot * (atPct / 100);
-                              return (
-                                <td key={job.id} className="p-1 border-r border-black text-right font-mono">
-                                  {riseAmt.toFixed(2)}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          <tr className="border-t border-black font-bold text-[9px]">
-                            <td className="p-1 border-r border-black text-right">Grand Total</td>
-                            {selectedJobsData.map(job => {
-                              const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
-                              const baseTot = calculateJobTotal(job);
-                              const grandTot = baseTot * (1 + atPct / 100);
-                              return (
-                                <td key={job.id} className="p-1 border-r border-black text-right font-mono">{grandTot.toFixed(2)}</td>
-                              );
-                            })}
-                          </tr>
-
-                          {/* Circle Limit Clause 4.0 Rows */}
-                          <tr className="border-t border-black text-[8px] bg-slate-50 print:bg-transparent">
-                            <td className="p-1 border-r border-black text-right font-bold text-slate-700">
-                              SE (Circle) Limit (Clause 4.0)
-                            </td>
-                            {selectedJobsData.map(job => {
-                              const check = checkJobCircleLimit(job);
-                              return (
-                                <td key={job.id} className="p-1 border-r border-black text-right font-mono font-bold text-slate-800">
-                                  {check.hasLimit ? `₹ ${check.limit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : 'N/A'}
-                                </td>
-                              );
-                            })}
-                          </tr>
-                          <tr className="border-t border-black text-[8px] font-bold">
-                            <td className="p-1 border-r border-black text-right font-bold">
-                              Approval Authority Power Check
-                            </td>
-                            {selectedJobsData.map(job => {
-                              const check = checkJobCircleLimit(job);
-                              if (!check.hasLimit) {
-                                return (
-                                  <td key={job.id} className="p-1 border-r border-black text-center text-slate-500 font-normal">
-                                    Standard Limit
-                                  </td>
-                                );
-                              }
-                              if (check.exceeds) {
-                                return (
-                                  <td key={job.id} className="p-1 border-r border-black text-center bg-rose-100 text-rose-900 font-bold">
-                                    <div className="flex flex-col items-center justify-center">
-                                      <span className="text-[7.5px] uppercase text-rose-800 font-black">
-                                        ⚠️ EXCEEDS CIRCLE LIMIT
-                                      </span>
-                                      <span className="text-[7px] text-rose-700 font-mono">
-                                        +₹{check.diff.toFixed(0)} (+{check.diffPct.toFixed(1)}%) &bull; Needs CE/CO Appr.
-                                      </span>
-                                    </div>
-                                  </td>
-                                );
-                              }
-                              return (
-                                <td key={job.id} className="p-1 border-r border-black text-center bg-emerald-50 text-emerald-800 font-medium">
-                                  <span className="text-[7.5px]">✓ Within Circle Limit</span>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        </tbody>
-                      </table>
-                    </div>
-                    
-                    <div className="flex justify-between items-end mt-4 text-black text-xs font-bold pt-2">
-                      <div>
-                        <p className="underline underline-offset-2 text-[10px]">
-                          Note - {selectedJobsData.some(j => j.status === 'Scrap' || j.condition === 'Scrap') ? 'Scrap Included' : ''}
-                        </p>
-                      </div>
-                      <div className="text-center">
-                        <p className="mb-6">For, {activeAgency?.name || ''}</p>
-                        <p className="text-[10px] text-slate-500">Auth Sign.</p>
-                      </div>
-                    </div>
-                  </div>
-                </PrintableA4Page>
-
-                {/* COMMON FORWARDING LETTER */}
-                <PrintableA4Page agency={activeAgency}>
-                  <div className="flex flex-col justify-between h-full text-black">
-                    <div>
-                      <div className="flex justify-between text-xs font-bold mb-4">
-                        <div className="whitespace-pre-wrap">
-                          {forwardingTo || `Superintending Engineer (O & M),
-Uttar Gujarat Vij Company Ltd.,
-Circle Office : SABARMATI`}
-                        </div>
-                        <div className="text-right whitespace-pre-wrap">
-                          <p>REF. NO. : {refNoText}</p>
-                          <p className="mt-1">DATE : {letterDateText}</p>
-                        </div>
-                      </div>
-
-                      <div className="text-xs font-bold text-center underline underline-offset-2 mb-4">
-                        Sub. : {forwardingSub || 'Submiting Inspection Report & Estimate of Transformer'}
-                      </div>
-
-                      <p className="text-xs mb-2">Dear Sir,</p>
-                      <p className="text-xs mb-4 leading-relaxed ml-4 whitespace-pre-wrap">
-                        {refBodyText}
-                      </p>
-
-                      <table className="w-full text-center text-xs border-collapse border border-black mb-4">
-                        <thead>
-                          <tr className="font-bold border-b border-black bg-slate-100 print:bg-white">
-                            <th className="p-1 border-r border-black">NO.</th>
-                            <th className="p-1 border-r border-black">JOB. NO.</th>
-                            <th className="p-1 border-r border-black">T.R. MAKE</th>
-                            <th className="p-1 border-r border-black">TR. SR. NO.</th>
-                            <th className="p-1 border-r border-black">KVA</th>
-                            <th className="p-1 border-r border-black">KV</th>
-                            <th className="p-1 border-r border-black">TYPE</th>
-                            <th className="p-1 border-r border-black">OGP/GP</th>
-                            <th className="p-1 border-r border-black">EST. AMT.</th>
-                            <th className="p-1">REMARK</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedJobsData.map((job, idx) => {
-                             const jobBaseTotal = calculateJobTotal(job);
-                             const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
-                             const finalAmt = (jobBaseTotal * (1 + atPct / 100)).toFixed(2);
-                             const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                             const check = checkJobCircleLimit(job);
-                             
-                            return (
-                              <tr key={job.id} className="border-b border-black">
-                                <td className="p-1 border-r border-black">{idx + 1}</td>
-                                <td className="p-1 border-r border-black font-mono font-bold">{job.jobNo}</td>
-                                <td className="p-1 border-r border-black">{job.make}</td>
-                                <td className="p-1 border-r border-black font-mono">{job.serialNo}</td>
-                                <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
-                                <td className="p-1 border-r border-black">11</td>
-                                <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
-                                <td className="p-1 border-r border-black">{job.repairType || 'OGP'}</td>
-                                <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
-                                <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
-                                  {isScrapJob ? (
-                                    'SCRAP'
-                                  ) : check.exceeds ? (
-                                    <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
-                                      REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
-                                    </span>
-                                  ) : (
-                                    'REPAIRABLE'
-                                  )}
-                                </td>
-                              </tr>
-                            );
-                          })}
-                          <tr className="font-bold border-black">
-                            <td colSpan={8} className="p-1 border-r border-black text-right">TOTAL</td>
-                            <td className="p-1 border-r border-black text-right font-mono font-bold">
-                              {selectedJobsData.reduce((acc, job) => {
-                                const baseAmt = calculateJobTotal(job);
-                                const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
-                                return acc + (baseAmt * (1 + atPct / 100));
-                              }, 0).toFixed(2)}
-                            </td>
-                            <td></td>
-                          </tr>
-                        </tbody>
-                      </table>
-
-                      <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>
-                    </div>
-
-                    <div>
-                      <div className="flex justify-between text-xs mb-6">
-                        <p>Thanking you</p>
-                        <p>Yours faithfully</p>
-                      </div>
-
-                      <div className="flex justify-between text-xs mb-4">
-                        <p>Encl. : Estimate & Inspection Reports</p>
-                        <div className="text-center">
-                          <p className="mb-6 font-bold">{signedByText}</p>
-                          <p className="text-[10px] text-slate-500">Auth Sign.</p>
-                        </div>
-                      </div>
-
-                      <div className="text-xs font-bold">
-                        <p className="mb-1">C . C. to :</p>
-                        <p className="whitespace-pre-wrap font-normal text-[11px]">{forwardingCc || 'E. E. (O & M) DIVISION - SABARMATI'}</p>
-                      </div>
-                    </div>
-                  </div>
-                </PrintableA4Page>
-              </>
-            )}
           </div>
       </div>
       )}

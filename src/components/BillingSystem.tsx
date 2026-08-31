@@ -2920,7 +2920,15 @@ export default function BillingSystem() {
               showAgencyHeaderIfNoLetterhead={false}
               className={activeDocTab === 'all' || activeDocTab === 'invoice' ? 'block' : 'hidden print:block'}
             >
-              <div className="border-2 border-black text-black text-[10px] h-full flex flex-col justify-between">
+              {/* ⚠ NO `justify-between` (AUDIT G7). This was `h-full flex flex-col justify-between` with
+                  exactly two children — the body and the footer — so flexbox pushed the footer to the
+                  BOTTOM OF THE PAGE and the "gap" between the totals and the signature was simply the
+                  leftover page height. Three reported symptoms, one declaration: totals-to-signature
+                  gap, empty space after the net total, and the received-payment / guarantee card
+                  landing at the page foot instead of following the total.
+                  `h-full` stays so the border box still reaches the bottom of the sheet; only the
+                  distribution changes, so the footer now follows the totals immediately. */}
+              <div className="border-2 border-black text-black text-[10px] h-full flex flex-col">
                 <div>
                   {/* Header Row: Supplier & Invoice Identification */}
                   <div className="grid grid-cols-2 border-b-2 border-black">
@@ -3099,34 +3107,35 @@ export default function BillingSystem() {
 
                 {/* Bottom Footer Section */}
                 <div className="grid grid-cols-2 border-t-2 border-black">
-                  <div className="p-2 border-r-2 border-black flex flex-col justify-between text-[9px]">
+                  {/* Signatory follows the text, not the cell foot — see the note above (AUDIT G7). */}
+                  <div className="p-2 border-r-2 border-black flex flex-col text-[9px]">
                     <div>
                       <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold">{grandTotal.toFixed(2)}</span></p>
-                      <p className="font-semibold italic text-[8px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
-                      <p className="mt-1 text-[8px]">In full settlement of Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{formatDDMMYYYY(billDate)}</strong></p>
+                      <p className="font-semibold italic text-[8.5px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
+                      <p className="mt-1 text-[8.5px]">In full settlement of Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{formatDDMMYYYY(billDate)}</strong></p>
                       {(activeAgency?.bankName || activeAgency?.accountNumber) && (
-                        <div className="mt-1 pt-1 border-t border-dashed border-slate-300 text-[8px]">
+                        <div className="mt-1 pt-1 border-t border-dashed border-slate-300 text-[8.5px]">
                           <div><strong>Bank:</strong> {activeAgency?.bankName || '-'} | <strong>A/C:</strong> <span className="font-mono font-bold">{activeAgency?.accountNumber || '-'}</span> | <strong>IFSC:</strong> <span className="font-mono font-bold">{activeAgency?.ifscCode || '-'}</span></div>
                         </div>
                       )}
                     </div>
-                    <div className="pt-3 text-center">
+                    <div className="pt-2 text-center">
                       <p className="font-bold">For, {activeAgency?.name || ''}</p>
                       <div className="h-4"></div>
                       <p className="text-[8px] text-slate-500">(Authorized Signatory / Stamp)</p>
                     </div>
                   </div>
 
-                  <div className="p-2 flex flex-col justify-between text-[9px]">
+                  <div className="p-2 flex flex-col text-[9px]">
                     <div>
                       <h4 className="font-black text-center uppercase tracking-wider mb-1 border-b border-black pb-0.5 text-[9px]">
                         Guarantee Card
                       </h4>
-                      <p className="text-[8px] leading-tight text-justify">
+                      <p className="text-[8.5px] leading-tight text-justify">
                         We guarantee the satisfactory performance of the above repaired transformers for {activeAgency?.gpValidationMonths || 18} months for 11 KV and 12 months for 22 KV from date of delivery.
                       </p>
                     </div>
-                    <div className="pt-3 text-center">
+                    <div className="pt-2 text-center">
                       <p className="font-bold">For, {activeAgency?.name || ''}</p>
                       <div className="h-4"></div>
                       <p className="text-[8px] text-slate-500">(Authorized Signatory)</p>
