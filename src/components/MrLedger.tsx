@@ -13,6 +13,8 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, atClause, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
+import { issuedMarks } from '../lib/issuedDocuments.js';
+import { inspectionsForJob } from '../lib/inspectionLink.js';
 import { 
   Loader2, 
   Search, 
@@ -338,6 +340,27 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
   const handleAddTransformerToMr = () => {
     if (!editingMr) return;
 
+    /**
+     * ⚠ THE GATE IS IN THE HANDLER, NOT ONLY ON THE BUTTON (AUDIT G3).
+     *
+     * The control at the bottom of this modal is already hidden when the tender is closed to
+     * new work - but hiding a control is what the operator SEES, and this is what HAPPENS.
+     * The handler checked `atForEditingMr()`, which answers a different question: whether the
+     * MR's jobs agree on a tender, not whether that tender still accepts new work.
+     *
+     * So the F83 rule was enforced by a `{intakeGate.open ? …}` in the JSX and by nothing
+     * else - the exact arrangement OilInward rejects three files away, with a comment saying
+     * so. Adding a unit to an old MR while its tender is closed is intake, and intake is what
+     * that rule refuses.
+     */
+    if (!intakeGate.open) {
+      setNotification({
+        type: 'error',
+        message: `No new units can be added: ${intakeGate.reason} The units already on this MR can still be edited.`,
+      });
+      return;
+    }
+
     const lastJob = editingMr.jobs[editingMr.jobs.length - 1];
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
@@ -436,7 +459,29 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
   // Save Full MR Updates to Firestore
   const handleSaveFullMr = async () => {
     if (!editingMr || !auth.currentUser || !activeAgency) return;
-    
+
+    /**
+     * ⚠ THE SAME GUARD THE ADD-UNIT BUTTON USES, ON THE PATH THAT ACTUALLY WRITES (AUDIT G2).
+     *
+     * `handleAddTransformerToMr` calls `atForEditingMr()` and refuses when the MR's own jobs
+     * do not agree on a tender. This function - which creates jobs in a batch a few lines
+     * below - did not, and fell back to `activeAtMaster ? activeAtMaster.id : ''`.
+     *
+     * ⚠ THE WRONG-TENDER CASE IS WORSE THAN THE EMPTY ONE. An empty `atId` is findable: it
+     * shows in the unassigned backlog and every census counts it. A job stamped with TODAY'S
+     * tender on another tender's MR looks correct everywhere and prices from the wrong rate
+     * schedule and the wrong AT percentage - the exact failure F72 exists to prevent.
+     *
+     * The MR's own jobs are the authority, never the session (F66). If they cannot say which
+     * tender this MR belongs to, that is a question for a person with the paperwork, not a
+     * default for the app to pick.
+     */
+    const mrAt = atForEditingMr();
+    if ('error' in mrAt) {
+      alert(mrAt.error);
+      return;
+    }
+
     if (!editingMr.mrNo.trim()) {
       alert('MR Number cannot be empty.');
       return;
@@ -460,15 +505,113 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
       }
     }
 
+    /**
+     * ⚠ A REMOVED ROW CANNOT TAKE AN ISSUED DOCUMENT WITH IT (AUDIT G3).
+     *
+     * This loop deletes every job the operator removed from the edit modal, and it checked
+     * NOTHING. A job carrying a bill, an estimate, a payment or a challan was destroyed by
+     * taking its row out of a form - and `issuedByAgencyId` lives on that document (O14), so
+     * the delete removes the only record of WHAT was billed, TO whom, and BY which agency.
+     *
+     * O33 recorded this gap against `handleDeleteEntireMr` and named only that function. The
+     * gap had TWO sites; this is the one the entry did not name, which is how it survived a
+     * fix aimed at the other. `scripts/admin/delete-unassigned.js` has refused exactly this
+     * since it was written - a script guarding what the UI did freely.
+     *
+     * ⚠ SAME TEST AS THE SCRIPT, NOT A SECOND ONE - src/lib/issuedDocuments.js is imported by
+     * both. A guard that agrees with its script only by coincidence is the F87 shape.
+     *
+     * It REFUSES rather than warns. Deletion has no undo, and the operator can clear those
+     * fields first if the document really was never issued.
+     */
+    const blockedDeletes = editingMr.deletedJobIds
+      .map(id => {
+        const job = (editingMr.jobs as any[]).find((j: any) => j.id === id);
+        return job ? { job, marks: issuedMarks(job) } : null;
+      })
+      .filter((x: any) => x && x.marks.length > 0) as { job: any; marks: string[] }[];
+
+    if (blockedDeletes.length > 0) {
+      const lines = blockedDeletes.map(
+        b => `${b.job.jobNo || '(no job number)'} — ${b.marks.join(', ')}`,
+      );
+      alert([
+        `Cannot remove ${blockedDeletes.length} transformer(s) from MR ${editingMr.mrNo}: they carry documents that have left the agency.`,
+        '',
+        ...lines,
+        '',
+        'Deleting these would remove the only record of what was billed, to whom, and by which agency. Put the row(s) back, or clear those fields first if nothing was issued.',
+      ].join('\n'));
+      return;
+    }
+
+    /**
+     * ⚠ A DELETED JOB TAKES ITS INSPECTIONS WITH IT, AND SAYS HOW MANY (AUDIT G4).
+     *
+     * `inspections` is the only collection holding a `jobId`, and nothing deleted them - O33's
+     * second gap. The orphan is not merely untidy: `jobId` is the ONLY link, so an inspection
+     * whose job is gone is unreachable by any screen, script or census. Dead weight that every
+     * later reader has to recognise and explain away.
+     *
+     * ⚠ THE REASON FOR CASCADING IS SPECIFIC, NOT GENERAL, AND THE COUNTERFACTUAL MATTERS.
+     * Cascade is right HERE BECAUSE the orphan cannot be reached. Had inspections carried
+     * `mrNo` - as the matcher wrongly assumed for months - the opposite would follow: the
+     * orphan would still be findable by MR, deleting it would destroy measured facts about a
+     * physical transformer (oil capacity, less oil, winding damage) recorded nowhere else, and
+     * re-creating a job with the same number would re-link it, which is right for a typo
+     * correction and wrong for a different transformer. Do not read "delete the children" as
+     * the rule; read "an unreachable record is not evidence".
+     *
+     * THE COUNT IS NAMED BEFORE IT HAPPENS. O33's complaint about the other delete path was a
+     * dialog "that names the jobs and not the inspections, and gives no count of what it
+     * leaves" - so this one gives the count of what it takes.
+     */
+    let inspectionsToDelete: string[] = [];
+    if (editingMr.deletedJobIds.length > 0) {
+      try {
+        const inspSnap = await getDocs(query(
+          collection(db, 'inspections'),
+          where('ownerId', '==', auth.currentUser.uid),
+        ));
+        const allInsp = inspSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        const removedJobs = (editingMr.jobs as any[]).filter(j => editingMr.deletedJobIds.includes(j.id));
+        inspectionsToDelete = [...new Set(
+          removedJobs.flatMap(j => inspectionsForJob(j, allInsp).map((i: any) => i.id)),
+        )];
+      } catch {
+        // ⚠ A FAILED READ ABORTS THE SAVE. Committing the job deletions without knowing what
+        // they strand is the exact outcome this guard exists to prevent.
+        alert('Could not check which inspections belong to the removed transformer(s). Nothing was saved — try again.');
+        return;
+      }
+
+      if (inspectionsToDelete.length > 0) {
+        const ok = window.confirm([
+          `Removing ${editingMr.deletedJobIds.length} transformer(s) will also delete ${inspectionsToDelete.length} inspection record(s) attached to them.`,
+          '',
+          'An inspection is reached only through its job, so leaving them behind would make them unreachable rather than preserving them.',
+          '',
+          'This cannot be undone. Continue?',
+        ].join('\n'));
+        if (!ok) return;
+      }
+    }
+
     setIsSavingEdit(true);
     try {
       const batch = writeBatch(db);
       const now = Date.now();
 
-      // 1. Delete removed jobs
+      // 1. Delete removed jobs — every one already cleared the issued-document guard above.
       for (const delId of editingMr.deletedJobIds) {
         const docRef = doc(db, 'jobs', delId);
         batch.delete(docRef);
+      }
+
+      // 1b. …and their inspections, in the SAME batch. A separate write could leave a job
+      //     deleted with its inspections intact, which is the orphan state by another route.
+      for (const inspId of inspectionsToDelete) {
+        batch.delete(doc(db, 'inspections', inspId));
       }
 
       // 2. Update existing or insert new jobs
@@ -516,12 +659,11 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             isCancelled: isJobCancelled,
             mrStatus: isJobCancelled ? 'Cancelled' : 'Active',
             isClosed: false,
-            atId: (() => {
-              const ids = [...new Set(editingMr.jobs
-                .map(x => String((x as any).atId ?? '').trim())
-                .filter(Boolean))];
-              return ids.length === 1 ? ids[0] : (activeAtMaster ? activeAtMaster.id : '');
-            })(),
+            // ⚠ `activeAtMaster` DOES NOT APPEAR HERE (AUDIT G2). `mrAt` is resolved from the
+            // MR's own jobs at the top of this function, and the save refuses if they cannot
+            // agree - so there is no case left in which a fallback would be consulted, and no
+            // expression for a later edit to widen back into one.
+            atId: mrAt.atId,
             prevAtNo: j.prevAtNo || '',
             prevJobNo: j.prevJobNo || '',
             prevDeliveryDate: j.prevDeliveryDate || '',
@@ -538,7 +680,9 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
       // ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (ACTIVE JOBS ONLY)
       if (editingMr.repairType !== 'GP') {
-        const at = atForEditingMr();
+        // Resolved once at the top of this function - the save cannot have reached here with
+        // an unresolved AT, so this no longer re-derives it (AUDIT G2).
+        const at = mrAt;
         if (!('error' in at)) {
           const activeJobs = editingMr.jobs.filter(j => j.status !== 'Cancelled' && !j.isCancelled);
           const highWater = highWaterJobNos(activeJobs, editingMr.division);

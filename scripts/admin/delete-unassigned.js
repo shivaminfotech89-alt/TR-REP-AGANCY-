@@ -38,6 +38,8 @@
 // are counted separately.
 
 import { all, banner, db, fmtDate } from './_db.js';
+import { issuedMarks } from '../../src/lib/issuedDocuments.js';
+import { inspectionFor, inspectionsForJob } from '../../src/lib/inspectionLink.js';
 
 const MODE = 'dry-run';   // 'dry-run' | 'apply'
 
@@ -47,43 +49,14 @@ const APPLY = MODE === 'apply' && process.argv.includes('--apply');
 const isUnassigned = (r) => !String(r?.atId ?? '').trim();
 
 /**
- * WHAT COUNTS AS AN ISSUED DOCUMENT.
+ * ⚠ THE ISSUED-DOCUMENT TEST IS SHARED WITH THE APP, NOT COPIED (AUDIT G3).
  *
- * Deliberately broad. A false positive costs a manual decision; a false negative destroys
- * the only evidence of a statement made to the division. Every field that could indicate a
- * document left the agency is here, including the amount fields - a job carrying a bill
- * amount but no bill number is exactly the half-written state worth stopping on.
+ * It used to be defined here. `MrLedger.handleSaveFullMr` deletes jobs when rows are removed
+ * from the MR edit modal and had NO such test, so this script refused to destroy evidence
+ * while the UI destroyed it two clicks away. One definition now lives in
+ * src/lib/issuedDocuments.js - plain .js so Node and Vite both import the same file - and a
+ * change to what counts as "issued" reaches both at once.
  */
-const ISSUED_FIELDS = [
-  ['estimateNo', 'estimate no'],
-  ['estimateSentDate', 'estimate sent'],
-  ['estimateAmount', 'estimate amount'],
-  ['billNo', 'bill no'],
-  ['billSentDate', 'bill sent'],
-  ['billAmount', 'bill amount'],
-  ['billStatus', 'bill status'],
-  ['paymentStatus', 'payment status'],
-  ['paidAmount', 'paid amount'],
-  ['paymentDate', 'payment date'],
-  ['challanNo', 'challan no'],
-  ['challanDate', 'challan date'],
-  ['dispatchDate', 'dispatched'],
-  ['issuedByAgencyId', 'issued-by stamp'],
-];
-
-const has = (v) => {
-  if (v === undefined || v === null) return false;
-  if (typeof v === 'number') return v !== 0;
-  const s = String(v).trim();
-  return s !== '' && s !== '-' && s.toLowerCase() !== 'unpaid' && s.toLowerCase() !== 'pending';
-};
-
-function issuedMarks(job) {
-  return ISSUED_FIELDS
-    .filter(([f]) => has(job[f]))
-    .map(([f, label]) => `${label}: ${job[f]}`);
-}
-
 banner('DELETE UNASSIGNED WORK — jobs and oil transactions with no tender');
 console.log(`MODE = '${MODE}'${APPLY ? '   ** WRITING **' : '   (dry run - nothing will be written)'}\n`);
 
@@ -95,12 +68,9 @@ const agName = (id) => agencies.find(a => a.id === id)?.name || `(unknown agency
 const unJobs = jobs.filter(isUnassigned);
 const unTxns = txns.filter(isUnassigned);
 
-/** Every way an inspection is linked to a job, matching src/lib/oilBalance.ts inspectionFor. */
-const inspectionsFor = (job) => inspections.filter(i =>
-  i.jobId === job.id ||
-  i.jobId === job.jobNo ||
-  i.id === job.inspectionId ||
-  (i.mrNo && job.mrNo && i.mrNo === job.mrNo && i.jobNo && job.jobNo && i.jobNo === job.jobNo));
+// ⚠ IMPORTED, NOT COPIED, and the mrNo/jobNo branch is gone with it (AUDIT G4): no
+// inspection carries either field, so that clause never matched anything.
+const inspectionsFor = (job) => inspectionsForJob(job, inspections);
 
 const blocked = [];
 const deletable = [];
@@ -217,10 +187,7 @@ console.log('4b. WHAT THE AGENCY-WIDE OIL NET BECOMES  (AUDIT F89)');
 console.log('=========================================================================');
 
 const external = inspections.filter(i => i.type === 'External' || !i.type);
-const inspFor = (job) =>
-  external.find(i => i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId ||
-                     (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) ||
-  external.find(i => i.jobId === job.id);
+const inspFor = (job) => inspectionFor(job, external);
 
 function shortageOf(job) {
   const insp = inspFor(job);

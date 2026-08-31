@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { inspectionFor } from '../lib/inspectionLink.js';
 import { useAgency, isUnassigned, isIntakeOpen } from "../lib/AgencyContext";
 import { db, auth, handleFirestoreError, OperationType } from "../lib/firebase";
 import * as XLSX from "xlsx";
@@ -371,7 +372,11 @@ ${intakeGate.reason}`);
           // WHICH TENDER THIS OIL BELONGS TO. Stamped at entry from the active AT, the same
           // way a job is - a transaction cannot be attributed later, because the MR it names
           // may have no jobs to read a tender from (AUDIT F82).
-          atId: activeAtMaster?.id || '',
+          // ⚠ NO FALLBACK (AUDIT G2). `?? ''` here was unreachable - the handler returns at
+          // the intake gate above when no tender is active, and `isIntakeOpen(null, …)` is
+          // closed, which covers "all tenders" too. Removed rather than kept, for the same
+          // reason as NewJob's: it is the pattern that produced the unassigned rows.
+          atId: activeAtMaster!.id,
           createdAt: serverTimestamp(),
         };
         await addDoc(collection(db, "oilTransactions"), newTx);
@@ -448,10 +453,7 @@ ${intakeGate.reason}`);
         summary[mrNo].mrDate = mrDate;
       }
 
-      const insp = inspections.find(i => 
-        (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
-        (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
-      ) || inspections.find(i => i.jobId === job.id);
+      const insp = inspectionFor(job, inspections);
 
       const rawOilCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
       const rawLessOil = insp?.data?.lessOilLtrs ?? insp?.lessOilLtrs ?? job.externalDetails?.lessOilLtrs ?? job.lessOilLtrs;

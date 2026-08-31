@@ -1805,6 +1805,178 @@ of not exposing it; the reasoning was sound and the door was open the whole time
 
 ---
 
+## G2. A fallback nobody could reach, and one nobody had guarded
+
+Three creation paths write `atId`. Two carried a fallback that was **unreachable**, and one
+carried a fallback that was **live**.
+
+| path | stamp | guarded by |
+|---|---|---|
+| NewJob save | `activeAtMaster ? activeAtMaster.id : ''` | setup-gap dialog returns first — dead branch |
+| OilInward new entry | `activeAtMaster?.id \|\| ''` | intake gate **in the handler** returns first — dead branch |
+| **MrLedger `handleSaveFullMr`** | `ids.length === 1 ? ids[0] : (activeAtMaster ? … : '')` | **nothing** |
+
+`handleSaveFullMr` creates jobs for rows added during an MR edit. Its guards checked the MR
+number, the job count, job numbers and kVA — **no AT check**. The only `atForEditingMr()` call
+in the function ran *after* `batch.commit()`, to advance a counter.
+
+So it could write an unassigned job two ways: the MR's jobs disagree or carry no AT, and
+`activeAtMaster` is null — which includes **"All tenders"**, a scope the MR Ledger renders in
+and this path never consulted.
+
+### The wrong-tender case is worse than the empty one
+
+An empty `atId` is **findable**: the unassigned backlog shows it, every census counts it, and
+`hasTender` now refuses it at the rules. A job stamped with **today's** tender on another
+tender's MR **looks correct everywhere** — and prices from the wrong rate schedule and the
+wrong AT percentage, which is the failure F72 exists to prevent.
+
+`atForEditingMr`'s own error text had said this all along: *"would have to take its job number
+and AT percentage from whichever AT is selected today, which may not be the tender this MR
+belongs to."* The function that produced the error was called by the button and not by the
+save.
+
+**Fixed:** `handleSaveFullMr` resolves the MR's AT before anything is written and refuses with
+that same message. `activeAtMaster` no longer appears in the expression at all — there is no
+fallback left for a later edit to widen back into one.
+
+### Both dead fallbacks deleted anyway
+
+Unreachable-today is not a reason to keep the pattern that produced the twelve unassigned
+jobs. A dead `: ''` reads as **the sanctioned way to write this field**, and the next call
+site copies the shape, not the guard. Both are now `activeAtMaster!.id`.
+
+### The rules backstop, and what it cannot do
+
+`hasTender()` on **create only** for `jobs` and `oilTransactions`. Create-only is the whole
+design: every record predating tender stamping has `atId` absent, and requiring it on update
+would make those documents unwritable by their own owner — the trap G1's `ownerId` check
+avoided.
+
+It stops an **empty** stamp and not a **wrong** one, because rules cannot read another
+collection to ask whether the id is one of this agency's tenders. And it surfaces as
+`permission-denied` mid-batch, which tells an operator nothing. **It is what survives a future
+call site that forgets the refusals; it is not the refusal.**
+
+---
+
+## G3. Guarded control, unguarded handler — a sweep, not a fix
+
+`handleSaveFullMr` was found guarded on its button and unguarded in its handler. That is the
+fourth instance of the shape this session, so the response was a sweep.
+
+| site | control | handler | before |
+|---|---|---|---|
+| OilInward new entry | hidden on `intakeGate.open` | **also checks** | ✅ already right — its comment says *"the gate is in the handler, not only on the button"* |
+| MrLedger add-unit | hidden on `intakeGate.open` | checked `atForEditingMr` — a **different question** | ⚠️ fixed |
+| NewJob save | whole form replaced by a refusal screen | **no gate check at all** | ⚠️ fixed |
+| MrLedger `handleSaveFullMr` | — | no AT check | fixed at G2 |
+
+**MrLedger's add-unit is the sharp one.** Its handler *did* have a guard, so it read as
+guarded — but `atForEditingMr` answers "do this MR's jobs agree on a tender?", not "does that
+tender still accept new work?". The F83 intake rule was enforced by a `{intakeGate.open ? …}`
+in the JSX and by nothing else. **A guard that answers an adjacent question is worse than no
+guard: it makes the function look protected.**
+
+NewJob's is unreachable today — the form is replaced 600 lines away — and was fixed anyway.
+A rule enforced by the UI is enforced until someone changes the UI, and a reader inspecting
+the save saw no rule, which is exactly how `handleSaveFullMr` came to exist.
+
+### The delete guard, and one shared definition
+
+`handleSaveFullMr`'s row-removal loop deleted jobs with **no check for an issued document** —
+O33's third gap, in the site O33 does not name. A job carrying a bill, a payment or a challan
+was destroyed by taking its row out of a form, and `issuedByAgencyId` lives on that document
+(O14), so the delete removes the only record of what was billed, to whom, and by which agency.
+
+**Two of the three jobs kept in F91 are exactly this shape**, including MSBT-12 / MR 1 with
+BILL/1, ₹6,680 paid and a challan — C3's only evidence.
+
+⚠ **`scripts/admin/delete-unassigned.js` has refused this since it was written.** A script
+guarding what the UI did freely, for as long as both existed. The test now lives once, in
+`src/lib/issuedDocuments.js` — plain `.js` so Vite and Node import the **same file** (the
+project sets `allowJs` and `"type": "module"`). A guard that agrees with its script only by
+coincidence is the F87 shape applied to a rule instead of a number.
+
+Verified after extraction: the script still refuses the same three jobs.
+
+---
+
+## G4. Inspections are reachable by `jobId` and by nothing else
+
+The delete guard does **not** address orphaning, and the two questions are genuinely separate:
+the guard decides *whether a job may be deleted*, orphaning is *what happens to its
+inspections when one legitimately is*.
+
+The answer turned on how reachable an orphan is. `inspectionFor` matches four ways, one of
+them `(i.mrNo === job.mrNo && i.jobNo === job.jobNo)`. Against live data:
+
+```
+inspections: 103
+carrying mrNo : 0 / 103
+carrying jobNo: 0 / 103
+already orphaned by jobId: 0
+```
+
+**No inspection carries either field.** That branch of `inspectionFor` has never matched
+anything and never can — a comparison against data the producing code does not emit, the
+F44/F53 pattern, sitting in the linking function rather than in a price.
+
+So an orphaned inspection is **completely unreachable**: `jobId` is the only link, and nothing
+lists inspections independently. It is not recoverable evidence; it is dead weight that every
+future census has to recognise and explain.
+
+**Therefore cascading is right here**, and the reasoning is specific rather than general:
+cascade is correct *because* the orphan cannot be reached. Had inspections carried `mrNo` —
+as `inspectionFor` assumes — the opposite would follow: an orphan would still be findable by
+MR, deleting it would destroy measured facts about a physical transformer (oil capacity, less
+oil, winding damage), and re-creating a job with the same number would re-link it, which is
+right for a typo correction and wrong for a different transformer.
+
+### ⚠ The counterfactual, which is the part that does not generalise
+
+**Cascade is right HERE BECAUSE the orphan cannot be reached.** The conclusion looks like a
+principle — *delete the children with the parent* — and it is not one.
+
+**Had inspections carried `mrNo`, as the matcher wrongly assumed, the opposite would follow:**
+the orphan would still be findable by MR; deleting it would destroy measured facts about a
+physical transformer — oil capacity, less oil, winding damage — recorded nowhere else; and
+re-creating a job with the same number would re-link it, which is right for a typo correction
+and wrong for a different transformer.
+
+So the rule to carry forward is not *cascade*. It is: **an unreachable record is not evidence,
+and a reachable one is.** Decide by asking what can still find the child, not by the shape of
+the relationship. Anyone extending this to another collection has to re-answer that question
+rather than cite this entry.
+
+### What was built
+
+**The dead branch was deleted, not repaired.** Populating `mrNo`/`jobNo` would have made it
+work, which is the wrong fix: it creates a **second linking rule that can disagree with the
+first**. A job renumbered or moved between MRs would match by one route and not the other, and
+which answer you got would depend on which clause ran first. `jobId` is the link, it works,
+and nothing needs a second route — one rule cannot disagree with itself.
+
+**And the matcher existed seven times**, character-identical, in `oilBalance.ts`,
+`BillingSystem` twice, `OilInward`, and three admin scripts. It decides whether an
+inspection's measurements apply to a transformer, so a divergence changes an oil shortage on a
+document sent to a division. One definition now lives in `src/lib/inspectionLink.js` — plain
+`.js`, imported by Vite and by plain Node, the same arrangement `issuedDocuments.js` uses.
+Verified figure-neutral: MEGHA +1365.60 and AARATI +112.00 unchanged across the consolidation.
+
+**The cascade** deletes a removed job's inspections in the **same batch** — a separate write
+could leave a job deleted with its inspections intact, which is the orphan state by another
+route — and names the count first: *"will also delete N inspection record(s)"*. O33's
+complaint about the other delete path was a dialog "that names the jobs and not the
+inspections, and gives no count of what it leaves"; this one gives the count of what it takes.
+
+A failed read of the inspections **aborts the save**. Committing job deletions without knowing
+what they strand is precisely the outcome the guard exists to prevent.
+
+Nothing is orphaned today — 0 of 103 — so this is prevention, not cleanup.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
@@ -3771,6 +3943,18 @@ by nothing.
 only evidence of what was billed, to whom, and by which agency - `issuedByAgencyId` was
 added in O14 precisely so an issued document's supplier could not be lost, and it lives on
 the job document that this path deletes. The remedy would survive only in this file.
+
+⚠ **THE GAP HAS TWO SITES, AND THIS ENTRY NAMED ONLY ONE.** `handleDeleteEntireMr` is the
+one described above. `handleSaveFullMr` - the MR **edit** modal's save - also deletes jobs,
+one per row the operator removed:
+
+    for (const delId of editingMr.deletedJobIds) batch.delete(doc(db, 'jobs', delId));
+
+Same three gaps, reached by taking a row out of a form rather than by pressing Delete. **It
+survived a fix aimed at the other because this entry named a function instead of a
+behaviour** - anyone checking "is O33 closed?" would read `handleDeleteEntireMr`, find the
+guard, and stop. Closed at G3; recorded here so the next reader of O33 knows to look for the
+second site rather than trusting the name.
 
 **What a fix needs**, in order of value:
 

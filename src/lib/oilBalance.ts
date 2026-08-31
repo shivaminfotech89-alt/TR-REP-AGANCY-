@@ -95,6 +95,8 @@ export function describeOil(litres: number): OilDirection {
   };
 }
 
+import { inspectionFor } from './inspectionLink.js';
+
 export interface OilBalanceInput {
   jobs: any[];
   inspections: any[];
@@ -136,14 +138,8 @@ export interface OilBalance {
   byDivision: Record<string, OilDivisionBalance>;
 }
 
-/** The external inspection for a job, by any of the four ways they are linked. */
-function inspectionFor(job: any, inspections: any[]): any {
-  return inspections.find(i =>
-    (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId ||
-     (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
-    (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
-  ) || inspections.find(i => i.jobId === job.id);
-}
+// The job/inspection link lives in inspectionLink.js — one definition, shared with the
+// admin scripts, with the branch that could never match removed (AUDIT G4).
 
 /** One job's net oil shortage, exactly as the register derives it. */
 export function jobOilShortage(job: any, inspections: any[]): number {

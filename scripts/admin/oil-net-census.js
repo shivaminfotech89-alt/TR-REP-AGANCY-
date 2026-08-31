@@ -28,6 +28,7 @@
  * issued. See OIL_DIRECTION in src/lib/oilBalance.ts for the evidence from the UGVCL sheet.
  */
 import { all, banner } from './_db.js';
+import { inspectionFor } from '../../src/lib/inspectionLink.js';
 
 const describe = (n) =>
   `${n > 0 ? '+' : n < 0 ? '-' : ''}${Math.abs(Number(n.toFixed(2))).toFixed(2)} LTR  ` +
@@ -40,16 +41,14 @@ const [agencies, jobs, txns, inspections] = await Promise.all(
 
 const external = inspections.filter(i => i.type === 'External' || !i.type);
 
-/** src/lib/oilBalance.ts inspectionFor — the four ways an inspection links to a job. */
-const inspectionFor = (job) =>
-  external.find(i =>
-    (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId ||
-     (i.mrNo === job.mrNo && i.jobNo === job.jobNo))) ||
-  external.find(i => i.jobId === job.id);
+// ⚠ THE LINK RULE IS IMPORTED, NOT COPIED (AUDIT G4). Seven identical copies existed and
+// each could drift; this decides whether an inspection's measurements apply to a transformer,
+// so a divergence changes a shortage on a document sent to a division.
+const inspFor = (job) => inspectionFor(job, external);
 
 /** src/lib/oilBalance.ts jobOilShortage — a stored netShortage wins; the rest is its fallback. */
 function jobOilShortage(job) {
-  const insp = inspectionFor(job);
+  const insp = inspFor(job);
   const stored = insp?.data?.netShortage ?? insp?.netShortage ?? job.externalDetails?.netShortage;
   if (typeof stored === 'number') return stored;
 

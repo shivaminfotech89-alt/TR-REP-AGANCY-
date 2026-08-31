@@ -1025,6 +1025,25 @@ export default function NewJob() {
   }, [activeAtMaster, activeAgency, commonData.division]);
 
   const handleSubmit = (e: React.FormEvent) => {
+    /**
+     * ⚠ THE INTAKE RULE ASSERTED WHERE THE WRITE IS (AUDIT G3).
+     *
+     * The whole form is already replaced by a refusal screen when the gate is closed, so this
+     * is unreachable today. It is here because the protection was a RENDER BRANCH ~600 lines
+     * from the save, and a reader inspecting this function saw no rule at all - which is
+     * precisely how MrLedger's `handleSaveFullMr` came to write jobs with no AT check while
+     * the button beside it was guarded.
+     *
+     * A rule enforced by the UI is enforced until someone changes the UI.
+     */
+    if (!intakeGate.open) {
+      e.preventDefault();
+      alert(`No new work can be recorded against this tender.
+
+${intakeGate.reason}`);
+      return;
+    }
+
     e.preventDefault();
     if (!auth.currentUser) {
       setModalAlertMessage("You must be logged in to save a job.");
@@ -1582,7 +1601,13 @@ export default function NewJob() {
               ratingLevel: t.starRating || t.ratingLevel || '3 Star & other',
               status: 'Received',
               isClosed: false,
-              atId: activeAtMaster ? activeAtMaster.id : '',
+              // ⚠ NO FALLBACK (AUDIT G2). This read `activeAtMaster ? activeAtMaster.id : ''`
+              // and the empty branch was unreachable - the save returns at the setup-gap
+              // check above when no AT is active, including in "all tenders" scope. It is
+              // deleted anyway: an empty `atId` is what produced the twelve unassigned jobs,
+              // and a dead fallback reads as the sanctioned way to write this field. The
+              // non-null assertion is safe for the same reason the branch was dead.
+              atId: activeAtMaster!.id,
               
               // Previous AT & Auto-Calculated GP Warranty Metadata
               gpGuaranteeMonths: commonData.repairType === 'GP' ? gpValidationMonths : null,

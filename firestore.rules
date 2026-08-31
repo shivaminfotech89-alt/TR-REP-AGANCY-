@@ -48,6 +48,27 @@ service cloud.firestore {
       return v is number || v is string || v is timestamp || v is map;
     }
 
+
+    /**
+     * A TENDER IS NAMED, AND NAMED WITH SOMETHING (AUDIT G2).
+     *
+     * ⚠ CREATE ONLY, AND THAT ASYMMETRY IS THE POINT. Every record written before oil and
+     * jobs were stamped per tender has `atId` ABSENT (F82), and 12 jobs carried an empty one
+     * (F87). Requiring it on UPDATE would make those documents unwritable by their own owner -
+     * the same trap the ownerId check avoided in G1 - so history stays editable and only NEW
+     * unassigned records are refused.
+     *
+     * ⚠ A SECOND LINE, NOT THE FIX. This cannot say "and it must be one of THIS agency's
+     * tenders" - rules cannot read another collection - so it stops an empty stamp and not a
+     * wrong one, which is the more dangerous of the two. And it surfaces as
+     * `permission-denied` in the middle of a batch, which tells an operator nothing. The
+     * refusals that explain themselves live in the app; this is what survives a future call
+     * site that forgets them.
+     */
+    function hasTender(data) {
+      return 'atId' in data && data.atId is string && data.atId.size() >= 1 && data.atId.size() <= 128;
+    }
+
     function isValidId(id) {
       return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
@@ -346,7 +367,7 @@ service cloud.firestore {
      */
     match /jobs/{jobId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidJob(incoming());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && hasTender(incoming()) && isValidJob(incoming());
       allow update: if isSignedIn() && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && isValidJob(incoming());
       allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }
@@ -398,7 +419,7 @@ service cloud.firestore {
 
     match /oilTransactions/{txId} {
       allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin());
-      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidOilTransaction(incoming());
+      allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && hasTender(incoming()) && isValidOilTransaction(incoming());
       allow update: if isSignedIn() && existing().ownerId == request.auth.uid && incoming().ownerId == existing().ownerId && isValidOilTransaction(incoming());
       allow delete: if isSignedIn() && existing().ownerId == request.auth.uid;
     }

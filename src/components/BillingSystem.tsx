@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -647,10 +648,7 @@ export default function BillingSystem() {
   // exclude it. Do not switch this to selectedJobsData.
   const jobOilDetails = useMemo(() => {
     return selectedJobsWithGp.map(job => {
-      const insp = inspections.find(i => 
-        (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
-        (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
-      ) || inspections.find(i => i.jobId === job.id);
+      const insp = inspectionFor(job, inspections);
       
       const rawOilCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
       const rawLessOil = insp?.data?.lessOilLtrs ?? insp?.lessOilLtrs ?? job.externalDetails?.lessOilLtrs ?? job.lessOilLtrs;
@@ -783,10 +781,7 @@ export default function BillingSystem() {
         summary[mrNo].mrDate = mrDate;
       }
 
-      const insp = inspections.find(i => 
-        (i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId || (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) &&
-        (i.type === 'External' || !i.type || i.data?.oilCapLtrs !== undefined)
-      ) || inspections.find(i => i.jobId === job.id);
+      const insp = inspectionFor(job, inspections);
 
       const rawOilCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
       const rawLessOil = insp?.data?.lessOilLtrs ?? insp?.lessOilLtrs ?? job.externalDetails?.lessOilLtrs ?? job.lessOilLtrs;

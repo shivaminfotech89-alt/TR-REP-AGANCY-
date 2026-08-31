@@ -33,6 +33,7 @@
 // answer the same question differently - the side-by-side discipline from AUDIT F87.
 
 import { all, banner, db } from './_db.js';
+import { inspectionFor } from '../../src/lib/inspectionLink.js';
 
 const MODE = 'dry-run';   // 'dry-run' | 'apply'
 
@@ -50,14 +51,14 @@ const [agencies, ats, jobs, txns, inspections] = await Promise.all(
   ['agencies', 'atMasters', 'jobs', 'oilTransactions', 'inspections'].map(all));
 
 const external = inspections.filter(i => i.type === 'External' || !i.type);
-const inspectionFor = (job) =>
-  external.find(i => i.jobId === job.id || i.jobId === job.jobNo || i.id === job.inspectionId ||
-                     (i.mrNo === job.mrNo && i.jobNo === job.jobNo)) ||
-  external.find(i => i.jobId === job.id);
+// ⚠ THE LINK RULE IS IMPORTED, NOT COPIED (AUDIT G4). Seven identical copies existed and
+// each could drift; this decides whether an inspection's measurements apply to a transformer,
+// so a divergence changes a shortage on a document sent to a division.
+const inspFor = (job) => inspectionFor(job, external);
 
 /** src/lib/oilBalance.ts jobOilShortage, verbatim. */
 function jobOilShortage(job) {
-  const insp = inspectionFor(job);
+  const insp = inspFor(job);
   const stored = insp?.data?.netShortage ?? insp?.netShortage ?? job.externalDetails?.netShortage;
   if (typeof stored === 'number') return stored;
   const rawCap = insp?.data?.oilCapLtrs ?? insp?.oilCapLtrs ?? job.externalDetails?.oilCapLtrs ?? job.oilCapLtrs ?? job.oilCapacity;
