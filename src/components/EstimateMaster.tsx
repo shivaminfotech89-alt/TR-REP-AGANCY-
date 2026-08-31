@@ -19,7 +19,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
-import { SCHEDULE_A, bandForKva } from '../lib/ugvclSchedule2020';
+import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100 } from '../lib/ugvclSchedule2020';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
@@ -87,6 +87,81 @@ function inheritedWindingPair(itemCode: string, kva: string): { al: number; cu: 
   // Both or neither. Showing one half of a pair labelled by material invites the reader to
   // assume the other is absent from the tender rather than absent from this lookup.
   return al !== null && cu !== null ? { al, cu } : null;
+}
+
+/**
+ * THE RADIATOR'S TENDER RATE AT ONE EXACT CAPACITY (AUDIT G6).
+ *
+ * ⚠ THIS MIRRORS THE ESTIMATE'S OWN LINE, DELIBERATELY. SingleJobEstimateReport computes
+ *
+ *     const radScheduleValue = kvaNum > 100 ? RADIATOR_ABOVE_100[kvaNum] : scheduleRate('20');
+ *
+ * and this is the same expression against the same two sources. That equivalence is the whole
+ * licence for showing a figure here: the grid must never print a rate the estimate will not
+ * use, and the ONLY reason it may print 2630.06 for 500 KVA is that the estimate charges
+ * 2630.06 for 500 KVA.
+ *
+ * ⚠ THE MARKER WAS NOT HIDING AN UNKNOWN - IT WAS HIDING A DISAGREEMENT IN THE LOOKUP.
+ * `inheritedScheduleRate` resolves through `bandForKva`, and 200 and 500 both fall in
+ * `B_ABOVE_100`, whose single value is 1971.69. So the generic path would have shown 1971.69
+ * in the 500 column while the estimate charged 2630.06. The estimate has been right all along;
+ * the grid could not say so, because it asked the schedule a question the schedule cannot
+ * answer - "what is the rate for this BAND" - where the estimate asks "what is the rate for
+ * this CAPACITY".
+ *
+ * ⚠ 315 KVA RETURNS NULL, AND THAT IS THE POINT. The tender does not price it.
+ * `RADIATOR_ABOVE_100[315]` is undefined, `resolveRate` returns null, and the estimate BLOCKS
+ * with a missing-rate error rather than interpolating between 200 and 500. The grid keeps its
+ * marker on exactly that cell - a figure there would be the falsehood the marker exists to
+ * prevent, and it is the one cell in the whole table where the tender genuinely has no answer.
+ *
+ * 5 KVA also returns null: the schedule's B5 rate for radiator is 0, which is "not priced"
+ * rather than "free", and `> 0` is the same test the estimate applies.
+ */
+function inheritedRadiatorRate(itemCode: string, kva: string): number | null {
+  const v = variantAxisForMasterCode(itemCode);
+  if (!v || v.axis !== 'capacity') return null;
+  const n = Number(kva) || 0;
+  if (n > 100) {
+    const exact = RADIATOR_ABOVE_100[n];
+    return typeof exact === 'number' && exact > 0 ? exact : null;   // 315: not priced -> marker
+  }
+  const entry = SCHEDULE_A.find(i => i.sr === (v.options as Record<string, string>)['upto-100']);
+  if (!entry) return null;
+  const r = entry.rates[bandForKva(n)];
+  return typeof r === 'number' && r > 0 ? r : null;
+}
+
+/**
+ * THE 11 KV TENDER RATE FOR A ROW WHOSE ONLY VARIABLE IS THE KV CLASS (AUDIT G5).
+ *
+ * ⚠ DISPLAY ONLY. THE CALCULATION IS UNTOUCHED. The tender prices 11 AND 22 KV, and F48
+ * established that refusing to price 22 KV work would be wrong: a job entered at 22 KV still
+ * resolves 8-B, and a blank or unrecognised `kv` still BLOCKS rather than defaulting. Nothing
+ * here is consulted when an estimate is priced - `resolveRate` reads the schedule, not this.
+ *
+ * ⚠ WHY 11 IS THE ONE SHOWN. Confirmed with the operator: every transformer these agencies
+ * repair is a DISTRIBUTION transformer at 11 KV, across all DISCOMs. 22 KV does not arise in
+ * their work. "Varies by KV rating" was true and useless - it told the reader the cell had two
+ * answers without telling them either, when one of the two is the answer for every job they
+ * will ever enter.
+ *
+ * Same treatment as the winding pair above and for the same reason: show the figure that
+ * applies, LABELLED with which it is. The label is what keeps this honest - `176.00 (11 KV)`
+ * says the rate and its condition, so an agency that ever does 22 KV work sees immediately
+ * that this is not their number, where a bare `176.00` would not.
+ */
+function inheritedKvRate(itemCode: string, kva: string): { value: number; kv: string } | null {
+  const v = variantAxisForMasterCode(itemCode);
+  if (!v || v.axis !== 'kv-class') return null;
+  // The 11 KV option, by name. Not options[0] - an ordering change in the map would silently
+  // relabel the figure, which is the class of fault this file keeps recording.
+  const sr = (v.options as Record<string, string>)['11'];
+  if (!sr) return null;
+  const entry = SCHEDULE_A.find(i => i.sr === sr);
+  if (!entry) return null;
+  const r = entry.rates[bandForKva(Number(kva) || 0)];
+  return typeof r === 'number' && r > 0 ? { value: r, kv: '11' } : null;
 }
 
 /** Short reason a variant row shows no inherited figure. Never blank - see AUDIT F50. */
@@ -1838,8 +1913,16 @@ export default function EstimateMaster() {
                                 && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
                               const inherited = stored ? null : inheritedScheduleRate(item.itemCode, kva);
                               const pair = stored || inherited !== null ? null : inheritedWindingPair(item.itemCode, kva);
-                              const marker = stored || pair ? null : variantMarker(item.itemCode);
+                              const kvRate = stored || inherited !== null || pair ? null : inheritedKvRate(item.itemCode, kva);
+                              const radRate = stored || inherited !== null || pair || kvRate ? null : inheritedRadiatorRate(item.itemCode, kva);
+                              const marker = stored || pair || kvRate || radRate !== null ? null : variantMarker(item.itemCode);
                               const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                              const radTitle = radRate !== null
+                                ? `From the UGVCL tender schedule at exactly ${kva} KVA. Above 100 KVA the tender prices each capacity separately - 200 and 500 differ - so this is the rate for this column, not a band average. It is the same figure the estimate charges. Nothing is stored for this cell; type over it to override.`
+                                : undefined;
+                              const kvTitle = kvRate
+                                ? `From the UGVCL tender schedule, ${kvRate.kv} KV. The tender also prices 22 KV and the estimate resolves that correctly from the KV rating on the external inspection - this shows ${kvRate.kv} KV because every transformer these agencies repair is 11 KV. Nothing is stored for this cell. Type over it to override BOTH KV classes with a single rate.`
+                                : undefined;
                               const pairTitle = pair
                                 ? `From the UGVCL tender schedule. Aluminium ${fmt(pair.al)}, copper ${fmt(pair.cu)} - the estimate picks one using the Winding Type on the internal inspection. Nothing is stored for this cell. Type over it to override BOTH materials with a single rate.`
                                 : undefined;
@@ -1862,10 +1945,10 @@ export default function EstimateMaster() {
                                     className={`w-20 px-1.5 py-1 text-right text-xs border rounded focus:ring-1 focus:ring-blue-500 font-mono font-medium ${
                                       stored ? 'border-slate-300 text-slate-900 font-semibold' : 'border-sky-200 bg-sky-50 text-slate-600'
                                     }`}
-                                    placeholder={inherited !== null ? fmt(inherited) : pair ? `${fmt(pair.al)}/${fmt(pair.cu)}` : '-'}
+                                    placeholder={inherited !== null ? fmt(inherited) : pair ? `${fmt(pair.al)}/${fmt(pair.cu)}` : kvRate ? fmt(kvRate.value) : radRate !== null ? fmt(radRate) : '-'}
                                     title={inherited !== null
                                       ? `Tender rate ${fmt(inherited)} applies while this is blank. Type to override; clear to go back to it.`
-                                      : pairTitle || marker || undefined}
+                                      : pairTitle || kvTitle || radTitle || marker || undefined}
                                   />
                                 );
                               }
@@ -1913,6 +1996,31 @@ export default function EstimateMaster() {
                                         title={pairTitle}>
                                     <span className="block whitespace-nowrap">{fmt(pair.al)} AL</span>
                                     <span className="block whitespace-nowrap">{fmt(pair.cu)} CU</span>
+                                  </span>
+                                );
+                              }
+                              if (radRate !== null) {
+                                return (
+                                  /* An ordinary inherited figure - same tint, same weight. It
+                                     needs no suffix: the COLUMN already states the capacity it
+                                     applies to, which is exactly why a per-column lookup can
+                                     show it where a per-band one could not. */
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-xs font-mono"
+                                        title={radTitle}>
+                                    {fmt(radRate)}
+                                  </span>
+                                );
+                              }
+                              if (kvRate) {
+                                return (
+                                  /* Same tint and weight as any other inherited figure - it is
+                                     the same kind of thing. The (11 KV) suffix carries the
+                                     condition, so no third visual signal is introduced, and it
+                                     is what stops the number reading as unconditional. */
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-[11px] font-mono leading-tight"
+                                        title={kvTitle}>
+                                    <span className="block whitespace-nowrap">{fmt(kvRate.value)}</span>
+                                    <span className="block whitespace-nowrap text-[9px] text-slate-500">({kvRate.kv} KV)</span>
                                   </span>
                                 );
                               }

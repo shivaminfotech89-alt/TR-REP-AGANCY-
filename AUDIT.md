@@ -1977,6 +1977,128 @@ Nothing is orphaned today — 0 of 103 — so this is prevention, not cleanup.
 
 ---
 
+## G5. Showing the rate that applies, when only one of the two ever does
+
+The Estimate Master's HV Bushing row printed **"Varies by KV rating"**. True, and useless:
+it told the reader the cell had two answers without telling them either.
+
+Confirmed with the operator: **every transformer these agencies repair is a distribution
+transformer at 11 KV, across all DISCOMs. 22 KV does not arise in their work.** So one of the
+two answers is the answer for every job they will ever enter, and the marker was withholding
+it.
+
+The row now shows **`176.00` with `(11 KV)` beneath it**, the same treatment the coil rows
+already give the aluminium/copper pair (F52), and for the same reason: *show the figure that
+applies, labelled with which it is.*
+
+**The label is what keeps it honest.** `176.00 (11 KV)` states the rate and its condition; a
+bare `176.00` would read as unconditional, and an agency that ever did 22 KV work would have
+no signal that this is not their number. The tooltip says the tender also prices 22 KV and
+that the estimate resolves it from the external inspection.
+
+### ⚠ Display only. The calculation is untouched, and that boundary is the point
+
+`inheritedKvRate` is consulted **nowhere in pricing**. `resolveRate` reads the schedule, not
+this function. So:
+
+- a job entered at **22 KV still resolves 8-B** (₹265), exactly as before;
+- a **blank or unrecognised `kv` still blocks** rather than defaulting — F48 established that
+  refusing to price 22 KV work would be wrong, and that a silent default is worse than a
+  refusal.
+
+This is the distinction between *what the grid shows an agency* and *what the tender permits*.
+Narrowing the display to the case that occurs is a readability decision; narrowing the code
+would be a correctness regression, and the note in `scheduleItemMap` — *"Anything other than
+11 or 22 blocks rather than defaulting (F48)"* — still governs.
+
+One implementation detail worth keeping: the 11 KV schedule row is looked up by **name**
+(`options['11']`), not by position. An ordering change in the variant map would otherwise
+silently relabel the figure — the class of fault this file keeps recording.
+
+### The remaining marker, and why it is still right
+
+**Radiator is the only one left.** Of the seven variant rows: HV Bushing now shows its figure;
+the five winding-material rows show the AL/CU pair (F52); Radiator alone shows
+*"Varies by capacity"*.
+
+Its marker is **not merely defensible, it is load-bearing**. `inheritedScheduleRate` resolves
+through `bandForKva`, and 200 and 500 KVA both fall in `B_ABOVE_100`, whose single value is
+**1971.69**. Showing an inherited figure would therefore print **1971.69 in the 500 column,
+where the tender's rate is 2630.06** — a wrong number in a cell an agency reads to check a
+bill. The marker is not hiding a figure; it is refusing to print a false one.
+
+Built at G6 — see below, including the check that decided whether it was safe.
+
+---
+
+## G6. The grid was asking the schedule a question it cannot answer
+
+The Radiator row showed *"Varies by capacity"* in all ten columns. It now shows the tender's
+rate in eight of them and keeps the marker on **315 KVA alone** — the one cell in the entire
+grid where the tender genuinely has no answer.
+
+### The question that decided it, and it had to be asked first
+
+**Would the grid show a figure the estimate will not use?** If it showed 2630.06 for 500 KVA
+while the estimate charged 1971.69, the display and the document would disagree — worse than
+the marker, because an agency checking a bill against the rate table would find a discrepancy
+that is not in the bill.
+
+**They already agreed.** `SingleJobEstimateReport:624`:
+
+```js
+const radScheduleValue = kvaNum > 100 ? RADIATOR_ABOVE_100[kvaNum] : scheduleRate('20');
+```
+
+The estimate has **never** used the band value above 100 KVA. It has charged 2630.06 for a 500
+KVA radiator all along.
+
+### So the marker was not hiding an unknown — it was hiding a mismatch in the lookup
+
+`inheritedScheduleRate` resolves through `bandForKva`; 200 and 500 both land in
+`B_ABOVE_100`, whose single value is 1971.69. **The grid asked "what is the rate for this
+BAND" where the estimate asks "what is the rate for this CAPACITY."** Two different questions
+against the same schedule, and the marker was the symptom of the difference rather than of any
+genuine variability.
+
+This is the fourth time in this audit that a display and a calculation have read the same data
+by different routes (F41/F55, F68, F81, F95). The distinguishing feature here is the outcome:
+the marker meant nobody was ever shown a wrong number, so it surfaced as a *missing* figure
+instead of a *false* one — which is why it survived so long and cost so little.
+
+`inheritedRadiatorRate` now mirrors the estimate's expression against the same two sources, and
+the docstring says the equivalence is the licence for showing anything at all.
+
+### Verified per column, against what the estimate charges
+
+```
+kVA   grid shows   estimate charges   agree
+5     (marker)     BLOCKS             yes     B5 rate is 0 — "not priced", not "free"
+10-25 1052.00      1052.00            yes
+50-63 1248.00      1248.00            yes
+100   1446.00      1446.00            yes
+200   1971.69      1971.69            yes
+315   (marker)     BLOCKS             yes     not in the tender
+500   2630.06      2630.06            yes     ← the band model cannot express this
+```
+
+### Why 315 keeps its marker
+
+`RADIATOR_ABOVE_100[315]` is undefined, `resolveRate` returns null, and the estimate raises a
+missing-rate error rather than interpolating between 200 and 500. **A figure in that cell would
+be the exact falsehood the marker exists to prevent**, and it would be the more dangerous kind:
+a plausible number, between two real ones, for a capacity nobody priced.
+
+5 KVA renders no figure for the same reason in a different form — the schedule's B5 radiator
+rate is 0, and `> 0` is the same test the estimate applies, so "not priced" does not become
+"free".
+
+**One marker remains in the whole grid, on the one cell where the tender has no answer.** That
+is a better end state than a marker covering two cells that do have answers — and the figure
+it withholds is genuinely absent rather than merely inconvenient to look up.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
