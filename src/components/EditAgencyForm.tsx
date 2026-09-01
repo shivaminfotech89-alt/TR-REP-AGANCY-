@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { stateCodeFromGstin, gstinScopeError } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
+import { CARD, CARD_PAD } from '../lib/ui';
 import {
   Loader2, FileUp, Check, Building2,
   CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
@@ -192,8 +193,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         prefixOH: flat ? prefixData : (prefixData['OH'] || ''),
         allotCRGO: resolveAllotment(name, 'CRGO'),
         allotAmorphous: resolveAllotment(name, 'Amorphous'),
-        allotWoundCore: resolveAllotment(name, 'Wound Core'),
-      });
+        allotWoundCore: resolveAllotment(name, 'Wound Core') });
     });
 
     // No blank placeholder row any more. It existed so the operator had something to type
@@ -412,7 +412,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           onClick={() => setActiveTab('agency')}
           className={`px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors flex items-center whitespace-nowrap ${
             activeTab === 'agency'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-blue-600 text-white'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
@@ -424,7 +424,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           onClick={() => setActiveTab('discom')}
           className={`px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors flex items-center whitespace-nowrap ${
             activeTab === 'discom'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-blue-600 text-white'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
@@ -436,7 +436,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           onClick={() => setActiveTab('bank')}
           className={`px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors flex items-center whitespace-nowrap ${
             activeTab === 'bank'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-blue-600 text-white'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
@@ -448,7 +448,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           onClick={() => setActiveTab('divisions')}
           className={`px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors flex items-center whitespace-nowrap ${
             activeTab === 'divisions'
-              ? 'bg-blue-600 text-white shadow-sm'
+              ? 'bg-blue-600 text-white'
               : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
           }`}
         >
@@ -460,7 +460,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           onClick={() => setActiveTab('preview')}
           className={`px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors flex items-center whitespace-nowrap ${
             activeTab === 'preview'
-              ? 'bg-emerald-600 text-white shadow-sm'
+              ? 'bg-emerald-600 text-white'
               : 'text-emerald-700 bg-emerald-50 hover:bg-emerald-100'
           }`}
         >
@@ -523,7 +523,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={gstin}
                   onChange={e => setGstin(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. 24ABCDE1234F1Z5"
                 />
               </div>
@@ -536,7 +536,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={pan}
                   onChange={e => setPan(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. ABCDE1234F"
                 />
               </div>
@@ -566,7 +566,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   readOnly={Boolean(stateCodeFromGstin(gstin))}
                   value={stateCodeFromGstin(gstin) || agencyStateCode}
                   onChange={e => setAgencyStateCode(e.target.value)}
-                  className={`w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 ${stateCodeFromGstin(gstin) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`}
+                  className={`w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 ${stateCodeFromGstin(gstin) ? 'bg-slate-100 text-slate-600 cursor-not-allowed' : 'bg-white'}`}
                   placeholder="Set the agency GSTIN above"
                 />
                 <p className="text-[10px] text-slate-500 mt-1">
@@ -623,7 +623,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={msmeNo}
                   onChange={e => setMsmeNo(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. UDYAM-GJ-01-XXXXXXX"
                 />
               </div>
@@ -708,7 +708,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={discomGstin}
                   onChange={e => setDiscomGstin(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. 24AAACU6551F1ZI"
                 />
               </div>
@@ -721,7 +721,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={discomPan}
                   onChange={e => setDiscomPan(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. AAACU6551F"
                 />
               </div>
@@ -747,7 +747,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={discomStateCode}
                   onChange={e => setDiscomStateCode(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. 24"
                 />
               </div>
@@ -773,7 +773,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={serviceSacCode}
                   onChange={e => setServiceSacCode(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="998719"
                 />
                 <span className="text-[10px] text-slate-500">Service accounting code for transformer repair</span>
@@ -826,7 +826,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   <span className="text-[10px] text-slate-500">Addressed on all Bill Covering Letters & Invoices</span>
                 </div>
 
-                <div className="md:col-span-2 bg-white p-3.5 rounded-lg border border-slate-300 shadow-sm space-y-2.5">
+                <div className="md:col-span-2 bg-white p-2.5 sm:p-3 rounded-lg border border-slate-300 space-y-2.5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div>
                       <label className="block text-xs font-bold uppercase tracking-widest text-slate-700 flex items-center gap-1.5">
@@ -850,7 +850,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                         <button
                           type="button"
                           onClick={() => setShowCcUnlockModal(true)}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded transition-colors shadow-sm"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded transition-colors"
                           title="Click to unlock this template with authorization warning"
                         >
                           <Unlock className="w-3.5 h-3.5 text-amber-600" />
@@ -887,7 +887,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                       readOnly={isCcTemplateLocked}
                       value={estimateCcTemplate}
                       onChange={e => setEstimateCcTemplate(e.target.value)}
-                      className={`w-full px-3 py-2 text-xs font-mono rounded border transition-all ${
+                      className={`w-full px-3 py-2 text-xs font-mono tabular-nums rounded border transition-all ${
                         isCcTemplateLocked
                           ? 'bg-slate-100 text-slate-700 border-slate-300 font-bold select-none cursor-not-allowed pr-36'
                           : 'bg-white text-slate-900 border-blue-500 font-bold ring-2 ring-blue-100'
@@ -903,7 +903,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
                   <div className="flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-600 pt-0.5">
                     <span>
-                      Standard format: <strong className="font-mono text-slate-800">E. E. (O & M) DIVISION - {'{division}'}</strong>
+                      Standard format: <strong className="font-mono tabular-nums text-slate-800">E. E. (O & M) DIVISION - {'{division}'}</strong>
                     </span>
                     <span className="text-slate-500">
                       Use <code className="bg-slate-100 px-1 py-0.5 rounded text-slate-700 font-bold">{'{division}'}</code> to automatically insert the job's concern division name.
@@ -1007,7 +1007,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={accountNumber}
                   onChange={e => setAccountNumber(e.target.value)}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. 12345678901234"
                 />
               </div>
@@ -1020,7 +1020,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   type="text"
                   value={ifscCode}
                   onChange={e => setIfscCode(e.target.value.toUpperCase())}
-                  className="w-full px-3 py-2 text-sm font-mono font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                  className="w-full px-3 py-2 text-sm font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. SBIN0001234"
                 />
               </div>
@@ -1069,11 +1069,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         <div className="space-y-4 animate-in fade-in duration-150">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* Estimate Header Preview */}
-            <div className="bg-white p-4 rounded-lg border border-blue-200 text-xs shadow-sm space-y-2">
+            <div className="bg-white p-2.5 sm:p-3 rounded-lg border border-l-2 border-l-blue-500 border-blue-200 text-xs space-y-2">
               <span className="inline-block px-2 py-0.5 bg-blue-100 text-blue-800 rounded font-bold text-[10px] uppercase tracking-wider">
                 Estimate Letter Header (Circle Office)
               </span>
-              <div className="font-mono text-[11px] text-slate-800 leading-tight whitespace-pre-wrap bg-slate-50 p-3 rounded border border-slate-200">
+              <div className="font-mono tabular-nums text-[11px] text-slate-800 leading-tight whitespace-pre-wrap bg-slate-50 p-3 rounded border border-slate-200">
                 {`TO,\n${circleAuthority || 'Superintending Engineer (O & M)'},\n${discomName || '[DISCOM name not set]'},\nCircle Office : ${circleOfficeName || '[Circle office not set]'}`}
               </div>
               <p className="text-[11px] text-slate-600">
@@ -1082,11 +1082,11 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
             </div>
 
             {/* Billed Copy Header Preview */}
-            <div className="bg-white p-4 rounded-lg border border-emerald-200 text-xs shadow-sm space-y-2">
+            <div className="bg-white p-2.5 sm:p-3 rounded-lg border border-l-2 border-l-emerald-500 border-emerald-200 text-xs space-y-2">
               <span className="inline-block px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px] uppercase tracking-wider">
                 Billed Copy Header (Division Office)
               </span>
-              <div className="font-mono text-[11px] text-slate-800 leading-tight whitespace-pre-wrap bg-slate-50 p-3 rounded border border-slate-200">
+              <div className="font-mono tabular-nums text-[11px] text-slate-800 leading-tight whitespace-pre-wrap bg-slate-50 p-3 rounded border border-slate-200">
                 {`To,\n${divisionAuthority || 'The Executive Engineer'},\n${discomName || '[DISCOM name not set]'},\nDivision Office : SABARMATI`}
               </div>
               <p className="text-[11px] text-slate-600">
@@ -1096,7 +1096,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           </div>
 
           {/* Tax Invoice Header & Billed To Card Preview */}
-          <div className="bg-white p-4 rounded-lg border border-slate-300 shadow-sm text-xs space-y-3">
+          <div className={`${CARD} ${CARD_PAD} text-xs space-y-3`}>
             <span className="inline-block px-2 py-0.5 bg-slate-800 text-white rounded font-bold text-[10px] uppercase tracking-wider">
               Tax Invoice Header & Consignee Box Preview
             </span>
@@ -1109,8 +1109,8 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 </div>
                 <div className="text-right text-[11px]">
                   <p className="font-bold">TAX INVOICE</p>
-                  <p><strong>Supplier GSTIN:</strong> <span className="font-mono">{gstin || '-'}</span></p>
-                  <p><strong>Supplier PAN:</strong> <span className="font-mono">{pan || '-'}</span></p>
+                  <p><strong>Supplier GSTIN:</strong> <span className="font-mono tabular-nums">{gstin || '-'}</span></p>
+                  <p><strong>Supplier PAN:</strong> <span className="font-mono tabular-nums">{pan || '-'}</span></p>
                 </div>
               </div>
               <div className="grid grid-cols-2 pt-1 text-[11px]">
@@ -1121,9 +1121,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   <p>Division Office : SABARMATI</p>
                 </div>
                 <div>
-                  <p><strong>DISCOM GSTIN:</strong> <span className="font-mono">{discomGstin || '-'}</span></p>
-                  <p><strong>DISCOM PAN:</strong> <span className="font-mono">{discomPan || '-'}</span></p>
-                  <p><strong>Service SAC:</strong> <span className="font-mono">{serviceSacCode || '998719'}</span></p>
+                  <p><strong>DISCOM GSTIN:</strong> <span className="font-mono tabular-nums">{discomGstin || '-'}</span></p>
+                  <p><strong>DISCOM PAN:</strong> <span className="font-mono tabular-nums">{discomPan || '-'}</span></p>
+                  <p><strong>Service SAC:</strong> <span className="font-mono tabular-nums">{serviceSacCode || '998719'}</span></p>
                 </div>
               </div>
             </div>
@@ -1140,7 +1140,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         <button
           type="submit"
           disabled={isSubmitting}
-          className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center shadow-sm"
+          className="px-5 py-2.5 text-xs font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center"
         >
           {isSubmitting ? (
             <>
@@ -1157,7 +1157,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       {/* Save Confirmation Change-Log Modal */}
       {updatePopupData && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm px-4">
-          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full border border-slate-200 animate-in fade-in zoom-in duration-200">
+          <div className="bg-white rounded-lg shadow-2xl p-5 max-w-lg w-full border border-slate-200 animate-in fade-in zoom-in duration-200">
             <div className="flex items-center space-x-3 mb-4 pb-3 border-b border-slate-100">
               <div className="bg-emerald-100 text-emerald-600 p-2.5 rounded-full flex-shrink-0">
                 <Check className="w-6 h-6" />
@@ -1228,7 +1228,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
               <p className="font-semibold text-amber-900">
                 The standard C.C. (Copy To) routing is locked to prevent formatting mismatches:
               </p>
-              <div className="p-2 bg-white rounded border border-amber-300 font-mono font-bold text-slate-800 text-center select-all shadow-xs">
+              <div className="p-2 bg-white rounded border border-amber-300 font-mono tabular-nums font-bold text-slate-800 text-center select-all shadow-xs">
                 E. E. (O & M) DIVISION - {'{division}'}
               </div>
               <p className="text-[11px] text-amber-800 leading-normal">
