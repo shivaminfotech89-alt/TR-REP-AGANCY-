@@ -23,8 +23,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           prefixAmorphous: '',
           prefixWoundCore: '',
           prefixLSTC: '',
-          prefixOH: '',
-        });
+          prefixOH: '' });
       } else {
         divs.push({
           name,
@@ -32,8 +31,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           prefixAmorphous: prefixData['Amorphous'] || '',
           prefixWoundCore: prefixData['Wound Core'] || '',
           prefixLSTC: prefixData['LSTC'] || '',
-          prefixOH: prefixData['OH'] || '',
-        });
+          prefixOH: prefixData['OH'] || '' });
       }
     });
     
@@ -83,8 +81,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
             'Amorphous': (d.prefixAmorphous || '').trim(),
             'Wound Core': (d.prefixWoundCore || '').trim(),
             'LSTC': (d.prefixLSTC || '').trim(),
-            'OH': (d.prefixOH || '').trim(),
-          };
+            'OH': (d.prefixOH || '').trim() };
         }
       });
 
@@ -131,7 +128,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           <p className="text-xs font-bold text-slate-700">No divisions configured for this AT yet.</p>
           <p className="text-[11px] text-slate-500">
             Add each division named in the tender, with the job number prefix issued for it.
-            Until then, job numbers use the <span className="font-mono font-bold">JOB</span> prefix.
+            Until then, job numbers use the <span className="font-mono tabular-nums font-bold">JOB</span> prefix.
           </p>
         </div>
       ) : null}
@@ -164,7 +161,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           const dupes = divErr?.duplicatePrefixes;
 
           return (
-            <div key={index} className={`p-3.5 rounded-xl space-y-3 border transition-colors ${
+            <div key={index} className={`p-2.5 rounded-lg space-y-2.5 border transition-colors ${
               divErr ? 'bg-red-50/40 border-red-300' : 'bg-slate-50 border-slate-200'
             }`}>
               <div className="flex items-center justify-between gap-3">
@@ -202,7 +199,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
                 <div className="p-2 bg-amber-50 border border-amber-300 rounded-lg text-[11px] text-amber-900 flex items-center gap-1.5 font-medium">
                   <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0" />
                   <span>
-                    Duplicate prefix not allowed in same division: <strong className="font-bold font-mono">{dupes.map(d => `"${d.prefix}" (${d.fields.join(' & ')})`).join(', ')}</strong>
+                    Duplicate prefix not allowed in same division: <strong className="font-bold font-mono tabular-nums">{dupes.map(d => `"${d.prefix}" (${d.fields.join(' & ')})`).join(', ')}</strong>
                   </span>
                 </div>
               )}
@@ -274,7 +271,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           type="button" 
           onClick={handleSave} 
           disabled={isSaving} 
-          className="flex items-center px-4 py-2 text-xs font-bold uppercase bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors"
+          className="flex items-center px-4 py-2 text-xs font-bold uppercase bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
         >
           {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Save className="w-3.5 h-3.5 mr-1.5" />} 
           Save Divisions & Prefixes
@@ -315,7 +312,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
                 sameSet ? 'bg-slate-50 border-slate-200 text-slate-600'
                         : 'bg-amber-50 border-amber-300 text-amber-900'
               }`}>
-                <div className="font-mono">{names.join(', ')}</div>
+                <div className="font-mono tabular-nums">{names.join(', ')}</div>
                 <p className="mt-1 leading-relaxed">
                   {sameSet
                     ? `Same ${names.length} division(s) as this AT. Job numbering reads the AT; this copy is used only if the AT has none.`

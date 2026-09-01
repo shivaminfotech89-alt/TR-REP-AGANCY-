@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { formatDDMMYYYY } from '../lib/utils';
 import { useAgency, AtMaster, AllotmentRecord } from '../lib/AgencyContext';
+import { TABLE, TH } from '../lib/ui';
 import { Plus, Check, Loader2, FileText, History, Lock, ShieldCheck, CheckCircle2, ArrowRight, X } from 'lucide-react';
 
 export interface AllotmentConfirmationData {
@@ -139,7 +140,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
     <div className="mt-4 pt-4 border-t border-slate-200">
       
       {/* SECTION 1: New Allotment Letter Entry */}
-      <div className="mb-6 bg-slate-50 border border-slate-200 rounded-xl p-4">
+      <div className="mb-4 bg-slate-50 border border-slate-200 rounded-lg p-3">
         <div className="flex justify-between items-center mb-3">
           <div>
             <h4 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
@@ -154,7 +155,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
             <button 
               type="button"
               onClick={() => setShowAddForm(true)} 
-              className="flex items-center px-3 py-1.5 text-xs font-bold uppercase bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-xs transition-colors"
+              className="flex items-center px-3 py-1.5 text-xs font-bold uppercase bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
             >
               <Plus className="w-3.5 h-3.5 mr-1" /> Add Allotment Letter
             </button>
@@ -162,7 +163,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
         </div>
         
         {showAddForm && (
-          <form onSubmit={handleAddLetter} className="space-y-4 bg-white p-4 border border-blue-200 rounded-xl shadow-xs animate-in fade-in duration-150">
+          <form onSubmit={handleAddLetter} className="space-y-3 bg-white p-3 border border-blue-200 rounded-lg animate-in fade-in duration-150">
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <span className="text-xs font-bold text-blue-900 uppercase tracking-wider">New Allotment Receipt</span>
               <span className="text-[11px] text-slate-500">Auto-adds to division quota on save</span>
@@ -187,7 +188,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                   value={newLetterNo} 
                   onChange={e => setNewLetterNo(e.target.value)} 
                   placeholder="e.g. LTR/2026/01" 
-                  className="w-full px-2.5 py-1.5 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 bg-white" 
+                  className="w-full px-2.5 py-1.5 text-xs font-mono tabular-nums font-bold border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 bg-white" 
                 />
               </div>
               <div>
@@ -246,7 +247,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
               <button 
                 type="submit" 
                 disabled={isSaving} 
-                className="flex items-center px-4 py-1.5 text-xs font-bold uppercase bg-blue-600 text-white rounded-lg hover:bg-blue-700 shadow-xs transition-colors"
+                className="flex items-center px-4 py-1.5 text-xs font-bold uppercase bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
               >
                 {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <Check className="w-3.5 h-3.5 mr-1.5" />} 
                 Save & Issue Allotment Confirmation
@@ -261,24 +262,24 @@ export function AtAllotments({ at }: { at: AtMaster }) {
               <History className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> Letter History ({at.allotmentHistory.length} Records)
             </h5>
             <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg shadow-2xs">
-              <table className="w-full text-left text-xs bg-white">
+              <table className={`${TABLE} text-xs bg-white`}>
                 <thead className="bg-slate-100/80 sticky top-0 border-b border-slate-200">
                   <tr>
-                    <th className="p-2.5 font-bold text-slate-700">Date</th>
-                    <th className="p-2.5 font-bold text-slate-700">Letter No</th>
-                    <th className="p-2.5 font-bold text-slate-700">Division</th>
-                    <th className="p-2.5 font-bold text-slate-700">Prefix</th>
-                    <th className="p-2.5 font-bold text-slate-700">Core Type</th>
-                    <th className="p-2.5 font-bold text-slate-700 text-right">Qty Added</th>
+                    <th className={`${TH}`}>Date</th>
+                    <th className={`${TH}`}>Letter No</th>
+                    <th className={`${TH}`}>Division</th>
+                    <th className={`${TH}`}>Prefix</th>
+                    <th className={`${TH}`}>Core Type</th>
+                    <th className={`${TH} text-right`}>Qty Added</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {[...at.allotmentHistory].reverse().map((record, idx) => (
                     <tr key={record.id || idx} className="hover:bg-blue-50/40 transition-colors">
                       <td className="p-2.5 text-slate-700 font-medium">{formatDDMMYYYY(record.date)}</td>
-                      <td className="p-2.5 font-mono font-bold text-slate-800">{record.letterNo}</td>
+                      <td className="p-2.5 font-mono tabular-nums font-bold text-slate-800">{record.letterNo}</td>
                       <td className="p-2.5 font-bold text-slate-800">{record.division}</td>
-                      <td className="p-2.5 font-mono text-[11px] text-blue-700">
+                      <td className="p-2.5 font-mono tabular-nums text-[11px] text-blue-700">
                         {getPrefixString(record.division, record.coreType) || '-'}
                       </td>
                       <td className="p-2.5 text-slate-700">
@@ -315,7 +316,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
 
           <div className="text-right">
             <span className="text-[11px] uppercase font-bold text-slate-500">Total Net Quota</span>
-            <div className="text-base font-black text-blue-700 font-mono">{grandTotal} Units</div>
+            <div className="text-base font-black text-blue-700 font-mono tabular-nums">{grandTotal} Units</div>
           </div>
         </div>
         
@@ -344,28 +345,28 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                     <td className="p-2.5 border border-slate-200">
                       <span className="font-bold text-slate-800 block text-xs">{div}</span>
                       {pref && (
-                        <span className="text-[10px] font-mono text-blue-600 block">
+                        <span className="text-[10px] font-mono tabular-nums text-blue-600 block">
                           Prefix: {pref}
                         </span>
                       )}
                     </td>
                     <td className="p-2.5 border border-slate-200 text-center">
-                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-mono font-bold text-xs rounded border border-slate-200 min-w-[50px]">
+                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-mono tabular-nums font-bold text-xs rounded border border-slate-200 min-w-[50px]">
                         {crgo}
                       </span>
                     </td>
                     <td className="p-2.5 border border-slate-200 text-center">
-                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-mono font-bold text-xs rounded border border-slate-200 min-w-[50px]">
+                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-mono tabular-nums font-bold text-xs rounded border border-slate-200 min-w-[50px]">
                         {am}
                       </span>
                     </td>
                     <td className="p-2.5 border border-slate-200 text-center">
-                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-mono font-bold text-xs rounded border border-slate-200 min-w-[50px]">
+                      <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-mono tabular-nums font-bold text-xs rounded border border-slate-200 min-w-[50px]">
                         {wc}
                       </span>
                     </td>
                     <td className="p-2.5 border border-slate-200 text-center bg-slate-50/50">
-                      <span className="inline-block px-3 py-1 bg-blue-50 text-blue-800 font-mono font-black text-xs rounded border border-blue-200 min-w-[55px]">
+                      <span className="inline-block px-3 py-1 bg-blue-50 text-blue-800 font-mono tabular-nums font-black text-xs rounded border border-blue-200 min-w-[55px]">
                         {divTotal} Units
                       </span>
                     </td>
@@ -376,10 +377,10 @@ export function AtAllotments({ at }: { at: AtMaster }) {
             <tfoot>
               <tr className="bg-slate-100 font-bold text-xs text-slate-900">
                 <td className="p-2.5 border border-slate-300 font-bold uppercase tracking-wider">Grand Total</td>
-                <td className="p-2.5 border border-slate-300 text-center font-mono font-black text-slate-800">{totalCRGO}</td>
-                <td className="p-2.5 border border-slate-300 text-center font-mono font-black text-slate-800">{totalAmorphous}</td>
-                <td className="p-2.5 border border-slate-300 text-center font-mono font-black text-slate-800">{totalWoundCore}</td>
-                <td className="p-2.5 border border-slate-300 text-center font-mono font-black text-blue-800 bg-blue-100/50">
+                <td className="p-2.5 border border-slate-300 text-center font-mono tabular-nums font-black text-slate-800">{totalCRGO}</td>
+                <td className="p-2.5 border border-slate-300 text-center font-mono tabular-nums font-black text-slate-800">{totalAmorphous}</td>
+                <td className="p-2.5 border border-slate-300 text-center font-mono tabular-nums font-black text-slate-800">{totalWoundCore}</td>
+                <td className="p-2.5 border border-slate-300 text-center font-mono tabular-nums font-black text-blue-800 bg-blue-100/50">
                   {grandTotal} Units
                 </td>
               </tr>
@@ -424,7 +425,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
               <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-4 space-y-3">
                 <div className="flex justify-between items-center text-xs pb-2 border-b border-emerald-200/60">
                   <span className="text-slate-600 font-medium">Letter Ref. Number:</span>
-                  <span className="font-mono font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                  <span className="font-mono tabular-nums font-bold text-slate-900 bg-white px-2 py-0.5 rounded border border-emerald-200">
                     {confirmationData.letterNo}
                   </span>
                 </div>
@@ -462,7 +463,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                 <div className="flex items-center justify-around">
                   <div className="text-center">
                     <span className="text-[10px] text-slate-500 font-medium block">Previous</span>
-                    <span className="text-sm font-bold font-mono text-slate-600">{confirmationData.previousTotal} Units</span>
+                    <span className="text-sm font-bold font-mono tabular-nums text-slate-600">{confirmationData.previousTotal} Units</span>
                   </div>
 
                   <div className="flex flex-col items-center">
@@ -474,7 +475,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
 
                   <div className="text-center">
                     <span className="text-[10px] text-emerald-700 font-bold block">New Quota</span>
-                    <span className="text-base font-black font-mono text-emerald-700 bg-white px-2.5 py-0.5 rounded-lg border border-emerald-300 shadow-2xs">
+                    <span className="text-base font-black font-mono tabular-nums text-emerald-700 bg-white px-2.5 py-0.5 rounded-lg border border-emerald-300 shadow-2xs">
                       {confirmationData.newTotal} Units
                     </span>
                   </div>
