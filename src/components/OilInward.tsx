@@ -15,6 +15,7 @@ import {
 } from "firebase/firestore";
 import { formatDDMMYYYY, getMrDateIso } from '../lib/utils';
 import { describeOil } from '../lib/oilBalance';
+import { CARD, CARD_PAD, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import {
   Droplet,
   Plus,
@@ -787,7 +788,11 @@ ${intakeGate.reason}`);
           one an operator would quote to a division. */}
       {viewingAllTenders && (
         <div className="bg-indigo-50 border-2 border-indigo-300 rounded-xl p-3.5 space-y-2">
-          <p className="text-sm font-bold text-indigo-900">
+          {/* RESTYLED, NOT REWORDED (AUDIT G12). Both caveats below keep every word - they
+              bound what this figure can be used for. The dot is ADDED: the indigo panel alone
+              did not survive a photocopy. */}
+          <p className="text-sm font-bold text-indigo-900 flex items-center gap-1.5">
+            <span className={`w-1.5 h-1.5 rounded-full ${TONE.info.dot} shrink-0`} />
             Every tender &mdash; net from movement alone
           </p>
           <p className="text-xs text-indigo-900">
@@ -837,7 +842,8 @@ ${intakeGate.reason}`);
             >
               <Droplet className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-bold text-amber-900">
+                <p className="text-sm font-bold text-amber-900 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0`} />
                   {unassignedTx.length > 0 && (
                     <>{unassignedTx.length} oil transaction{unassignedTx.length === 1 ? '' : 's'}
                     {' '}({litres.toFixed(2)} LTR){unassignedJobCount > 0 ? ' and ' : ' '}</>
@@ -863,10 +869,10 @@ ${intakeGate.reason}`);
               <div className="border-t-2 border-amber-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
                 {unassignedTx.map(t => (
                   <div key={t.id} className="p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-                    <span className="font-mono font-bold text-slate-900">MR {t.mrNo || '(no MR)'}</span>
+                    <span className="font-mono tabular-nums font-bold text-slate-900">MR {t.mrNo || '(no MR)'}</span>
                     <span className="text-slate-600">{t.division || '(no division)'}</span>
                     <span className="text-slate-600">{t.oilType}</span>
-                    <span className="font-mono font-bold text-slate-900">
+                    <span className="font-mono tabular-nums font-bold text-slate-900">
                       {(Number((t as any).netLiters) || 0).toFixed(2)} LTR
                     </span>
                     <span className="text-slate-500">
@@ -884,7 +890,7 @@ ${intakeGate.reason}`);
       })()}
 
       {/* Top Header & Stat Cards */}
-      <div className="bg-white p-6 rounded shadow-sm border border-slate-200 space-y-4">
+      <div className={`${CARD} ${CARD_PAD} space-y-3`}>
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <h1 className="text-xl font-bold text-slate-900 flex items-center">
@@ -902,7 +908,7 @@ ${intakeGate.reason}`);
               <div className="text-[10px] uppercase font-bold text-amber-700">
                 Sub Total Shortage
               </div>
-              <div className="text-base font-mono font-bold text-amber-900">
+              <div className="text-base font-mono tabular-nums font-bold text-amber-900">
                 {subTotalShortage.toFixed(2)} LTR
               </div>
             </div>
@@ -911,7 +917,7 @@ ${intakeGate.reason}`);
               <div className="text-[10px] uppercase font-bold text-blue-700">
                 Inward Received
               </div>
-              <div className="text-base font-mono font-bold text-blue-900">
+              <div className="text-base font-mono tabular-nums font-bold text-blue-900">
                 {subTotalReceived.toFixed(2)} LTR
               </div>
             </div>
@@ -924,7 +930,7 @@ ${intakeGate.reason}`);
                 : hasOpeningBalance ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
                 : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
               <div className="text-[10px] uppercase font-bold opacity-80">Opening balance</div>
-              <div className="font-mono font-black text-sm">
+              <div className="font-mono tabular-nums font-black text-sm">
                 {viewingAllTenders ? 'excluded'
                   : hasOpeningBalance ? describeOil(openingBalance).signed : 'not carried forward'}
               </div>
@@ -945,7 +951,7 @@ ${intakeGate.reason}`);
                   {Object.entries(openingByDivision).sort(([a], [b]) => a.localeCompare(b)).map(([div, v]) => (
                     <div key={div} className="flex items-baseline justify-between gap-2 text-[10px]">
                       <span className="font-semibold opacity-80">{div}</span>
-                      <span className="font-mono font-bold">
+                      <span className="font-mono tabular-nums font-bold">
                         {Number(v) >= 0 ? '+' : ''}{Number(v).toFixed(2)}
                       </span>
                     </div>
@@ -958,7 +964,7 @@ ${intakeGate.reason}`);
               <div className="text-[10px] uppercase font-bold opacity-80">
                 Net Balance
               </div>
-              <div className="text-base font-mono font-black">
+              <div className="text-base font-mono tabular-nums font-black">
                 {describeOil(subTotalNetBalance).signed}
               </div>
               <div className="text-[9px] font-bold uppercase tracking-wide opacity-80">
@@ -1039,13 +1045,13 @@ ${intakeGate.reason}`);
                 type="date"
                 value={filterUptoDate}
                 onChange={(e) => setFilterUptoDate(e.target.value)}
-                className="text-xs font-mono font-bold bg-white border border-blue-300 rounded px-2 py-1 text-slate-800 focus:outline-none"
+                className="text-xs font-mono tabular-nums font-bold bg-white border border-blue-300 rounded px-2 py-1 text-slate-800 focus:outline-none"
               />
               {availableMrDates.length > 0 && (
                 <select
                   value={filterUptoDate}
                   onChange={(e) => setFilterUptoDate(e.target.value)}
-                  className="text-xs font-mono font-semibold bg-white border border-blue-300 rounded px-2 py-1 text-slate-700 focus:outline-none max-w-[140px]"
+                  className="text-xs font-mono tabular-nums font-semibold bg-white border border-blue-300 rounded px-2 py-1 text-slate-700 focus:outline-none max-w-[140px]"
                 >
                   <option value="">-- Pick MR Date --</option>
                   {availableMrDates.map((d) => (
@@ -1068,13 +1074,13 @@ ${intakeGate.reason}`);
                 type="date"
                 value={filterExactDate}
                 onChange={(e) => setFilterExactDate(e.target.value)}
-                className="text-xs font-mono font-bold bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 focus:outline-none"
+                className="text-xs font-mono tabular-nums font-bold bg-white border border-slate-300 rounded px-2 py-1 text-slate-800 focus:outline-none"
               />
               {availableMrDates.length > 0 && (
                 <select
                   value={filterExactDate}
                   onChange={(e) => setFilterExactDate(e.target.value)}
-                  className="text-xs font-mono font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none max-w-[140px]"
+                  className="text-xs font-mono tabular-nums font-semibold bg-white border border-slate-300 rounded px-2 py-1 text-slate-700 focus:outline-none max-w-[140px]"
                 >
                   <option value="">-- Pick MR Date --</option>
                   {availableMrDates.map((d) => (
@@ -1114,16 +1120,16 @@ ${intakeGate.reason}`);
               </span>
               <span>
                 Cumulative oil account for <strong>{filterDivision}</strong> up to <strong>{formatDDMMYYYY(filterUptoDate)}</strong>.
-                Sub Total Shortage: <strong className="font-mono">{subTotalShortage.toFixed(2)} LTR</strong> |
-                Total Inward: <strong className="font-mono">{subTotalReceived.toFixed(2)} LTR</strong> |
-                Net Due: <strong className="font-mono">{subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR</strong>.
+                Sub Total Shortage: <strong className="font-mono tabular-nums">{subTotalShortage.toFixed(2)} LTR</strong> |
+                Total Inward: <strong className="font-mono tabular-nums">{subTotalReceived.toFixed(2)} LTR</strong> |
+                Net Due: <strong className="font-mono tabular-nums">{subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR</strong>.
               </span>
             </div>
           </div>
         )}
       </div>
 
-      <div className="bg-white rounded shadow-sm border border-slate-200">
+      <div className={CARD}>
         <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
           <div className="flex space-x-2">
             <button
@@ -1361,7 +1367,7 @@ ${intakeGate.reason}`);
                     </span>
                   </div>
                   <div className="text-right">
-                    <span className="text-lg font-mono font-bold text-green-700">
+                    <span className="text-lg font-mono tabular-nums font-bold text-green-700">
                       ={" "}
                       {calculateNetLiters(
                         formData.grossLiters,
@@ -1396,7 +1402,9 @@ ${intakeGate.reason}`);
                     {editingId ? "Update Entry" : "Save Inward Entry"}
                   </button>
                 ) : (
-                  <span className="px-4 py-2 text-xs font-semibold bg-amber-50 text-amber-900 border border-amber-300 rounded max-w-md">
+                  <span className="inline-flex items-start gap-1.5 px-2.5 py-1.5 text-xs font-semibold bg-amber-50 text-amber-900 border border-l-2 border-l-amber-500 border-amber-300 rounded max-w-md">
+                    {/* Dot added; the reason itself is untouched (AUDIT G12). */}
+                    <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0 mt-1`} />
                     No new oil entries: {intakeGate.reason} Oil already recorded under this
                     tender stays in its balance and can still be corrected.
                   </span>
@@ -1441,7 +1449,7 @@ ${intakeGate.reason}`);
                   <div key={`opening-panel-${division}`} className="px-3 py-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
                     <span className="text-xs font-bold text-indigo-900">{division}</span>
                     <span className="flex items-baseline gap-2">
-                      <span className={`font-mono font-black text-sm ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                      <span className={`font-mono tabular-nums font-black text-sm ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
                         {d.signed}
                       </span>
                       <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-800">
@@ -1459,7 +1467,7 @@ ${intakeGate.reason}`);
                       All divisions
                     </span>
                     <span className="flex items-baseline gap-2">
-                      <span className={`font-mono font-black text-sm ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                      <span className={`font-mono tabular-nums font-black text-sm ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
                         {d.signed}
                       </span>
                       <span className="text-[10px] font-bold uppercase tracking-wide text-indigo-800">
@@ -1479,23 +1487,27 @@ ${intakeGate.reason}`);
           </div>
         )}
 
-        <div className="overflow-x-auto">
+        {/* ⚠ SCROLLS SIDEWAYS, HIDES NOTHING (AUDIT G12). The transactions table has ten
+            columns and the summary six; an operator reconciling oil against a division needs
+            every one of them. A register missing its middle columns on a narrow screen is a
+            different and wrong register. */}
+        <div className={TABLE_WRAP}>
           {viewMode === "transactions" ? (
-            <table className="w-full text-left text-sm text-slate-600">
+            <table className={TABLE}>
               <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-3">Receive Date</th>
-                  <th className="px-4 py-3">MR No.</th>
-                  <th className="px-4 py-3">MR Date</th>
-                  <th className="px-4 py-3">Division</th>
-                  <th className="px-4 py-3">Oil Type</th>
-                  <th className="px-4 py-3 text-right">Barrels</th>
-                  <th className="px-4 py-3 text-right">Gross (LTR)</th>
-                  <th className="px-4 py-3 text-right">Loss %</th>
-                  <th className="px-4 py-3 text-right text-green-700 font-bold">
+                  <th className={`${TH}`}>Receive Date</th>
+                  <th className={`${TH}`}>MR No.</th>
+                  <th className={`${TH}`}>MR Date</th>
+                  <th className={`${TH}`}>Division</th>
+                  <th className={`${TH}`}>Oil Type</th>
+                  <th className={`${TH} text-right`}>Barrels</th>
+                  <th className={`${TH} text-right`}>Gross (LTR)</th>
+                  <th className={`${TH} text-right`}>Loss %</th>
+                  <th className={`${TH} text-right text-green-700 font-bold`}>
                     Net (LTR)
                   </th>
-                  <th className="px-4 py-3 text-center">Actions</th>
+                  <th className={`${TH} text-center`}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -1525,32 +1537,32 @@ ${intakeGate.reason}`);
                         key={tx.id || idx}
                         className={`hover:bg-slate-50 ${editingId === tx.id ? "bg-blue-50/50" : ""}`}
                       >
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className={`${TD} whitespace-nowrap`}>
                           {formatDDMMYYYY(tx.date)}
                         </td>
-                        <td className="px-4 py-3 font-medium text-slate-900">
+                        <td className={`${TD} font-medium text-slate-900`}>
                           {tx.mrNo}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-slate-700">
+                        <td className={`${TD} whitespace-nowrap text-slate-700`}>
                           {formatDDMMYYYY(mrDateVal)}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className={`${TD} whitespace-nowrap`}>
                           {tx.division}
                         </td>
-                        <td className="px-4 py-3">
+                        <td className={`${TD}`}>
                           <span
                             className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${tx.oilType === "Fresh" ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"}`}
                           >
                             {tx.oilType}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-right font-mono">
+                        <td className={`${TD} text-right font-mono tabular-nums`}>
                           {tx.barrels}
                         </td>
                         {/* THE MARKER (AUDIT F97). Every other Fresh row is a multiple of
                             210, so 195 beside "1 barrel" reads as a typo without it - and the
                             reader most likely to 'correct' it is reconciling months later. */}
-                        <td className="px-4 py-3 text-right font-mono">
+                        <td className={`${TD} text-right font-mono tabular-nums`}>
                           {tx.grossLiters.toFixed(2)}
                           {tx.grossLitersManual && (
                             <span
@@ -1561,13 +1573,13 @@ ${intakeGate.reason}`);
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-slate-400">
+                        <td className={`${TD} text-right font-mono tabular-nums text-slate-400`}>
                           {tx.filtrationLossPercent}%
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold text-green-700">
+                        <td className={`${TD} text-right font-mono tabular-nums font-bold text-green-700`}>
                           {tx.netLiters.toFixed(2)}
                         </td>
-                        <td className="px-4 py-3 text-center">
+                        <td className={`${TD} text-center`}>
                           <button
                             onClick={() => handleEdit(tx)}
                             className="p-1.5 text-blue-600 hover:bg-blue-100 rounded transition-colors"
@@ -1589,13 +1601,13 @@ ${intakeGate.reason}`);
                     >
                       SUB TOTAL ({filterDivision !== 'All' ? filterDivision : 'All Divisions'}{filterDateMode === 'upto' ? ` - Up to ${formatDDMMYYYY(filterUptoDate)}` : ''}):
                     </td>
-                    <td className="px-4 py-3 text-right font-mono">
+                    <td className={`${TD} text-right font-mono tabular-nums`}>
                       {filteredTransactions
                         .reduce((sum, item) => sum + item.grossLiters, 0)
                         .toFixed(2)}
                     </td>
                     <td></td>
-                    <td className="px-4 py-3 text-right font-mono text-green-700">
+                    <td className={`${TD} text-right font-mono tabular-nums text-green-700`}>
                       {filteredTransactions
                         .reduce((sum, item) => sum + item.netLiters, 0)
                         .toFixed(2)}
@@ -1606,19 +1618,19 @@ ${intakeGate.reason}`);
               </tbody>
             </table>
           ) : (
-            <table className="w-full text-left text-sm text-slate-600">
+            <table className={TABLE}>
               <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
                 <tr>
-                  <th className="px-4 py-3">MR No.</th>
-                  <th className="px-4 py-3">MR Date</th>
-                  <th className="px-4 py-3">Division</th>
-                  <th className="px-4 py-3 text-right text-amber-700">
+                  <th className={`${TH}`}>MR No.</th>
+                  <th className={`${TH}`}>MR Date</th>
+                  <th className={`${TH}`}>Division</th>
+                  <th className={`${TH} text-right text-amber-700`}>
                     Total Shortage (LTR)
                   </th>
-                  <th className="px-4 py-3 text-right text-blue-700">
+                  <th className={`${TH} text-right text-blue-700`}>
                     Oil Received (LTR)
                   </th>
-                  <th className="px-4 py-3 text-right text-slate-900 font-bold">
+                  <th className={`${TH} text-right text-slate-900 font-bold`}>
                     Net Pending / Shortage (LTR)
                   </th>
                 </tr>
@@ -1641,11 +1653,11 @@ ${intakeGate.reason}`);
                           <td className="px-4 py-2.5 whitespace-nowrap font-semibold text-indigo-900">
                             {division}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono text-indigo-400" colSpan={2}>
+                          <td className="px-4 py-2.5 text-right font-mono tabular-nums text-indigo-400" colSpan={2}>
                             &mdash;
                           </td>
                           <td className="px-4 py-2.5 text-right">
-                            <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                            <span className={`font-mono tabular-nums font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
                               {d.signed}
                             </span>
                             {/* THE DIRECTION IN WORDS, beside the number and not inferable
@@ -1666,11 +1678,11 @@ ${intakeGate.reason}`);
                           <td className="px-4 py-2.5 font-black text-indigo-900 uppercase text-xs tracking-wider" colSpan={3}>
                             Opening balance, all divisions &mdash; carried from {openingSourceLabel}
                           </td>
-                          <td className="px-4 py-2.5 text-right font-mono text-indigo-400" colSpan={2}>
+                          <td className="px-4 py-2.5 text-right font-mono tabular-nums text-indigo-400" colSpan={2}>
                             &mdash;
                           </td>
                           <td className="px-4 py-2.5 text-right">
-                            <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
+                            <span className={`font-mono tabular-nums font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-700'}`}>
                               {d.signed}
                             </span>
                             <span className="block text-[10px] font-bold uppercase tracking-wide text-indigo-800">
@@ -1707,22 +1719,22 @@ ${intakeGate.reason}`);
                       summary.totalShortage - summary.totalReceived;
                     return (
                       <tr key={idx} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 font-medium text-slate-900">
+                        <td className={`${TD} font-medium text-slate-900`}>
                           {summary.mrNo}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap text-slate-700">
+                        <td className={`${TD} whitespace-nowrap text-slate-700`}>
                           {formatDDMMYYYY(summary.mrDate)}
                         </td>
-                        <td className="px-4 py-3 whitespace-nowrap">
+                        <td className={`${TD} whitespace-nowrap`}>
                           {summary.division}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-amber-700">
+                        <td className={`${TD} text-right font-mono tabular-nums text-amber-700`}>
                           {summary.totalShortage.toFixed(2)}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono text-blue-700">
+                        <td className={`${TD} text-right font-mono tabular-nums text-blue-700`}>
                           {summary.totalReceived.toFixed(2)}
                         </td>
-                        <td className="px-4 py-3 text-right font-mono font-bold">
+                        <td className={`${TD} text-right font-mono tabular-nums font-bold`}>
                           <span
                             className={
                               pending > 0 ? "text-red-600" : "text-green-600"
@@ -1755,14 +1767,14 @@ ${intakeGate.reason}`);
                         </span>
                       )}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-amber-700 font-bold">
+                    <td className={`${TD} text-right font-mono tabular-nums text-amber-700 font-bold`}>
                       {subTotalShortage.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-blue-700 font-bold">
+                    <td className={`${TD} text-right font-mono tabular-nums text-blue-700 font-bold`}>
                       {subTotalReceived.toFixed(2)}
                     </td>
-                    <td className="px-4 py-3 text-right">
-                      <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
+                    <td className={`${TD} text-right`}>
+                      <span className={`font-mono tabular-nums font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
                         {d.signed}
                       </span>
                       <span className="block text-[10px] font-bold uppercase tracking-wide text-slate-700">
