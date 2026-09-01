@@ -2269,6 +2269,750 @@ single_job            one estimate sheet
 
 ---
 
+## G10. The MR Register as a table, and a `<div>` the parser would have moved
+
+The register was a card list: one card per MR, six chips wrapping in a flex row, inside a
+`max-w-6xl mx-auto` page container. It is now a nine-column table using the `ui.ts` vocabulary.
+
+**Width was one class.** `max-w-6xl mx-auto` is 1152px centred, so on a 1920px workshop screen
+~380px of gutter sat on each side while the register itself scrolled. `AppLayout`'s content
+area imposes no width of its own, so the constraint was entirely local — the table was already
+filling its card; the card was in a box.
+
+**Nine columns, none hidden at any breakpoint** — MR No, MR Date, Division, Units, Type, Core,
+Stage, Actions, plus the expander. The wrapper scrolls sideways. A register missing its middle
+columns on a narrow screen is not a smaller register, it is a different and wrong one.
+
+**Actions stay visible in their own column.** A hidden destructive action is worse than a wide
+table, and cancelling an MR is frequent.
+
+### ⚠ The finding: a `<div>` inside `<tbody>`
+
+The expanded per-transformer panel was a `<div>`, which was correct while its parent was a
+card. Inside a `<tbody>` it is **invalid DOM, and the parser does not error — it hoists the
+element out of the table entirely.** The rows would have rendered and the panel would have
+appeared somewhere else on the page.
+
+**It typechecks. It lints. React says nothing.** `tsc` sees valid JSX, ESLint sees valid JSX,
+and the only way to find it is to look at rendered output. It is now
+`<tr><td colSpan={9}>`, matching the nine header columns.
+
+Worth recording as its own class: **a container's validity is a property of its parent, not of
+itself.** A `<div>` that was right for years becomes wrong the moment the thing above it
+changes from a card to a `<tbody>`, and nothing in the toolchain notices — the same shape as a
+comment that was true when written. Any card-to-table conversion has this hazard in it.
+
+### The stage column, and why it costs a read
+
+Stage uses `mrStageSummary(group.jobs, inspections)` — the shared definition every inspection
+screen already uses — at the cost of one owner-scoped `inspections` read on this screen.
+
+The alternative was deriving it from `job.status` alone, free. **That was rejected on F87
+grounds:** a stage counted one way here and another way on the inspection screens is two
+measurements of one quantity that nobody puts side by side, which is exactly how the backlog
+banner reported 4 of 12 for a fortnight. One read is cheap against that.
+
+`mrStageSummary` returns four `{complete, doneCount, total, date}` states and **no label**; the
+label ("Int 4/17", "Dispatched") is composed at the call site from the first incomplete stage.
+That is presentation over the shared definition, not a second definition of it. A failed read
+leaves the list empty rather than rendering every MR as "not started", which would be a claim.
+
+### Restyled, not weakened
+
+The unassigned-work banner and the intake gate keep **every word, the count, the expander and
+the list**. The only addition is a **dot** on each: the amber fill alone did not survive a
+photocopy of this register, and colour is never the only signal.
+
+### Presentation-only proof
+
+```
+getDocs 5→6 · where( 8→9        the one new inspections read, and its ownerId clause
+writeBatch 4→4 · batch.delete 2→2 · batch.update 3→3 · batch.set 1→1
+atForEditingMr 6→6 · issuedMarks 2→2 · inspectionsForJob 2→2
+intakeGate.open 3→3 · alert( 8→8 · window.confirm 1→1
+filteredGroups 5→5 · highWaterJobNos 2→2 · atClause 2→2 · isUnassigned 3→3
+<th 9→18 · <td 9→19 · <tr 2→5 · <table 1→2      the new MR table
+hidden *:table-cell : 0
+```
+
+Every guard, batch, delete, gate and confirmation is untouched.
+
+---
+
+## G11. An aggregate that takes the first job's value and prints it as the MR's
+
+`MrLedger.fetchJobs` groups jobs by MR and seeds the group like this:
+
+```js
+groups[mrKey] = { mrNo, dateOfIssue, division: job.division, repairType: job.repairType || 'OGP', … }
+```
+
+**Whichever job is encountered first supplies `repairType` and `division` for the whole MR**,
+and neither is revisited as the remaining jobs are pushed in. The register then prints that one
+value as a chip, with nothing indicating it is a sample rather than a summary.
+
+### Why this is materially wrong and not merely imprecise
+
+**GP means repaired under guarantee, at no cost.** An MR holding one GP job among three OGP
+ones would display a single **GP** chip — asserting free-of-cost repair for three transformers
+that are chargeable. The reverse is as bad: a GP job hidden inside an MR chipped OGP invites a
+charge for work already covered.
+
+Division is the same shape with different consequences: it addresses the forwarding letter and
+selects the job-number prefix.
+
+### ⚠ Latent, not theoretical — and the census says which
+
+`scripts/admin/mr-homogeneity.js`, read-only:
+
+```
+MRs examined             : 21
+mixed repairType (GP/OGP): 0     ← the chip has never yet shown a wrong value
+mixed division           : 0
+mixed coreType           : 4     ← legitimate; one MR can hold several core types
+```
+
+**No MR in live data is mixed on repair type or division, so nothing has been displayed
+wrongly.** The mechanism is wrong; the data has not yet exercised it. It would be wrong the
+first time an operator adds a GP unit to an existing OGP MR — which the add-unit button
+permits, and which nothing prevents.
+
+The four core-type mixes are real and correct: `MR 9344` holds CRGO 13 · AMORPHOUS 3 ·
+WOUND CORE 2, and those price from three different schedules.
+
+### How it surfaced, which is the transferable part
+
+**Nothing examining the data found this. A presentation change did.**
+
+The restyle needed the value *per job* to build the Type and Core columns — and the moment the
+aggregation had to be written out per job rather than read off the group, it showed itself. No
+census was looking for it; no test would have caught it, because the output is a plausible
+single value.
+
+That is the inverse of the usual case in this file, where a defect is found by tracing a
+value's provenance and the UI is where it surfaces. Here **the UI work was the instrument**:
+asking "what should this cell contain?" forced the question "is there one answer?", which
+nobody had asked of the group object in the years it had existed.
+
+### The fix, and what it deliberately does not do
+
+The row shows **counts, never a dominant value** — `OGP 3 · GP 1`, and just `OGP` when
+uniform. Same reasoning as the per-division oil split (F86): *"an opening position of +40
+SABARMATI, −30 KALOL is two facts, not one net of +10."* A "mostly OGP ⚠" chip puts one word
+where two facts are, and the marker is exactly what an operator scanning forty rows does not
+read.
+
+⚠ **It does not silently correct.** A GP job sitting on an OGP MR may be a data fault rather
+than a legitimate mix, and that is a question for someone with the paperwork. The row reports
+what is there and decides nothing.
+
+**`group.repairType` and `group.division` still exist and are still first-job-wins.** The
+display no longer trusts them. The underlying fields are unchanged, because changing what they
+mean is a logic change and this commit was presentation.
+
+### ⚠⚠ It does not only DISPLAY the sampled value — the edit modal WRITES it
+
+Found while checking what still reads those fields, and it escalates this entry from a display
+fault to a data-corruption path:
+
+```js
+// handleSaveFullMr — both the update branch and the create branch
+batch.update(docRef, { …, division: editingMr.division,
+                          repairType: editingMr.repairType,
+                          isGp: editingMr.repairType === 'GP', … });
+```
+
+`editingMr.repairType` is seeded from `group.repairType` — the first job's value. So **opening
+an MR in Full Edit and pressing Save stamps every job on that MR with the first job's repair
+type and division**, and sets `isGp` to match.
+
+On a mixed MR that is not a wrong label; it is a **silent rewrite of the data**. A GP job among
+OGP ones would be converted to OGP — losing the record that it was repaired under guarantee at
+no cost — by an operator who opened the modal to fix a serial number and touched nothing else.
+`isGp` is written from the same sampled value, so the derived flag is rewritten to agree with
+the corruption.
+
+The census keeps this latent: no MR is mixed today, so nothing has been overwritten. **But the
+add-unit path permits adding a GP unit to an OGP MR, and the moment one exists, the next Full
+Edit save destroys it.**
+
+**The sequence is worth keeping on paper: a display bug, traced to its source, turned out to
+share that source with a write.** Nothing was looking for the write; it was found by asking
+what still read the field the display had stopped trusting.
+
+### Fixed
+
+`EditableJobEntry` now carries each job's own `division` and `repairType`, and both save
+branches stamp per job:
+
+```js
+division:   j.division   ?? editingMr.division,
+repairType: j.repairType ?? editingMr.repairType,
+isGp:      (j.repairType ?? editingMr.repairType) === 'GP',
+```
+
+The fallback fires only for a row with no value of its own — a row the operator just added —
+which is the one case where the MR-level control **is** the right source. Both branches use the
+same expression so they cannot drift.
+
+**The MR-level controls stay, and are now documented as read-not-written.** They cannot be
+removed: `getJobNoPrefix(editingMr.division, …)` supplies the job-number prefix, the counter
+advance is keyed on the same division, and `repairType === 'GP'` excludes a job from number
+continuation. Removing them would break number allocation — which has been rebuilt three times.
+
+### ⚠ Division was not the lesser of the two
+
+Same mechanism, same write, different blast radius. `repairType` decides whether work is
+charged — worse per job. But `division` decides the job-number prefix, the forwarding-letter
+address, **and the per-division oil split (F86)**: a job silently moved to another division
+takes its oil shortage with it, so the per-division opening balance the carry-forward records
+is wrong — and that is a figure a DISCOM is settled against.
+
+### The control question, and why it cannot be deferred indefinitely
+
+The safe half is built: **nothing is ever overwritten silently.** But that leaves a specific
+wrong of its own, and it is not a general open item.
+
+**If an operator changes the Division dropdown meaning it to apply, it now applies only to new
+rows.** The existing jobs stay on the old division while the MR header shows the new one — so
+the screen asserts something the data does not say. That is the same class of fault as
+everything else in this file, arriving from the opposite direction: before, the write agreed
+with the header and corrupted the jobs; now the jobs are safe and the header can lie.
+
+Two answers, both narrow:
+
+1. **A checkbox — "apply to all N jobs".** Keeps the field editable and makes the blast radius
+   explicit and counted. More UI, and it invites the operator to do the thing that was until
+   now happening by accident.
+2. **Read-only when the MR has jobs; editable only on the add path.** Smaller, and probably the
+   honest answer: **an MR's division is a fact from the division's paperwork, not something the
+   agency chooses.** The same argument applies to repair type — whether a transformer is under
+   guarantee is a property of its history, not a field.
+
+### ⚠ DECIDED, NOT OPEN: (2), read-only when the MR has jobs
+
+**This is settled and should not be re-argued.** The operator's reasoning is the deciding one:
+*an MR's division is a fact from the division's paperwork, not something the agency chooses* -
+and the same holds for repair type, since whether a transformer is under guarantee is a
+property of its history rather than a field.
+
+**Deferred only for sequencing**, not for doubt: it changes what an operator can do, and
+interleaving a behaviour change into a screen-by-screen restyle pass makes both harder to
+review. It lands after the restyle.
+
+Until then the safe half stands - nothing is overwritten silently - and the header-can-lie
+window above is the accepted cost of waiting.
+
+---
+
+## G12. Oil Account restyled — the screen with the most recent work on it
+
+Chosen as the second restyle for three reasons, and all three held: it exercises the token
+vocabulary hardest (signed figures with direction words, a per-division breakdown, an
+unassigned section, an all-tenders mode with two caveats, F88's opening lines); it carries the
+highest density of recent work (F87, F88, F89, F95, F96, F97 all land here), so it is the real
+test of *restyle, do not weaken*; and it is a clean file with a printed sibling, which lets the
+diff-the-printed-subtree discipline be established on an easy case before `BillingSystem`,
+where it is load-bearing.
+
+**Two surfaces unified, two tables through `TABLE`/`TH`/`TD`** (16 `th`, 21 `td`), figures made
+tabular, and the wrapper now scrolls with **no column hidden at any breakpoint**. The
+transactions table has ten columns and the summary six; an operator reconciling oil against a
+division needs every one of them.
+
+### Three notices restyled, none reworded
+
+The all-tenders scope panel, the unassigned-oil section and the intake gate refusal. **Every
+word is unchanged** - they bound what the figures can be used for, and F89's second caveat in
+particular is the one thing standing between this screen and a number quoted to a division.
+
+Each gained a **dot**. The panel fill alone did not survive a photocopy of this register, and
+colour is never the only signal.
+
+### The proof
+
+```
+getDocs 4→4 · where( 6→6 · addDoc 2→2 · updateDoc 2→2
+isUnassigned 6→6 · describeOil 14→14 · intakeGate.open 2→2
+viewingAllTenders 13→13 · openingForFilter 5→5 · showOpeningLines 6→6
+grossLitersManual 16→16 · defaultGrossFor 7→7 · isManualGross 3→3
+openingIncomplete 8→8 · alert( 1→1
+
+<th 18→18 · <td 36→36 · <table 2→2 · hidden *:table-cell 0→0
+```
+
+Wording verified phrase by phrase rather than by eye: *"belong to no tender"*, *"No new oil
+entries:"*, *"Approximate"*, *"Opening balances are excluded"*, *"recorded history, not the
+division"*, *"Reconcile against"* - each 1 → 1.
+
+**The printed sibling is untouched.** `BillingSystem.tsx` holds both the tax invoice and the
+oil account SHEET; `OilInward.tsx` holds only the screen. `git status` shows no modification to
+`BillingSystem.tsx`, `SingleJobEstimateReport.tsx` or `LetterheadHeader.tsx` - so the diff
+discipline had nothing to diff, which is exactly the easy case it was worth proving on first.
+
+---
+
+## G13. Two vocabularies on one screen, and how the boundary was made structural
+
+Dispatch Challan was chosen as the third restyle because it is the first screen where the token
+vocabulary has to sit **beside** a contrast-committed set without absorbing it.
+
+### The printed subtree was proved unchanged, not asserted
+
+The delivery challan lives in this file, between `<PrintableA4Page>` and `</PrintableA4Page>`.
+It was snapshotted before any edit and re-hashed after each of three:
+
+```
+before  297e2504eb580704e3897b02b7afbbc9
+after   297e2504eb580704e3897b02b7afbbc9      (three times)
+```
+
+⚠ **The method matters more than the hash.** The edit script splits the file at the
+`PrintableA4Page` boundary, edits only the text above it, and re-attaches the printed subtree
+**verbatim**. It is structurally incapable of touching the document, rather than merely
+careful about it - and the hash then confirms what the structure already guarantees. A
+discipline that depends on remembering is not a discipline.
+
+### The exclusion, documented where someone would tidy it
+
+`bg-amber-50/60` for a scrap row, `bg-blue-50` and `bg-rose-100/80` for selected rows, and
+`bg-blue-600` / `bg-rose-600` for their checkboxes are untouched. Verified rather than
+intended: each string is 1:1 against HEAD, and `isScrap` (30) and `isSelected` (7) are
+unchanged.
+
+**Four states overlap in these rows** - scrap, selected, selected-scrap, and GP brown text
+(`#5B3A1A`, GP_TEXT_CLASS) - and the pairing was measured, not chosen.
+
+⚠ **The comment sits at the row states, not in a header.** That is deliberate: a note about
+"do not tidy these" is only useful where the tidying would happen. It says that `TONE.warn` is
+a **different** amber and `TONE.bad` a **different** rose, so a substitution would look like a
+cleanup while silently re-opening a measurement, and it points back at ui.ts's exclusion list.
+
+**This is the shape the restyle pass needs to survive at scale:** the tokens are for chrome,
+and a measured colour is data. The screen now carries both, and the boundary is written at the
+line where the two meet rather than in a document nobody opens.
+
+### What did not move
+
+```
+sort( 8→8 · testingDate 4→4 · challanNo 43→43 · coreType 6→6
+GpChip 5→5 · matchesGpFilter 10→10 · selectedJobIds 18→18 · handleToggleJob 2→2
+<th 33→33 · <td 31→31 · <table 3→3 · min-w-[ 2→2 · hidden *:table-cell 0→0
+```
+
+The pending list's test-date sort, the dispatched list's challan numbers and the core-type and
+GP/OGP columns are intact. **The two `min-w-[…]` values were deliberately preserved** when the
+tables moved to `TABLE`: they are what stops a column being squeezed out rather than scrolled
+to, and dropping them would have satisfied the "no hidden columns" rule while breaking the
+thing the rule exists to protect.
+
+---
+
+## G14. Four printed documents in one file, and the check that had to be positive
+
+Billing System is where the split-and-reattach discipline stops being a formality. The tax
+invoice was fitted to a single page against the Ravi Electric reference (F97/G7), and it does
+not ship alone.
+
+**There are FOUR printed documents in this file, not two:**
+
+```
+forwarding    lines 2813-2884   e85a73859da6ee375c61d4e04758f9fd   IDENTICAL
+certificate   lines 2887-2916   072daf7678ea0e63b236b2b22c8919d5   IDENTICAL
+TAX_INVOICE   lines 2919-3147   1ddc4fef971153d12da0dbcb5e1fc257   IDENTICAL
+OIL_SHEET     lines 3150-3299   0f9e2222d2d1acc1c078a2f1bbd46315   IDENTICAL
+```
+
+A forwarding letter and a certificate ship alongside the invoice and the oil account sheet. The
+survey found them because the script enumerates `<PrintableA4Page>` boundaries rather than
+looking for the documents it expects - **the count was an output, not an assumption.** Had it
+been written against "the invoice and the oil sheet", two documents would have been silently
+in the editable region.
+
+### The negative check that had to be made positive
+
+The G7 invoice fix removed `justify-between` in three places so the signatory sits under the
+totals rather than at the page foot. **A restyle that reintroduced a flex utility there would
+undo it silently** - and "silently" is the whole problem, because the symptom is a gap on a
+printed page that nobody looks at until a division does.
+
+Confirming "the hash would catch it" is not enough on its own: it is only true if all three
+removals are inside the hashed block. So it was checked **positively**, by asserting the
+absence of the utility on each of the three specific elements:
+
+```
+outer container has NO justify-between : True
+left footer cell  has NO justify-between: True
+right footer cell has NO justify-between: True
+```
+
+All three live at lines 2931, 3111 and 3129 - inside 2919-3147. So the hash does cover them,
+and that is now a fact on the record rather than an inference.
+
+⚠ **Five `justify-between` remain inside the invoice and are correct.** They distribute within
+the invoice's own header boxes, not between the totals and the signatory. A future sweep that
+removed them "for consistency with G7" would break the header - the fix was never "remove
+justify-between from the invoice", it was "the footer must follow the totals".
+
+### What did not move
+
+```
+billTypeFilter 24→24 · paidAmount 17→17 · paymentStatus 11→11
+blockIfMasterMisfiled 3→3 · GP 15→15 · billable 15→15
+<th 53→53 · <td 65→65 · <table 6→6 · min-w-[ 8→8 · hidden *:table-cell 0→0
+getDocs 4→4 · where( 5→5 · writeBatch 4→4
+```
+
+The scrap/repairable bill separation, the GP exclusion and its reconciling count, and payment
+recording are intact. All eight `min-w-[…]` preserved, for the reason given at G13: they are
+what stops a column being squeezed out rather than scrolled to.
+
+Restyled: 12 card surfaces, 5 filled-pill shadows, 2 radii, 25 figures made tabular. The two
+coloured summary cards became left-accent tints rather than white cards with a full coloured
+border, matching the vocabulary.
+
+---
+
+## G15. Reports, and the one thing in this pass that was added rather than re-expressed
+
+A clean file - no `PrintableA4Page`, asserted by the edit script rather than checked by eye, so
+a document appearing here later would stop the restyle instead of being quietly edited.
+
+Restyled: eight identical stat cards, the tab shell, five selected-tab shadows, twelve header
+cells through `TH`, fourteen figures made tabular. The AT-scoped filter, per-job pricing,
+scrap-charge resolution, GP display and the Excel export are untouched:
+
+```
+<th 13→13 · <td 12→12 · <table 1→1 · getDocs 3→3 · where( 3→3
+atClause 2→2 · atForJob 3→3 · getJobFullEstimate 2→2 · resolveScrapCharge 2→2
+matchesGpFilter 4→4 · GpChip 2→2 · sort( 3→3 · XLSX 5→5 · hidden *:table-cell 0→0
+```
+
+### ⚠ THE EXCEPTION: `min-w-[1100px]` was ADDED, not re-expressed
+
+**Every other change in this restyle pass re-expresses something that was already there.** This
+one is not, and it is recorded here so it does not read as scope creep to whoever reviews the
+diff.
+
+Reports' table has **twelve columns and no minimum width**. The wrapper was already
+`overflow-x-auto`, so no column was hidden - and that is exactly what made it easy to miss:
+**the "hide no column" rule was satisfied while the thing the rule exists for was defeated.**
+With no minimum the columns compress and wrap, so on a narrow screen the operator still cannot
+read the row. Several columns carry two facts each - "MR No & Date", "Capacity & Make",
+"Estimate & Billing" - so compression bites harder here than on a plain table.
+
+Dispatch and Billing already carry `min-w` for precisely this reason; this table had none. The
+addition brings it into line rather than inventing a treatment.
+
+**It is still a behaviour change at narrow widths**, not a re-skin, and calling it one would be
+wrong. The general form is worth keeping: **a rule stated as a prohibition ("do not hide
+columns") can be honoured to the letter by a layout that fails its purpose.** The prohibition
+was the wrong shape; the requirement is "the operator can read the whole row", and the min-w
+is what actually delivers it.
+
+---
+
+## G16. Two kinds of excluded colour, and only one of them is detectable
+
+External, Internal and Testing restyled as a group - they share a toolbar and a shape. Each
+holds one printed report, sliced at the `PrintableA4Page` boundary and re-attached verbatim:
+
+```
+ExternalInspection   752-889    8f40d56867052c5d9ff84ea2594919a5   IDENTICAL
+InternalInspection   892-1039   3db3b79c1b4b53d9bade84d951f3e6f5   IDENTICAL
+TestingReport        476-601    cc30c5afa9acc7bf49a47aef0893b8a6   IDENTICAL
+```
+
+Small diffs by design - these screens are mostly form and table, and most of the table cells
+live inside the printed reports.
+
+### ⚠ THE FINDING: the exclusion list had two kinds in it, and did not say so
+
+`ui.ts` named three excluded colour sets - GP brown, the tender state chip, the Dispatch
+scrap/selected tints. All three are excluded because **they were MEASURED**: contrast-checked
+against specific backgrounds, so a substitution fails a contrast check and an automated audit
+would eventually catch it.
+
+**The circle-limit indicator is excluded for a completely different reason, and it is the
+reason that cannot be automated.**
+
+`renderCircleLimitIndicator` uses three visual states to make three different statements about
+what the operator should do next:
+
+| state | says |
+|---|---|
+| `text-slate-400 italic` | *nothing to do here* — a fixed-rate job, or a missing **rate**, which is not this operator's action |
+| `text-amber-700 italic` | ***your* next action** — a field on the row in front of them is blank |
+| `text-slate-500 italic underline` | *this is a clickable setup gap* |
+
+The code states the rule outright: **"grey reads as 'nothing to do here', which is the opposite
+of the case."**
+
+Four branches produce seven distinct messages, and **F79 established that the wording
+distinguishes an unentered field from an unconfigured rate** — sending an operator to the
+Estimate Master to fix a field on the bench in front of them was a real failure, not a
+hypothetical one.
+
+**Flattening these into `chip('warn')` would look like a tidy-up. It would pass every contrast
+check, every lint and every type check, and it would silently merge "you can fix this" with
+"someone else must configure this."**
+
+### The distinction, which is the transferable part
+
+- **Contrast-committed**: the colour was measured. Breaking it fails a *measurable* property.
+  A tool can find it.
+- **Meaning-committed**: the colour carries a distinction in what it *says*. Breaking it fails
+  nothing measurable at all. **No tool will ever find it.**
+
+A design system's exclusion list therefore cannot be one list. The second kind needs its reason
+written next to it, because the only thing standing between it and a well-intentioned cleanup
+is a person reading a sentence.
+
+Recorded as set 4 in `ui.ts`'s exclusion block — the place someone looks before restyling —
+with the two kinds separated and the tell for each stated.
+
+### Verified rather than intended
+
+Seven messages, both semantic colour states and the underline are each confirmed present after
+the edit. Across all three files: `<th>`, `<td>`, `<table>`, `getDocs`, `where(`, `writeBatch`,
+`batch.set`, `OtherTenderNote`, `otherTenderPending`, `scopedJobs`, `matchesAtScope`,
+`missing.push` (blank-save validation), the stage helpers, `min-w-[`, `hidden *:table-cell` —
+every count equal, and the other-tenders notice wording identical.
+
+---
+
+## G17. Two printed boundaries of different kinds, and one of them is not a hash
+
+Estimate Generator, plus Admin Panel and Support Desk folded in - two clean files needing no
+record of their own beyond this line: eleven card surfaces routed through `CARD`, two gradient
+banners flattened, eight radii, four figures tabular, and the G1 *"Deferred until Razorpay"*
+label intact. Every logic count equal.
+
+### The two boundaries are not the same kind of thing
+
+**1. IN-FILE - the forwarding letter.** Sliced at `<PrintableA4Page>`, re-attached verbatim,
+hash confirms it:
+
+```
+lines 938-1058   4b81c11aa8fb93208ba8488bafae3337   IDENTICAL
+```
+
+**2. CROSS-FILE - the estimate sheet.** `<SingleJobEstimateReport>` is *rendered* from this
+screen but *lives* in another file. Hashed too:
+
+```
+WHOLE FILE       f0e63ea5869f9957f2ea54c94e2065bf   IDENTICAL
+  printed block 1  lines 1163-1335   ebdd466c49ee02985e02cd79047f9b87
+  printed block 2  lines 1385-1566   b7b0ccd033a085f749e1d3a3b6f0b132
+```
+
+⚠ **But the hash is not what protects it, and saying so matters.** The edit script never opens
+that file - the guarantee is the file boundary itself, which is stronger than any check applied
+after the fact. The hash confirms what the structure already made true.
+
+**The distinction is worth keeping because the two fail differently.** An in-file boundary is
+maintained by discipline and needs the hash: one careless global replace reaches across it. A
+cross-file boundary is maintained by the filesystem and cannot be crossed by accident - but it
+is also *invisible*, so a reader of this diff would have no reason to know a printed document
+was in play at all. **The hash on boundary 2 exists to document a risk, not to catch one.**
+
+### The ~16mm spare, checked positively
+
+G7 fitted the estimate sheet to one A4 page with about 16mm to spare. That margin lives in
+constants, not in the JSX, so the file hash alone would not say whether the *figures* survived.
+Checked by name:
+
+```
+JOB_BOX_MM = 30.5 · TOTALS_MM = 29.7 · SIGN_MM = 15.0 · ROW_MM = 4.8
+FALLBACK_CONTENT_MM = 259.1 · text-[9.5px] · const singlePage = isFirst && isLast;
+```
+
+All present. The last is the single-page relief that makes 29 items fit; the `9.5px` is the
+table size that was raised because row height is fixed.
+
+### The G8 pointer, and a check that had to be two-sided
+
+The `estimateViewMode` declaration carries the note naming G8 - **the only thing a person
+reinstating the matrix from git history cannot avoid reading.** It is untouched:
+
+```
+'matrix' IS GONE AND SHOULD NOT COME BACK (AUDIT G8)              present
+useState<'batch_all' | 'forwarding_only' | 'single_job'>(…)       present
+Math.floor(Math.random() * 100) + 1                               present   ← as TEXT
+estimateViewMode === 'matrix'                                     0 matches ← as CODE
+```
+
+⚠ **The last two lines are one check, and it needs both halves.** The fabricated document
+number must be **present as quoted text** inside the warning - that is the whole point of the
+pointer - and **absent as code**. Grepping for it alone would have looked like the matrix was
+back; grepping for its absence alone would have silently permitted deleting the warning that
+explains why it must not return.
+
+### Presentation-only proof
+
+```
+<th 32→32 · <td 34→34 · <table 4→4 · getDocs 3→3 · where( 3→3 · atClause 2→2
+builderLineFor 4→4 · buildSingleJobEstimateData 3→3 · renderForwardingLetterPages 3→3
+estimateViewMode 11→11 · XLSX 13→13 · triggerUniversalPrint 3→3
+setupGap 2→2 · blockIfMasterMisfiled 2→2 · hidden *:table-cell 0→0
+```
+
+`builderLineFor` still has its one Excel-export caller (G8), and `git status` shows
+`SingleJobEstimateReport.tsx` unmodified.
+
+---
+
+## G18. Exclusion from restyling is not the same as being well-built
+
+The carried-balance badge on a tender card sets a standard the other meaning-committed sets
+should be measured against, and it was not noticed until three of them had been catalogued:
+
+```jsx
+short ? 'text-amber-900 bg-amber-50 border-amber-300'
+      : 'text-emerald-800 bg-emerald-50 border-emerald-200'
+...
+Opening oil {d.signed}{short && ' — approximate'}
+```
+
+**The colour and the word say the same thing, so neither carries it alone.** Amber and the
+literal word *"approximate"* both mark the same state. Photocopy it, hand it to a colour-blind
+operator, print it in greyscale: the meaning survives every one.
+
+### By that standard the circle-limit indicator is weaker than its exclusion implied
+
+`renderCircleLimitIndicator` separates **"your next action"** (amber) from **"someone else must
+configure this"** (grey). Checking each message against whether the words carry it:
+
+| message | tone | do the words carry it? |
+|---|---|---|
+| `Enter Wt of Coil LV to estimate` | amber | **yes** — imperative, addressed to the reader |
+| `Enter Wt of Coil to estimate` | amber | **yes** — same |
+| `Inspection incomplete - cannot estimate` | amber | **no** |
+| `External inspection missing - cannot estimate` | grey | **no** |
+| `Rate not configured - cannot estimate` | grey | **no** |
+| `Fixed rate - no limit check` | grey | partly — states a reason, not an owner |
+
+**Two of the three amber messages carry the distinction in words. The third does not** - and it
+is the one that sits closest to a grey message of near-identical shape. *"Inspection incomplete
+- cannot estimate"* and *"External inspection missing - cannot estimate"* are the same sentence
+pattern, the same length and the same italic weight. **In greyscale they are two identical-
+looking grey lines, and one of them means "go and fill in the field in front of you" while the
+other means "wait for someone else".**
+
+So the defect is narrower than "the indicator relies on colour", and sharper: it is one branch,
+and it is the branch where the colour is doing all the work.
+
+### The general finding, which is the reason this is its own entry
+
+**Exclusion from restyling is not the same as being well-built.**
+
+The indicator was excluded from the token vocabulary because its colours carry meaning (G16),
+and that exclusion is correct. But it was then treated as *compliant* - as though being
+protected from a cleanup were evidence that it was right. It is not. **The exclusion says "a
+tool cannot check this"; it says nothing about whether it passes.**
+
+This is the same shape as the GP chip needing its label: *colour is never the only signal*.
+That rule was applied to every token in `ui.ts` and to every notice restyled in this pass, and
+the one set explicitly held outside the tokens is the one where nobody re-checked it.
+
+The lesson generalises past this codebase: **a carve-out list needs its own audit, precisely
+because the automated checks stop at its boundary.** Everything inside the system is checked by
+the system; everything the system was told to leave alone is checked by nobody.
+
+⚠ **AND IT GENERALISES PAST STYLING.** Every exclusion in this project sits outside whatever
+checks the rest of it, and each was carved out for a good reason that says nothing about
+whether the thing itself is right:
+
+| carve-out | outside what |
+|---|---|
+| the deferred "Type" heading rename | outside the terminology work that named the ambiguity |
+| the Wound Core fallback | outside the master-health checks that cover the other sections |
+| the legacy `estimateMaster` field | outside the per-AT migration that moved everything else |
+| D0's derived job numbers | outside the numbering rebuild that made the rest allocated |
+| GP brown, the Dispatch tints, the tender chip | outside the token vocabulary |
+| the circle-limit indicator | outside it too - and the one that turned out to be weak |
+
+**The test to apply to any of them is the same:** not "why was this excluded?" - that is
+usually recorded and usually sound - but **"what checks it now?"** For most of the rows above
+the answer is an entry in this file and nothing else, which is why the entries have to say what
+the thing must satisfy rather than only why it was left alone.
+
+### Not fixed here, deliberately
+
+Making *"Inspection incomplete"* carry its own ownership is a **wording change to a message F79
+settled**, and F79's wording distinguishes an unentered field from an unconfigured rate. Editing
+it inside a presentation pass is exactly the interleaving that makes both harder to review - the
+same reasoning that deferred G11's read-only control.
+
+It belongs after the restyle pass. The standard to hold it to is the badge's: **say it in the
+words, and let the colour agree rather than carry.**
+
+---
+
+## G19. The last screen, and a guard that caught a comment describing a deleted system
+
+New Job was held back to the end of the restyle pass deliberately: it is where a presentation
+change is most likely to disturb something that took three rebuilds, and the vocabulary needed
+to be settled across ten screens first.
+
+**Five sets frozen, asserted before and after**, with the script writing the file back unchanged
+if any assertion failed:
+
+1. the intake gate (F83) and its handler assertion (G3);
+2. **the job-number field** — c1eabbe's shape: numbers DERIVED not reserved, the suggestion
+   continuing from the highest SAVED active OGP job, the prefix inside the box, recomputation
+   when division or core type changes;
+3. the setup-gap dialogs, each naming the thing that is actually missing (F50/F79);
+4. draft stashing on a mid-entry tender switch;
+5. the duplicate check and the allotment count.
+
+Fourteen expressions confirmed present before and after. Restyled: 8 modals, 2 pill shadows,
+40 figures made tabular. No card surface matched — this screen's surfaces were already plain.
+
+### ⚠ The assertion refused, and what it caught was a lie in a comment
+
+The pre-check also asserted that the **removed** reservation system stays removed. It failed:
+`reserveJobNos` was present. Not as code — in a comment, and the comment said:
+
+> *"Every number now comes from `reserveJobNos`, which advances the counter inside its own
+> transaction before the operator ever sees the number (AUDIT F60)."*
+
+**There is no `reserveJobNos`.** The whole apparatus was deleted when intake changed from
+allocating numbers to recording the ones the division already agreed. The comment described the
+system that F60 built and F68 removed, and it sat directly above the counter-reconciliation
+block explaining why that block exists — so it did not merely fail to describe the code, **it
+gave a wrong reason for the code that is still there**.
+
+Corrected to say what the block actually does: the job-number field is editable, so a saved
+number higher than the stored counter must push the counter forward, or the AT's
+`lastJobNumbers` sits below reality and the seeding that reads it (F42) starts a later tender
+too low.
+
+**This is the fifth comment in this session found asserting behaviour the code does not have**
+(F87, F88, F92, G11, and now this). What is different here is how it was found: not by reading,
+but by **a machine check that happened to be looking for the same string**. The guard was
+written to prevent a restyle reintroducing a deleted system; it caught documentation claiming
+the deleted system was still in use.
+
+### The refinement that followed
+
+The check then had to distinguish code from prose, because the corrected comment *names*
+`reserveJobNos` in order to say it does not exist. So the assertion strips comments before
+looking — **the name must be absent as code and is now deliberately present as text.** Same
+two-sided shape as the G8 pointer check in G17: a probe that only searched for absence would
+have permitted deleting the correction that explains the absence.
+
+The same distinction settled the two apparent DIFFs in the proof: `getAutoJobNo` 9→10 and
+`lastJobNumbers` 3→4 were both the new comment. **Code-only: 9→9 and 3→3.**
+
+### The restyle pass is complete
+
+Eleven screens, one vocabulary in `src/lib/ui.ts`, four exclusion sets recorded with the two
+kinds distinguished (G16, G18), every printed document hashed identical, and every screen's
+guards, notices and wording verified unchanged rather than assumed.
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on
