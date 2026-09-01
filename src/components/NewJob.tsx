@@ -252,8 +252,7 @@ export default function NewJob() {
      * sets it from availableDivisions; until then, everything that reads it was computing
      * against a division this agency has no prefix for.
      */
-    division: '',
-  });
+    division: '' });
 
   const [transformers, setTransformers] = useState<TransformerEntry[]>([
     { 
@@ -438,8 +437,7 @@ export default function NewJob() {
     autoFilledFrom: undefined,
     gpSource: undefined,
     gpPriorJobId: null,
-    gpLookupMissFor: undefined,
-  });
+    gpLookupMissFor: undefined });
 
   // Restore a stashed intake, once, on return from fixing agency setup.
   useEffect(() => {
@@ -480,8 +478,7 @@ export default function NewJob() {
         actionLabel: 'Set Up AT',
         actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
         unsavedWarning: draftWarning,
-        onBeforeNavigate: saveIntakeDraft,
-      });
+        onBeforeNavigate: saveIntakeDraft });
       return true;
     }
 
@@ -505,8 +502,7 @@ export default function NewJob() {
         actionLabel: 'Configure Prefixes',
         actionTo: '/agency-settings?section=at',
         unsavedWarning: draftWarning,
-        onBeforeNavigate: saveIntakeDraft,
-      });
+        onBeforeNavigate: saveIntakeDraft });
       return true;
     }
     return false;
@@ -600,8 +596,7 @@ export default function NewJob() {
       dateOfIssue: new Date().toISOString().split('T')[0],
       type: 'Distribution',
       repairType: type,
-      division: firstDiv,
-    });
+      division: firstDiv });
     setTransformers([initRow]);
     setJobNoSuggestFor(null);
     setAmbiguousMatch(null);
@@ -732,8 +727,7 @@ export default function NewJob() {
         ...updated[index],
         gpSource: 'legacy',
         gpPriorJobId: null,
-        gpLookupMissFor: jobNo,
-      };
+        gpLookupMissFor: jobNo };
       return updated;
     });
   };
@@ -861,8 +855,7 @@ export default function NewJob() {
           prevDeliveryDate: '',
           gpSource: undefined,
           gpPriorJobId: null,
-          gpLookupMissFor: undefined,
-        };
+          gpLookupMissFor: undefined };
       } else if (row.gpSource === 'legacy' && (row.gpLookupMissFor || '').trim().toUpperCase() !== (value || '').trim().toUpperCase()) {
         // A miss recorded against a different number must not keep showing.
         newTransformers[index] = { ...row, gpSource: undefined, gpLookupMissFor: undefined };
@@ -1058,8 +1051,7 @@ ${intakeGate.reason}`);
         unsavedWarning: intakeHasData()
           ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
           : undefined,
-        onBeforeNavigate: saveIntakeDraft,
-      });
+        onBeforeNavigate: saveIntakeDraft });
       return;
     }
     if (commonData.repairType === 'OGP') {
@@ -1177,8 +1169,7 @@ ${intakeGate.reason}`);
           unsavedWarning: intakeHasData()
             ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
             : undefined,
-          onBeforeNavigate: saveIntakeDraft,
-        });
+          onBeforeNavigate: saveIntakeDraft });
         setLoading(false);
         return;
       }
@@ -1438,8 +1429,7 @@ ${intakeGate.reason}`);
               unsavedWarning: intakeHasData()
                 ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
                 : undefined,
-              onBeforeNavigate: saveIntakeDraft,
-            });
+              onBeforeNavigate: saveIntakeDraft });
             setLoading(false);
             return;
           }
@@ -1477,8 +1467,7 @@ ${intakeGate.reason}`);
                 unsavedWarning: intakeHasData()
                   ? `This intake has ${transformers.length} transformer row${transformers.length > 1 ? 's' : ''} entered. It will be saved as a draft and restored when you come back.`
                   : undefined,
-                onBeforeNavigate: saveIntakeDraft,
-              });
+                onBeforeNavigate: saveIntakeDraft });
               setLoading(false);
               return;
             }
@@ -1642,23 +1631,28 @@ ${intakeGate.reason}`);
               createdAt: now,
               updatedAt: now,
               ownerId: auth.currentUser.uid,
-              agencyId: activeAgency.id,
-            };
+              agencyId: activeAgency.id };
           
           jobEntries.push({ ref: newJobRef, data: jobData });
           createdJobsList.push({ id: newJobRef.id, ...jobData });
         }
 
-        // RECONCILIATION, NOT ALLOCATION - and it is no longer how numbers are issued.
+        // RECONCILIATION, NOT ALLOCATION - and this comment described a system that no
+        // longer exists (AUDIT G19).
         //
-        // Every number now comes from `reserveJobNos`, which advances the counter inside
-        // its own transaction before the operator ever sees the number (AUDIT F60). This
-        // block survives for the one case reservation does not cover: the job-number field
-        // is editable, and a hand-typed number higher than the counter must still push it
-        // forward or the next reservation would reissue it.
+        // ⚠ IT SAID "every number now comes from `reserveJobNos`". THERE IS NO
+        // `reserveJobNos`. The whole reservation apparatus was removed: intake RECORDS the
+        // numbers the division already agreed rather than allocating them, and the field's
+        // suggestion is DERIVED by `getAutoJobNo` from the highest SAVED active OGP job.
+        // Nothing is reserved, so nothing can be burned.
         //
-        // It only ever advances - `maxNum > currentLast` - so it cannot rewind the counter
-        // below a number that was reserved and then burned.
+        // WHAT THIS BLOCK ACTUALLY DOES, and why it is still needed: the job-number field is
+        // editable, so a saved number higher than the stored counter must push the counter
+        // forward - otherwise the AT's `lastJobNumbers` sits below reality and the seeding
+        // that reads it (F42) starts a later tender too low.
+        //
+        // It only ever advances - `maxNum > currentLast` - so a cancelled MR releasing its
+        // numbers cannot rewind it past work that still exists.
         const nextCounters = { ...currentCounters };
         let hasCounterChange = false;
 
@@ -1786,7 +1780,7 @@ ${intakeGate.reason}`);
           can edit by hand if they prefer. This is an offer, not a gate. */}
       {refusalPrompt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-xl w-full border border-rose-200 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-2xl p-5 sm:p-6 max-w-xl w-full border border-rose-200 animate-in fade-in zoom-in duration-150 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center gap-3 mb-3 text-rose-600">
               <div className="bg-rose-100 p-2.5 rounded-xl shrink-0">
                 <AlertCircle className="w-6 h-6" />
@@ -1810,14 +1804,14 @@ ${intakeGate.reason}`);
                     Transformer #{r.index + 1}
                   </div>
                   <div className="text-xs text-slate-700">
-                    <span className="font-mono font-bold">{r.from}</span> is already used by:
+                    <span className="font-mono tabular-nums font-bold">{r.from}</span> is already used by:
                   </div>
                   <div className="text-[11px] text-slate-600 mt-0.5 pl-3 border-l-2 border-slate-200">
                     {r.fromLabel}
                   </div>
                   <div className="flex items-baseline gap-2 mt-2">
                     <span className="text-[11px] uppercase tracking-widest text-slate-400 font-bold">Next free</span>
-                    <span className="font-mono font-black text-slate-900 text-lg">{r.to}</span>
+                    <span className="font-mono tabular-nums font-black text-slate-900 text-lg">{r.to}</span>
                   </div>
                 </div>
               ))}
@@ -1860,7 +1854,7 @@ ${intakeGate.reason}`);
       {/* ERROR MODAL */}
       {errorMsg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200 animate-in fade-in zoom-in duration-150">
+          <div className="bg-white rounded-lg shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200 animate-in fade-in zoom-in duration-150">
             <div className="flex items-center gap-3 mb-3 text-rose-600">
               <div className="bg-rose-100 p-2.5 rounded-xl shrink-0">
                 <AlertCircle className="w-6 h-6" />
@@ -2004,7 +1998,7 @@ ${intakeGate.reason}`);
                   name="mrNo"
                   value={commonData.mrNo} 
                   onChange={handleCommonChange} 
-                  className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
+                  className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono tabular-nums font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
                   placeholder="e.g. 5933 / MR-104" 
                 />
               </div>
@@ -2023,7 +2017,7 @@ ${intakeGate.reason}`);
                   name="dateOfIssue"
                   value={commonData.dateOfIssue} 
                   onChange={handleCommonChange} 
-                  className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
+                  className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-xl text-xs sm:text-sm font-mono tabular-nums font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
                 />
               </div>
             </div>
@@ -2059,7 +2053,7 @@ ${intakeGate.reason}`);
                   onClick={() => handleRepairTypeSelect('OGP')}
                   className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     commonData.repairType === 'OGP'
-                      ? 'bg-blue-600 text-white shadow-xs'
+                      ? 'bg-blue-600 text-white'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -2071,7 +2065,7 @@ ${intakeGate.reason}`);
                   onClick={() => handleRepairTypeSelect('GP')}
                   className={`py-2 px-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                     commonData.repairType === 'GP'
-                      ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-400/40'
+                      ? 'bg-amber-600 text-white ring-2 ring-amber-400/40'
                       : 'text-slate-600 hover:text-slate-900'
                   }`}
                 >
@@ -2092,7 +2086,7 @@ ${intakeGate.reason}`);
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {Object.entries(divisionAllotmentInfo).map(([core, count]) => (
-                  <span key={core} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg font-mono font-bold text-[11px] border border-slate-200">
+                  <span key={core} className="px-2.5 py-1 bg-slate-100 text-slate-700 rounded-lg font-mono tabular-nums font-bold text-[11px] border border-slate-200">
                     {core}: {String(count)} Max
                   </span>
                 ))}
@@ -2122,10 +2116,10 @@ ${intakeGate.reason}`);
 
             {/* SUMMARY STATS PILLS */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold font-mono text-slate-800">
+              <span className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold font-mono tabular-nums text-slate-800">
                 Total: {transformers.length} Unit(s)
               </span>
-              <span className="px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs font-bold font-mono text-blue-800">
+              <span className="px-2.5 py-1 bg-blue-50 border border-blue-200 rounded-lg text-xs font-bold font-mono tabular-nums text-blue-800">
                 {totalKva} KVA
               </span>
               {Object.entries(coreTypeSummary).map(([ct, cnt]) => (
@@ -2151,7 +2145,7 @@ ${intakeGate.reason}`);
                 {/* ROW TOP BAR */}
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-2.5 pb-2 border-b border-slate-100">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-mono text-xs font-bold flex items-center justify-center">
+                    <span className="w-6 h-6 rounded-full bg-slate-900 text-white font-mono tabular-nums text-xs font-bold flex items-center justify-center">
                       {index + 1}
                     </span>
                     <span className="text-xs font-bold text-slate-800">
@@ -2257,7 +2251,7 @@ ${intakeGate.reason}`);
                           setTimeout(() => setJobNoSuggestFor(cur => (cur === index ? null : cur)), 150);
                           handleJobNoBlur(index, t.jobNo);
                         }}
-                        className={`w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border rounded-lg focus:ring-1 bg-white ${
+                        className={`w-full px-3 py-2 text-xs sm:text-sm font-mono tabular-nums font-bold border rounded-lg focus:ring-1 bg-white ${
                           commonData.repairType === 'GP'
                             ? 'border-amber-300 focus:ring-amber-500 focus:border-amber-500 text-amber-950'
                             : 'border-slate-200 focus:ring-blue-500 focus:border-blue-500 text-slate-900'
@@ -2291,14 +2285,14 @@ ${intakeGate.reason}`);
                                   className="w-full text-left px-2.5 py-1.5 hover:bg-amber-50 border-b border-slate-100 last:border-b-0"
                                 >
                                   <div className="flex items-baseline justify-between gap-2">
-                                    <span className="font-mono font-bold text-slate-900 text-xs">{pj.jobNo}</span>
+                                    <span className="font-mono tabular-nums font-bold text-slate-900 text-xs">{pj.jobNo}</span>
                                     <span className="text-[10px] font-bold text-slate-500">MR {pj.mrNo || '-'}</span>
                                   </div>
                                   <div className="text-[10px] text-slate-600 flex flex-wrap gap-x-2">
                                     <span>{pj.make || '-'}</span>
-                                    <span className="font-mono">S/N {pj.serialNo || '-'}</span>
-                                    <span className="font-mono">{pj.capacityKva} KVA</span>
-                                    <span className="font-mono">Del {d ? formatDDMMYYYY(d) : '-'}</span>
+                                    <span className="font-mono tabular-nums">S/N {pj.serialNo || '-'}</span>
+                                    <span className="font-mono tabular-nums">{pj.capacityKva} KVA</span>
+                                    <span className="font-mono tabular-nums">Del {d ? formatDDMMYYYY(d) : '-'}</span>
                                   </div>
                                 </button>
                               );
@@ -2320,7 +2314,7 @@ ${intakeGate.reason}`);
                         type="number"
                         value={t.capacityKva}
                         onChange={(e) => handleTransformerChange(index, 'capacityKva', e.target.value)}
-                        className="w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border border-slate-200 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                        className="w-full px-3 py-2 text-xs sm:text-sm font-mono tabular-nums font-bold border border-slate-200 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
                         placeholder="e.g. 200"
                       />
                       <div className="flex items-center gap-1 overflow-x-auto py-0.5 scrollbar-none no-scrollbar">
@@ -2329,7 +2323,7 @@ ${intakeGate.reason}`);
                             key={kva}
                             type="button"
                             onClick={() => handleTransformerChange(index, 'capacityKva', kva)}
-                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold shrink-0 transition-colors cursor-pointer ${
+                            className={`px-1.5 py-0.5 rounded text-[9px] font-mono tabular-nums font-bold shrink-0 transition-colors cursor-pointer ${
                               t.capacityKva === kva 
                                 ? 'bg-blue-600 text-white shadow-2xs' 
                                 : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
@@ -2368,7 +2362,7 @@ ${intakeGate.reason}`);
                       value={t.serialNo}
                       onChange={(e) => handleTransformerChange(index, 'serialNo', e.target.value.toUpperCase())}
                       onBlur={() => handleSerialNoBlur(index, t.serialNo)}
-                      className="w-full px-3 py-2 text-xs sm:text-sm font-mono font-bold border border-slate-200 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white uppercase"
+                      className="w-full px-3 py-2 text-xs sm:text-sm font-mono tabular-nums font-bold border border-slate-200 rounded-lg focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white uppercase"
                       placeholder="e.g. 13602"
                     />
                   </div>
@@ -2433,19 +2427,19 @@ ${intakeGate.reason}`);
                                   ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months.`
                                   : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months, so this must be booked as OGP, not GP.`}
                               </span>
-                              <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono font-bold rounded border border-black/10">
+                              <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono tabular-nums font-bold rounded border border-black/10">
                                 Job #{t.prevJobNo || t.jobNo}
                               </span>
                               {t.prevAtNo && (
-                                <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono rounded border border-black/10">
+                                <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono tabular-nums rounded border border-black/10">
                                   AT: {t.prevAtNo}
                                 </span>
                               )}
                             </div>
                             <div className="text-[11px] opacity-85 mt-0.5">
-                              Last Dispatched: <strong className="font-mono">{t.prevDeliveryDate ? formatDDMMYYYY(t.prevDeliveryDate) : 'N/A'}</strong>
+                              Last Dispatched: <strong className="font-mono tabular-nums">{t.prevDeliveryDate ? formatDDMMYYYY(t.prevDeliveryDate) : 'N/A'}</strong>
                               {rowGpCalc?.isValidDate && (
-                                <> &bull; Expiry: <strong className="font-mono">{formatDDMMYYYY(rowGpCalc.expiryDateStr)}</strong> ({rowGpCalc.isWithinWarranty ? rowGpCalc.remainingMonthsText : `${rowGpCalc.elapsedMonthsText} elapsed`})</>
+                                <> &bull; Expiry: <strong className="font-mono tabular-nums">{formatDDMMYYYY(rowGpCalc.expiryDateStr)}</strong> ({rowGpCalc.isWithinWarranty ? rowGpCalc.remainingMonthsText : `${rowGpCalc.elapsedMonthsText} elapsed`})</>
                               )}
                             </div>
                           </div>
@@ -2515,7 +2509,7 @@ ${intakeGate.reason}`);
                             type="date"
                             value={t.prevDeliveryDate || ''}
                             onChange={(e) => handleTransformerChange(index, 'prevDeliveryDate', e.target.value)}
-                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs font-mono font-bold bg-white text-amber-950 outline-none focus:ring-1 focus:ring-amber-500"
+                            className="w-full px-2.5 py-1.5 border border-amber-300 rounded-lg text-xs font-mono tabular-nums font-bold bg-white text-amber-950 outline-none focus:ring-1 focus:ring-amber-500"
                             required={commonData.repairType === 'GP'}
                           />
                         </div>
@@ -2526,7 +2520,7 @@ ${intakeGate.reason}`);
                         <div className="px-3 py-2 bg-amber-100/90 border border-amber-300 rounded-lg text-xs text-amber-950 flex items-center gap-2">
                           <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0" />
                           <span>
-                            No earlier job found for <strong className="font-mono">{t.gpLookupMissFor || t.jobNo}</strong>. If this transformer was repaired under an earlier AT, enter the delivery date written on the job card. Make, serial and kVA must be entered manually - there is no record to copy.
+                            No earlier job found for <strong className="font-mono tabular-nums">{t.gpLookupMissFor || t.jobNo}</strong>. If this transformer was repaired under an earlier AT, enter the delivery date written on the job card. Make, serial and kVA must be entered manually - there is no record to copy.
                           </span>
                         </div>
                       ) : rowGpCalc && rowGpCalc.isValidDate ? (
@@ -2547,7 +2541,7 @@ ${intakeGate.reason}`);
                                 : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months, so this must be booked as OGP, not GP.`}
                             </span>
                           </div>
-                          <div className="text-[11px] font-mono opacity-90">
+                          <div className="text-[11px] font-mono tabular-nums opacity-90">
                             Last Repaired: <span className="font-bold">{formatDDMMYYYY(rowGpCalc.repairedDateStr)}</span> → Expired: <span className="font-bold">{formatDDMMYYYY(rowGpCalc.expiryDateStr)}</span>
                           </div>
                         </div>
@@ -2609,7 +2603,7 @@ ${intakeGate.reason}`);
       {/* ========================================================================= */}
       {ambiguousMatch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="bg-white rounded-lg shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
             <div className="p-4 bg-amber-600 text-white flex items-center justify-between shrink-0">
               <div className="min-w-0">
                 <h3 className="font-bold text-sm sm:text-base flex items-center gap-2">
@@ -2657,7 +2651,7 @@ ${intakeGate.reason}`);
                     className="w-full text-left p-3 rounded-xl border border-slate-200 hover:border-amber-500 hover:bg-amber-50/60 transition-colors"
                   >
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="font-mono font-bold text-slate-900 text-sm">{pj.jobNo}</span>
+                      <span className="font-mono tabular-nums font-bold text-slate-900 text-sm">{pj.jobNo}</span>
                       <div className="flex items-baseline gap-2">
                         {pjAtLabel && (
                           <span className="text-[10px] font-bold text-blue-800 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5 uppercase tracking-wide">
@@ -2669,9 +2663,9 @@ ${intakeGate.reason}`);
                     </div>
                     <div className="mt-1 grid grid-cols-2 sm:grid-cols-4 gap-x-3 gap-y-1 text-[11px]">
                       <div><span className="text-slate-500">Make: </span><span className="font-semibold text-slate-800">{pj.make || '-'}</span></div>
-                      <div><span className="text-slate-500">Serial: </span><span className="font-mono font-semibold text-slate-800">{pj.serialNo || '-'}</span></div>
-                      <div><span className="text-slate-500">Capacity: </span><span className="font-mono font-semibold text-slate-800">{pj.capacityKva} KVA</span></div>
-                      <div><span className="text-slate-500">Delivered: </span><span className="font-mono font-semibold text-slate-800">{delDate ? formatDDMMYYYY(delDate) : '-'}</span></div>
+                      <div><span className="text-slate-500">Serial: </span><span className="font-mono tabular-nums font-semibold text-slate-800">{pj.serialNo || '-'}</span></div>
+                      <div><span className="text-slate-500">Capacity: </span><span className="font-mono tabular-nums font-semibold text-slate-800">{pj.capacityKva} KVA</span></div>
+                      <div><span className="text-slate-500">Delivered: </span><span className="font-mono tabular-nums font-semibold text-slate-800">{delDate ? formatDDMMYYYY(delDate) : '-'}</span></div>
                       <div className="col-span-2 sm:col-span-4">
                         <span className="text-slate-500">AT: </span>
                         <span className="font-semibold text-slate-800">{pjAtLabel || 'not recorded on this job'}</span>
@@ -2700,7 +2694,7 @@ ${intakeGate.reason}`);
       {/* ========================================================================= */}
       {showPastPickerRowIndex !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
+          <div className="bg-white rounded-lg shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[85vh]">
             
             <div className="p-4 bg-slate-900 text-white flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2.5">
@@ -2729,7 +2723,7 @@ ${intakeGate.reason}`);
             <div className="px-4 py-2.5 bg-amber-50 border-b border-amber-200 text-amber-900 text-xs flex items-start gap-2">
               <span className="text-amber-700 font-bold shrink-0">ℹ️ Note:</span>
               <span>
-                For <strong>GP Warranty Repairs</strong>, no new Job Number is created. Selecting a past transformer reuses its <strong>same original Job Number</strong> (<span className="font-mono font-bold text-amber-950">from 1st time repair as OGP</span>) to track its entire guarantee period lifecycle.
+                For <strong>GP Warranty Repairs</strong>, no new Job Number is created. Selecting a past transformer reuses its <strong>same original Job Number</strong> (<span className="font-mono tabular-nums font-bold text-amber-950">from 1st time repair as OGP</span>) to track its entire guarantee period lifecycle.
               </span>
             </div>
 
@@ -2805,10 +2799,10 @@ ${intakeGate.reason}`);
                       >
                         <div className="space-y-1.5 min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-1.5">
-                            <span className="font-mono font-bold text-xs bg-slate-900 text-white px-2 py-0.5 rounded">
+                            <span className="font-mono tabular-nums font-bold text-xs bg-slate-900 text-white px-2 py-0.5 rounded">
                               Past Job #{pj.jobNo || 'Record'}
                             </span>
-                            <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-900 rounded font-bold font-mono">
+                            <span className="text-[10px] px-2 py-0.5 bg-blue-100 text-blue-900 rounded font-bold font-mono tabular-nums">
                               {pj.capacityKva} KVA
                             </span>
                             <span className="text-[10px] px-2 py-0.5 bg-slate-100 text-slate-800 rounded font-bold">
@@ -2818,7 +2812,7 @@ ${intakeGate.reason}`);
                               Div: {pj.division || '-'}
                             </span>
                             {atInfo && (
-                              <span className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-bold font-mono border border-amber-200">
+                              <span className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-900 rounded font-bold font-mono tabular-nums border border-amber-200">
                                 AT: {atInfo}
                               </span>
                             )}
@@ -2831,7 +2825,7 @@ ${intakeGate.reason}`);
                             )}
                           </div>
                           <div className="text-xs text-slate-600">
-                            Make: <strong className="text-slate-900">{pj.make || '-'}</strong> &bull; S/N: <strong className="text-slate-900 font-mono">{pj.serialNo || '-'}</strong> &bull; MR No: <strong className="text-slate-800">{pj.mrNo || '-'}</strong>
+                            Make: <strong className="text-slate-900">{pj.make || '-'}</strong> &bull; S/N: <strong className="text-slate-900 font-mono tabular-nums">{pj.serialNo || '-'}</strong> &bull; MR No: <strong className="text-slate-800">{pj.mrNo || '-'}</strong>
                           </div>
                           <div className="text-[11px] text-slate-500 flex flex-wrap gap-x-3">
                             <span>Last Delivery / Outward: <strong className="text-slate-700">{delivStr}</strong></span>
@@ -2872,7 +2866,7 @@ ${intakeGate.reason}`);
       {/* ========================================================================= */}
       {showReceiptModal && savedJobsForReceipt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-150">
+          <div className="bg-white rounded-lg shadow-2xl max-w-3xl w-full border border-slate-200 overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-150">
             
             <div className="p-4 bg-emerald-700 text-white flex items-center justify-between shrink-0 print:hidden">
               <div className="flex items-center gap-2">
@@ -2907,11 +2901,11 @@ ${intakeGate.reason}`);
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200 text-xs my-4">
                 <div>
                   <span className="text-slate-500 block text-[10px] font-bold uppercase">MR Number</span>
-                  <span className="font-bold font-mono text-sm text-slate-900">{commonData.mrNo}</span>
+                  <span className="font-bold font-mono tabular-nums text-sm text-slate-900">{commonData.mrNo}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px] font-bold uppercase">Receive Date</span>
-                  <span className="font-bold font-mono text-slate-900">{formatDDMMYYYY(commonData.dateOfIssue)}</span>
+                  <span className="font-bold font-mono tabular-nums text-slate-900">{formatDDMMYYYY(commonData.dateOfIssue)}</span>
                 </div>
                 <div>
                   <span className="text-slate-500 block text-[10px] font-bold uppercase">Division</span>
@@ -2928,10 +2922,10 @@ ${intakeGate.reason}`);
                   <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
                     <tr>
                       <th className="py-2.5 px-3">#</th>
-                      <th className="py-2.5 px-3 font-mono">Job No</th>
+                      <th className="py-2.5 px-3 font-mono tabular-nums">Job No</th>
                       <th className="py-2.5 px-3">Capacity (KVA)</th>
                       <th className="py-2.5 px-3">Make</th>
-                      <th className="py-2.5 px-3 font-mono">Serial No</th>
+                      <th className="py-2.5 px-3 font-mono tabular-nums">Serial No</th>
                       <th className="py-2.5 px-3">Job / Core Type</th>
                       {commonData.repairType === 'GP' && <th className="py-2.5 px-3">Prev AT / Ref</th>}
                     </tr>
@@ -2940,13 +2934,13 @@ ${intakeGate.reason}`);
                     {savedJobsForReceipt.map((job, idx) => (
                       <tr key={job.id || idx} className="hover:bg-slate-50">
                         <td className="py-2.5 px-3 font-bold text-slate-500">{idx + 1}</td>
-                        <td className="py-2.5 px-3 font-mono font-bold text-blue-700">{job.jobNo}</td>
-                        <td className="py-2.5 px-3 font-bold font-mono">{job.capacityKva} KVA</td>
+                        <td className="py-2.5 px-3 font-mono tabular-nums font-bold text-blue-700">{job.jobNo}</td>
+                        <td className="py-2.5 px-3 font-bold font-mono tabular-nums">{job.capacityKva} KVA</td>
                         <td className="py-2.5 px-3 font-semibold uppercase">{job.make || '-'}</td>
-                        <td className="py-2.5 px-3 font-mono text-slate-800">{job.serialNo || '-'}</td>
+                        <td className="py-2.5 px-3 font-mono tabular-nums text-slate-800">{job.serialNo || '-'}</td>
                         <td className="py-2.5 px-3 font-bold">{job.coreType || 'CRGO'}</td>
                         {commonData.repairType === 'GP' && (
-                          <td className="py-2.5 px-3 text-[11px] text-amber-800 font-mono">
+                          <td className="py-2.5 px-3 text-[11px] text-amber-800 font-mono tabular-nums">
                             {job.prevAtNo || job.prevJobNo || 'GP Warranty'}
                           </td>
                         )}
@@ -3008,7 +3002,7 @@ ${intakeGate.reason}`);
       {/* CONFIRM DISCARD ON REPAIR-TYPE SWITCH */}
       {pendingTypeSwitch && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-3 sm:p-4 animate-in fade-in duration-150">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
+          <div className="bg-white rounded-lg shadow-2xl max-w-md w-full border border-slate-200 overflow-hidden">
             <div className="p-4 bg-amber-600 text-white flex items-center gap-2">
               <AlertTriangle className="w-5 h-5 shrink-0" />
               <h3 className="font-bold text-sm sm:text-base">
@@ -3048,7 +3042,7 @@ ${intakeGate.reason}`);
 
       {showSaveConfirmModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
             <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center mx-auto mb-4">
               <FileText className="w-6 h-6" />
             </div>
@@ -3077,7 +3071,7 @@ ${intakeGate.reason}`);
       {/* Modal Alert Message */}
       {modalAlertMessage && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-2xl border border-amber-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-lg shadow-2xl border border-amber-200 max-w-sm w-full p-6 text-center animate-in fade-in zoom-in-95 duration-200">
             <div className="w-12 h-12 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center mx-auto mb-4">
               <X className="w-6 h-6" />
             </div>
