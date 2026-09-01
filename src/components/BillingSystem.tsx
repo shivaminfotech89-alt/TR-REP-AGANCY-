@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
+import { CARD, CARD_PAD, NUM, TABLE, TH, TD } from '../lib/ui';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 
@@ -1659,7 +1660,7 @@ export default function BillingSystem() {
       {!selectedMrNo ? (
         <div className="space-y-6 print:hidden">
           {/* Header Banner, Universal Filters & Stage Navigation Tabs */}
-          <div className="bg-white p-4 sm:p-5 rounded-xl shadow-xs border border-slate-200 space-y-4">
+          <div className={`${CARD} ${CARD_PAD} space-y-3`}>
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
               <div>
                 <h1 className="text-base sm:text-lg font-black text-slate-900 tracking-tight flex items-center gap-2">
@@ -1705,7 +1706,7 @@ export default function BillingSystem() {
                 onClick={() => setActiveTab('generator')}
                 className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                   activeTab === 'generator'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                 }`}
               >
@@ -1722,7 +1723,7 @@ export default function BillingSystem() {
                 onClick={() => setActiveTab('sent')}
                 className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                   activeTab === 'sent'
-                    ? 'bg-amber-600 text-white shadow-xs'
+                    ? 'bg-amber-600 text-white'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                 }`}
               >
@@ -1741,7 +1742,7 @@ export default function BillingSystem() {
                 onClick={() => setActiveTab('payments')}
                 className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                   activeTab === 'payments'
-                    ? 'bg-emerald-600 text-white shadow-xs'
+                    ? 'bg-emerald-600 text-white'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
                 }`}
               >
@@ -1770,11 +1771,11 @@ export default function BillingSystem() {
             /* TAB 1: BILL GENERATOR */
             <div className="space-y-6">
               <div className="flex flex-col sm:flex-row justify-between items-stretch sm:items-center gap-3">
-                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl w-full sm:w-auto">
+                <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg w-full sm:w-auto">
                   <button
                     onClick={() => setBillTypeFilter('repairable')}
                     className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
-                      billTypeFilter === 'repairable' ? 'bg-white text-blue-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      billTypeFilter === 'repairable' ? 'bg-white text-blue-600 ' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     Repairable Delivered
@@ -1782,7 +1783,7 @@ export default function BillingSystem() {
                   <button
                     onClick={() => setBillTypeFilter('scrap')}
                     className={`flex-1 sm:flex-none px-3.5 py-2 rounded-lg text-xs font-bold uppercase transition-all ${
-                      billTypeFilter === 'scrap' ? 'bg-white text-red-600 shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      billTypeFilter === 'scrap' ? 'bg-white text-red-600 ' : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     Scrap Delivered
@@ -1791,7 +1792,7 @@ export default function BillingSystem() {
               </div>
 
               {/* Explanation Banner for Pending Delivery */}
-              <div className="p-3.5 sm:p-4 bg-blue-50/90 border border-blue-200 rounded-xl text-blue-950 text-xs flex items-start gap-3 shadow-xs">
+              <div className="p-3.5 sm:p-4 bg-blue-50/90 border border-blue-200 rounded-lg text-blue-950 text-xs flex items-start gap-3 shadow-xs">
                 <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <p className="font-bold text-xs sm:text-sm text-blue-900">💡 Why do jobs show as "Pending" in Billing System?</p>
@@ -1803,7 +1804,7 @@ export default function BillingSystem() {
               </div>
 
               {/* Delivered MR Table */}
-              <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+              <div className={`${CARD} overflow-hidden`}>
                 <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <FileText className="w-4 h-4 text-blue-600 shrink-0" />
@@ -1875,7 +1876,7 @@ export default function BillingSystem() {
 
                           return (
                             <tr key={mr} className="hover:bg-slate-50/80 border-b border-slate-100">
-                              <td className="px-4 py-3 font-mono font-bold text-blue-600 align-top text-xs sm:text-sm">{mr}</td>
+                              <td className="px-4 py-3 font-mono tabular-nums font-bold text-blue-600 align-top text-xs sm:text-sm">{mr}</td>
                               <td className="px-4 py-3 font-medium text-slate-700 align-top text-xs sm:text-sm">{divName}</td>
                               <td className="px-4 py-3 font-semibold text-slate-700 align-top text-xs">
                                 <div>
@@ -1954,7 +1955,7 @@ export default function BillingSystem() {
 
                                             return (
                                               <div key={j.id} className="flex items-center gap-1.5 text-[11px] min-w-0">
-                                                <span className={`font-mono font-bold shrink-0 flex items-center gap-1 ${isGpJob(j) ? GP_TEXT_CLASS : 'text-slate-800'}`}>
+                                                <span className={`font-mono tabular-nums font-bold shrink-0 flex items-center gap-1 ${isGpJob(j) ? GP_TEXT_CLASS : 'text-slate-800'}`}>
                                                   {j.jobNo}:
                                                   {isGpJob(j) && <GpChip />}
                                                 </span>
@@ -2055,22 +2056,22 @@ export default function BillingSystem() {
             <div className="space-y-6">
               {/* KPI Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-4">
-                <div className="bg-white p-4 rounded-xl border border-amber-200 bg-amber-50/30 shadow-xs">
+                <div className="bg-amber-50/30 border border-l-2 border-l-amber-500 border-amber-200 rounded-lg p-2.5 sm:p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Sent Bills Awaiting Payment</p>
                   <p className="text-xl sm:text-2xl font-bold text-amber-700 mt-1">{sentBillStats.unpaidCount}</p>
                   <p className="text-[11px] text-amber-600 mt-0.5">Bills Pending Realization</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                <div className={`${CARD} ${CARD_PAD}`}>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Pending Invoiced Value</p>
                   <p className="text-xl sm:text-2xl font-bold text-blue-600 mt-1">₹{sentBillStats.unpaidValue.toLocaleString('en-IN')}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">Awaiting Disbursal</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                <div className={`${CARD} ${CARD_PAD}`}>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Sent Invoices</p>
                   <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">{sentBillStats.totalCount}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">Lifetime Sent</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 shadow-xs">
+                <div className="bg-emerald-50/40 border border-l-2 border-l-emerald-500 border-emerald-200 rounded-lg p-2.5 sm:p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">Realized Collections</p>
                   <p className="text-xl sm:text-2xl font-bold text-emerald-700 mt-1">₹{sentBillStats.paidValue.toLocaleString('en-IN')}</p>
                   <p className="text-[11px] text-emerald-600 mt-0.5">{sentBillStats.paidCount} Bills Realized</p>
@@ -2078,7 +2079,7 @@ export default function BillingSystem() {
               </div>
 
               {/* Sent Bills Register Table Card */}
-              <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+              <div className={`${CARD} overflow-hidden`}>
                 <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Send className="w-4 h-4 text-amber-600 shrink-0" />
@@ -2134,13 +2135,13 @@ export default function BillingSystem() {
                         filteredUnpaidSentBills.map(item => (
                           <tr key={item.mrNo} className="hover:bg-slate-50/80 border-b border-slate-100">
                             <td className="px-4 py-3 align-top">
-                              <div className="font-mono font-bold text-blue-600 text-xs sm:text-sm">{item.mrNo}</div>
+                              <div className="font-mono tabular-nums font-bold text-blue-600 text-xs sm:text-sm">{item.mrNo}</div>
                               <div className="text-xs font-semibold text-slate-700">{item.division}</div>
                               <div className="text-[10px] text-slate-500">{item.deliveredCount} / {item.totalCount} Delivered</div>
                             </td>
                             <td className="px-4 py-3 align-top text-xs">
                               <div className="font-bold text-slate-800">{item.billNo}</div>
-                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">Ref: {item.billRefNo}</div>
+                              <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">Ref: {item.billRefNo}</div>
                               {item.paymentRemarks && (
                                 <div className="text-[10px] text-slate-400 italic mt-0.5">{item.paymentRemarks}</div>
                               )}
@@ -2200,22 +2201,22 @@ export default function BillingSystem() {
             <div className="space-y-6">
               {/* KPI Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3.5 sm:gap-4">
-                <div className="bg-white p-4 rounded-xl border border-emerald-200 bg-emerald-50/40 shadow-xs">
+                <div className="bg-emerald-50/40 border border-l-2 border-l-emerald-500 border-emerald-200 rounded-lg p-2.5 sm:p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-800">Total Realized Collections</p>
                   <p className="text-xl sm:text-2xl font-bold text-emerald-700 mt-1">₹{sentBillStats.paidValue.toLocaleString('en-IN')}</p>
                   <p className="text-[11px] text-emerald-600 mt-0.5">{sentBillStats.paidCount} Invoices Fully Settled</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                <div className={`${CARD} ${CARD_PAD}`}>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total Deductions / TDS</p>
                   <p className="text-xl sm:text-2xl font-bold text-amber-700 mt-1">₹{sentBillStats.totalDeductions.toLocaleString('en-IN')}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">TDS / SD Withheld</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs">
+                <div className={`${CARD} ${CARD_PAD}`}>
                   <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Settled Bills Count</p>
                   <p className="text-xl sm:text-2xl font-bold text-slate-900 mt-1">{sentBillStats.paidCount}</p>
                   <p className="text-[11px] text-slate-500 mt-0.5">Paid MRs</p>
                 </div>
-                <div className="bg-white p-4 rounded-xl border border-amber-200 bg-amber-50/30 shadow-xs">
+                <div className="bg-amber-50/30 border border-l-2 border-l-amber-500 border-amber-200 rounded-lg p-2.5 sm:p-3">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-amber-800">Pending Payments</p>
                   <p className="text-xl sm:text-2xl font-bold text-amber-700 mt-1">₹{sentBillStats.unpaidValue.toLocaleString('en-IN')}</p>
                   <p className="text-[11px] text-amber-600 mt-0.5">{sentBillStats.unpaidCount} Bills Pending</p>
@@ -2223,7 +2224,7 @@ export default function BillingSystem() {
               </div>
 
               {/* Received Payments Register Table Card */}
-              <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden">
+              <div className={`${CARD} overflow-hidden`}>
                 <div className="p-3.5 sm:p-4 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
                   <div className="flex items-center gap-2">
                     <Banknote className="w-4 h-4 text-emerald-600 shrink-0" />
@@ -2300,7 +2301,7 @@ export default function BillingSystem() {
                                 <span className="px-1.5 py-0.5 bg-emerald-100 text-emerald-800 rounded font-semibold text-[10px]">
                                   {item.paymentMode || 'NEFT'}
                                 </span>
-                                <span className="font-mono text-emerald-700 font-bold">{item.paymentRefNo}</span>
+                                <span className="font-mono tabular-nums text-emerald-700 font-bold">{item.paymentRefNo}</span>
                               </div>
                               <div className="text-[11px] text-slate-500 mt-1">
                                 Payment Date: <span className="font-medium text-slate-700">{formatDDMMYYYY(item.paymentDate)}</span>
@@ -2310,13 +2311,13 @@ export default function BillingSystem() {
                               )}
                             </td>
                             <td className="px-4 py-3 align-top">
-                              <div className="font-mono font-bold text-blue-600 text-xs sm:text-sm">{item.mrNo}</div>
+                              <div className="font-mono tabular-nums font-bold text-blue-600 text-xs sm:text-sm">{item.mrNo}</div>
                               <div className="text-xs font-semibold text-slate-700">{item.division}</div>
                               <div className="text-[10px] text-slate-500">{item.deliveredCount} Delivered Jobs</div>
                             </td>
                             <td className="px-4 py-3 align-top text-xs">
                               <div className="font-bold text-slate-800">{item.billNo}</div>
-                              <div className="text-[11px] text-slate-500 font-mono mt-0.5">Ref: {item.billRefNo}</div>
+                              <div className="text-[11px] text-slate-500 font-mono tabular-nums mt-0.5">Ref: {item.billRefNo}</div>
                               <div className="text-[10px] text-slate-400 mt-0.5">Sent: {formatDDMMYYYY(item.billSentDate)}</div>
                             </td>
                             <td className="px-4 py-3 align-top">
@@ -2502,7 +2503,7 @@ export default function BillingSystem() {
                   </span>
                 ) : null}
               </div>
-              <p className="text-lg sm:text-xl font-mono font-bold text-white mt-1">MR No: {selectedMrNo}</p>
+              <p className="text-lg sm:text-xl font-mono tabular-nums font-bold text-white mt-1">MR No: {selectedMrNo}</p>
               <p className="text-xs text-slate-300 mt-0.5">
                 Division: <span className="font-semibold text-white">{currentDivision}</span> • {selectedJobsData.length} Delivered Transformers
               </p>
@@ -2678,7 +2679,7 @@ export default function BillingSystem() {
                   type="text"
                   value={billNo}
                   onChange={(e) => setBillNo(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono font-bold text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums font-bold text-slate-800"
                 />
               </div>
               <div>
@@ -2687,7 +2688,7 @@ export default function BillingSystem() {
                   type="text"
                   value={billDate}
                   onChange={(e) => setBillDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums text-slate-800"
                 />
               </div>
               <div>
@@ -2696,7 +2697,7 @@ export default function BillingSystem() {
                   type="text"
                   value={apprNo}
                   onChange={(e) => setApprNo(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums text-slate-800"
                 />
               </div>
               <div>
@@ -2705,7 +2706,7 @@ export default function BillingSystem() {
                   type="text"
                   value={apprDate}
                   onChange={(e) => setApprDate(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums text-slate-800"
                 />
               </div>
               <div>
@@ -2714,7 +2715,7 @@ export default function BillingSystem() {
                   type="text"
                   value={divisionGstin}
                   onChange={(e) => setDivisionGstin(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums text-slate-800"
                   placeholder="DISCOM GST No"
                 />
               </div>
@@ -2724,7 +2725,7 @@ export default function BillingSystem() {
                   type="text"
                   value={divisionPan}
                   onChange={(e) => setDivisionPan(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums text-slate-800"
                   placeholder="DISCOM PAN No"
                 />
               </div>
@@ -2734,7 +2735,7 @@ export default function BillingSystem() {
                   type="text"
                   value={serviceSacCode}
                   onChange={(e) => setServiceSacCode(e.target.value)}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono text-slate-800"
+                  className="w-full px-2.5 py-1.5 border border-slate-300 rounded font-mono tabular-nums text-slate-800"
                   placeholder="998719"
                 />
               </div>
@@ -3319,7 +3320,7 @@ export default function BillingSystem() {
             <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Forwarding To (Recipient Address)</label>
-                <textarea rows={3} value={forwardingTo} onChange={e => setForwardingTo(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono text-xs" />
+                <textarea rows={3} value={forwardingTo} onChange={e => setForwardingTo(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono tabular-nums text-xs" />
               </div>
 
               <div>
@@ -3334,7 +3335,7 @@ export default function BillingSystem() {
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1">C . C. to :</label>
-                <textarea rows={2} value={forwardingCc} onChange={e => setForwardingCc(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono text-xs" />
+                <textarea rows={2} value={forwardingCc} onChange={e => setForwardingCc(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono tabular-nums text-xs" />
               </div>
 
               <div className="bg-amber-50 border border-amber-200 p-3 rounded flex items-center space-x-2 text-xs text-amber-800">
@@ -3397,7 +3398,7 @@ export default function BillingSystem() {
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] uppercase font-bold text-blue-700">Net Bill Value</p>
-                  <p className="text-base font-bold text-blue-900 font-mono">
+                  <p className="text-base font-bold text-blue-900 font-mono tabular-nums">
                     ₹{calculateMrBillSummary(sendTargetMr).grandTotal.toLocaleString('en-IN')}
                   </p>
                 </div>
@@ -3412,7 +3413,7 @@ export default function BillingSystem() {
                   value={sendBillNo}
                   onChange={e => setSendBillNo(e.target.value)}
                   placeholder="e.g. BILL/SAB/2026/045"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono tabular-nums"
                 />
               </div>
 
@@ -3425,7 +3426,7 @@ export default function BillingSystem() {
                   value={sendBillRefNo}
                   onChange={e => setSendBillRefNo(e.target.value)}
                   placeholder="e.g. UGVCL/BILL-SUB/MR-841/2026-27"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none font-mono tabular-nums"
                 />
               </div>
 
@@ -3503,13 +3504,13 @@ export default function BillingSystem() {
                 <div>
                   <p className="font-bold text-emerald-950">MR No: {paidTargetMr}</p>
                   <p className="text-emerald-700">Division: {mrGroups[paidTargetMr]?.[0]?.division || 'SABARMATI'}</p>
-                  <p className="text-emerald-800 font-mono text-[11px] mt-0.5">
+                  <p className="text-emerald-800 font-mono tabular-nums text-[11px] mt-0.5">
                     Bill No: {mrGroups[paidTargetMr]?.[0]?.billNo || `BILL/${paidTargetMr}`}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] uppercase font-bold text-emerald-700">Total Billed</p>
-                  <p className="text-base font-bold text-emerald-900 font-mono">
+                  <p className="text-base font-bold text-emerald-900 font-mono tabular-nums">
                     ₹{calculateMrBillSummary(paidTargetMr).grandTotal.toLocaleString('en-IN')}
                   </p>
                 </div>
@@ -3555,7 +3556,7 @@ export default function BillingSystem() {
                   value={paymentRefNo}
                   onChange={e => setPaymentRefNo(e.target.value)}
                   placeholder="e.g. UTR002938192839 or CHQ-928371"
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono tabular-nums"
                 />
               </div>
 
@@ -3569,7 +3570,7 @@ export default function BillingSystem() {
                     value={paidAmount}
                     onChange={e => setPaidAmount(e.target.value)}
                     placeholder="e.g. 145000"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono tabular-nums"
                   />
                 </div>
 
@@ -3582,7 +3583,7 @@ export default function BillingSystem() {
                     value={paymentDeductions}
                     onChange={e => setPaymentDeductions(e.target.value)}
                     placeholder="e.g. 2900"
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none font-mono tabular-nums"
                   />
                 </div>
               </div>
