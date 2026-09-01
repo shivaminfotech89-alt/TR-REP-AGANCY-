@@ -1,5 +1,6 @@
 
 import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
+import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -1072,7 +1073,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
       
       {/* Universal Top Filter Bar & Stage Lifecycle Navigation (Hidden during print) */}
       {!selectedMrNo ? (
-        <div className="bg-white rounded-xl shadow-xs border border-slate-200 p-4 sm:p-5 mb-5 space-y-4 print:hidden">
+        <div className={`${CARD} ${CARD_PAD} mb-4 space-y-3 print:hidden`}>
           {/* Header Title & Universal Filters */}
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
             <div>
@@ -1119,7 +1120,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               onClick={() => { setActiveTab('generator'); }}
               className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                 activeTab === 'generator'
-                  ? 'bg-blue-600 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
               }`}
             >
@@ -1136,7 +1137,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               onClick={() => { setActiveTab('sent'); setSelectedMrNo(null); }}
               className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                 activeTab === 'sent'
-                  ? 'bg-amber-600 text-white shadow-xs'
+                  ? 'bg-amber-600 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
               }`}
             >
@@ -1155,7 +1156,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               onClick={() => { setActiveTab('approvals'); setSelectedMrNo(null); }}
               className={`flex items-center space-x-2 px-4 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all ${
                 activeTab === 'approvals'
-                  ? 'bg-emerald-600 text-white shadow-xs'
+                  ? 'bg-emerald-600 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200 border border-slate-200'
               }`}
             >
@@ -1177,19 +1178,19 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
           <div className="flex items-center gap-2">
             <button
               onClick={() => setSelectedMrNo(null)}
-              className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-3.5 py-2 rounded-lg transition-colors shadow-xs"
+              className="flex items-center gap-1.5 text-xs font-bold text-slate-700 hover:text-slate-900 bg-white hover:bg-slate-100 border border-slate-200 px-3.5 py-2 rounded-lg transition-colors"
             >
               <ArrowLeft className="w-4 h-4" />
               <span>&larr; Back to Estimate Register</span>
             </button>
-            <span className="text-xs font-mono font-bold text-slate-500">MR: {selectedMrNo}</span>
+            <span className="text-xs font-mono tabular-nums font-bold text-slate-500">MR: {selectedMrNo}</span>
           </div>
         </div>
       )}
 
       {/* Global Success Notification */}
       {savedSuccessMsg && (
-        <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-3 rounded-lg flex items-center justify-between text-xs font-semibold print:hidden shadow-sm mb-4">
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-800 p-2.5 rounded-lg flex items-center justify-between text-xs font-semibold print:hidden mb-4">
           <div className="flex items-center gap-2">
             <Check className="w-4 h-4 text-emerald-600 shrink-0" />
             <span>{savedSuccessMsg}</span>
@@ -1204,7 +1205,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
       {activeTab === 'generator' && (
         <>
           {!selectedMrNo ? (
-            <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden print:hidden">
+            <div className={`${CARD} overflow-hidden print:hidden`}>
               <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
                 <div>
                   <h2 className="text-xs font-bold text-slate-700 uppercase tracking-widest">
@@ -1217,7 +1218,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               </div>
               
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
+                <table className={`${TABLE} text-sm`}>
                   <thead className="bg-slate-50 border-b border-slate-200">
                     <tr>
                       <th className="px-4 py-3 font-bold text-slate-500 uppercase tracking-widest text-[10px]">MR No</th>
@@ -1253,7 +1254,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
 
                         return (
                           <tr key={mr} className="hover:bg-slate-50">
-                            <td className="px-4 py-3 font-mono font-bold text-slate-800">
+                            <td className="px-4 py-3 font-mono tabular-nums font-bold text-slate-800">
                               <div className="flex items-center gap-2">
                                 <span>{mr}</span>
                                 {hasCircleLimitExceeded && (
@@ -1280,7 +1281,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                                 </span>
                               )}
                             </td>
-                            <td className="px-4 py-3 font-mono font-bold text-slate-900">
+                            <td className="px-4 py-3 font-mono tabular-nums font-bold text-slate-900">
                               <div>₹{estTotal.toLocaleString('en-IN')}</div>
                               {hasCircleLimitExceeded && (
                                 <span className="text-[10px] text-rose-600 font-sans font-bold flex items-center gap-0.5">
@@ -1341,23 +1342,23 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             </div>
           ) : (
             <div className="space-y-6 print:space-y-0">
-              <div className="bg-slate-900 border border-slate-800 p-4 rounded flex flex-wrap gap-3 justify-between items-center text-white print:hidden shadow-sm">
+              <div className="bg-slate-900 border border-slate-800 p-2.5 rounded-lg flex flex-wrap gap-2.5 justify-between items-center text-white print:hidden">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Selected MR</p>
-                  <p className="text-lg font-mono font-bold">{selectedMrNo}</p>
+                  <p className="text-lg font-mono tabular-nums font-bold">{selectedMrNo}</p>
                   <p className="text-xs text-slate-300 mt-1">{selectedJobsData.length} Transformer(s) in this MR</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <button
                     onClick={() => handleOpenSendModal(selectedMrNo)}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-purple-600 hover:bg-purple-700 text-white px-3.5 py-2 rounded transition-colors"
                     title="Send Estimate with Ref No and Date"
                   >
                     <Send className="w-3.5 h-3.5 mr-1.5" /> Send Estimate
                   </button>
                   <button 
                     onClick={() => setShowEditModal(true)}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-2 rounded transition-colors"
                   >
                     <Edit3 className="w-3.5 h-3.5 mr-1.5" /> Edit Letter
                   </button>
@@ -1366,20 +1367,20 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       const container = document.getElementById('printable-estimate-container');
                       if (container) downloadHtmlAsWord(container, `Estimate_Report_${selectedMrNo}.doc`, `Estimate Report & Forwarding Letter - ${selectedMrNo}`);
                     }}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-indigo-600 hover:bg-indigo-700 text-white px-3.5 py-2 rounded transition-colors"
                   >
                     <FileText className="w-3.5 h-3.5 mr-1.5" /> Download Word (.doc)
                   </button>
                   <button 
                     onClick={handlePrint}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3.5 py-2 rounded transition-colors shadow-sm cursor-pointer"
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white px-3.5 py-2 rounded transition-colors cursor-pointer"
                     title="Print document or open print dialog"
                   >
                     <Printer className="w-3.5 h-3.5 mr-1.5" /> Print
                   </button>
                   <button
                     onClick={handleExportExcel}
-                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded transition-colors shadow-sm"
+                    className="flex items-center text-xs font-bold uppercase tracking-wider bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded transition-colors"
                   >
                     <FileSpreadsheet className="w-3.5 h-3.5 mr-1.5" /> Export Excel
                   </button>
@@ -1400,7 +1401,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 onClick={() => setEstimateViewMode('batch_all')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                   estimateViewMode === 'batch_all'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
                 title="Prints 1 Common Forwarding Letter for the MR on Page 1, followed by individual detailed 3-section A4 estimate sheets for each transformer"
@@ -1412,7 +1413,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 onClick={() => setEstimateViewMode('forwarding_only')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                   estimateViewMode === 'forwarding_only'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
                 title="View or print the consolidated MR-wise Common Forwarding Letter"
@@ -1424,7 +1425,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 onClick={() => setEstimateViewMode('single_job')}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
                   estimateViewMode === 'single_job'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
                 title="View or print a single transformer's 3-section estimate sheet"
@@ -1450,7 +1451,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   <button
                     key={job.id}
                     onClick={() => setActiveSingleJobId(job.id)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-mono font-bold transition-colors border ${
+                    className={`px-3 py-1.5 rounded-md text-xs font-mono tabular-nums font-bold transition-colors border ${
                       isActive
                         ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
@@ -1487,7 +1488,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     <h3 className="text-sm font-black uppercase tracking-wide text-rose-950">
                       ⚠️ ESTIMATE AMOUNT IS MORE THAN CIRCLE LIMIT (Clause 4.0 - 25% Approval Power)
                     </h3>
-                    <span className="px-2.5 py-0.5 rounded-full text-[11px] bg-rose-200 text-rose-900 font-bold font-mono border border-rose-300">
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] bg-rose-200 text-rose-900 font-bold font-mono tabular-nums border border-rose-300">
                       {exceedingJobsInSelectedMr.length} Transformer(s) Over Limit
                     </span>
                   </div>
@@ -1501,7 +1502,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   <div key={job.id} className="bg-white border border-rose-300 rounded-lg p-3 flex justify-between items-center shadow-xs">
                     <div>
                       <div className="flex items-center gap-1.5">
-                        <span className="font-mono font-bold text-slate-900 text-xs">Job #{job.jobNo}</span>
+                        <span className="font-mono tabular-nums font-bold text-slate-900 text-xs">Job #{job.jobNo}</span>
                         <span className="text-[11px] font-semibold text-slate-600">({job.capacityKva} KVA &bull; {check.ratingLabel})</span>
                       </div>
                       <div className="text-[10px] text-slate-500 mt-0.5">
@@ -1509,7 +1510,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       </div>
                     </div>
                     <div className="text-right">
-                      <div className="font-mono font-bold text-rose-700 text-xs">
+                      <div className="font-mono tabular-nums font-bold text-rose-700 text-xs">
                         ₹{check.finalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </div>
                       <div className="text-[9px] text-slate-500 font-medium">
@@ -1610,7 +1611,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-xs flex items-center justify-between bg-gradient-to-br from-white to-amber-50/40">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Sent Estimates Awaiting Approval</p>
-                <p className="text-2xl font-mono font-black text-amber-900 mt-1">{sentStats.pendingCount}</p>
+                <p className="text-2xl font-mono tabular-nums font-black text-amber-900 mt-1">{sentStats.pendingCount}</p>
                 <p className="text-xs text-amber-700 mt-0.5">₹{sentStats.pendingValue.toLocaleString('en-IN')} Total Value</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-amber-100 text-amber-700 flex items-center justify-center">
@@ -1621,7 +1622,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Cumulative Sent Estimates</p>
-                <p className="text-2xl font-mono font-black text-slate-900 mt-1">{sentStats.totalCount}</p>
+                <p className="text-2xl font-mono tabular-nums font-black text-slate-900 mt-1">{sentStats.totalCount}</p>
                 <p className="text-xs text-slate-500 mt-0.5">₹{sentStats.totalValue.toLocaleString('en-IN')} Estimated</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
@@ -1632,7 +1633,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Already Approved Estimates</p>
-                <p className="text-2xl font-mono font-black text-emerald-800 mt-1">{sentStats.approvedCount}</p>
+                <p className="text-2xl font-mono tabular-nums font-black text-emerald-800 mt-1">{sentStats.approvedCount}</p>
                 <p className="text-xs text-emerald-600 mt-0.5">
                   <button 
                     onClick={() => setActiveTab('approvals')}
@@ -1718,7 +1719,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                         {/* MR Details */}
                         <td className="px-4 py-3.5">
                           <div className="flex items-center gap-2">
-                            <span className="font-mono font-black text-slate-900 text-sm">{item.mrNo}</span>
+                            <span className="font-mono tabular-nums font-black text-slate-900 text-sm">{item.mrNo}</span>
                             {hasCircleLimitExceeded && (
                               <span 
                                 className="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-100 text-rose-800 border border-rose-300 shadow-2xs"
@@ -1731,20 +1732,20 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                           </div>
                           <span className="text-slate-600 font-medium block">{item.division} Division • {item.jobCount} T/F</span>
                           {item.mrDate !== '-' && (
-                            <span className="text-[10px] text-slate-400 block font-mono mt-0.5">MR Date: {formatDDMMYYYY(item.mrDate)}</span>
+                            <span className="text-[10px] text-slate-400 block font-mono tabular-nums mt-0.5">MR Date: {formatDDMMYYYY(item.mrDate)}</span>
                           )}
                         </td>
 
                         {/* Dispatch Details */}
                         <td className="px-4 py-3.5">
-                          <span className="font-mono font-bold text-slate-800 block text-xs">{item.estimateRefNo}</span>
+                          <span className="font-mono tabular-nums font-bold text-slate-800 block text-xs">{item.estimateRefNo}</span>
                           <span className="text-slate-500 flex items-center mt-0.5 text-[11px]">
                             <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Dispatched: {formatDDMMYYYY(item.estimateSentDate)}
                           </span>
                         </td>
 
                         {/* Amount */}
-                        <td className="px-4 py-3.5 text-right font-mono font-black text-slate-900 text-sm">
+                        <td className="px-4 py-3.5 text-right font-mono tabular-nums font-black text-slate-900 text-sm">
                           <div>₹{item.estimateAmount.toLocaleString('en-IN')}</div>
                           {hasCircleLimitExceeded && (
                             <span className="text-[10px] text-rose-600 font-sans font-bold flex items-center justify-end gap-0.5">
@@ -1811,7 +1812,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-white p-4 rounded-xl border border-emerald-200 shadow-xs flex items-center justify-between bg-gradient-to-br from-white to-emerald-50/40">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Total Received Approvals</p>
-                <p className="text-2xl font-mono font-black text-emerald-900 mt-1">{sentStats.approvedCount}</p>
+                <p className="text-2xl font-mono tabular-nums font-black text-emerald-900 mt-1">{sentStats.approvedCount}</p>
                 <p className="text-xs text-emerald-700 mt-0.5">₹{sentStats.approvedValue.toLocaleString('en-IN')} Approved Value</p>
               </div>
               <div className="w-12 h-12 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
@@ -1822,7 +1823,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Approval Rate</p>
-                <p className="text-2xl font-mono font-black text-slate-900 mt-1">
+                <p className="text-2xl font-mono tabular-nums font-black text-slate-900 mt-1">
                   {sentStats.totalCount > 0 
                     ? `${Math.round((sentStats.approvedCount / sentStats.totalCount) * 100)}%` 
                     : '100%'}
@@ -1837,7 +1838,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-white p-4 rounded-xl border border-amber-200 shadow-xs flex items-center justify-between">
               <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Pending Approvals</p>
-                <p className="text-2xl font-mono font-black text-amber-800 mt-1">{sentStats.pendingCount}</p>
+                <p className="text-2xl font-mono tabular-nums font-black text-amber-800 mt-1">{sentStats.pendingCount}</p>
                 <p className="text-xs text-amber-600 mt-0.5">
                   <button 
                     onClick={() => setActiveTab('sent')}
@@ -1923,22 +1924,22 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       <tr key={item.mrNo} className="hover:bg-slate-50/80 transition-colors">
                         {/* Approval Details */}
                         <td className="px-4 py-3.5">
-                          <span className="font-mono font-bold text-emerald-900 text-xs block">{item.approvalNo}</span>
+                          <span className="font-mono tabular-nums font-bold text-emerald-900 text-xs block">{item.approvalNo}</span>
                           <span className="text-slate-500 flex items-center mt-0.5 text-[11px]">
                             <Calendar className="w-3 h-3 mr-1 text-slate-400" /> Approval Date: {formatDDMMYYYY(item.approvalDate)}
                           </span>
-                          <span className="text-[10px] text-slate-400 block font-mono">Ref: {item.estimateRefNo}</span>
+                          <span className="text-[10px] text-slate-400 block font-mono tabular-nums">Ref: {item.estimateRefNo}</span>
                         </td>
 
                         {/* MR Details */}
                         <td className="px-4 py-3.5">
-                          <span className="font-mono font-black text-slate-900 text-sm block">{item.mrNo}</span>
+                          <span className="font-mono tabular-nums font-black text-slate-900 text-sm block">{item.mrNo}</span>
                           <span className="text-slate-600 font-medium">{item.division} Division • {item.jobCount} T/F</span>
                         </td>
 
                         {/* Approved Amount */}
                         <td className="px-4 py-3.5 text-right">
-                          <span className="font-mono font-black text-emerald-800 text-sm block">
+                          <span className="font-mono tabular-nums font-black text-emerald-800 text-sm block">
                             ₹{item.approvedAmount.toLocaleString('en-IN')}
                           </span>
                           {item.approvedAmount !== item.estimateAmount && (
@@ -2008,7 +2009,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Send Estimate to DISCOM</h3>
-                  <p className="text-xs text-slate-500 font-mono mt-0.5">MR Number: <strong>{sendTargetMr}</strong></p>
+                  <p className="text-xs text-slate-500 font-mono tabular-nums mt-0.5">MR Number: <strong>{sendTargetMr}</strong></p>
                 </div>
               </div>
               <button onClick={() => setShowSendModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -2019,7 +2020,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-purple-50 border border-purple-200 rounded-lg p-3 text-xs text-purple-900 flex justify-between items-center">
               <div>
                 <span className="text-purple-700 block font-medium">Estimated Value:</span>
-                <span className="text-base font-mono font-black text-purple-950">
+                <span className="text-base font-mono tabular-nums font-black text-purple-950">
                   ₹{calculateMrEstimateTotal(sendTargetMr).toLocaleString('en-IN')}
                 </span>
               </div>
@@ -2039,7 +2040,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   value={sendRefNo}
                   onChange={(e) => setSendRefNo(e.target.value)}
                   placeholder="e.g. UGVCL/EE-T-1/TRANS-REP/123"
-                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
+                  className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
                   required
                 />
               </div>
@@ -2052,7 +2053,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   type="date"
                   value={sendDate}
                   onChange={(e) => setSendDate(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
+                  className="w-full px-3 py-2 text-xs font-mono tabular-nums border border-slate-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white"
                   required
                 />
               </div>
@@ -2113,7 +2114,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 </div>
                 <div>
                   <h3 className="text-base font-bold text-slate-900">Record Estimate Approval</h3>
-                  <p className="text-xs text-slate-500 font-mono mt-0.5">MR Number: <strong>{apprTargetMr}</strong></p>
+                  <p className="text-xs text-slate-500 font-mono tabular-nums mt-0.5">MR Number: <strong>{apprTargetMr}</strong></p>
                 </div>
               </div>
               <button onClick={() => setShowApprModal(false)} className="text-slate-400 hover:text-slate-600">
@@ -2124,7 +2125,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-xs text-emerald-900 flex justify-between items-center">
               <div>
                 <span className="text-emerald-700 block font-medium">Estimated Amount:</span>
-                <span className="text-base font-mono font-black text-emerald-950">
+                <span className="text-base font-mono tabular-nums font-black text-emerald-950">
                   ₹{calculateMrEstimateTotal(apprTargetMr).toLocaleString('en-IN')}
                 </span>
               </div>
@@ -2144,7 +2145,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   value={apprNo}
                   onChange={(e) => setApprNo(e.target.value)}
                   placeholder="e.g. UGVCL/SE-TR/APPR/2026/123"
-                  className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                  className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
                   required
                 />
               </div>
@@ -2158,7 +2159,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     type="date"
                     value={apprDate}
                     onChange={(e) => setApprDate(e.target.value)}
-                    className="w-full px-3 py-2 text-xs font-mono border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                    className="w-full px-3 py-2 text-xs font-mono tabular-nums border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
                     required
                   />
                 </div>
@@ -2171,7 +2172,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     value={apprAmount}
                     onChange={(e) => setApprAmount(e.target.value)}
                     placeholder="Approved Amt"
-                    className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
+                    className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
                   />
                 </div>
               </div>
@@ -2249,7 +2250,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
 
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Forwarding To (Recipient Address)</label>
-                <textarea rows={3} value={forwardingTo} onChange={e => setForwardingTo(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono text-xs" />
+                <textarea rows={3} value={forwardingTo} onChange={e => setForwardingTo(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white font-mono tabular-nums text-xs" />
               </div>
 
               <div>
@@ -2322,7 +2323,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     readOnly={isCcLocked}
                     value={forwardingCc}
                     onChange={e => setForwardingCc(e.target.value)}
-                    className={`w-full px-3 py-2 text-sm border rounded font-mono text-xs transition-all ${
+                    className={`w-full px-3 py-2 text-sm border rounded font-mono tabular-nums text-xs transition-all ${
                       isCcLocked
                         ? 'bg-slate-200/70 text-slate-700 border-slate-300 font-bold select-none cursor-not-allowed'
                         : 'bg-white text-slate-900 border-blue-500 font-bold ring-2 ring-blue-100'
@@ -2335,7 +2336,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   )}
                 </div>
                 <p className="text-[10px] text-slate-500">
-                  Standard format: <strong className="font-mono text-slate-700">E. E. (O & M) DIVISION - {currentSelectedDivision}</strong>
+                  Standard format: <strong className="font-mono tabular-nums text-slate-700">E. E. (O & M) DIVISION - {currentSelectedDivision}</strong>
                 </p>
               </div>
 
@@ -2430,7 +2431,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               <p className="font-semibold text-amber-900">
                 Standard C.C. recipient is locked by default:
               </p>
-              <div className="p-2 bg-white rounded border border-amber-300 font-mono font-bold text-slate-800 text-center select-all">
+              <div className="p-2 bg-white rounded border border-amber-300 font-mono tabular-nums font-bold text-slate-800 text-center select-all">
                 E. E. (O & M) DIVISION - {currentSelectedDivision}
               </div>
               <p className="text-[11px] text-amber-800 leading-normal">
