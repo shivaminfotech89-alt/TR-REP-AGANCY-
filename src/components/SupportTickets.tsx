@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, addDoc, orderBy } from 'firebase/firestore';
 import { useAgency } from '../lib/AgencyContext';
+import { CARD, CARD_PAD } from '../lib/ui';
 import { SupportTicket, TicketCategory, TicketPriority } from '../types/admin';
 import { LifeBuoy, PlusCircle, MessageSquare, Clock, CheckCircle2, AlertCircle, RefreshCw, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import { formatDDMMYYYY } from '../lib/utils';
@@ -122,7 +123,7 @@ export default function SupportTickets() {
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Top Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-950 rounded-2xl p-6 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-blue-800/40">
+      <div className="bg-slate-900 rounded-lg p-3 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-blue-800/40">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <LifeBuoy className="w-6 h-6 text-blue-400" />
@@ -145,7 +146,7 @@ export default function SupportTickets() {
       </div>
 
       {/* Main Tickets List */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6">
+      <div className={`${CARD} p-3`}>
         <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-100">
           <div>
             <h2 className="text-base font-bold text-slate-900">Your Support Tickets</h2>
@@ -359,7 +360,7 @@ export default function SupportTickets() {
 
               <div className="space-y-1">
                 <span className="text-[11px] font-bold text-slate-500 uppercase">Your Query:</span>
-                <div className="bg-slate-50 border border-slate-200 p-3.5 rounded-xl text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
+                <div className="bg-slate-50 border border-slate-200 p-2.5 rounded-lg text-xs text-slate-800 whitespace-pre-wrap leading-relaxed">
                   {selectedTicket.description}
                 </div>
               </div>
@@ -369,7 +370,7 @@ export default function SupportTickets() {
                   <span className="text-[11px] font-bold text-green-700 uppercase flex items-center gap-1">
                     <Sparkles className="w-3.5 h-3.5 text-green-600" /> Super Admin Response (shivaminfotech89@gmail.com):
                   </span>
-                  <div className="bg-green-50 border border-green-200 p-3.5 rounded-xl text-xs text-green-950 font-medium leading-relaxed whitespace-pre-wrap">
+                  <div className="bg-green-50 border border-green-200 p-2.5 rounded-lg text-xs text-green-950 font-medium leading-relaxed whitespace-pre-wrap">
                     {selectedTicket.adminReply}
                   </div>
                   <p className="text-[10px] text-slate-400 text-right">
@@ -377,7 +378,7 @@ export default function SupportTickets() {
                   </p>
                 </div>
               ) : (
-                <div className="bg-amber-50 border border-amber-200 p-3 rounded-xl text-xs text-amber-900 flex items-center gap-2">
+                <div className="bg-amber-50 border border-amber-200 p-2.5 rounded-lg text-xs text-amber-900 flex items-center gap-2">
                   <Clock className="w-4 h-4 text-amber-600 shrink-0" />
                   <span>Your ticket is currently under review by Super Admin. Response will appear here once processed.</span>
                 </div>

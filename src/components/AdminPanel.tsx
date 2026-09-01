@@ -3,6 +3,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useAgency, Agency } from '../lib/AgencyContext';
+import { CARD, CARD_PAD } from '../lib/ui';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
   ShieldCheck, Users, Building2, CreditCard, LifeBuoy, Settings, 
@@ -103,7 +104,7 @@ export default function AdminPanel() {
 
   if (!isSuperAdminEmail) {
     return (
-      <div className="max-w-3xl mx-auto my-12 bg-white rounded-2xl border border-slate-200 shadow-lg p-8 text-center space-y-4">
+      <div className="max-w-3xl mx-auto my-12 bg-white rounded-lg border border-slate-200 p-8 text-center space-y-4">
         <div className="w-16 h-16 bg-amber-100 border border-amber-300 rounded-full flex items-center justify-center mx-auto text-amber-600">
           <ShieldCheck className="w-8 h-8" />
         </div>
@@ -250,10 +251,10 @@ export default function AdminPanel() {
     <div className="max-w-7xl mx-auto space-y-6 pb-12">
       
       {/* Top Admin Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-800 to-indigo-950 rounded-2xl p-6 text-white shadow-xl flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-slate-700">
+      <div className="bg-slate-900 rounded-lg p-3 text-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border border-slate-700">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <div className="p-2 bg-amber-500/20 border border-amber-400/40 rounded-xl text-amber-400">
+            <div className="p-2 bg-amber-500/20 border border-amber-400/40 rounded-lg text-amber-400">
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
@@ -270,7 +271,7 @@ export default function AdminPanel() {
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-800/80 p-2 rounded-xl border border-slate-700/80 text-xs">
+        <div className="flex items-center gap-2 bg-slate-800/80 p-1.5 rounded-lg border border-slate-700/80 text-xs">
           <button 
             onClick={fetchAdminData}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg font-bold flex items-center gap-1.5 transition-colors"
@@ -283,8 +284,8 @@ export default function AdminPanel() {
 
       {/* Overview Stats Grid */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-600">
+        <div className={`${CARD} ${CARD_PAD} flex items-center gap-4`}>
+          <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-600">
             <Building2 className="w-6 h-6" />
           </div>
           <div>
@@ -294,8 +295,8 @@ export default function AdminPanel() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-emerald-600">
+        <div className={`${CARD} ${CARD_PAD} flex items-center gap-4`}>
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-600">
             <CreditCard className="w-6 h-6" />
           </div>
           <div>
@@ -305,8 +306,8 @@ export default function AdminPanel() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="p-3 bg-purple-50 border border-purple-200 rounded-xl text-purple-600">
+        <div className={`${CARD} ${CARD_PAD} flex items-center gap-4`}>
+          <div className="p-3 bg-purple-50 border border-purple-200 rounded-lg text-purple-600">
             <Users className="w-6 h-6" />
           </div>
           <div>
@@ -316,7 +317,7 @@ export default function AdminPanel() {
           </div>
         </div>
 
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
+        <div className={`${CARD} ${CARD_PAD} flex items-center gap-4`}>
           <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-amber-600">
             <LifeBuoy className="w-6 h-6" />
           </div>
@@ -396,7 +397,7 @@ export default function AdminPanel() {
            version, and who is on an old one" is an administrative question and had no
            screen. */}
       {activeTab === 'agencies' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4 mb-6">
+        <div className={`${CARD} p-6 space-y-4 mb-6`}>
           <div>
             <h2 className="text-base font-bold text-slate-900">Published AT rate templates</h2>
             <p className="text-xs text-slate-500">
@@ -436,7 +437,7 @@ export default function AdminPanel() {
                           {t.atNumber && <div className="text-slate-500">AT {t.atNumber}</div>}
                           {t.notes && <div className="text-slate-500 mt-0.5 max-w-md">{t.notes}</div>}
                         </td>
-                        <td className="py-2 pr-3 font-mono font-bold text-slate-800">v{t.version}</td>
+                        <td className="py-2 pr-3 font-mono tabular-nums font-bold text-slate-800">v{t.version}</td>
                         <td className="py-2 pr-3 text-slate-600">
                           {t.publishedAt ? new Date(t.publishedAt).toLocaleDateString('en-IN') : '-'}
                           {t.publishedBy && <div className="text-slate-400">{t.publishedBy}</div>}
@@ -466,7 +467,7 @@ export default function AdminPanel() {
 
       {/* --- TAB 1: AGENCIES & SUBSCRIPTION MANAGEMENT --- */}
       {activeTab === 'agencies' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className={`${CARD} p-6 space-y-6`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base font-bold text-slate-900">Registered Agencies & Razorpay Subscriptions</h2>
@@ -500,7 +501,7 @@ export default function AdminPanel() {
                     <tr key={agency.id} className="hover:bg-slate-50 transition-colors">
                       <td className="p-3 font-bold text-slate-900">
                         {agency.name}
-                        <span className="block text-[10px] font-mono text-slate-400">ID: {agency.id}</span>
+                        <span className="block text-[10px] font-mono tabular-nums text-slate-400">ID: {agency.id}</span>
                       </td>
                       <td className="p-3 text-slate-600">
                         <div>{agency.email || 'No email set'}</div>
@@ -561,7 +562,7 @@ export default function AdminPanel() {
 
       {/* --- TAB 2: USER & ROLE MANAGEMENT --- */}
       {activeTab === 'users' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className={`${CARD} p-6 space-y-6`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base font-bold text-slate-900">User Role & RBAC Permissions Management</h2>
@@ -644,7 +645,7 @@ export default function AdminPanel() {
 
       {/* --- TAB 3: SUPPORT TICKETS DESK --- */}
       {activeTab === 'tickets' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className={`${CARD} p-6 space-y-6`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base font-bold text-slate-900">User Generated Support Tickets</h2>
@@ -728,7 +729,7 @@ export default function AdminPanel() {
 
       {/* --- TAB 4: RAZORPAY INTEGRATION CONFIG --- */}
       {activeTab === 'razorpay' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className={`${CARD} p-6 space-y-6`}>
           <div className="pb-4 border-b border-slate-100">
             <h2 className="text-base font-bold text-slate-900">Razorpay Annual Subscription Gateway (₹3,999/yr)</h2>
             <p className="text-xs text-slate-500">Configure Razorpay payment gateway credentials for agency subscription billing</p>
@@ -769,7 +770,7 @@ export default function AdminPanel() {
                 type="text"
                 value={razorpaySettings.keyId}
                 onChange={(e) => setRazorpaySettings(prev => ({ ...prev, keyId: e.target.value }))}
-                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
@@ -779,7 +780,7 @@ export default function AdminPanel() {
                 type="password"
                 value={razorpaySettings.keySecret}
                 onChange={(e) => setRazorpaySettings(prev => ({ ...prev, keySecret: e.target.value }))}
-                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
 
@@ -805,7 +806,7 @@ export default function AdminPanel() {
 
       {/* --- TAB 5: WEB APP & MAINTENANCE CONTROLS --- */}
       {activeTab === 'system' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className={`${CARD} p-6 space-y-6`}>
           <div className="pb-4 border-b border-slate-100">
             <h2 className="text-base font-bold text-slate-900">Web Application & Maintenance Controls</h2>
             <p className="text-xs text-slate-500">Configure global app banners, broadcast notices, and system availability</p>
