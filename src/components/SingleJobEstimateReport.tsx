@@ -1117,8 +1117,52 @@ export default function SingleJobEstimateReport({
 
   const coreClass = classifyCoreType(job.coreType || 'CRGO');
 
-  // Amorphous / CRGO Wound Core: fixed-rate document, entirely different printed
-  // format from the itemised CRGO/OH report below - separate render path.
+  /**
+   * FIXED-RATE DOCUMENT (Amorphous / CRGO Wound Core) - a different printed format from the
+   * itemised CRGO/OH report below, but NOT a different layout path.
+   *
+   * ⚠ THIS BRANCH SHARES `layoutEstimatePages`, AND THE BUDGET IS INCOMPLETE FOR IT (AUDIT
+   * G22). The calculation returns early at the top of the file; the RENDER does not - it maps
+   * the same `pages` over the same measured `contentMm`. But the constants above were derived
+   * for the itemised sheet, and this branch prints three blocks that sheet does not have:
+   *
+   *     sub-heading + "FIXED RATE (Internal & External)"   ~13.8mm   NOT CHARGED
+   *     the clause paragraph                               ~48.6mm   NOT CHARGED (at 12px)
+   *     the LT-coil and radiator notes                     ~22.1mm   NOT CHARGED (at 11px)
+   *
+   * That is roughly 85mm of content the budget does not know exists - very nearly a THIRD of
+   * the 259.1mm content area. It has never produced a wrong page count, and the reason is
+   * slack rather than correctness: two line items against the itemised sheet's 29 left about
+   * 90mm spare, and G22 spent about 37mm of it to size this sheet for its own content instead
+   * of the itemised sheet's, leaving about 53mm. An incomplete model reads exactly like a
+   * complete one, and this one's blind spot is now larger than its margin.
+   *
+   * ⚠ WHY G22 STOPPED AT THESE SIZES, since 53mm remains. The page is `flex flex-col
+   * justify-between`, so the signature block is pinned to the bottom whatever the content
+   * does: surplus becomes ONE GAP between the notes and the signature, not more readable text.
+   * Past roughly this point the sheet reads as a stripe of type at the top and another at the
+   * bottom. That is a constraint derived from how this page lays out - unlike the 9.5px floor
+   * G22 removed, which was borrowed from a sheet with fourteen times the content.
+   *
+   * ⚠ AND THE ROW HEIGHT HAD ALREADY STOPPED APPLYING. `h-4` asks for 16px; at 9.5px the cells
+   * held 14.25px of text plus `p-0.5`, i.e. 18.25px, so the rows had been content-sized for
+   * some time and the class said 16. Nothing reports a declared height the content has
+   * outgrown. G22 restated it as `h-7` (28px) against 13px text and `p-1.5`. Compare
+   * TestingReport's `h-6.5`, where the declared height IS doing the work and would silently
+   * stop if Tailwind's spacing scale changed under it - the same defect from either side.
+   *
+   * ⚠ AND THE FAILURE WOULD BE SILENT. If the clause is edited longer - it is agency-editable
+   * via `agency.amorphousClauseText`, so this is a user action, not a code change - the browser
+   * clips or spills while `layoutEstimatePages` still reports one page. There is no overflow
+   * check, and the letterhead notice above cannot fire either: `paginatedByLetterhead` needs
+   * `totalPages > 1`, which two rows can never reach. Nothing would report it.
+   *
+   * ⚠ JOB_BOX_MM = 30.5 IS EXACT FOR THE ITEMISED SHEET AND ABOUT 0.4mm LIGHT FOR THIS ONE.
+   * G22 raised the Order No. line here from 9px to 10px to match the box around it, and left
+   * the itemised sheet's at 9px. 0.4mm sits well inside SAFETY_MM = 4, so the constant was not
+   * adjusted - but a constant that is exact for one caller and slightly light for another
+   * should say so rather than look uniformly measured.
+   */
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
     const isAmorphous = coreClass === 'AMORPHOUS';
     const titleText = isAmorphous
@@ -1164,69 +1208,69 @@ export default function SingleJobEstimateReport({
               <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
                 <div>
                   <div className="text-center mb-1 pb-0.5 border-b-2 border-black">
-                    <h2 className="text-sm font-black uppercase tracking-wider">{titleText}</h2>
+                    <h2 className="text-lg font-black uppercase tracking-wider">{titleText}</h2>
                   </div>
 
                   {isFirst && (
-                    <div className="grid grid-cols-2 text-[10px] border border-black p-1.5 mb-1 leading-snug bg-white">
+                    <div className="grid grid-cols-2 text-[12px] border border-black p-1.5 mb-1 leading-snug bg-white">
                       <div className="space-y-0.5 border-r border-black pr-2">
                         <div className="flex">
-                          <span className="font-bold w-24">Job No.:</span>
+                          <span className="font-bold w-28">Job No.:</span>
                           <span className="font-mono font-bold">{job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Manufacturer:</span>
+                          <span className="font-bold w-28">Manufacturer:</span>
                           <span className="font-bold uppercase truncate">{job.make || '-'}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Serial No.:</span>
+                          <span className="font-bold w-28">Serial No.:</span>
                           <span className="font-mono">{job.serialNo || '-'}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">KVA/KV:</span>
+                          <span className="font-bold w-28">KVA/KV:</span>
                           <span className="font-bold">{job.capacityKva}/11</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Oil Capacity:</span>
+                          <span className="font-bold w-28">Oil Capacity:</span>
                           <span className="font-mono">{Number(oilCap).toFixed(2)}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Oil Shortage:</span>
+                          <span className="font-bold w-28">Oil Shortage:</span>
                           <span className="font-mono">{Number(oilShort).toFixed(2)}</span>
                         </div>
-                        <div className="flex text-[9px] pt-0.5">
-                          <span className="font-bold w-24">Order No.:</span>
+                        <div className="flex text-[12px] pt-0.5">
+                          <span className="font-bold w-28">Order No.:</span>
                           <span className="font-mono truncate">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
                         </div>
                       </div>
 
                       <div className="space-y-0.5 pl-2">
                         <div className="flex">
-                          <span className="font-bold w-24">Date:</span>
+                          <span className="font-bold w-28">Date:</span>
                           <span className="font-mono">{dateFormatted}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Division:</span>
+                          <span className="font-bold w-28">Division:</span>
                           <span className="font-bold uppercase">{job.division || 'SABARMATI'}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Mr. No.:</span>
+                          <span className="font-bold w-28">Mr. No.:</span>
                           <span className="font-mono font-bold">{job.mrNo}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Mr. Date:</span>
+                          <span className="font-bold w-28">Mr. Date:</span>
                           <span className="font-mono">{mrDateFormatted}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Service Type:</span>
+                          <span className="font-bold w-28">Service Type:</span>
                           <span className="font-bold">{job.repairType || 'OGP'}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Winding Type:</span>
+                          <span className="font-bold w-28">Winding Type:</span>
                           <span className="font-bold">{windingTypeStr}</span>
                         </div>
                         <div className="flex">
-                          <span className="font-bold w-24">Voltage Class:</span>
+                          <span className="font-bold w-28">Voltage Class:</span>
                           <span className="font-bold">{voltageRating}</span>
                         </div>
                       </div>
@@ -1235,49 +1279,49 @@ export default function SingleJobEstimateReport({
 
                   {isFirst && (
                     <div className="text-center mb-2">
-                      <p className="text-xs font-bold uppercase">{subHeadingText}</p>
-                      <p className="text-xs font-bold uppercase mt-0.5">FIXED RATE (Internal &amp; External)</p>
+                      <p className="text-sm font-bold uppercase">{subHeadingText}</p>
+                      <p className="text-sm font-bold uppercase mt-0.5">FIXED RATE (Internal &amp; External)</p>
                     </div>
                   )}
 
                   {isFirst && (
-                    <p className="text-[9px] text-justify leading-relaxed mb-2">{clauseText}</p>
+                    <p className="text-[12px] text-justify leading-relaxed mb-2">{clauseText}</p>
                   )}
 
-                  <table className="w-full border-collapse border border-black text-[9.5px]">
+                  <table className="w-full border-collapse border border-black text-[13px]">
                     <thead>
                       <tr className="bg-slate-100 print:bg-transparent font-bold border-b border-black text-center">
-                        <th className="border border-black p-1 w-8">Sr. No.</th>
-                        <th className="border border-black p-1 text-left min-w-[200px]">Item Description</th>
-                        <th className="border border-black p-1 w-12">Unit</th>
-                        <th className="border border-black p-1 w-14">Quantity</th>
-                        <th className="border border-black p-1 text-right w-16">Unit Rate</th>
-                        <th className="border border-black p-1 text-right w-20">Amount</th>
+                        <th className="border border-black p-1.5 w-8">Sr. No.</th>
+                        <th className="border border-black p-1.5 text-left min-w-[200px]">Item Description</th>
+                        <th className="border border-black p-1.5 w-12">Unit</th>
+                        <th className="border border-black p-1.5 w-14">Quantity</th>
+                        <th className="border border-black p-1.5 text-right w-16">Unit Rate</th>
+                        <th className="border border-black p-1.5 text-right w-20">Amount</th>
                       </tr>
                     </thead>
                     <tbody>
                       {rows.map((item) => (
-                        <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-4">
-                          <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
-                          <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
-                          <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
-                          <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
-                          <td className="border-r border-black p-0.5 text-right font-mono">{item.rate === null ? '' : formatCurrency(item.rate)}</td>
-                          <td className="border-r border-black p-0.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
+                        <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-7">
+                          <td className="border-r border-black p-1.5 text-center font-mono">{item.sr}</td>
+                          <td className="border-r border-black p-1.5 pl-1">{item.desc}</td>
+                          <td className="border-r border-black p-1.5 text-center font-semibold">{item.unit}</td>
+                          <td className="border-r border-black p-1.5 text-center font-mono">{item.qty}</td>
+                          <td className="border-r border-black p-1.5 text-right font-mono">{item.rate === null ? '' : formatCurrency(item.rate)}</td>
+                          <td className="border-r border-black p-1.5 text-right font-mono font-medium">{formatCurrency(item.amt)}</td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
 
                   {isFirst && (
-                    <div className="mt-2 text-[8px] leading-relaxed space-y-1">
+                    <div className="mt-2 text-[11px] leading-relaxed space-y-1">
                       <p>{noteLtCoil}</p>
                       <p>{noteRadiator}</p>
                     </div>
                   )}
 
                   {isLast && estimate.rateErrors.length > 0 && (
-                    <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-[9px]">
+                    <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-[12px]">
                       <p className="font-black uppercase tracking-wide mb-1">⚠ Estimate incomplete - rate not found</p>
                       <ul className="list-disc list-inside space-y-0.5 font-normal">
                         {estimate.rateErrors.map((e, i) => <li key={i}>{e.message}</li>)}
@@ -1286,7 +1330,7 @@ export default function SingleJobEstimateReport({
                     </div>
                   )}
                   {isLast && estimate.rateErrors.length === 0 && (
-                    <div className="flex justify-end mt-1 text-[9.5px]">
+                    <div className="flex justify-end mt-1 text-[13px]">
                       <table className="border-collapse border border-black w-64 text-right">
                         <tbody>
                           <tr className="border-b border-black">
@@ -1299,7 +1343,7 @@ export default function SingleJobEstimateReport({
                             </td>
                             <td className="p-1 font-mono font-medium">{formatCurrency(estimate.percentageAmount)}</td>
                           </tr>
-                          <tr className="bg-slate-100 print:bg-transparent font-black text-[10.5px]">
+                          <tr className="bg-slate-100 print:bg-transparent font-black text-[15px]">
                             <td className="p-1.5 border-r border-black">Final Amount:</td>
                             <td className="p-1.5 font-mono">{formatCurrency(estimate.finalAmount)}</td>
                           </tr>
@@ -1314,7 +1358,7 @@ export default function SingleJobEstimateReport({
                 </div>
 
                 {isLast && estimate.rateErrors.length === 0 && (
-                  <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-8 text-[10px] font-bold uppercase">
+                  <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-8 text-[13px] font-bold uppercase">
                     <div className="text-left">
                       <div className="h-10"></div>
                       <p className="font-bold">For, {agency?.discomName || '-'}</p>
