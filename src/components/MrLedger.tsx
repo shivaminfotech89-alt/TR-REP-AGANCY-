@@ -88,6 +88,21 @@ interface EditableJobEntry {
   serialNo: string;
   coreType: string;
   status: string;
+  /**
+   * THE JOB'S OWN DIVISION AND REPAIR TYPE (AUDIT G11).
+   *
+   * ⚠ CARRIED SO THE SAVE CAN STAMP EACH JOB WITH ITS OWN VALUE. They were absent, so the
+   * save had nothing to write but the MR-level field - which is sampled from the FIRST job -
+   * and every job on the MR was overwritten with it. `repairType` decides whether work is
+   * charged; `division` decides the job-number prefix, the forwarding-letter address and the
+   * per-division oil split (F86).
+   *
+   * Undefined on a NEW row, which is correct: a row the operator just added has no value of
+   * its own, so it takes the MR-level one. That is the only case where the MR-level field is
+   * the right source.
+   */
+  division?: string;
+  repairType?: string;
   prevAtNo?: string;
   prevJobNo?: string;
   prevDeliveryDate?: string;
@@ -301,6 +316,10 @@ export default function MrLedger() {
         serialNo: j.serialNo || '',
         coreType: j.coreType || 'CRGO',
         status: j.status || 'Received',
+        // Each job's OWN values, so the save has something to write that is not the group's
+        // sampled one (AUDIT G11).
+        division: j.division,
+        repairType: j.repairType,
         prevAtNo: j.prevAtNo || '',
         prevJobNo: j.prevJobNo || '',
         prevDeliveryDate: j.prevDeliveryDate || '',
@@ -623,9 +642,20 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
           batch.update(docRef, {
             mrNo: editingMr.mrNo.trim(),
             dateOfIssue: editingMr.dateOfIssue,
-            division: editingMr.division,
-            repairType: editingMr.repairType,
-            isGp: editingMr.repairType === 'GP',
+            // ⚠ THE JOB'S OWN VALUES, NEVER THE MR HEADER'S (AUDIT G11). This read
+            // `editingMr.division` / `editingMr.repairType`, which are sampled from the FIRST
+            // job of the group and never revisited - so opening an MR in Full Edit and pressing
+            // Save stamped every job with the first job's values and set `isGp` to match.
+            //
+            // On a mixed MR that is not a wrong label, it is a SILENT REWRITE: a GP job among
+            // OGP ones became OGP, losing the record that it was repaired under guarantee at no
+            // cost, for an operator who opened the modal to fix a serial number.
+            //
+            // The fallback is for a row with no value of its own - i.e. one just added - and
+            // that is the only case where the MR-level control is the right source.
+            division: j.division ?? editingMr.division,
+            repairType: j.repairType ?? editingMr.repairType,
+            isGp: (j.repairType ?? editingMr.repairType) === 'GP',
             jobNo: j.jobNo.trim(),
             capacityKva: Number(j.capacityKva),
             make: j.make.trim().toUpperCase(),
@@ -646,9 +676,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
           batch.set(newDocRef, {
             mrNo: editingMr.mrNo.trim(),
             dateOfIssue: editingMr.dateOfIssue,
-            division: editingMr.division,
-            repairType: editingMr.repairType,
-            isGp: editingMr.repairType === 'GP',
+            // Same rule as the update branch above (AUDIT G11). A new row genuinely has no
+            // values of its own, so here the MR-level control is the correct source - but it
+            // is written through the same expression so the two branches cannot drift.
+            division: j.division ?? editingMr.division,
+            repairType: j.repairType ?? editingMr.repairType,
+            isGp: (j.repairType ?? editingMr.repairType) === 'GP',
             type: 'Distribution',
             jobNo: j.jobNo.trim(),
             capacityKva: Number(j.capacityKva),
@@ -1312,6 +1345,13 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
               
               {/* SECTION 1: MR HEADER DETAILS */}
               <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs space-y-3">
+                {/* ⚠ THESE ARE READ, NOT WRITTEN ONTO EXISTING JOBS (AUDIT G11).
+                    `division` and `repairType` below are still needed: the job-number prefix
+                    comes from `getJobNoPrefix(editingMr.division, …)`, the counter advance is
+                    keyed on it, and GP excludes a job from number continuation. So they cannot
+                    be removed without breaking number allocation.
+                    What they no longer do is overwrite every job on save - each job keeps its
+                    own values, and these apply only to a row that has none, i.e. a new one. */}
                 <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                   <FileSpreadsheet className="w-4 h-4 text-blue-600" />
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
