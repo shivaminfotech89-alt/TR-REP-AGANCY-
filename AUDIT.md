@@ -3395,6 +3395,111 @@ and not noticed until this entry — **the same class of defect G22 was written 
 
 ---
 
+## G24. A control that took input and then discarded it
+
+G11 stopped the Full Edit save writing the MR header's `division` and `repairType` onto every
+job, because on a mixed MR that was a silent rewrite — a GP job among OGP ones became OGP,
+losing the record that it was repaired under guarantee at no cost, for an operator who opened
+the modal to fix a serial number.
+
+**That fix left the controls in a worse state than either of the two honest ones.** They still
+looked like editable properties of the MR. They still accepted a change. And the change was then
+discarded for every row except a brand-new one. **An input that ignores you is worse than a
+locked one, because it also tells you it worked.**
+
+The underlying reason is not a UI preference: **an MR's division and repair category come off
+the division's paperwork.** The agency does not choose them. They are recorded, not decided.
+
+### The lock condition is the same fact as the message
+
+The trigger is deliberately *"are there saved units whose values would not follow"* — not
+*"does the MR have jobs"*:
+
+```js
+const savedJobs = (editingMr?.jobs ?? []).filter(j => j.id && !j.isNew);
+locked: savedJobs.length > 0
+```
+
+A row added in this session has no values of its own and **does** take these, so it is not a
+reason to lock. That keeps the lock and the sentence shown to the operator as one fact rather
+than two rules that can drift — the same discipline as G3's "the gate is in the handler, not
+only on the button", applied to an explanation instead of a guard.
+
+### Not a disabled box
+
+A greyed-out input says *"you cannot do this"* and stops there. It invites the operator to hunt
+for the enabled version, or to read the lock as a bug. The field shows the value **as a record**
+and says why in words:
+
+> **Division Office** 🔒 SABARMATI
+> *Addresses the forwarding letter and sets the job-number prefix. Recorded on 4 saved
+> transformer(s) — editing it here would not change theirs.*
+
+The reason names the **consequence of editing**, not the rule. "Would not change theirs" is
+checkable against the screen below it; "this field is read-only" is not.
+
+### It shows counts when the units disagree
+
+`editingMr.division` is seeded from `group.division`, which is **first-job-wins** — the exact
+sample G11 was written about. Displaying it read-only as *the MR's division* would have asserted
+the one thing G11 established is unreliable, and asserted it more firmly than before, because a
+locked value reads as authoritative.
+
+So the field reuses G10's `mixOf`: `SABARMATI 3 · KALOL 1` when they disagree, one value when
+they do not. Same rule as the register and the per-division oil split (F86) — **two facts are
+not one fact.** The amber tone agrees with the words rather than carrying them; the counts
+themselves say the units disagree, in greyscale and on a photocopy.
+
+**Zero MRs in live data are mixed** (`mr-homogeneity.js`: 0 of 21 on both fields), so this
+branch is written against a state that has not occurred. It is written anyway because G11's
+whole finding was that nothing prevents it.
+
+### What the add path inherits, said where the adding happens
+
+The locked values are still the source for a row that has none — the job-number prefix comes
+from `getJobNoPrefix(editingMr.division, …)`, the counter advance is keyed on it, and GP excludes
+a job from number continuation. So this is **not a dead control; it is a record that also seeds**,
+and the modal now says so above the unit list:
+
+> A transformer added below is stamped **SABARMATI** / **OGP** from these values. A unit
+> belonging to another division, or repaired under guarantee when this MR is not, belongs on
+> that division's own MR.
+
+When the saved units disagree there is nothing coherent to inherit, and it says that instead —
+that a new row would be stamped from whichever unit was read first, which is arbitrary.
+
+**A side effect worth naming: this closes the path G11 identified as the way a mixed MR would
+first appear.** G11 recorded that the defect would bite *"the first time an operator adds a GP
+unit to an existing OGP MR — which the add-unit button permits, and which nothing prevents."*
+Locking the category means the button can no longer be used that way. That was not the goal of
+this change and it does not make the display fix redundant — data can still be mixed by other
+routes, and G10's counts still report it — but the most likely route is now shut.
+
+### The heading and the subtitle contradicted the controls
+
+Two pieces of surrounding text promised what the fields no longer do, and both were more
+misleading than the controls themselves because they are read first:
+
+| | was | now |
+|---|---|---|
+| section heading | `MR Header & Administrative Details` | `MR Header — As Issued By The Division` |
+| modal subtitle | Edit MR Header information, **change category**, and modify all N transformer unit(s) | Edit the MR number and date, and modify all N transformer unit(s). Division and repair category come from the division and are shown as recorded. |
+
+*"Administrative Details"* frames the block as properties the agency administers. *"As Issued By
+The Division"* names the source, which is the actual rule and also explains the lock before the
+operator reaches it.
+
+**The subtitle was the sharper one.** It said *"change category"* — an explicit offer to do the
+thing the control three inches below now refuses. It had been wrong since G11 in substance
+(the change was accepted and discarded) and became visibly wrong here.
+
+**This is the third time in this session that surrounding prose outlived the code it
+described** — after G19's comment citing a deleted `reserveJobNos` and G21's `CHUNK_SIZE`
+comment asserting "clean pagination" with no budget. The pattern is consistent: **the code was
+changed, the checks passed, and the sentence next to it was not part of either.**
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on

@@ -42,7 +42,8 @@ import {
   BookOpen,
   Ban,
   XCircle,
-  Check
+  Check,
+  Lock
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
@@ -126,6 +127,55 @@ interface MrEditState {
 
 const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', '500'];
 const JOB_STATUSES = ['Received', 'Internal Inspected', 'Tested / OK', 'Dispatched', 'Scrap / Unrepairable', 'Under Repair', 'Cancelled'];
+
+/**
+ * A HEADER VALUE THAT CAME OFF THE DIVISION'S PAPERWORK AND IS NOT THE AGENCY'S TO CHANGE (G24).
+ *
+ * ⚠ NOT A DISABLED INPUT. A greyed-out box says "you cannot do this" and stops; it invites the
+ * operator to hunt for the enabled version, or to read the lock as a bug. This shows the value
+ * as a RECORD and says in words why it is one, so the answer to "why can't I edit this" is on
+ * the screen rather than in someone's memory.
+ *
+ * ⚠ IT SHOWS COUNTS WHEN THE UNITS DISAGREE, never one value standing for all of them. Same
+ * rule as the register (G10) and the per-division oil split (F86): `SABARMATI 3 · KALOL 1` is
+ * two facts, and printing the first as though it were the MR's would be exactly the aggregate
+ * G11 was written about. The amber tone agrees with the words; it does not carry them - the
+ * counts themselves say the units disagree, in greyscale and on a photocopy.
+ */
+function LockedMrHeaderField({ label, mix, reason }: {
+  label: string;
+  mix: { entries: [string, number][]; mixed: boolean };
+  reason: string;
+}) {
+  return (
+    <div>
+      <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
+        {label}
+      </label>
+      <div
+        className={`w-full px-3 py-2 text-xs font-bold rounded-lg border flex items-center gap-1.5 ${
+          mix.mixed
+            ? 'border-amber-300 bg-amber-50 text-amber-900'
+            : 'border-slate-200 bg-slate-100 text-slate-700'
+        }`}
+      >
+        <Lock className="w-3 h-3 shrink-0 opacity-70" />
+        <span className="truncate">
+          {mix.entries.length === 0
+            ? '(none)'
+            : mix.mixed
+              ? mix.entries.map(([k, n]) => `${k} ${n}`).join(' · ')
+              : mix.entries[0][0]}
+        </span>
+      </div>
+      <span className="block text-[10px] text-slate-500 mt-0.5 leading-snug">
+        {mix.mixed
+          ? 'The saved transformers on this MR do not agree, so the MR has no single value. Correct them on the units below.'
+          : reason}
+      </span>
+    </div>
+  );
+}
 
 export default function MrLedger() {
   const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders } = useAgency();
@@ -254,6 +304,28 @@ export default function MrLedger() {
 
   // Full MR Edit Modal State
   const [editingMr, setEditingMr] = useState<MrEditState | null>(null);
+
+  /**
+   * ⚠ THE MR HEADER'S DIVISION AND REPAIR CATEGORY ARE LOCKED ONCE A UNIT IS SAVED (G24).
+   *
+   * They come off the division's paperwork. The agency does not choose them, and G11 already
+   * stopped the save writing them onto existing jobs - which left the worst of both: a control
+   * that took input and then discarded it for every row except a brand-new one.
+   *
+   * The trigger is deliberately "are there saved units whose values would NOT follow", not
+   * "does the MR have jobs". A row added in this session has no values of its own and DOES
+   * take these, so it is not a reason to lock. That makes the lock and the reason shown to the
+   * operator the same fact, rather than two rules that could drift apart.
+   */
+  const headerLock = useMemo(() => {
+    const savedJobs = (editingMr?.jobs ?? []).filter((j: any) => j.id && !j.isNew);
+    return {
+      locked: savedJobs.length > 0,
+      savedJobs,
+      divisionMixed: new Set(savedJobs.map((j: any) => String(j.division ?? '').trim().toUpperCase())).size > 1,
+      repairMixed: new Set(savedJobs.map((j: any) => String(j.repairType ?? '').trim().toUpperCase() || 'OGP')).size > 1,
+    };
+  }, [editingMr]);
   const [isSavingEdit, setIsSavingEdit] = useState(false);
   
   // Cancel MR State
@@ -1459,8 +1531,13 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                       </span>
                     )}
                   </div>
+                  {/* ⚠ "change category" WAS A PROMISE THIS MODAL NO LONGER KEEPS (AUDIT G24).
+                      The repair category is locked once a unit is saved, so a subtitle offering
+                      to change it contradicted the control three inches below it. */}
                   <p className="text-[11px] text-slate-300">
-                    Edit MR Header information, change category, and modify all {editingMr.jobs.length} transformer unit(s)
+                    Edit the MR number and date, and modify all {editingMr.jobs.length} transformer
+                    unit(s). Division and repair category come from the division and are shown as
+                    recorded.
                   </p>
                 </div>
               </div>
@@ -1496,11 +1573,17 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                     keyed on it, and GP excludes a job from number continuation. So they cannot
                     be removed without breaking number allocation.
                     What they no longer do is overwrite every job on save - each job keeps its
-                    own values, and these apply only to a row that has none, i.e. a new one. */}
+                    own values, and these apply only to a row that has none, i.e. a new one.
+
+                    ⚠ AND SINCE G24 THEY ARE READ-ONLY ONCE THE MR HAS SAVED UNITS. An MR's
+                    division and repair category come off the division's paperwork; they are
+                    not the agency's to choose. G11 stopped the save writing them onto existing
+                    jobs, which left a control that accepted input and then discarded it for
+                    every row but a new one - a worse state than either editing or not. */}
                 <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
                   <FileSpreadsheet className="w-4 h-4 text-blue-600" />
                   <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    MR Header & Administrative Details
+                    MR Header &mdash; As Issued By The Division
                   </h4>
                 </div>
 
@@ -1539,37 +1622,75 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                   </div>
 
                   {/* DIVISION */}
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
-                      Division Office <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={editingMr.division}
-                      onChange={(e) => setEditingMr(prev => prev ? ({ ...prev, division: e.target.value }) : null)}
-                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
-                    >
-                      {divisions.map(div => (
-                        <option key={div} value={div}>{div}</option>
-                      ))}
-                    </select>
-                  </div>
+                  {headerLock.locked ? (
+                    <LockedMrHeaderField
+                      label="Division Office"
+                      mix={mixOf(headerLock.savedJobs, (j: any) => j.division, '(none)')}
+                      reason={`Addresses the forwarding letter and sets the job-number prefix. Recorded on ${headerLock.savedJobs.length} saved transformer(s) - editing it here would not change theirs.`}
+                    />
+                  ) : (
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
+                        Division Office <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={editingMr.division}
+                        onChange={(e) => setEditingMr(prev => prev ? ({ ...prev, division: e.target.value }) : null)}
+                        className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
+                      >
+                        {divisions.map(div => (
+                          <option key={div} value={div}>{div}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   {/* REPAIR TYPE */}
-                  <div>
-                    <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
-                      Repair Category <span className="text-red-500">*</span>
-                    </label>
-                    <select
-                      value={editingMr.repairType}
-                      onChange={(e) => setEditingMr(prev => prev ? ({ ...prev, repairType: e.target.value }) : null)}
-                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
-                    >
-                      <option value="OGP">OGP (Out of Guarantee)</option>
-                      <option value="GP">GP (Guarantee Period Warranty)</option>
-                    </select>
-                  </div>
+                  {headerLock.locked ? (
+                    <LockedMrHeaderField
+                      label="Repair Category"
+                      mix={mixOf(headerLock.savedJobs, (j: any) => j.repairType, 'OGP')}
+                      reason={`GP is repair under guarantee at no cost. Recorded on ${headerLock.savedJobs.length} saved transformer(s) - editing it here would not change theirs.`}
+                    />
+                  ) : (
+                    <div>
+                      <label className="block text-[10px] font-bold uppercase text-slate-600 mb-1">
+                        Repair Category <span className="text-red-500">*</span>
+                      </label>
+                      <select
+                        value={editingMr.repairType}
+                        onChange={(e) => setEditingMr(prev => prev ? ({ ...prev, repairType: e.target.value }) : null)}
+                        className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
+                      >
+                        <option value="OGP">OGP (Out of Guarantee)</option>
+                        <option value="GP">GP (Guarantee Period Warranty)</option>
+                      </select>
+                    </div>
+                  )}
 
                 </div>
+
+                {/* ⚠ WHAT A NEW UNIT INHERITS, SAID WHERE THE OPERATOR WILL ADD ONE (AUDIT G24).
+                    The locked values are still the source for a row that has none of its own,
+                    so this is not a dead control - it is a record that also seeds. Saying so
+                    is the difference between "locked" and "locked and therefore irrelevant". */}
+                {headerLock.locked && !headerLock.divisionMixed && !headerLock.repairMixed && (
+                  <p className="text-[10px] text-slate-500 leading-snug">
+                    A transformer added below is stamped{' '}
+                    <strong className="text-slate-700">{editingMr.division || '(none)'}</strong> /{' '}
+                    <strong className="text-slate-700">{editingMr.repairType || 'OGP'}</strong> from
+                    these values. A unit belonging to another division, or repaired under guarantee
+                    when this MR is not, belongs on that division's own MR.
+                  </p>
+                )}
+                {headerLock.locked && (headerLock.divisionMixed || headerLock.repairMixed) && (
+                  <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5 leading-snug">
+                    <strong>This MR does not have one value to inherit.</strong> Its saved
+                    transformers disagree, so a unit added below would be stamped from whichever
+                    of them was read first - which is arbitrary. Fix the units that are wrong
+                    before adding another, or add it to the MR it belongs to.
+                  </p>
+                )}
               </div>
 
               {/* SECTION 2: TRANSFORMER UNITS IN THIS MR */}
