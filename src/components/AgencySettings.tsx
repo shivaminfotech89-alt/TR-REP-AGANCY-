@@ -3,6 +3,7 @@ import AtMasters from './AtMasters';
 import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAgency, type PublishedAt } from '../lib/AgencyContext';
+import { CARD, CARD_PAD } from '../lib/ui';
 import { gstinScopeError } from '../lib/utils';
 import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
@@ -315,7 +316,7 @@ export default function AgencySettings() {
 
           The AT selector states "none active" explicitly. An absent selector and an
           unset one are indistinguishable, and that ambiguity cost real time. */}
-      <div className="bg-slate-900 text-white p-5 rounded-xl shadow-sm border border-slate-800">
+      <div className="bg-slate-900 text-white p-3 rounded-lg border border-slate-800">
         {/* STACKED, not side by side. Two flex-1 selectors plus the Add button inside a
             672px page left the agency select roughly 190px wide, and `min-w-0` - required
             so a flex child CAN shrink - let it shrink below its content, truncating the
@@ -392,7 +393,7 @@ export default function AgencySettings() {
           Rendered only while open - a permanently visible "Add New Agency" card sitting
           between the frame and "This Agency" implied it was part of one or the other. */}
       {showAddForm && (
-      <div className="bg-white p-5 rounded-xl shadow-xs border-2 border-blue-200">
+      <div className="bg-white p-2.5 sm:p-3 rounded-lg border border-l-2 border-l-blue-500 border-blue-200">
         <div className="flex justify-between items-center mb-4">
           <div>
             <h2 className="text-lg font-bold text-slate-900">Add New Agency</h2>
@@ -598,7 +599,7 @@ export default function AgencySettings() {
               {activeAgency.name} - identity, tax, DISCOM routing, bank, letterhead
             </span>
           </div>
-          <div className="bg-white p-5 rounded-xl shadow-xs border border-slate-200 border-l-4 border-l-slate-400">
+          <div className={`${CARD} ${CARD_PAD} border-l-2 border-l-slate-400`}>
             <EditAgencyForm agency={activeAgency} />
           </div>
         </div>
@@ -630,7 +631,7 @@ export default function AgencySettings() {
             /* SAYS WHAT TO DO, not merely that nothing is here. A section that vanishes is
                indistinguishable from one that does not exist - which is exactly how hours
                were lost looking for divisions that were never missing, only unreachable. */
-            <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-5">
+            <div className="bg-amber-50 border border-l-2 border-l-amber-500 border-amber-300 rounded-lg p-3">
               <div className="flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
                 <div className="min-w-0">
@@ -676,7 +677,7 @@ export default function AgencySettings() {
             type="button"
             onClick={() => setEstimateOpen(o => !o)}
             aria-expanded={estimateOpen}
-            className={`w-full text-left rounded-xl border-2 p-4 transition-colors ${
+            className={`w-full text-left rounded-lg border p-3 transition-colors ${
               ratesSummary.tone === 'blocking'
                 ? 'bg-rose-50 border-rose-400 hover:bg-rose-100/70'
                 : ratesSummary.tone === 'warn'
