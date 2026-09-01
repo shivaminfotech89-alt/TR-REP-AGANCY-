@@ -17,6 +17,7 @@ import { auth } from '../lib/firebase';
 import { formatDDMMYYYY } from '../lib/utils';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
+import { CARD } from '../lib/ui';
 import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
 import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100 } from '../lib/ugvclSchedule2020';
@@ -33,8 +34,7 @@ const SECTION_FIELD: Record<SectionKey, string> = {
   AMORPHOUS: 'estimateMasterAmorphous',
   WOUND_CORE: 'estimateMasterWoundCore',
   OVERHAULING: 'estimateMasterOverhauling',
-  CIRCLE_LIMITS: 'estimateMasterCircleLimits',
-};
+  CIRCLE_LIMITS: 'estimateMasterCircleLimits' };
 
 /**
  * What the ESTIMATE would charge for this item at this capacity when the master says
@@ -529,8 +529,7 @@ export default function EstimateMaster() {
       estimateMasterCircleLimits: pick('estimateMasterCircleLimits' as any),
       // The pre-sections CRGO field never moved onto the AT and never will - nothing has
       // written it since D4. Agency only.
-      estimateMaster: (activeAgency as any)?.estimateMaster,
-    };
+      estimateMaster: (activeAgency as any)?.estimateMaster };
   }, [selectedAt, activeAgency]);
 
   /**
@@ -968,8 +967,7 @@ export default function EstimateMaster() {
       payload: useStored ? (stored as EstimateItem[]) : shown,
       storedCount: Array.isArray(stored) ? stored.length : 0,
       shownCount: shown.length,
-      autoAdded,
-    };
+      autoAdded };
   };
 
   /** One plain sentence naming what is being sent and where it came from. */
@@ -1111,8 +1109,7 @@ export default function EstimateMaster() {
    */
   const editStamp = () => ({
     estimateMasterEditedAt: serverTimestamp(),
-    estimateMasterEditedBy: auth.currentUser?.email || auth.currentUser?.uid || '',
-  });
+    estimateMasterEditedBy: auth.currentUser?.email || auth.currentUser?.uid || '' });
 
   const handleInitiateSave = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
     // Gates BOTH destinations - the per-agency save and the publish modal behind it.
@@ -1151,8 +1148,7 @@ export default function EstimateMaster() {
       ...payload,
       ratesSource: 'own',
       ratesUpdatedAt: Date.now(),
-      ...editStamp(),
-    } as any);
+      ...editStamp() } as any);
   };
 
   // Direct 1-click Save for Active Agency Only (Safe & Isolated)
@@ -1174,8 +1170,7 @@ export default function EstimateMaster() {
         estimateMasterAmorphous: amorphousData,
         estimateMasterWoundCore: woundCoreData,
         estimateMasterOverhauling: overhaulingData,
-        estimateMasterCircleLimits: circleLimitsData,
-      };
+        estimateMasterCircleLimits: circleLimitsData };
       await saveRatesToActiveAt(payload);
       setEditingSection(null);
       setSyncSuccessMsg(`✓ Saved all five sections for AT "${selectedAt?.atNumber || selectedAt?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
@@ -1280,8 +1275,7 @@ export default function EstimateMaster() {
         label: t.atNumber || t.name || t.id,
         agencyName: agencies.find(a => a.id === t.agencyId)?.name || '(unknown agency)',
         closed: String(t.status || '').toLowerCase() === 'closed',
-        ratesSource: String((t as any).ratesSource || '') || null,
-      }))
+        ratesSource: String((t as any).ratesSource || '') || null }))
       .sort((a, b) => a.agencyName.localeCompare(b.agencyName) || a.label.localeCompare(b.label));
   }, [atMasters, agencies, activeAgency, selectedAt]);
 
@@ -1475,7 +1469,7 @@ export default function EstimateMaster() {
     const isEditing = editingSection === sectionKey;
 
     return (
-      <div className="bg-white rounded-xl shadow-xs border border-slate-200 overflow-hidden transition-all">
+      <div className={`${CARD} overflow-hidden transition-all`}>
         {/* Accordion Header */}
         <div 
           onClick={() => setIsOpen(!isOpen)}
@@ -1497,12 +1491,12 @@ export default function EstimateMaster() {
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
               <p className="text-[11px] text-slate-500 mt-1">
-                <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono">tinted</span> = the UGVCL tender rate,
+                <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono tabular-nums">tinted</span> = the UGVCL tender rate,
                 used while the cell is blank - nothing is stored. Type to override for this agency;
                 <strong> clear a cell to go back to the tender rate</strong>. Once a cell holds a value,
                 a future change to the tender schedule no longer reaches it.
-                {' '}A cell showing <span className="font-mono">AL</span> and{' '}
-                <span className="font-mono">CU</span> has two tender rates; the estimate picks one
+                {' '}A cell showing <span className="font-mono tabular-nums">AL</span> and{' '}
+                <span className="font-mono tabular-nums">CU</span> has two tender rates; the estimate picks one
                 from the Winding Type on the internal inspection, and typing a rate here replaces
                 both.
               </p>
@@ -1776,7 +1770,7 @@ export default function EstimateMaster() {
                     {data.map((item, idx) => (
                       <th key={idx} className="px-3.5 py-3 text-right border-r border-rose-200 min-w-[170px] whitespace-normal">
                         <div className="font-bold text-rose-900 leading-snug">{item.itemName}</div>
-                        <div className="text-[10px] text-rose-700 font-mono font-normal">Level Code: {item.itemCode}</div>
+                        <div className="text-[10px] text-rose-700 font-mono tabular-nums font-normal">Level Code: {item.itemCode}</div>
                       </th>
                     ))}
                   </tr>
@@ -1784,30 +1778,30 @@ export default function EstimateMaster() {
                 <tbody className="divide-y divide-slate-100">
                   {kvaColumns.map((kva, kvaIdx) => (
                     <tr key={kva} className="hover:bg-rose-50/40 transition-colors">
-                      <td className="px-3.5 py-2.5 font-bold text-slate-700 whitespace-nowrap sticky left-0 bg-white border-r border-slate-100 text-center w-24 font-mono">
+                      <td className="px-3.5 py-2.5 font-bold text-slate-700 whitespace-nowrap sticky left-0 bg-white border-r border-slate-100 text-center w-24 font-mono tabular-nums">
                         {kvaIdx + 1}
                       </td>
                       <td className="px-3.5 py-2.5 font-bold text-slate-900 sticky left-[96px] bg-white border-r border-slate-100 min-w-[140px] w-40">
-                        <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono text-xs">
+                        <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono tabular-nums text-xs">
                           {kva} / 11 KVA
                         </span>
                       </td>
                       {data.map((item, itemIdx) => {
                         const rateVal = item.rates?.[kva];
                         return (
-                          <td key={itemIdx} className="px-3 py-2.5 text-right font-mono text-slate-700 border-r border-slate-100">
+                          <td key={itemIdx} className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 border-r border-slate-100">
                             {isEditing ? (
                               <input
                                 type="number"
                                 step="0.01"
                                 value={rateVal ?? ''}
                                 onChange={(e) => handleRateChange('CIRCLE_LIMITS', itemIdx, kva, e.target.value)}
-                                className="w-24 px-2 py-1 text-right text-xs border border-rose-300 rounded focus:ring-1 focus:ring-rose-500 font-mono font-semibold"
+                                className="w-24 px-2 py-1 text-right text-xs border border-rose-300 rounded focus:ring-1 focus:ring-rose-500 font-mono tabular-nums font-semibold"
                                 placeholder="-"
                               />
                             ) : (
                               rateVal !== null && rateVal !== undefined && !isNaN(Number(rateVal)) && Number(rateVal) > 0 ? (
-                                <span className="font-bold text-slate-900 text-xs font-mono">
+                                <span className="font-bold text-slate-900 text-xs font-mono tabular-nums">
                                   ₹ {Number(rateVal).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                 </span>
                               ) : (
@@ -1836,7 +1830,7 @@ export default function EstimateMaster() {
                       Unit
                     </th>
                     {kvaColumns.map(kva => (
-                      <th key={kva} className="px-3 py-3 text-right bg-blue-50/50 text-blue-900 whitespace-nowrap font-mono">
+                      <th key={kva} className="px-3 py-3 text-right bg-blue-50/50 text-blue-900 whitespace-nowrap font-mono tabular-nums">
                         {kva} / 11 KVA
                       </th>
                     ))}
@@ -1862,7 +1856,7 @@ export default function EstimateMaster() {
                             }
                             /* Marked in place, so a blank or duplicated code is visible in the
                                row rather than only in an alert when Save is pressed. */
-                            className={`w-14 px-1.5 py-1 text-xs border rounded font-mono font-bold ${
+                            className={`w-14 px-1.5 py-1 text-xs border rounded font-mono tabular-nums font-bold ${
                               !String(item.itemCode ?? '').trim()
                                 ? 'border-amber-400 bg-amber-50 placeholder-amber-600'
                                 : (data.filter(o => String(o.itemCode ?? '').trim().toLowerCase() === String(item.itemCode ?? '').trim().toLowerCase()).length > 1
@@ -1871,7 +1865,7 @@ export default function EstimateMaster() {
                             }`}
                           />
                         ) : (
-                          <span className="font-mono font-bold">{item.itemCode}</span>
+                          <span className="font-mono tabular-nums font-bold">{item.itemCode}</span>
                         )}
                       </td>
                       <td className="px-3.5 py-2.5 sticky left-[64px] bg-white group-hover:bg-slate-50 border-r border-slate-100 min-w-[280px] max-w-md whitespace-normal break-words align-top">
@@ -1907,7 +1901,7 @@ export default function EstimateMaster() {
                       {kvaColumns.map(kva => {
                         const rateVal = item.rates?.[kva];
                         return (
-                          <td key={kva} className="px-2.5 py-2.5 text-right font-mono text-slate-700 align-top">
+                          <td key={kva} className="px-2.5 py-2.5 text-right font-mono tabular-nums text-slate-700 align-top">
                             {(() => {
                               const stored = rateVal !== null && rateVal !== undefined
                                 && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
@@ -1942,7 +1936,7 @@ export default function EstimateMaster() {
                                        an untouched cell still saves as null. */
                                     value={rateVal ?? ''}
                                     onChange={(e) => handleRateChange(sectionKey, idx, kva, e.target.value)}
-                                    className={`w-20 px-1.5 py-1 text-right text-xs border rounded focus:ring-1 focus:ring-blue-500 font-mono font-medium ${
+                                    className={`w-20 px-1.5 py-1 text-right text-xs border rounded focus:ring-1 focus:ring-blue-500 font-mono tabular-nums font-medium ${
                                       stored ? 'border-slate-300 text-slate-900 font-semibold' : 'border-sky-200 bg-sky-50 text-slate-600'
                                     }`}
                                     placeholder={inherited !== null ? fmt(inherited) : pair ? `${fmt(pair.al)}/${fmt(pair.cu)}` : kvRate ? fmt(kvRate.value) : radRate !== null ? fmt(radRate) : '-'}
@@ -1954,7 +1948,7 @@ export default function EstimateMaster() {
                               }
                               if (stored) {
                                 return (
-                                  <span className="font-semibold text-slate-900 text-xs font-mono"
+                                  <span className="font-semibold text-slate-900 text-xs font-mono tabular-nums"
                                         title="Set by this agency - overrides the tender rate.">
                                     {fmt(Number(rateVal))}
                                   </span>
@@ -1977,7 +1971,7 @@ export default function EstimateMaster() {
                                      and to a photocopy, which is how these are read on the
                                      floor. Overrides are semibold and near-black; inherited is
                                      normal weight. That difference survives greyscale. */
-                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-xs font-mono"
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-xs font-mono tabular-nums"
                                         title="From the UGVCL tender schedule. Nothing is stored for this cell - the estimate uses this figure. Type over it to override.">
                                     {fmt(inherited)}
                                   </span>
@@ -1992,7 +1986,7 @@ export default function EstimateMaster() {
                                      STACKED, not "163.00 AL / 357.00 CU" on one line: this
                                      column sizes to its widest cell, and one wide row would
                                      widen all ten capacity columns for all 31 rows. */
-                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-[11px] font-mono leading-tight"
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-[11px] font-mono tabular-nums leading-tight"
                                         title={pairTitle}>
                                     <span className="block whitespace-nowrap">{fmt(pair.al)} AL</span>
                                     <span className="block whitespace-nowrap">{fmt(pair.cu)} CU</span>
@@ -2005,7 +1999,7 @@ export default function EstimateMaster() {
                                      needs no suffix: the COLUMN already states the capacity it
                                      applies to, which is exactly why a per-column lookup can
                                      show it where a per-band one could not. */
-                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-xs font-mono"
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-xs font-mono tabular-nums"
                                         title={radTitle}>
                                     {fmt(radRate)}
                                   </span>
@@ -2017,7 +2011,7 @@ export default function EstimateMaster() {
                                      the same kind of thing. The (11 KV) suffix carries the
                                      condition, so no third visual signal is introduced, and it
                                      is what stops the number reading as unconditional. */
-                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-[11px] font-mono leading-tight"
+                                  <span className="block -mx-1 px-1 rounded bg-sky-50 text-slate-600 text-[11px] font-mono tabular-nums leading-tight"
                                         title={kvTitle}>
                                     <span className="block whitespace-nowrap">{fmt(kvRate.value)}</span>
                                     <span className="block whitespace-nowrap text-[9px] text-slate-500">({kvRate.kv} KV)</span>
@@ -2285,7 +2279,7 @@ export default function EstimateMaster() {
           a user gets rates - enter them, or take a published AT. It sits above the tables
           because for an AT with none, it is the fastest correct action on the screen. */}
       {selectedAt && publishedAts.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-xl p-4">
+        <div className={`${CARD} p-3`}>
           <div className="flex items-center gap-2 mb-2">
             <Database className="w-4 h-4 text-indigo-600" />
             <h3 className="text-sm font-bold text-slate-900">Published AT templates</h3>
@@ -2331,7 +2325,7 @@ export default function EstimateMaster() {
       {/* PUBLISH AS A TEMPLATE — admin only. */}
       {showPublishTplModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-purple-200 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-purple-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center gap-3 mb-3 text-purple-700">
               <div className="bg-purple-100 p-2.5 rounded-xl shrink-0"><Crown className="w-6 h-6" /></div>
               <div>
@@ -2612,7 +2606,7 @@ export default function EstimateMaster() {
       {/* Section Save Scope Confirmation Dialog */}
       {pendingSaveSection && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
@@ -2786,7 +2780,7 @@ export default function EstimateMaster() {
       {/* Full Sync Modal */}
       {showApplyModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs animate-in fade-in">
-          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in zoom-in-95">
+          <div className="bg-white rounded-lg shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in zoom-in-95">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-sky-50 text-sky-600 rounded-xl border border-sky-100">
