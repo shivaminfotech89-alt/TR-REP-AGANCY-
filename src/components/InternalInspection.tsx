@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency, getCircleLimitsEstimateMaster } from '../lib/AgencyContext';
+import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { Wrench, Search, Loader2, ArrowLeft, Save, Download, Printer, Cpu, Zap, CheckCircle2, AlertTriangle } from 'lucide-react';
@@ -668,7 +669,7 @@ export default function InternalInspection() {
       type={type}
       value={formsData[jobId]?.[field] || ''}
       onChange={(e) => handleChange(jobId, field, e.target.value)}
-      className={`px-1.5 py-1 text-[10px] font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
+      className={`px-1.5 py-1 text-[10px] font-mono tabular-nums border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
       step={step !== undefined ? step : (type === 'number' ? '0.01' : undefined)}
     />
   );
@@ -685,7 +686,7 @@ export default function InternalInspection() {
         if (max !== undefined && raw !== '' && Number(raw) > max) return;
         handleChange(jobId, field, raw);
       }}
-      className={`px-1.5 py-1 text-[10px] font-mono border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
+      className={`px-1.5 py-1 text-[10px] font-mono tabular-nums border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white text-slate-800 text-center shadow-2xs ${widthClass}`}
       step="1"
       min="0"
       max={max}
@@ -699,7 +700,7 @@ export default function InternalInspection() {
       readOnly
       disabled
       tabIndex={-1}
-      className={`px-1.5 py-1 text-[10px] font-mono border border-slate-200 rounded bg-slate-100 text-slate-500 text-center cursor-not-allowed ${widthClass}`}
+      className={`px-1.5 py-1 text-[10px] font-mono tabular-nums border border-slate-200 rounded bg-slate-100 text-slate-500 text-center cursor-not-allowed ${widthClass}`}
     />
   );
 
@@ -854,11 +855,11 @@ export default function InternalInspection() {
 
     return (
       <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
-        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-4 rounded-xl shadow-md border border-slate-200">
+        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-2.5 sm:p-3 rounded-lg border border-slate-200">
           <div>
             <p className="text-sm font-bold text-slate-800">Internal Inspection Report - Print Preview</p>
             <p className="text-xs text-slate-500">
-              MR No: <strong className="font-mono">{selectedMrNo}</strong> ({mrDateStr}) • {mrJobs.length} Transformers • {jobChunks.length} Landscape A4 Page{jobChunks.length > 1 ? 's' : ''}
+              MR No: <strong className="font-mono tabular-nums">{selectedMrNo}</strong> ({mrDateStr}) • {mrJobs.length} Transformers • {jobChunks.length} Landscape A4 Page{jobChunks.length > 1 ? 's' : ''}
             </p>
           </div>
           <div className="flex items-center space-x-3">
@@ -1045,7 +1046,7 @@ export default function InternalInspection() {
 
   return (
     <div className="space-y-6 print:space-y-0">
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-6 rounded shadow-sm border border-slate-200">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white p-2.5 sm:p-3 rounded-lg border border-slate-200">
         <div>
           <h1 className="text-xl font-bold text-slate-900 print:text-black flex items-center">
             <Wrench className="w-6 h-6 mr-3 text-blue-600" />
@@ -1069,7 +1070,7 @@ export default function InternalInspection() {
       {!selectedMrNo && <OtherTenderNote count={otherTenderPending} noun="internal inspection" />}
 
       {!selectedMrNo ? (
-        <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 print:bg-transparent flex flex-col md:flex-row justify-between items-center gap-4">
             <h2 className="text-sm font-bold text-slate-700 print:text-black uppercase tracking-widest">Select MR to Inspect</h2>
             <div className="flex flex-wrap items-center space-x-4 w-full md:w-auto gap-y-2">
@@ -1175,14 +1176,14 @@ export default function InternalInspection() {
                     return (
                     <React.Fragment key={mr}>
                     <tr className="hover:bg-slate-50 transition-colors">
-                      <td className="px-3 py-3 text-center font-mono font-bold text-xs text-slate-400">
+                      <td className="px-3 py-3 text-center font-mono tabular-nums font-bold text-xs text-slate-400">
                         {idx + 1}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="font-mono font-bold text-slate-900 text-sm">{mr}</div>
+                        <div className="font-mono tabular-nums font-bold text-slate-900 text-sm">{mr}</div>
                         <div className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
                           <span>MR Date:</span>
-                          <span className="font-mono text-slate-700 font-semibold">{mrDateStr}</span>
+                          <span className="font-mono tabular-nums text-slate-700 font-semibold">{mrDateStr}</span>
                         </div>
                       </td>
                       <td className="px-3 py-3 whitespace-nowrap">
@@ -1192,22 +1193,22 @@ export default function InternalInspection() {
                       </td>
                       <td className="px-3 py-3 text-xs">
                         <div className="font-medium text-slate-800">{capSummary}</div>
-                        <div className="text-[11px] text-blue-600 font-bold font-mono mt-0.5">Total: {totalKva} KVA</div>
+                        <div className="text-[11px] text-blue-600 font-bold font-mono tabular-nums mt-0.5">Total: {totalKva} KVA</div>
                       </td>
                       <td className="px-3 py-3 text-center whitespace-nowrap">
-                        <span className="font-mono font-bold text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
+                        <span className="font-mono tabular-nums font-bold text-xs bg-blue-50 text-blue-700 px-2 py-0.5 rounded-full border border-blue-100">
                           {jobsForMr.length} {jobsForMr.length === 1 ? 'Unit' : 'Units'}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-xs text-slate-500 max-w-[180px] truncate" title={jobsForMr.map(j => j.jobNo).join(', ')}>
-                        <span className="font-mono text-slate-700 font-medium">
+                        <span className="font-mono tabular-nums text-slate-700 font-medium">
                           {jobsForMr.map(j => j.jobNo).join(', ')}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-center whitespace-nowrap">
                         {extInspDate ? (
                           <div className="inline-flex flex-col items-center">
-                            <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded font-mono">
+                            <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded font-mono tabular-nums">
                               {formatDDMMYYYY(extInspDate)}
                             </span>
                           </div>
@@ -1221,11 +1222,11 @@ export default function InternalInspection() {
                             <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold bg-green-50 text-green-700 border border-green-200">
                               <CheckCircle2 className="w-3 h-3 text-green-600" /> Completed
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                            <span className="text-[10px] text-slate-500 font-mono tabular-nums mt-0.5">
                               {inspectedCount} of {jobsForMr.length} inspected
                             </span>
                             {intInspDate && (
-                              <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                              <span className="text-[10px] text-slate-500 font-mono tabular-nums mt-0.5">
                                 Date: {formatDDMMYYYY(intInspDate)}
                               </span>
                             )}
@@ -1235,7 +1236,7 @@ export default function InternalInspection() {
                             <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200">
                               Pending
                             </span>
-                            <span className="text-[10px] text-slate-500 font-mono mt-0.5">
+                            <span className="text-[10px] text-slate-500 font-mono tabular-nums mt-0.5">
                               {inspectedCount} of {jobsForMr.length} inspected
                             </span>
                           </div>
@@ -1308,12 +1309,12 @@ export default function InternalInspection() {
                 </span>
               </div>
               <div className="flex items-center gap-3 mt-1">
-                <p className="text-xl font-mono font-bold text-white tracking-tight">MR No: {selectedMrNo}</p>
-                <span className="text-xs bg-slate-800 text-slate-300 font-mono px-2.5 py-1 rounded border border-slate-700">
+                <p className="text-xl font-mono tabular-nums font-bold text-white tracking-tight">MR No: {selectedMrNo}</p>
+                <span className="text-xs bg-slate-800 text-slate-300 font-mono tabular-nums px-2.5 py-1 rounded border border-slate-700">
                   MR Date: <strong className="text-white">({formatDDMMYYYY(mrJobs[0]?.dateOfIssue || mrJobs[0]?.mrDate || mrJobs[0]?.createdAt)})</strong>
                 </span>
                 {mrJobs[0]?.externalInspectionDate && (
-                  <span className="text-xs bg-indigo-950 text-indigo-200 font-mono px-2.5 py-1 rounded border border-indigo-800">
+                  <span className="text-xs bg-indigo-950 text-indigo-200 font-mono tabular-nums px-2.5 py-1 rounded border border-indigo-800">
                     Ext. Insp: <strong>{formatDDMMYYYY(mrJobs[0].externalInspectionDate)}</strong>
                   </span>
                 )}
@@ -1332,7 +1333,7 @@ export default function InternalInspection() {
                   type="date"
                   value={internalInspectionDate}
                   onChange={(e) => setInternalInspectionDate(e.target.value)}
-                  className="bg-slate-900 text-white font-mono text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
+                  className="bg-slate-900 text-white font-mono tabular-nums text-xs px-2 py-1 rounded border border-slate-600 focus:ring-1 focus:ring-blue-500 focus:outline-hidden"
                 />
               </div>
 
@@ -1365,7 +1366,7 @@ export default function InternalInspection() {
             <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, WAS Ring, and fill damaged coil weights before submitting.</span>
           </div>
 
-          <div className="bg-white rounded shadow-sm border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
+          <div className="bg-white rounded-lg border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
             <form onSubmit={handleSubmit}>
               <div className="min-w-max">
                 <table className="w-full text-left print:text-black print:text-[8px] border-collapse">
@@ -1456,22 +1457,22 @@ export default function InternalInspection() {
                       const hvLimbMax = limbRaw !== undefined && limbRaw.trim() !== '' && !isNaN(Number(limbRaw)) ? Number(limbRaw) : undefined;
                       return (
                       <tr key={job.id} className={`hover:bg-slate-50/80 transition-colors group ${isScrap ? 'bg-red-50/30' : ''}`}>
-                        <td className="p-2 text-xs font-mono text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
+                        <td className="p-2 text-xs font-mono tabular-nums text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
                           {index + 1}
                         </td>
-                        <td className="p-2 text-xs font-mono font-bold sticky left-8 bg-white group-hover:bg-slate-50 border-r border-slate-200 min-w-[100px] z-10">
+                        <td className="p-2 text-xs font-mono tabular-nums font-bold sticky left-8 bg-white group-hover:bg-slate-50 border-r border-slate-200 min-w-[100px] z-10">
                           <div className="flex items-center gap-1.5">
                             <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
                             {matchesGpFilter(job, 'GP') && <GpChip />}
                           </div>
                         </td>
-                        <td className="p-2 text-xs font-mono font-medium text-slate-700 min-w-[90px] border-r border-slate-200">
+                        <td className="p-2 text-xs font-mono tabular-nums font-medium text-slate-700 min-w-[90px] border-r border-slate-200">
                           {job.serialNo || '-'}
                         </td>
                         <td className="p-2 text-xs text-slate-800 font-semibold min-w-[70px] truncate max-w-[90px] border-r border-slate-200" title={job.make}>
                           {job.make || '-'}
                         </td>
-                        <td className="p-2 text-xs text-slate-900 font-mono font-bold text-center border-r border-slate-200">
+                        <td className="p-2 text-xs text-slate-900 font-mono tabular-nums font-bold text-center border-r border-slate-200">
                           {job.capacityKva}
                         </td>
                         <td className="p-1.5 text-[10px] text-indigo-900 font-bold text-center border-r border-slate-200 bg-indigo-50/30">
@@ -1479,7 +1480,7 @@ export default function InternalInspection() {
                             {job.coreType || 'CRGO'}
                           </span>
                         </td>
-                        <td className="p-1.5 text-[11px] text-center border-r border-slate-200 bg-blue-50/20 font-mono text-blue-900 font-semibold">
+                        <td className="p-1.5 text-[11px] text-center border-r border-slate-200 bg-blue-50/20 font-mono tabular-nums text-blue-900 font-semibold">
                           {job.externalInspectionDate ? formatDDMMYYYY(job.externalInspectionDate) : '-'}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center bg-amber-50/30">

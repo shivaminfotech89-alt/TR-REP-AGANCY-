@@ -1,5 +1,6 @@
 
 import { useAgency, matchesAtScope } from '../lib/AgencyContext';
+import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { OtherTenderNote } from './OtherTenderNote';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -444,7 +445,7 @@ export default function TestingReport() {
 
     return (
       <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
-        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-4 rounded-xl shadow-md border border-slate-200">
+        <div className="print:hidden max-w-[297mm] mx-auto mb-4 flex justify-between items-center bg-white p-2.5 sm:p-3 rounded-lg border border-slate-200">
           <div>
             <p className="text-sm font-bold text-slate-800">Testing Report Print Preview</p>
             <p className="text-xs text-slate-500">
@@ -624,7 +625,7 @@ export default function TestingReport() {
       {!isFormOpen && <OtherTenderNote count={otherTenderPending} noun="testing job" />}
 
       {!isFormOpen ? (
-        <div className="bg-white rounded shadow-sm border border-slate-200 overflow-hidden">
+        <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
           <div className="border-b border-slate-200 flex text-sm font-medium">
             <button
               onClick={() => { setTab('Pending'); setSelectedJobIds(new Set()); }}
@@ -753,16 +754,16 @@ export default function TestingReport() {
                         )}
                       </button>
                     </td>
-                    <td className="px-2 py-3 text-center font-mono font-bold text-xs text-slate-400">
+                    <td className="px-2 py-3 text-center font-mono tabular-nums font-bold text-xs text-slate-400">
                       {idx + 1}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
-                        <span className={`font-mono font-bold text-sm ${matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}`}>{job.jobNo}</span>
+                        <span className={`font-mono tabular-nums font-bold text-sm ${matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}`}>{job.jobNo}</span>
                         {matchesGpFilter(job, 'GP') && <GpChip />}
                       </div>
                       {job.serialNo ? (
-                        <div className="text-[11px] font-mono text-slate-500">
+                        <div className="text-[11px] font-mono tabular-nums text-slate-500">
                           S.No: <span className="font-semibold text-slate-700">{job.serialNo}</span>
                         </div>
                       ) : (
@@ -770,8 +771,8 @@ export default function TestingReport() {
                       )}
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <div className="font-mono font-bold text-slate-800 text-xs">{job.mrNo}</div>
-                      <div className="text-[11px] text-slate-500 font-mono">
+                      <div className="font-mono tabular-nums font-bold text-slate-800 text-xs">{job.mrNo}</div>
+                      <div className="text-[11px] text-slate-500 font-mono tabular-nums">
                         Dt: {formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)}
                       </div>
                     </td>
@@ -781,7 +782,7 @@ export default function TestingReport() {
                       </span>
                     </td>
                     <td className="px-3 py-3 whitespace-nowrap">
-                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold font-mono rounded border border-blue-100">
+                      <span className="px-2 py-0.5 bg-blue-50 text-blue-700 text-xs font-bold font-mono tabular-nums rounded border border-blue-100">
                         {job.capacityKva} KVA ({job.coreType || 'CRGO'})
                       </span>
                     </td>
@@ -791,7 +792,7 @@ export default function TestingReport() {
                     </td>
                     <td className="px-3 py-3 text-center whitespace-nowrap">
                       {job.externalInspectionDate ? (
-                        <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded font-mono">
+                        <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-0.5 rounded font-mono tabular-nums">
                           {formatDDMMYYYY(job.externalInspectionDate)}
                         </span>
                       ) : (
@@ -800,7 +801,7 @@ export default function TestingReport() {
                     </td>
                     <td className="px-3 py-3 text-center whitespace-nowrap">
                       {job.internalInspectionDate ? (
-                        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-mono">
+                        <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded font-mono tabular-nums">
                           {formatDDMMYYYY(job.internalInspectionDate)}
                         </span>
                       ) : (
@@ -808,7 +809,7 @@ export default function TestingReport() {
                       )}
                     </td>
                     {tab === 'Completed' && (
-                      <td className="px-3 py-3 text-center text-slate-700 font-mono text-xs whitespace-nowrap font-medium">
+                      <td className="px-3 py-3 text-center text-slate-700 font-mono tabular-nums text-xs whitespace-nowrap font-medium">
                         {job.testingDate ? formatDDMMYYYY(job.testingDate) : '-'}
                       </td>
                     )}
@@ -866,7 +867,7 @@ export default function TestingReport() {
                   Transformer Routine Testing
                 </span>
               </div>
-              <p className="text-lg font-mono font-bold mt-1">{selectedJobIds.size} Transformer{selectedJobIds.size > 1 ? 's' : ''} Selected for Testing</p>
+              <p className="text-lg font-mono tabular-nums font-bold mt-1">{selectedJobIds.size} Transformer{selectedJobIds.size > 1 ? 's' : ''} Selected for Testing</p>
             </div>
             <div className="flex items-center space-x-4 w-full md:w-auto">
               <div className="flex-1 md:flex-none">
@@ -918,12 +919,12 @@ export default function TestingReport() {
                   <div className="flex flex-wrap items-center justify-between mb-4 border-b border-slate-100 pb-3 gap-2">
                     <div>
                       <div className="flex items-center gap-3">
-                        <h3 className={`font-mono font-bold text-lg flex items-center gap-2 ${matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}`}>
+                        <h3 className={`font-mono tabular-nums font-bold text-lg flex items-center gap-2 ${matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}`}>
                           {job.jobNo}
                           {matchesGpFilter(job, 'GP') && <GpChip />}
                         </h3>
                         {job.serialNo && (
-                          <span className="text-xs font-mono font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
+                          <span className="text-xs font-mono tabular-nums font-bold bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-200">
                             S.No: {job.serialNo}
                           </span>
                         )}
@@ -931,23 +932,23 @@ export default function TestingReport() {
                           {job.division || '-'}
                         </span>
                       </div>
-                      <p className="text-xs text-slate-500 font-mono mt-1">
+                      <p className="text-xs text-slate-500 font-mono tabular-nums mt-1">
                         MR: <span className="text-slate-700 font-semibold">{job.mrNo}</span>{' '}
                         <span>({formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt)})</span>
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
                       {job.externalInspectionDate && (
-                        <span className="text-[11px] bg-blue-50 text-blue-800 font-mono px-2 py-1 rounded border border-blue-200 font-medium">
+                        <span className="text-[11px] bg-blue-50 text-blue-800 font-mono tabular-nums px-2 py-1 rounded border border-blue-200 font-medium">
                           Ext: {formatDDMMYYYY(job.externalInspectionDate)}
                         </span>
                       )}
                       {job.internalInspectionDate && (
-                        <span className="text-[11px] bg-emerald-50 text-emerald-800 font-mono px-2 py-1 rounded border border-emerald-200 font-medium">
+                        <span className="text-[11px] bg-emerald-50 text-emerald-800 font-mono tabular-nums px-2 py-1 rounded border border-emerald-200 font-medium">
                           Int: {formatDDMMYYYY(job.internalInspectionDate)}
                         </span>
                       )}
-                      <span className="px-2.5 py-1 bg-slate-900 text-white text-xs font-bold font-mono rounded-lg">
+                      <span className="px-2.5 py-1 bg-slate-900 text-white text-xs font-bold font-mono tabular-nums rounded-lg">
                         {job.capacityKva} KVA ({job.coreType || 'CRGO'})
                       </span>
                       <span className="text-xs font-semibold text-slate-700 bg-slate-100 px-2.5 py-1 rounded-lg">
