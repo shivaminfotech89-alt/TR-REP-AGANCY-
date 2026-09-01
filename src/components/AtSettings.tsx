@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
+import { CARD, CARD_PAD } from '../lib/ui';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
@@ -272,7 +273,7 @@ export function AtSettings() {
    * it is what the delete button exists for.
    */
   const seedPanel = seedReport && seedAtNow && !seedAtHasRates && (
-    <div className="p-4 rounded-xl border-2 border-indigo-200 bg-indigo-50/60 space-y-2">
+    <div className="p-2.5 sm:p-3 rounded-lg border border-l-2 border-l-indigo-500 border-indigo-200 bg-indigo-50/60 space-y-2">
       <div className="flex items-start justify-between gap-3">
         <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-900">
           AT {seedReportAtNo} is ready &mdash; two things to know
@@ -291,7 +292,7 @@ export function AtSettings() {
           </p>
           <div className="flex flex-wrap gap-1.5">
             {Object.entries(seedReport.counters).sort().map(([k, v]) => (
-              <span key={k} className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-[10px] font-mono text-indigo-900">
+              <span key={k} className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-[10px] font-mono tabular-nums text-indigo-900">
                 {k}: next is {Number(v) + 1}
               </span>
             ))}
@@ -457,11 +458,11 @@ export function AtSettings() {
   if (!activeAgency) return null;
 
   return (
-    <div className="bg-white p-6 rounded-xl shadow-xs border border-slate-200">
+    <div className={`${CARD} ${CARD_PAD}`}>
       {/* Header with Title and Minimize/Expand Toggle */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg shadow-xs shrink-0">
+          <div className="p-2 bg-gradient-to-br from-indigo-500 to-purple-600 text-white rounded-lg shrink-0">
             <Briefcase className="w-5 h-5" />
           </div>
           <div>
@@ -537,9 +538,9 @@ export function AtSettings() {
       {/* CONFIRM — names what is about to go, and what it is not. */}
       {confirmDeleteAt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-md w-full border border-rose-200">
+          <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-5 max-w-md w-full border border-rose-200">
             <div className="flex items-center gap-3 mb-3 text-rose-700">
-              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0"><Trash2 className="w-6 h-6" /></div>
+              <div className="bg-rose-100 p-2 rounded-lg shrink-0"><Trash2 className="w-6 h-6" /></div>
               <h3 className="text-base font-bold text-slate-900">
                 Delete AT {confirmDeleteAt.atNumber || confirmDeleteAt.name}?
               </h3>
@@ -583,7 +584,7 @@ export function AtSettings() {
                   </p>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {held.map(([label, n]) => (
-                      <span key={label} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-mono text-[10px]">
+                      <span key={label} className="px-2 py-0.5 rounded bg-white border border-amber-300 font-mono tabular-nums text-[10px]">
                         {label} — {n} row{n === 1 ? '' : 's'}
                       </span>
                     ))}
@@ -611,7 +612,7 @@ export function AtSettings() {
                 Cancel
               </button>
               <button type="button" onClick={() => runDelete(confirmDeleteAt)}
-                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-sm">
+                      className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg">
                 Delete this AT
               </button>
             </div>
@@ -625,16 +626,16 @@ export function AtSettings() {
           performs the identical check and is not going anywhere (AUDIT F75, F77). */}
       {deleteError && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-2xl shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-rose-200 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-5 max-w-lg w-full border border-rose-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center gap-3 mb-3 text-rose-700">
-              <div className="bg-rose-100 p-2.5 rounded-xl shrink-0"><AlertTriangle className="w-6 h-6" /></div>
+              <div className="bg-rose-100 p-2 rounded-lg shrink-0"><AlertTriangle className="w-6 h-6" /></div>
               <h3 className="text-base font-bold text-slate-900">{deleteError.title}</h3>
             </div>
             <p className="text-sm text-slate-700 whitespace-pre-line">{deleteError.message}</p>
             {deleteError.items.length > 0 && (
               <div className="mt-3 border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-48 overflow-y-auto">
                 {deleteError.items.map((it, i) => (
-                  <div key={i} className="px-3 py-1.5 text-xs font-mono text-slate-700">{it}</div>
+                  <div key={i} className="px-3 py-1.5 text-xs font-mono tabular-nums text-slate-700">{it}</div>
                 ))}
               </div>
             )}
@@ -669,7 +670,7 @@ export function AtSettings() {
                 return (
                   <div key={at.id} className="space-y-2">
                     <div 
-                      className={`p-4 border rounded-xl flex flex-col md:flex-row md:items-center justify-between cursor-pointer transition-colors gap-4 ${
+                      className={`p-3 border rounded-lg flex flex-col md:flex-row md:items-center justify-between cursor-pointer transition-colors gap-3 ${
                         activeAtMaster?.id === at.id ? 'border-indigo-500 bg-indigo-50/40 ring-1 ring-indigo-500/20' : 'border-slate-200 hover:border-indigo-300 bg-slate-50/30'
                       }`}
                       onClick={() => setActiveAtMasterId(at.id)}
@@ -800,7 +801,7 @@ export function AtSettings() {
                           </div>
                         </>
                       ) : (
-                        <form onClick={e => e.stopPropagation()} onSubmit={e => handleSaveEdit(at.id, e)} className="w-full space-y-3 bg-white p-4 rounded-xl border border-indigo-300 shadow-xs">
+                        <form onClick={e => e.stopPropagation()} onSubmit={e => handleSaveEdit(at.id, e)} className="w-full space-y-3 bg-white p-3 rounded-lg border border-indigo-300">
                           <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                             <h4 className="text-xs font-bold uppercase tracking-wider text-indigo-800">Edit AT / Tender Period</h4>
                             <button type="button" onClick={() => { setEditingAtId(null); setEditFormData(null); }} className="text-slate-400 hover:text-slate-600">
@@ -866,7 +867,7 @@ export function AtSettings() {
                     
                     {/* Combined Details (Divisions & Prefixes + Allotment Quotas) for this active AT */}
                     {activeAtMaster?.id === at.id && !isEditing && (
-                      <div className="border border-t-0 border-indigo-300 bg-white p-4 rounded-b-xl space-y-4 shadow-xs">
+                      <div className="border border-t-0 border-indigo-300 bg-white p-3 rounded-b-lg space-y-3">
                         {/* Sub-tabs to seamlessly switch between Divisions & Prefixes and Allotment Quotas */}
                         <div className="flex border-b border-slate-200">
                           <button
@@ -925,7 +926,7 @@ export function AtSettings() {
             {!showAddForm ? (
               <button 
                 onClick={openAddForm} 
-                className="flex items-center px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-xs transition-colors"
+                className="flex items-center px-3.5 py-1.5 text-xs font-bold uppercase tracking-wider bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
               >
                 <Plus className="w-3.5 h-3.5 mr-1" /> Add AT Period
               </button>
