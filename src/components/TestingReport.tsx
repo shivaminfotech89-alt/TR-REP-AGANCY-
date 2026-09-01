@@ -435,7 +435,31 @@ export default function TestingReport() {
     const selectedJobs = Array.from<string>(selectedJobIds).map(id => jobs.find(j => j.id === id)!).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
     const printDate = formatDDMMYYYY(selectedJobs[0]?.testingDate || new Date());
 
-    // Chunk jobs for clean landscape A4 pagination (8 jobs per page)
+    /**
+     * EIGHT ROWS A PAGE - AND, LIKE THE INSPECTION REPORTS, IT IS NOT A VERTICAL LIMIT
+     * (AUDIT G21).
+     *
+     * ⚠ THE PREVIOUS JUSTIFICATION WAS "Chunk jobs for clean landscape A4 pagination (8 jobs
+     * per page)". That restates the value and asserts a result; it is not a model. The two
+     * inspection reports had no comment at all. This is the model all three lacked.
+     *
+     * LANDSCAPE A4, 21 column slots across 297mm. The content area is ~176mm, and eight rows
+     * plus the title, header and signature block use about 88mm after G21's enlargement -
+     * roughly 88mm SPARE, about half the page. So the binding constraint here is WIDTH, which
+     * is the opposite of what a row count implies.
+     *
+     * ⚠ THE ROW HEIGHT IS WHAT MADE THE ENLARGEMENT NEARLY FREE, AND IT IS TAILWIND-VERSION-
+     * DEPENDENT. `<tr className="... h-6.5">` resolves to 26px ONLY because this project is on
+     * Tailwind v4, which generates spacing dynamically. 6.5 is not in v3's fixed scale: under
+     * v3, or under a config that pins the scale, the class emits NOTHING and the rows fall
+     * back to sizing from their content. That would change how this document paginates without
+     * anyone touching this file. On a table row the height is a MINIMUM anyway, so the five
+     * cells that stack two lines grow it by ~1px each at 9.5px - about 2mm down the page,
+     * which is why the enlargement was nearly free rather than free.
+     *
+     * ⚠ IF THE TEXT EVER OVERFLOWS 297mm, the honest fixes are FEWER COLUMNS PER PAGE or a
+     * SMALLER CHUNK_SIZE. Not smaller type - unreadable print is the fault G21 fixed.
+     */
     const CHUNK_SIZE = 8;
     const jobChunks: typeof selectedJobs[] = [];
     for (let i = 0; i < selectedJobs.length; i += CHUNK_SIZE) {
@@ -489,7 +513,7 @@ export default function TestingReport() {
                       <span>TOTAL TRANSFORMERS: <strong>{selectedJobs.length}</strong></span>
                     </div>
 
-                    <table className="w-full border-collapse border border-black text-[8px] text-center">
+                    <table className="w-full border-collapse border border-black text-[9.5px] text-center">
                       <thead>
                         <tr className="bg-slate-100 print:bg-transparent">
                           <th rowSpan={2} className="border border-black p-0.5 w-5">Sr.</th>
@@ -509,7 +533,7 @@ export default function TestingReport() {
                           <th rowSpan={2} className="border border-black p-0.5 w-9">%Imp</th>
                           <th rowSpan={2} className="border border-black p-0.5 min-w-[45px]">Remarks</th>
                         </tr>
-                        <tr className="bg-slate-100 print:bg-transparent text-[7.5px]">
+                        <tr className="bg-slate-100 print:bg-transparent text-[8.5px]">
                           <th className="border border-black p-0.5 font-normal">LV Volts</th>
                           <th className="border border-black p-0.5 font-normal">Ex. Amp</th>
                           <th className="border border-black p-0.5 font-normal">Loss (W)</th>
@@ -533,15 +557,15 @@ export default function TestingReport() {
                               <td className="border border-black p-0.5 font-bold uppercase text-left pl-1">
                                 <div className="leading-tight">{job.jobNo}</div>
                                 {job.serialNo && (
-                                  <div className="text-[6.5px] font-mono font-medium text-slate-600 leading-tight">SN: {job.serialNo}</div>
+                                  <div className="text-[8.5px] font-mono font-medium text-slate-600 leading-tight">SN: {job.serialNo}</div>
                                 )}
                               </td>
                               <td className="border border-black p-0.5 text-left pl-1">
-                                <div className="text-[7.5px] font-mono font-bold leading-tight">{job.mrNo || '-'}</div>
-                                <div className="text-[6.5px] font-mono text-slate-600 leading-tight">Dt: {mrDateStr}</div>
+                                <div className="text-[8.5px] font-mono font-bold leading-tight">{job.mrNo || '-'}</div>
+                                <div className="text-[8.5px] font-mono text-slate-600 leading-tight">Dt: {mrDateStr}</div>
                               </td>
                               <td className="border border-black p-0.5 font-bold whitespace-nowrap">
-                                {job.capacityKva} <span className="font-normal text-[7px]">({job.coreType || 'CRGO'})</span>
+                                {job.capacityKva} <span className="font-normal text-[8.5px]">({job.coreType || 'CRGO'})</span>
                               </td>
                               {/* Defaults to OGP, matching EstimateGenerate and
                                   SingleJobEstimateReport. This used to default to 'GP',
@@ -551,7 +575,7 @@ export default function TestingReport() {
                                   "free of cost, never billed". No job currently has the
                                   field unset - this is defensive, not corrective. */}
                               <td className="border border-black p-0.5 font-bold uppercase">{job.repairType || 'OGP'}</td>
-                              <td className="border border-black p-0.5 text-[7px] text-center font-mono leading-tight">
+                              <td className="border border-black p-0.5 text-[8.5px] text-center font-mono leading-tight">
                                 <div>E: {extDateStr}</div>
                                 <div>I: {intDateStr}</div>
                               </td>
@@ -565,13 +589,13 @@ export default function TestingReport() {
                               <td className="border border-black p-0.5 font-bold">{data.loadLoss}</td>
                               <td className="border border-black p-0.5">{data.neutralCurrent}</td>
                               
-                              <td className="border border-black p-0.5 text-[7px]">{data.highVoltageTest || 'Passed (60s)'}</td>
-                              <td className="border border-black p-0.5 text-[7.5px]">{data.dvdfTest || 'Passed'}</td>
-                              <td className="border border-black p-0.5 text-[7.5px]">{data.insulationResistance}</td>
-                              <td className="border border-black p-0.5 font-bold text-[7.5px]">{data.oilBdv}</td>
-                              <td className="border border-black p-0.5 text-[7.5px]">{data.ratioTest}</td>
-                              <td className="border border-black p-0.5 text-[7.5px]">{data.percentageImpedance}</td>
-                              <td className="border border-black p-0.5 text-[7px] font-medium">{data.remarks || 'OK'}</td>
+                              <td className="border border-black p-0.5 text-[8.5px]">{data.highVoltageTest || 'Passed (60s)'}</td>
+                              <td className="border border-black p-0.5 text-[8.5px]">{data.dvdfTest || 'Passed'}</td>
+                              <td className="border border-black p-0.5 text-[8.5px]">{data.insulationResistance}</td>
+                              <td className="border border-black p-0.5 font-bold text-[8.5px]">{data.oilBdv}</td>
+                              <td className="border border-black p-0.5 text-[8.5px]">{data.ratioTest}</td>
+                              <td className="border border-black p-0.5 text-[8.5px]">{data.percentageImpedance}</td>
+                              <td className="border border-black p-0.5 text-[8.5px] font-medium">{data.remarks || 'OK'}</td>
                             </tr>
                           );
                         })}
@@ -584,16 +608,16 @@ export default function TestingReport() {
                       <div className="text-center">
                         <div className="h-8"></div>
                         <div className="border-t border-dotted border-black pt-0.5">TESTING SUPERVISED / WITNESSED</div>
-                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer / AEE</div>
+                        <div className="text-[9px] text-slate-700 font-normal">Junior Engineer / AEE</div>
                       </div>
                       <div className="text-center">
                         <div className="h-8 flex items-center justify-center">
-                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[7.5px] text-slate-500 font-normal">
+                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[8.5px] text-slate-500 font-normal">
                             OFFICIAL STAMP
                           </div>
                         </div>
                         <div className="border-t border-dotted border-black pt-0.5">TESTED BY & AUTHORIZED SIGNATORY</div>
-                        <div className="text-[8px] text-slate-700 font-normal">{auth.currentUser?.displayName || 'Testing Engineer'} - {activeAgency?.name}</div>
+                        <div className="text-[9px] text-slate-700 font-normal">{auth.currentUser?.displayName || 'Testing Engineer'} - {activeAgency?.name}</div>
                       </div>
                     </div>
                   )}
