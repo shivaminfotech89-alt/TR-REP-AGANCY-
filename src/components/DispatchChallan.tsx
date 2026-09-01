@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
+import { CARD, CARD_PAD, NUM, TONE, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
@@ -617,7 +618,7 @@ export default function DispatchChallan() {
     <div className="w-full max-w-full overflow-x-hidden space-y-3 sm:space-y-4 pb-28 sm:pb-16 print:m-0 print:max-w-full print:p-0 print:pb-0">
       
       {/* 1. TOP HEADER & RESPONSIVE TAB SWITCHER */}
-      <div className="bg-slate-900 rounded-xl sm:rounded-2xl p-3 sm:p-4 text-white shadow-md border border-slate-800 print:hidden w-full">
+      <div className="bg-slate-900 rounded-lg p-2.5 sm:p-3 text-white border border-slate-800 print:hidden w-full">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
           
           {/* Title & Brand info */}
@@ -650,13 +651,13 @@ export default function DispatchChallan() {
               onClick={() => setActiveTab('pending')}
               className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg font-bold text-xs transition-all min-h-[38px] ${
                 activeTab === 'pending'
-                  ? 'bg-blue-600 text-white shadow-xs ring-1 ring-blue-400/40'
+                  ? 'bg-blue-600 text-white ring-1 ring-blue-400/40'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <Truck className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">Pending</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ${activeTab === 'pending' ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-300'}`}>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums shrink-0 ${activeTab === 'pending' ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-300'}`}>
                 {pendingJobs.length}
               </span>
             </button>
@@ -666,13 +667,13 @@ export default function DispatchChallan() {
               onClick={() => setActiveTab('history')}
               className={`flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg font-bold text-xs transition-all min-h-[38px] ${
                 activeTab === 'history'
-                  ? 'bg-purple-600 text-white shadow-xs ring-1 ring-purple-400/40'
+                  ? 'bg-purple-600 text-white ring-1 ring-purple-400/40'
                   : 'text-slate-300 hover:text-white hover:bg-slate-700/50'
               }`}
             >
               <History className="w-3.5 h-3.5 shrink-0" />
               <span className="truncate">Dispatched</span>
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono shrink-0 ${activeTab === 'history' ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-300'}`}>
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums shrink-0 ${activeTab === 'history' ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-300'}`}>
                 {allDispatchedJobs.length}
               </span>
             </button>
@@ -693,12 +694,12 @@ export default function DispatchChallan() {
                 onClick={() => setSelectedDivision('All')}
                 className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
                   selectedDivision === 'All'
-                    ? 'bg-blue-600 text-white shadow-xs'
+                    ? 'bg-blue-600 text-white'
                     : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
                 }`}
               >
                 <span>All</span>
-                <span className="text-[10px] px-1.5 py-0.2 bg-black/30 rounded-full font-mono">
+                <span className="text-[10px] px-1.5 py-0.2 bg-black/30 rounded-full font-mono tabular-nums">
                   {pendingJobs.length}
                 </span>
               </button>
@@ -713,12 +714,12 @@ export default function DispatchChallan() {
                     onClick={() => setSelectedDivision(div)}
                     className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
                       isSelected
-                        ? 'bg-cyan-600 text-white shadow-xs'
+                        ? 'bg-cyan-600 text-white'
                         : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
                     }`}
                   >
                     <span>{div}</span>
-                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-400'}`}>
+                    <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums ${isSelected ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-400'}`}>
                       {count}
                     </span>
                   </button>
@@ -747,7 +748,7 @@ export default function DispatchChallan() {
         <div className="space-y-3 sm:space-y-4 print:hidden w-full">
 
           {/* SECTION A: CHALLAN METADATA & DISPATCH FORM */}
-          <div className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl p-3.5 sm:p-4 shadow-xs">
+          <div className={`${CARD} ${CARD_PAD}`}>
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 border-b border-slate-100 pb-2.5">
               <div className="flex items-center gap-2">
                 <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg shrink-0">
@@ -812,7 +813,7 @@ export default function DispatchChallan() {
                     type="text" 
                     value={challanNo} 
                     onChange={e => setChallanNo(e.target.value)} 
-                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
+                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono tabular-nums font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
                     placeholder="e.g. CH/2026/042" 
                   />
                 </div>
@@ -828,7 +829,7 @@ export default function DispatchChallan() {
                     type="date" 
                     value={challanDate} 
                     onChange={e => setChallanDate(e.target.value)} 
-                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
+                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono tabular-nums font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
                   />
                 </div>
               </div>
@@ -843,7 +844,7 @@ export default function DispatchChallan() {
                     type="text" 
                     value={vehicleNo} 
                     onChange={e => setVehicleNo(e.target.value.toUpperCase())} 
-                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono font-bold uppercase outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
+                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono tabular-nums font-bold uppercase outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
                     placeholder="e.g. GJ-01-AB-1234" 
                   />
                 </div>
@@ -859,7 +860,7 @@ export default function DispatchChallan() {
                     type="date" 
                     value={deliveryDate} 
                     onChange={e => setDeliveryDate(e.target.value)} 
-                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
+                    className="w-full pl-9 pr-3 py-2.5 border border-slate-200 rounded-lg text-xs sm:text-sm font-mono tabular-nums font-bold outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-200 bg-slate-50/50 focus:bg-white transition-colors" 
                   />
                 </div>
               </div>
@@ -874,7 +875,7 @@ export default function DispatchChallan() {
                     <span>{selectedJobIds.size} Selected</span>
                   </span>
                   <span className="text-slate-400 hidden xs:inline">&bull;</span>
-                  <span className="text-slate-700 font-bold font-mono bg-white px-2 py-0.5 rounded border border-blue-200">
+                  <span className="text-slate-700 font-bold font-mono tabular-nums bg-white px-2 py-0.5 rounded border border-blue-200">
                     {selectedTotalKva} KVA
                   </span>
                   <span className="text-slate-400 hidden xs:inline">&bull;</span>
@@ -902,7 +903,7 @@ export default function DispatchChallan() {
           </div>
 
           {/* SECTION B: SELECT READY TRANSFORMERS */}
-          <div className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl overflow-hidden shadow-xs">
+          <div className={`${CARD} overflow-hidden`}>
             
             {/* FILTER & SELECTION CONTROLS HEADER */}
             <div className="p-3 sm:p-4 border-b border-slate-200 bg-slate-50/80 flex flex-col lg:flex-row justify-between items-stretch lg:items-center gap-2.5">
@@ -925,14 +926,14 @@ export default function DispatchChallan() {
                   <button
                     type="button"
                     onClick={() => setJobCategoryFilter('Repairable')}
-                    className={`px-2.5 py-1 rounded-md transition-all ${jobCategoryFilter === 'Repairable' ? 'bg-emerald-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-2.5 py-1 rounded-md transition-all ${jobCategoryFilter === 'Repairable' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
                     OK ({repairableCount})
                   </button>
                   <button
                     type="button"
                     onClick={() => setJobCategoryFilter('Scrap')}
-                    className={`px-2.5 py-1 rounded-md transition-all ${jobCategoryFilter === 'Scrap' ? 'bg-rose-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}
+                    className={`px-2.5 py-1 rounded-md transition-all ${jobCategoryFilter === 'Scrap' ? 'bg-rose-600 text-white' : 'text-slate-600 hover:text-slate-900'}`}
                   >
                     Scrap ({scrapCount})
                   </button>
@@ -1008,7 +1009,7 @@ export default function DispatchChallan() {
                 </div>
               ) : (
                 <div className="overflow-x-auto w-full">
-                  <table className="w-full text-left text-xs border-collapse min-w-[1000px]">
+                  <table className={`${TABLE} text-xs min-w-[1000px]`}>
                     <thead>
                       <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
                         <th className="p-2 text-center w-10">
@@ -1038,6 +1039,25 @@ export default function DispatchChallan() {
                     </thead>
                     <tbody className="divide-y divide-slate-100">
                       {filteredPendingJobs.map(job => {
+                        /**
+                         * ⚠ THE ROW TINT AND THE SELECTED STATE ARE DELIBERATELY NOT TOKENS
+                         * (AUDIT G13).
+                         *
+                         * `bg-amber-50/60` for scrap, `bg-blue-50` / `bg-rose-100/80` for a
+                         * selected row and `bg-blue-600` / `bg-rose-600` for its checkbox were
+                         * CONTRAST-MEASURED against each other and against GP brown (#5B3A1A,
+                         * GP_TEXT_CLASS), which appears in these same rows. Four states overlap
+                         * here - scrap, selected, selected-scrap, GP text - and the pairing was
+                         * checked, not chosen.
+                         *
+                         * ⚠ DO NOT TIDY THESE INTO chip() OR TONE. `TONE.warn` is a different
+                         * amber and `TONE.bad` a different rose; substituting them would look
+                         * like a cleanup and would silently re-open a measurement. ui.ts names
+                         * this set as one of its three exclusions - see the THEMES block there.
+                         *
+                         * Everything around them uses the token vocabulary. The point of this
+                         * screen in the restyle pass was to show the two can sit side by side.
+                         */
                         const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
                         const isSelected = selectedJobIds.has(job.id);
 
@@ -1058,16 +1078,16 @@ export default function DispatchChallan() {
                                 {isSelected && <CheckCircle2 className="w-3.5 h-3.5" />}
                               </div>
                             </td>
-                            <td className="p-2 font-mono font-bold">
+                            <td className="p-2 font-mono tabular-nums font-bold">
                               <span className="flex items-center gap-1.5">
                                 <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
                                 {matchesGpFilter(job, 'GP') && <GpChip />}
                               </span>
                             </td>
-                            <td className="p-2 font-mono text-slate-700">{job.mrNo || '-'}</td>
+                            <td className="p-2 font-mono tabular-nums text-slate-700">{job.mrNo || '-'}</td>
                             <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
-                            <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
-                            <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
+                            <td className="p-2 font-mono tabular-nums text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
+                            <td className="p-2 text-center font-mono tabular-nums font-bold text-slate-900">{job.capacityKva}</td>
                             <td className="p-2 font-semibold text-slate-700 truncate max-w-[110px]" title={job.coreType || 'CRGO'}>{job.coreType || 'CRGO'}</td>
                             <td className="p-2 text-center">
                               {matchesGpFilter(job, 'GP')
@@ -1076,7 +1096,7 @@ export default function DispatchChallan() {
                             </td>
                             <td className="p-2 uppercase font-semibold text-slate-700 truncate max-w-[130px]">{job.division || '-'}</td>
                             {/* Scrap jobs are never tested, so a dash here is correct, not missing data */}
-                            <td className="p-2 font-mono text-slate-600">{formatDDMMYYYY(job.testingDate)}</td>
+                            <td className="p-2 font-mono tabular-nums text-slate-600">{formatDDMMYYYY(job.testingDate)}</td>
                             <td className="p-2 text-center">
                               <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
                                 isScrap
@@ -1102,7 +1122,7 @@ export default function DispatchChallan() {
                   <span>Select ready transformers above to generate and dispatch delivery challan.</span>
                 ) : (
                   <span className="font-bold text-slate-800">
-                    Ready to dispatch <span className="text-blue-600">{selectedJobIds.size}</span> unit(s) with Challan <strong className="font-mono text-purple-700">{challanNo || '(Enter Challan #)'}</strong>
+                    Ready to dispatch <span className="text-blue-600">{selectedJobIds.size}</span> unit(s) with Challan <strong className="font-mono tabular-nums text-purple-700">{challanNo || '(Enter Challan #)'}</strong>
                   </span>
                 )}
               </div>
@@ -1133,7 +1153,7 @@ export default function DispatchChallan() {
                   <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
                   <span>{selectedJobIds.size} Units ({selectedTotalKva} KVA)</span>
                 </div>
-                <div className="text-[10px] text-slate-300 font-mono truncate">
+                <div className="text-[10px] text-slate-300 font-mono tabular-nums truncate">
                   CH: {challanNo || 'Required'} &bull; {vehicleNo || 'Veh Req'}
                 </div>
               </div>
@@ -1163,13 +1183,13 @@ export default function DispatchChallan() {
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-2 sm:gap-3">
             <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs">
               <span className="text-[10px] font-bold uppercase text-slate-500 block">Total Delivered</span>
-              <span className="text-lg sm:text-2xl font-black text-slate-900 font-mono">{allDispatchedJobs.length}</span>
+              <span className="text-lg sm:text-2xl font-black text-slate-900 font-mono tabular-nums">{allDispatchedJobs.length}</span>
               <span className="text-[10px] text-slate-400 block mt-0.5">Transformers</span>
             </div>
 
             <div className="bg-white border border-emerald-200 rounded-xl p-3 shadow-xs">
               <span className="text-[10px] font-bold uppercase text-emerald-800 block">Tested OK Delivered</span>
-              <span className="text-lg sm:text-2xl font-black text-emerald-950 font-mono">
+              <span className="text-lg sm:text-2xl font-black text-emerald-950 font-mono tabular-nums">
                 {allDispatchedJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap').length}
               </span>
               <span className="text-[10px] text-emerald-700 block mt-0.5">Dispatched to Grid</span>
@@ -1177,7 +1197,7 @@ export default function DispatchChallan() {
 
             <div className="bg-white border border-rose-200 rounded-xl p-3 shadow-xs">
               <span className="text-[10px] font-bold uppercase text-rose-800 block">Scrap Returned</span>
-              <span className="text-lg sm:text-2xl font-black text-rose-950 font-mono">
+              <span className="text-lg sm:text-2xl font-black text-rose-950 font-mono tabular-nums">
                 {allDispatchedJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length}
               </span>
               <span className="text-[10px] text-rose-700 block mt-0.5">Delivered to Store</span>
@@ -1185,7 +1205,7 @@ export default function DispatchChallan() {
 
             <div className="bg-white border border-purple-200 rounded-xl p-3 shadow-xs">
               <span className="text-[10px] font-bold uppercase text-purple-800 block">Total Challans</span>
-              <span className="text-lg sm:text-2xl font-black text-purple-950 font-mono">
+              <span className="text-lg sm:text-2xl font-black text-purple-950 font-mono tabular-nums">
                 {new Set(allDispatchedJobs.map(j => j.challanNo)).size}
               </span>
               <span className="text-[10px] text-purple-700 block mt-0.5">Challan Batches</span>
@@ -1193,7 +1213,7 @@ export default function DispatchChallan() {
           </div>
 
           {/* SEARCH & FILTER CONTROLS */}
-          <div className="bg-white p-3.5 sm:p-4 rounded-xl sm:rounded-2xl border border-slate-200 shadow-xs space-y-3">
+          <div className="bg-white p-3.5 sm:p-4 rounded-lg border border-slate-200 shadow-xs space-y-3">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-2.5 pb-2.5 border-b border-slate-100">
               <div>
                 <h2 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
@@ -1429,14 +1449,14 @@ export default function DispatchChallan() {
                 const displayMrs = data.mrNos.join(', ');
 
                 return (
-                  <div key={cNo} className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs overflow-hidden transition-all hover:border-slate-300">
+                  <div key={cNo} className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden transition-all hover:border-slate-300">
                     
                     {/* CHALLAN CARD HEADER */}
                     <div className="p-3 sm:p-4 bg-slate-50/90 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2.5">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="font-bold text-slate-900 text-xs sm:text-sm md:text-base flex items-center gap-1.5 truncate">
-                            <span>Challan: <strong className="font-mono text-purple-800">{cNo}</strong></span>
+                            <span>Challan: <strong className="font-mono tabular-nums text-purple-800">{cNo}</strong></span>
                           </h3>
                           {isFilteredSubset && (
                             <span className="text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 px-1.5 py-0.2 rounded">
@@ -1446,10 +1466,10 @@ export default function DispatchChallan() {
                         </div>
                         
                         <div className="text-[11px] text-slate-600 flex flex-wrap items-center gap-x-3 gap-y-0.5 mt-0.5 font-medium">
-                          <span>Date: <strong className="font-mono text-slate-800">{formatDDMMYYYY(data.challanDate)}</strong></span>
-                          <span>Vehicle: <strong className="font-mono uppercase text-slate-800">{data.vehicleNo || '-'}</strong></span>
+                          <span>Date: <strong className="font-mono tabular-nums text-slate-800">{formatDDMMYYYY(data.challanDate)}</strong></span>
+                          <span>Vehicle: <strong className="font-mono tabular-nums uppercase text-slate-800">{data.vehicleNo || '-'}</strong></span>
                           {displayDivisions && <span className="truncate max-w-xs">Div: <strong className="uppercase text-slate-800">{displayDivisions}</strong></span>}
-                          {displayMrs && <span className="truncate max-w-xs">MR: <strong className="font-mono text-slate-800">{displayMrs}</strong></span>}
+                          {displayMrs && <span className="truncate max-w-xs">MR: <strong className="font-mono tabular-nums text-slate-800">{displayMrs}</strong></span>}
                         </div>
                       </div>
 
@@ -1502,7 +1522,7 @@ export default function DispatchChallan() {
                               }`}
                             >
                               <div className="flex items-center justify-between gap-1 mb-0.5">
-                                <span className="font-mono font-bold text-xs text-slate-900 truncate">{job.jobNo}</span>
+                                <span className="font-mono tabular-nums font-bold text-xs text-slate-900 truncate">{job.jobNo}</span>
                                 <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded shrink-0 ${
                                   isScrap ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-800'
                                 }`}>
@@ -1512,7 +1532,7 @@ export default function DispatchChallan() {
                               <div className="text-[11px] font-bold text-slate-700 truncate">
                                 {job.capacityKva} KVA ({job.coreType || 'CRGO'}) {job.make ? `• ${job.make}` : ''}
                               </div>
-                              <div className="text-[10px] text-slate-500 font-mono mt-1 pt-1 border-t border-slate-200/60 flex flex-col gap-0.2">
+                              <div className="text-[10px] text-slate-500 font-mono tabular-nums mt-1 pt-1 border-t border-slate-200/60 flex flex-col gap-0.2">
                                 <div className="truncate">MR: <strong className="text-slate-700">{job.mrNo || '-'}</strong> ({mrDateStr})</div>
                                 {job.division && <div className="text-[9px] text-slate-400 uppercase truncate">{job.division}</div>}
                               </div>
@@ -1527,9 +1547,9 @@ export default function DispatchChallan() {
             </div>
           ) : (
             /* 2. DETAILED JOB TABLE VIEW (WITH HORIZONTAL SCROLL FOR MOBILE) */
-            <div className="bg-white border border-slate-200 rounded-xl sm:rounded-2xl shadow-xs overflow-hidden w-full">
+            <div className="bg-white border border-slate-200 rounded-lg shadow-xs overflow-hidden w-full">
               <div className="overflow-x-auto w-full">
-                <table className="w-full text-left text-xs border-collapse min-w-[1080px]">
+                <table className={`${TABLE} text-xs min-w-[1080px]`}>
                   <thead>
                     <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 uppercase tracking-wider text-[10px]">
                       <th className="p-2">Job No</th>
@@ -1552,16 +1572,16 @@ export default function DispatchChallan() {
 
                       return (
                         <tr key={job.id} className={`transition-colors whitespace-nowrap ${isScrap ? 'bg-amber-50/60 hover:bg-amber-100/60' : 'hover:bg-slate-50'}`}>
-                          <td className="p-2 font-mono font-bold">
+                          <td className="p-2 font-mono tabular-nums font-bold">
                               <span className="flex items-center gap-1.5">
                                 <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
                                 {matchesGpFilter(job, 'GP') && <GpChip />}
                               </span>
                             </td>
-                          <td className="p-2 font-mono text-slate-700">{job.mrNo || '-'}</td>
+                          <td className="p-2 font-mono tabular-nums text-slate-700">{job.mrNo || '-'}</td>
                           <td className="p-2 text-slate-800 truncate max-w-[130px]" title={job.make}>{job.make || '-'}</td>
-                          <td className="p-2 font-mono text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
-                          <td className="p-2 text-center font-mono font-bold text-slate-900">{job.capacityKva}</td>
+                          <td className="p-2 font-mono tabular-nums text-slate-600 truncate max-w-[130px]" title={job.serialNo}>{job.serialNo || '-'}</td>
+                          <td className="p-2 text-center font-mono tabular-nums font-bold text-slate-900">{job.capacityKva}</td>
                           <td className="p-2 font-semibold text-slate-700 truncate max-w-[110px]" title={job.coreType || 'CRGO'}>{job.coreType || 'CRGO'}</td>
                           <td className="p-2 text-center">
                             {matchesGpFilter(job, 'GP')
@@ -1578,8 +1598,8 @@ export default function DispatchChallan() {
                               {isScrap ? 'Scrap' : 'Repairable'}
                             </span>
                           </td>
-                          <td className="p-2 font-mono font-bold text-purple-700">{job.challanNo || '-'}</td>
-                          <td className="p-2 font-mono text-slate-600">{formatDDMMYYYY(job.challanDate)}</td>
+                          <td className="p-2 font-mono tabular-nums font-bold text-purple-700">{job.challanNo || '-'}</td>
+                          <td className="p-2 font-mono tabular-nums text-slate-600">{formatDDMMYYYY(job.challanDate)}</td>
                           <td className="p-2 text-right">
                             <button
                               type="button"
