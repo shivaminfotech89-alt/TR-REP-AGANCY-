@@ -3043,6 +3043,44 @@ same reasoning that deferred G11's read-only control.
 It belongs after the restyle pass. The standard to hold it to is the badge's: **say it in the
 words, and let the colour agree rather than carry.**
 
+### Resolved — and the rule turned out to be grammatical
+
+| condition | was | now | tone |
+|---|---|---|---|
+| coil LV weight | `Enter Wt of Coil LV to estimate` | *unchanged* | amber |
+| coil weight | `Enter Wt of Coil to estimate` | *unchanged* | amber |
+| other missing input | `Inspection incomplete - cannot estimate` | **`Enter the missing field to estimate`** | amber |
+| no external data | `External inspection missing - cannot estimate` | **`External inspection not done yet`** | grey |
+| rate missing | `Rate not configured - cannot estimate` | **`Rate not configured in Estimate Master`** | grey |
+| no limit | `Limit not configured` | *unchanged* — a button, underlined | grey |
+| fixed rate | `Fixed rate - no limit check` | *unchanged* — declarative already | grey |
+
+**Imperative for the reader's action, declarative for someone else's.** The two amber messages
+that already carried their ownership did it by being instructions; the fix was to make that the
+rule rather than an accident of two strings. Ownership now survives greyscale, photocopying and
+colour-blindness with no colour at all, and the tones still agree rather than carry.
+
+**The shared `- cannot estimate` suffix was the actual defect and is gone from the grey pair.**
+That suffix is what made the amber and grey messages twins — same pattern, same length, same
+italic weight. Removing it breaks the resemblance at its source rather than compensating for it.
+`Rate not configured in Estimate Master` also now names where the fix lives, so nobody infers
+it from the colour.
+
+### Two things this deliberately did not do
+
+**It does not name the field in the fallback**, because it cannot: `EstimateRateError` carries
+`kind` and `message` and nothing else, and the two coil messages identify themselves by
+substring-matching their own prose. See **O36**.
+
+**It does not change the tone on two branches where amber is arguably wrong** — a conservator
+weight with no field anywhere in the app, and a KV Rating that lives on the other screen. Both
+are logic defects that no rewording fixes, and disguising them with better words would have been
+worse than leaving them visible. See **O37**.
+
+That split is the same discipline as the deferral itself: **a wording change fixes wording.**
+Where the words were carrying a defect rather than causing one, they were left alone and the
+defect was written down.
+
 ---
 
 ## G19. The last screen, and a guard that caught a comment describing a deleted system
@@ -5932,6 +5970,87 @@ The `unparsed` and `unparsedKeys` fields, and the amber block that rendered them
 **deleted along with the discrepancy that produced them** rather than moved somewhere better
 — there was nothing left to report. After: counters identical for every agency and every
 key, and no stored job number read differently by the two rules.
+
+---
+
+### O36. Estimate errors do not carry where they came from, so the UI matches on their prose
+
+**Found while doing G18's wording change, and it is the reason that change could not go
+further.** `EstimateRateError` is:
+
+```ts
+export interface EstimateRateError {
+  kind: 'missing-rate' | 'missing-input';
+  message: string;
+}
+```
+
+`kind` separates *configuration* from *observation*, which is what F79 needed and it works.
+But **nothing identifies the field**, so `renderCircleLimitIndicator` recovers it the only way
+left — by substring-matching the error's own prose:
+
+```js
+inputErrors.some(e => e.message.includes('Wt of Coil LV'))
+inputErrors.some(e => e.message.includes('Wt of Coil'))
+```
+
+Two consequences, one live and one latent.
+
+**Live: the fallback message cannot name its field.** G18 asked whether *"Enter the missing
+field to estimate"* could name the field the way the two coil messages do. It cannot, and
+naming it would mean four or five more substring matches on sentences written for humans —
+deepening the coupling rather than paying it off. The hover title carries the specifics instead.
+
+**Latent: this is the pattern with its own entry in this file** — *a comparison against a
+literal the producing code never emits*. It is currently correct only because both sides sit in
+files that were edited together. Rewording `"Wt of Coil LV"` in `SingleJobEstimateReport.tsx`
+for clarity — a change no reviewer would flag — silently drops the indicator to the generic
+message. It type-checks, it runs, and the branch it wrongly selects is a real one.
+
+Note also the **ordering dependency**: `'Wt of Coil LV'` must be tested before `'Wt of Coil'`,
+because the second is a prefix of the first. Nothing in either file says so.
+
+**The fix** is a structured origin on the error — the field key and the screen it lives on —
+which `kind`'s own doc comment already gestures at by claiming `'missing-input'` is *"fixed on
+the inspection form, by the person in front of it."* **O37 shows that claim is not always
+true**, which is a second reason the origin should be data rather than prose.
+
+Deferred deliberately: it touches the estimate module every consumer reads, and it was not
+going to be done correctly inside a wording change.
+
+---
+
+### O37. Two branches where "your next action" is not the operator's action
+
+Both reached through the same amber message, both found while scoping G18, and **neither is
+fixable by wording** — which is why G18 changed the words and left the tone alone.
+
+**The conservator branch points at a field that does not exist.** Schedule-A 18b prices
+conservator replacement per kilogram; `damCtTank` is an integer *count*. When it is non-zero the
+estimate raises a `missing-input` error saying *"no conservator weight is recorded anywhere"* —
+and it is right: there is no such field in `ExternalInspection`, `InternalInspection` or the
+job. The indicator then renders it amber, meaning *your next action*, for a value the operator
+has nowhere to enter.
+
+**Blast radius today is zero** — the census recorded at `SingleJobEstimateReport.tsx:621` found
+0 jobs with `damCtTank > 0` across both agencies. That is what makes it an open item rather
+than a defect to fix now, and also what makes it easy to leave: it will surface the first time
+an inspector records a damaged conservator, on a bench, with no way forward.
+
+**This is a data-model decision, not a rename.** Either the case is grey and says the weight
+cannot be recorded anywhere, or `damCtTank > 0` is refused at the External inspection with a
+message saying it cannot be priced, or the field is added. Choosing between those is not a
+presentation question.
+
+**The KV-rating branch is on the other screen.** A blank KV Rating blocks HV bushing pricing;
+the field lives on the **External** inspection, while the indicator is rendered on the
+**Internal** one. Amber is defensible — it is still the operator's action — but the words must
+not say *"this inspection"*, which is why G18 rejected *"Complete this inspection to estimate"*
+in favour of a message that stays silent about the screen. **Saying the wrong screen is the
+exact failure F79 was written about.**
+
+Fixing it properly means the error carrying its origin as structured data — see **O36**. Doing
+it by matching message text would extend the coupling O36 exists to remove.
 
 ---
 

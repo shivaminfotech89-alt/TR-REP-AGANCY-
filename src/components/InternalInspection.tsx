@@ -749,20 +749,41 @@ export default function InternalInspection() {
     // that is actually missing. "Rate not configured" used to cover both a missing rate
     // and a missing measurement - see EstimateRateError - which sent an operator to the
     // Estimate Master to fix a field on the row in front of them.
+    //
+    // ⚠ GRAMMATICAL MOOD CARRIES THE OWNERSHIP, NOT THE COLOUR (AUDIT G18).
+    //
+    //     IMPERATIVE  ("Enter ...")        = the reader's own next action   -> amber
+    //     DECLARATIVE ("... not done yet") = a precondition or a setting    -> grey
+    //
+    // The tones remain and still agree, but they no longer have to be seen. Photocopy this
+    // column, print it in greyscale, hand it to a colour-blind operator: the distinction is
+    // in the sentence.
+    //
+    // ⚠ THE SHARED "- cannot estimate" SUFFIX WAS THE DEFECT AND IS DELIBERATELY GONE from
+    // the grey pair. It made "Inspection incomplete - cannot estimate" (your action) and
+    // "External inspection missing - cannot estimate" (not your action) the same sentence
+    // pattern at the same length in the same italic weight - two identical-looking grey lines
+    // meaning opposite things. Do not reintroduce a common suffix across the two families.
+    //
+    // ⚠ THE FALLBACK CANNOT NAME ITS FIELD, and this is a limitation, not a preference.
+    // `EstimateRateError` carries `kind` and `message` and nothing else, so the two coil
+    // messages below identify themselves by SUBSTRING-MATCHING their own prose. Extending
+    // that to name the remaining fields would deepen exactly the coupling that OPEN item
+    // O36 exists to remove. The hover title carries the specifics until it does.
     const inputErrors = est.rateErrors.filter(e => e.kind === 'missing-input');
     const rateProblems = est.rateErrors.filter(e => e.kind === 'missing-rate');
     const blockedMessage = !externalDataSaved
-      ? 'External inspection missing - cannot estimate'
+      ? 'External inspection not done yet'
       : inputErrors.length > 0
         ? (inputErrors.some(e => e.message.includes('Wt of Coil LV'))
             ? 'Enter Wt of Coil LV to estimate'
             : inputErrors.some(e => e.message.includes('Wt of Coil'))
               ? 'Enter Wt of Coil to estimate'
-              : 'Inspection incomplete - cannot estimate')
+              : 'Enter the missing field to estimate')
         : !check.hasLimit
           ? 'Limit not configured'
           : rateProblems.length > 0
-            ? 'Rate not configured - cannot estimate'
+            ? 'Rate not configured in Estimate Master'
             : null;
     if (blockedMessage) {
       // "Limit not configured" is a setup gap - offer the route, not just the message.
@@ -790,6 +811,12 @@ export default function InternalInspection() {
       }
       // An input problem is the operator's own next action, so it is amber rather than
       // grey - grey reads as "nothing to do here", which is the opposite of the case.
+      // Since G18 the words say this too; the colour agrees rather than carries.
+      //
+      // ⚠ AMBER IS NOT ALWAYS TRUE FOR THIS BRANCH - see OPEN items O36 and O37. One residual
+      // case points at a field on the EXTERNAL inspection, and one points at a conservator
+      // weight that has no field anywhere in the app. Both are logic defects and neither is
+      // fixable by wording, so G18 left the tone alone rather than disguise them.
       const isInput = inputErrors.length > 0;
       return (
         <span className={`block text-[9px] font-semibold italic ${isInput ? 'text-amber-700' : 'text-slate-400'}`}
