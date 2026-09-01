@@ -778,6 +778,102 @@ See the sweep results at O23.
 
 ---
 
+## Pattern: one printed document was fitted against a reference; the other three were guessed
+
+The estimate paginates through `layoutEstimatePages`, which carries a real millimetre budget —
+`JOB_BOX_MM`, `TOTALS_MM`, `SIGN_MM`, `ROW_MM`, `FALLBACK_CONTENT_MM`, every one of them
+measured and corrected against the CSS when G7 fitted the sheet to a single A4 page.
+
+The three landscape reports paginate through a hard-coded row count and nothing else:
+
+| document | number | justification found in the code |
+|---|---|---|
+| Estimate | `layoutEstimatePages` | a mm budget, per element (G7) |
+| External Inspection | `CHUNK_SIZE = 9` | none — bare constant (G20) |
+| Internal Inspection | `CHUNK_SIZE = 9` | none — bare constant (G20) |
+| Testing Report | `CHUNK_SIZE = 8` | *"clean landscape A4 pagination (8 jobs per page)"* — the value restated, not a model (G21) |
+
+**Three documents with hard-coded row counts and no budget behind any of them is a pattern,
+not three coincidences.** The difference is not care taken on the estimate and care withheld
+elsewhere: **the estimate was fitted against a reference document — Ravi Electric's printed
+estimate for job 21SRVOH-1, supplied by the user — and the other three never were.** A number
+gets a model when something forces a comparison against paper. Nothing ever forced one here.
+
+What the guessing cost was measurable once measured: all three landscape sheets were leaving
+**roughly half to two-thirds of the page empty** while printing text at 6.5–7.5px, small enough
+that the user could not read it. The row count implied a vertical limit; the binding constraint
+was width the whole time. G20 and G21 gave each number the model it lacked rather than changing
+it — the constants were not wrong, they were merely unexplained, and an unexplained constant
+invites the next reader to spend from a budget nobody has written down.
+
+### And a fourth case, which is the worse one: a model that is incomplete rather than absent
+
+The fixed-rate estimate — *ESTIMATE FOR REPAIRING OF … / FIXED RATE (Internal & External)*, the
+Amorphous and Wound Core format — sits in the same file as the itemised sheet and **shares
+`layoutEstimatePages`**. The calculation returns early; the render does not. So this document
+paginates through the one real mm model in the codebase.
+
+**And the model does not describe it.** The constants were derived for the itemised sheet, and
+the fixed-rate branch prints three blocks that sheet does not have — the sub-heading, the
+1,024-character clause paragraph, and the two notes. Roughly **62 mm of content the budget does
+not know exists** (about 75 mm after G22 enlarged them).
+
+| | the three landscape reports | the fixed-rate estimate |
+|---|---|---|
+| what governs pagination | a bare row count | a real mm budget |
+| what is wrong with it | there is no model | the model is not comprehensive |
+| how it reads to the next person | obviously arbitrary | **authoritative** |
+
+**An incomplete model is harder to see than an absent one, because the constants read as
+measured.** `CHUNK_SIZE = 8` announces itself as a guess to anyone who looks. `JOB_BOX_MM =
+30.5` alongside `TOTALS_MM = 29.7` and `ROW_MM = 4.8` reads as a sheet that was surveyed —
+and it was, for the other branch. Nothing in it says which caller it was surveyed for.
+
+**It has never been wrong, and the reason is slack, not correctness.** Two line items against
+the itemised sheet's 29 leave about 100 mm spare, which absorbs the 62 mm silently. Correctness
+that rests on a margin nobody has stated is indistinguishable from correctness that rests on
+the arithmetic — right up until the margin goes.
+
+**The failure mode is silent, and it is reachable by a user rather than a developer.** The
+clause is agency-editable (`agency.amorphousClauseText`). Edit it longer and the browser clips
+or spills while `layoutEstimatePages` still reports one page. There is no overflow check. The
+letterhead notice cannot fire either — `paginatedByLetterhead` requires `totalPages > 1`, which
+two rows can never reach. **Nothing would report it.** Compare G7, where the same layout
+running out of room *did* produce a notice naming the setting and the shortfall: the difference
+is that G7's shortfall went through the page count and this one would not.
+
+G22 recorded all of this in the branch rather than changing the constants, including that
+`JOB_BOX_MM` is exact for the itemised sheet and about 0.4 mm light for the fixed-rate one —
+inside `SAFETY_MM = 4`, so not worth adjusting, but worth *saying*. A constant that is exact
+for one caller and approximate for another should not present itself as uniformly measured.
+
+### A declared row height that silently stops applying — invisible in both directions
+
+Two of these documents declare a row height on `<tr>`. Both were found while enlarging the
+type, and they fail in opposite directions:
+
+| | Testing Report | fixed-rate estimate |
+|---|---|---|
+| the class | `h-6.5` | `h-4` |
+| what it asks for | 26 px | 16 px |
+| status when found | **doing the work** | **stopped doing the work** |
+| why it could break | 6.5 is not in Tailwind v3's scale — under v3, or a config that pins the scale, the class emits nothing and rows size to content | at 9.5px the cells already held 18.25 px, so the rows had outgrown 16 px and been content-sized for some time |
+| what said so | nothing | nothing |
+
+**A row height is a minimum, so it stops applying by being exceeded rather than by erroring.**
+Growing the font past it produces no warning, no layout break and no visual tell — the rows
+simply get taller and the class becomes decorative. And it can stop applying without anyone
+touching the file at all: `h-6.5`'s dependency is the *Tailwind version*, not this component.
+
+The pair is the point. `h-6.5` is a declared height carrying real weight on a foundation
+outside the file; `h-4` is a declared height carrying nothing while still reading as a
+constraint. **From inside the component the two are indistinguishable** — same syntax, same
+apparent authority, opposite truth — which is why the enlargement had to check rather than
+assume in both places. G21 left `h-6.5` alone and documented what it rests on; G22 restated
+`h-4` as `h-7` against the new type so the declared number is once again the one that decides.
+
+---
+
 ## F87. `?? ''` in JavaScript and `== ''` in a Firestore query are not the same test
 
 **JavaScript coalesces a missing field; Firestore refuses to match one.** Every place this
@@ -3010,6 +3106,176 @@ The same distinction settled the two apparent DIFFs in the proof: `getAutoJobNo`
 Eleven screens, one vocabulary in `src/lib/ui.ts`, four exclusion sets recorded with the two
 kinds distinguished (G16, G18), every printed document hashed identical, and every screen's
 guards, notices and wording verified unchanged rather than assumed.
+
+---
+
+## G20. The inspection reports: text sized to fit a page that was two-thirds empty
+
+**Reported by the user**, who could not comfortably read a printed External inspection sheet.
+That is the whole reason this was found: the restyle pass immediately before it had hashed both
+documents byte-identical eleven times over, and every one of those checks passed. **A frozen
+document is not a correct document.** The pass proved nothing had changed; nobody had asked
+whether what was there was any good.
+
+Both sheets printed their data table at **7.5px**, with individual cells narrowed to **7px** and
+**6.5px**. For comparison, the itemised estimate on the same printer is 9.5px.
+
+### The measurement that inverted the question
+
+| | External | Internal |
+|---|---|---|
+| orientation | landscape A4 | landscape A4 |
+| columns | 29 | 27 |
+| content area | ~176 mm | ~176 mm |
+| used by 9 rows + chrome | ~68 mm | ~68 mm |
+| **spare** | **~115 mm** | **~115 mm** |
+
+**Two-thirds of the page was empty while the type was too small to read.** `CHUNK_SIZE = 9` sits
+above the pagination loop and reads as a vertical capacity — nine rows, one page. It is not.
+Nine rows use about a third of the height available. The constraint that actually binds these
+documents is **29 columns across 297 mm**, which is a width, and the row count says nothing
+about it.
+
+So the number was not wrong and did not change. What it lacked was the *reason*, and a reader
+who assumed the obvious reason would reach for exactly the wrong lever.
+
+### What changed
+
+Table `7.5px → 9.5px`; the narrowed `7px` and `6.5px` cells to `8.5px`; signature sub-labels
+`8px → 9px`; the stamp box `7.5px → 8.5px`; Internal's amorphous/wound-core note band
+`8px → 9px`. Floor across both documents: **8.5px**. Nothing shrank.
+
+`CHUNK_SIZE` was given the model it never had — 29 (27) columns across 297 mm, ~115 mm of
+vertical surplus, width as the binding constraint, and the instruction that horizontal overflow
+must be answered by **fewer columns or a smaller chunk, never smaller type**, because smaller
+type is the fault being fixed and compensating that way would undo it silently.
+
+### The assertion that refused
+
+Internal's `font-mono` cell anchor did not match. The restyle pass had inserted `tabular-nums`
+into that class list, so the pre-edit string no longer existed. The script stopped rather than
+skipping the edit — **the failure was mine and the guard was right**, which is the same shape as
+the EstimateMaster and NewJob refusals earlier in this session.
+
+One error corrected during drafting: the first version of the `CHUNK_SIZE` comment said 69
+columns, taken from a `grep` of the whole file rather than the printed block. The real figures
+are 29 and 27. A model with a wrong number in it is worse than no model, because it will be
+believed.
+
+---
+
+## G21. The Testing Report, and a row height that only works because of the Tailwind version
+
+Same treatment, same document family, one structural difference worth the entry.
+
+**Sizes before:** table `8px`; sub-header row `7.5px`; stacked sub-lines `6.5px` (serial number,
+MR date) and `7.5px` (MR number); core-type suffix `7px`; chrome `10px` and `9.5px` with `8px`
+sub-labels. **Spare:** ~97 mm of a 176 mm content area — about half the page.
+
+**Sizes after:** table **`9.5px`**; every sub-line **`8.5px`**; signature sub-labels **`9px`**;
+`10px` and `9.5px` chrome untouched. Floor **8.5px**, up from 6.5px.
+
+The sub-lines deliberately did **not** go to the table's 9.5px. A sub-line at the same size as
+the value it sits under is not a sub-line, and this sheet has 21 column slots to keep legible.
+
+### `h-6.5` is valid, and only because of the Tailwind version
+
+Unlike the inspection reports, this document declares a row height: `<tr className="border
+border-black h-6.5">`. That class is not in Tailwind v3's spacing scale, and the first reading
+of it was that it was dead.
+
+**It is not.** This project is on **Tailwind v4.1.14** — CSS-first, `@import "tailwindcss"`, no
+config file — where spacing is generated dynamically and `h-6.5` resolves to `calc(var(--spacing)
+* 6.5)` = **26 px**.
+
+That verification changed the answer rather than confirming it, and the dependency it exposed is
+the durable part: **the row height is what made the enlargement nearly free, and it rests on the
+Tailwind major version, not on anything in this file.** A downgrade, or a config that pins the
+spacing scale, would silently return these rows to content-sizing and change how the document
+paginates with no diff to point at.
+
+"Nearly" free rather than free, because a `<tr>` height is a **minimum**: five cells stack two
+lines, so at 9.5px each row grows by about a pixel — roughly 2 mm down the page, against ~88 mm
+spare after the enlargement.
+
+### The comment that already existed, and was still not a model
+
+Unlike the inspection reports, `CHUNK_SIZE = 8` here had a comment:
+
+> `// Chunk jobs for clean landscape A4 pagination (8 jobs per page)`
+
+It restates the value and asserts a result. It does not say why 8, that the page is half empty,
+or which dimension binds. **A comment that names the constant and claims it works is easy to
+mistake for a justification** — arguably worse than the inspection reports' bare number, which
+at least announced itself as unexplained. Replaced with the same model: 21 column slots across
+297 mm, ~88 mm spare, width binding, the `h-6.5` dependency spelled out, and overflow answered
+by fewer columns or a smaller chunk rather than smaller type.
+
+---
+
+## G22. The fixed-rate estimate: a borrowed floor, and a budget that does not know what it is measuring
+
+The Amorphous / CRGO Wound Core document — *ESTIMATE FOR REPAIRING OF … / FIXED RATE (Internal &
+External)*. **Two line items**, against the itemised sheet's 29.
+
+Two passes, and the second one mattered more than the first.
+
+### Pass one: the prose, and the finding underneath it
+
+The clause paragraph — 1,024 characters describing what is actually being charged for — printed
+at **9px**; the LT-coil and radiator notes at **8px**. Raised to 11px and 10px, with the
+rate-error box and the Order No. line to 10px and the title to `text-base`.
+
+While measuring, the real finding: **this branch shares `layoutEstimatePages`.** The
+*calculation* returns early; the *render* does not. It maps the same pages over the same
+measured `contentMm` and the same constants — constants derived for the itemised sheet, which
+does not have this sheet's sub-heading, clause or notes. See the pattern section for why an
+incomplete model is worse than an absent one.
+
+### Pass two: the floor was borrowed, and stopping had to be derived
+
+Pass one left the table, totals, job box and signature alone because they already met "the
+9.5px target". **That target came from the itemised sheet** — 29 rows, 16 mm spare after G7
+fitted it to one page. This sheet has two rows and ~90 mm spare. There was no reason for it to
+sit at the same size as a document with fourteen times the content, and "it already meets the
+target" concealed the fact that the target belonged to something else.
+
+| | before | after |
+|---|---|---|
+| title | `text-base` | `text-lg` |
+| job box + labels | `10px` | `12px` (`w-24 → w-28`) |
+| sub-heading | `text-xs` | `text-sm` |
+| clause | `11px` | `12px` |
+| **table** | `9.5px` | **`13px`**, rows `h-4 → h-7`, cells `p-0.5 → p-1.5` |
+| notes | `10px` | `11px` |
+| totals | `9.5px` | `13px` |
+| **Final Amount** | `10.5px` | **`15px`** |
+| signature | `10px` | `13px` |
+
+Floor **11px**. Page usage 169 mm → **206 mm of 259.1 mm**, leaving **~53 mm**.
+
+**Why stop there, with 53 mm still spare.** The page is `flex flex-col justify-between`, so the
+signature block is pinned to the bottom whatever the content does. Surplus therefore becomes
+**one gap** between the notes and the signature, not more readable text; past roughly this point
+the sheet reads as a stripe of type at the top and another at the bottom. That is a limit
+derived from how this page lays out. The 9.5px floor it replaced was a number copied from a
+different document — **the distinction between those two kinds of stopping point is the entry.**
+
+### What the guards did
+
+The two printed branches live in **one file**, and `w-24`, `p-0.5`, `p-1` and `text-[10px]` all
+appear verbatim in both. Every edit was applied to the fixed-rate **slice**; a whole-file
+replace would have silently edited a document that was out of scope. The itemised block was
+asserted byte-identical (`b7b0ccd033a085f749e1d3a3b6f0b132`) against a snapshot taken in the same
+process, in both passes — **compared, not assumed**.
+
+Three assertions refused across the two passes, all three my error rather than the code's: a
+floor set to 10px while the table and totals were deliberately left at 9.5px; a label count of
+13 taken from the row layout when there are 14 spans. Each stopped before writing.
+
+Also recorded rather than fixed: `JOB_BOX_MM = 30.5` is exact for the itemised sheet and about
+0.4 mm light for this one, inside `SAFETY_MM = 4`. **A constant that is exact for one caller and
+approximate for another should say so rather than look uniformly measured.**
 
 ---
 
