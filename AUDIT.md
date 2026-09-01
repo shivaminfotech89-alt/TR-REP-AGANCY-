@@ -3275,7 +3275,85 @@ floor set to 10px while the table and totals were deliberately left at 9.5px; a 
 
 Also recorded rather than fixed: `JOB_BOX_MM = 30.5` is exact for the itemised sheet and about
 0.4 mm light for this one, inside `SAFETY_MM = 4`. **A constant that is exact for one caller and
-approximate for another should say so rather than look uniformly measured.**
+approximate for another should say so rather than look uniformly measured.** G23 extended that
+note to three constants — see below.
+
+---
+
+## G23. The overflow the budget could not have reported, however honest it became
+
+G22 left the fixed-rate sheet with ~85 mm of uncharged content against ~53 mm of margin — a
+blind spot larger than the slack hiding it — and the clause driving it is **agency-editable**
+(`agency.amorphousClauseText`). The obvious repair was to charge the sub-heading, clause and
+notes in `layoutEstimatePages` so this branch would fail the way the itemised one does: loudly,
+with a notice.
+
+**That repair would not have worked, and the reason is structural rather than incidental.**
+
+### Why charging the budget cannot produce the warning
+
+`layoutEstimatePages` relieves pressure in exactly one way: **it moves rows to another page.**
+The three uncharged blocks are not rows, and all three are `isFirst`-gated, so they are pinned
+to page 1 and there is nothing for the mechanism to move. Worse, in `fixLastPageOverflow`:
+
+```js
+if (used + cost > cap) { overflowAt = i; break; }   // i = 0 when the clause alone blows the page
+...
+if (overflowAt <= 0) break;                         // gives up, returns one page
+```
+
+A mild overgrowth pushes row 2 onto page 2 and produces a page count somebody might notice. A
+severe one — the clause alone exceeding the page — sets `overflowAt` to `0`, breaks, and returns
+**one page**. It clips silently.
+
+**So a budget-based check would go quiet exactly when the failure is worst.** That is not a bug
+inside the function; it is what a row-moving relief valve can and cannot see. Any amount of
+honesty added to the constants would have inherited it.
+
+### And it would have misattributed the cause
+
+Charging the blocks *can* push `totalPages` to 2 in the mild case — at which point
+`paginatedByLetterhead` fires and announces *"prints on 2 pages because of the letterhead
+reservation"*. Its `wouldFitWithoutReservation` computes `rowsMm` from `allRows` only and never
+sees the clause. **Charging without rewriting the notice would have converted a silent failure
+into a confidently misattributed one** — the operator reduces the header height, the fault does
+not move, and the app has actively sent them the wrong way.
+
+### What was built instead
+
+A measurement, outside `layoutEstimatePages` entirely, so the itemised document carries **no
+risk at all**: its budget is untouched, its overflow still moves rows, and
+`paginatedByLetterhead` still reports it.
+
+**It measures natural heights, not the container's.** The page is `flex flex-col
+justify-between` and both children default to `flex-shrink: 1`, so content that is too tall gets
+**compressed** rather than overflowing its parent — the container's own `scrollHeight` would
+equal its `clientHeight` and report nothing wrong. Summing each child's `scrollHeight` against
+the container's `clientHeight` is what survives that. A 1 mm floor absorbs sub-pixel rounding.
+
+The notice **names the clause, not "content"**, because the clause is the editable thing: which
+paragraph, which three settings, where to change them, and how many millimetres are being lost.
+It also says the printed sheet will not show that anything is missing — clipping leaves no mark,
+so the warning is the only evidence there will ever be.
+
+And it says what it is **not**: *"This is not the letterhead reservation and reducing the header
+or footer height will not fix it."* Two notices on one screen with different causes must each
+name their own. On this sheet only the clause notice can actually fire — two rows cannot reach
+a second page — but that is a fact about today's row count, not a property of either notice, so
+they are kept distinguishable regardless.
+
+### What this does not do
+
+**It reports the consequence; it does not make the model true.** The ~85 mm is still uncharged
+and `layoutEstimatePages` still does not know this branch exists. That was the deliberate split:
+loud failure and a truthful budget are different goals, and only one of them was needed to stop
+a division receiving a clipped estimate.
+
+The per-caller drift is now recorded as **three** constants rather than one — `JOB_BOX_MM`
+~0.4 mm light, `ROW_MM` ~2.6 mm light **per row** (G22 set these rows to `h-7` = 7.4 mm against a
+constant describing 4.8 mm), `TABLE_HEAD_MM` slightly light from `p-1 → p-1.5`. All inside
+`SAFETY_MM = 4`, all stated rather than adjusted. The `ROW_MM` divergence was introduced by G22
+and not noticed until this entry — **the same class of defect G22 was written to record.**
 
 ---
 

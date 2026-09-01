@@ -1116,6 +1116,50 @@ export default function SingleJobEstimateReport({
     : 0;
 
   const coreClass = classifyCoreType(job.coreType || 'CRGO');
+  const isFixedRate = coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE';
+
+  // Hoisted above the fixed-rate branch because the overflow effect below depends on them,
+  // and a hook cannot be declared after a conditional return.
+  const clauseText = agency?.amorphousClauseText || AMORPHOUS_ESTIMATE_TEXT.clause;
+  const noteLtCoil = agency?.amorphousNoteLtCoil || AMORPHOUS_ESTIMATE_TEXT.noteLtCoil;
+  const noteRadiator = agency?.amorphousNoteRadiator || AMORPHOUS_ESTIMATE_TEXT.noteRadiator;
+
+  /**
+   * THE FIXED-RATE SHEET'S OVERFLOW CHECK - MEASURED, NOT BUDGETED (AUDIT G23).
+   *
+   * ⚠ THIS DELIBERATELY DOES NOT GO THROUGH `layoutEstimatePages`, and the reason is that the
+   * budget could not produce this warning even if it charged for the clause. That layout
+   * relieves pressure in exactly ONE way - by moving ROWS to another page - and the clause,
+   * sub-heading and notes are not rows and are pinned to page 1 by `isFirst`. Worse,
+   * `fixLastPageOverflow` bails on `overflowAt <= 0`, i.e. when even the first row no longer
+   * fits, so a budget-based check would go quiet exactly when the overflow is WORST. This
+   * measures what the browser actually laid out instead, which has no such blind spot.
+   *
+   * ⚠ IT MEASURES NATURAL HEIGHTS, NOT THE CONTAINER'S. The page is `flex flex-col
+   * justify-between`, and both children have the default `flex-shrink: 1` - so when the content
+   * is too tall the children are COMPRESSED rather than overflowing their parent, and the
+   * parent's own scrollHeight would still equal its clientHeight and report nothing wrong.
+   * Summing each child's scrollHeight is what survives that.
+   *
+   * Runs for the fixed-rate sheet only. The itemised document is untouched by G23: it has a
+   * real budget, its overflow moves rows, and `paginatedByLetterhead` already reports it.
+   */
+  const contentColumnRef = useRef<HTMLDivElement | null>(null);
+  const [clauseOverflowMm, setClauseOverflowMm] = useState(0);
+
+  useEffect(() => {
+    if (!isFixedRate) return;
+    const column = contentColumnRef.current;
+    const container = column?.parentElement;
+    if (!column || !container) return;
+    // the signature block is the column's sibling, and is absent while rate errors are shown
+    const signature = column.nextElementSibling as HTMLElement | null;
+    const neededPx = column.scrollHeight + (signature?.scrollHeight ?? 0);
+    const overflowPx = neededPx - container.clientHeight;
+    const mm = (overflowPx / 96) * 25.4;
+    // 1mm floor: sub-pixel rounding and font-loading jitter are not an overflow
+    setClauseOverflowMm(mm >= 1 ? Math.ceil(mm) : 0);
+  }, [isFixedRate, clauseText, noteLtCoil, noteRadiator, contentMm]);
 
   /**
    * FIXED-RATE DOCUMENT (Amorphous / CRGO Wound Core) - a different printed format from the
@@ -1151,17 +1195,29 @@ export default function SingleJobEstimateReport({
    * TestingReport's `h-6.5`, where the declared height IS doing the work and would silently
    * stop if Tailwind's spacing scale changed under it - the same defect from either side.
    *
-   * ⚠ AND THE FAILURE WOULD BE SILENT. If the clause is edited longer - it is agency-editable
-   * via `agency.amorphousClauseText`, so this is a user action, not a code change - the browser
-   * clips or spills while `layoutEstimatePages` still reports one page. There is no overflow
-   * check, and the letterhead notice above cannot fire either: `paginatedByLetterhead` needs
-   * `totalPages > 1`, which two rows can never reach. Nothing would report it.
+   * ⚠ THE FAILURE USED TO BE SILENT, AND IS NOW REPORTED - BY MEASUREMENT, NOT BY THE BUDGET
+   * (AUDIT G23). If the clause is edited longer - it is agency-editable via
+   * `agency.amorphousClauseText`, so this is a user action, not a code change - the browser
+   * clips while `layoutEstimatePages` still reports one page. Charging the clause in the budget
+   * would NOT have fixed this: that layout only relieves pressure by moving rows, and it gives
+   * up entirely once even the first row does not fit, so it would fall silent precisely when
+   * the overflow is worst. The check is therefore a measurement of what was actually laid out,
+   * sitting outside `layoutEstimatePages` - see `clauseOverflowMm` above.
    *
-   * ⚠ JOB_BOX_MM = 30.5 IS EXACT FOR THE ITEMISED SHEET AND ABOUT 0.4mm LIGHT FOR THIS ONE.
-   * G22 raised the Order No. line here from 9px to 10px to match the box around it, and left
-   * the itemised sheet's at 9px. 0.4mm sits well inside SAFETY_MM = 4, so the constant was not
-   * adjusted - but a constant that is exact for one caller and slightly light for another
-   * should say so rather than look uniformly measured.
+   * ⚠ THE BUDGET ITSELF IS STILL NOT TRUE FOR THIS BRANCH. G23 reports the consequence; it does
+   * not make the model comprehensive. The ~85mm above remains uncharged.
+   *
+   * ⚠ THREE CONSTANTS ARE EXACT FOR THE ITEMISED SHEET AND APPROXIMATE FOR THIS ONE. A constant
+   * that is exact for one caller and off for another must say so rather than look uniformly
+   * measured - all three are inside SAFETY_MM = 4 per page, so they are stated, not adjusted:
+   *
+   *     JOB_BOX_MM = 30.5   ~0.4mm light   G22 raised the Order No. line 9px -> 10px -> 12px
+   *                                        here; the itemised sheet keeps 9px.
+   *     ROW_MM     = 4.8    ~2.6mm light   PER ROW. G22 set these rows to `h-7` (28px = 7.4mm)
+   *                                        against 13px text; 4.8mm describes the itemised
+   *                                        sheet's rows. ~5.2mm across the two rows here, and
+   *                                        it would scale with any row this branch gained.
+   *     TABLE_HEAD_MM = 9.1  slightly light  `p-1` -> `p-1.5` and 13px text here.
    */
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
     const isAmorphous = coreClass === 'AMORPHOUS';
@@ -1171,12 +1227,39 @@ export default function SingleJobEstimateReport({
     const subHeadingText = isAmorphous
       ? 'ESTIMATE FOR REPAIRING OF AMORPHOUS DISTRIBUTION TRANSFORMERS'
       : 'ESTIMATE FOR REPAIRING OF CRGO WOUND CORE DISTRIBUTION TRANSFORMERS';
-    const clauseText = agency?.amorphousClauseText || AMORPHOUS_ESTIMATE_TEXT.clause;
-    const noteLtCoil = agency?.amorphousNoteLtCoil || AMORPHOUS_ESTIMATE_TEXT.noteLtCoil;
-    const noteRadiator = agency?.amorphousNoteRadiator || AMORPHOUS_ESTIMATE_TEXT.noteRadiator;
-
     return (
       <>
+        {/* ⚠ TWO NOTICES CAN APPEAR ON THIS SCREEN AND THEY HAVE DIFFERENT CAUSES (AUDIT G23).
+            Each must name its own, because a notice that fires for the wrong reason is worse
+            than none: the operator changes the setting it names and the fault does not move.
+            The letterhead notice is about a RESERVATION and needs `totalPages > 1`. The clause
+            notice is about EDITABLE TEXT and is measured, so it fires on a single page. On this
+            sheet only the second can actually fire - two rows can never reach a second page -
+            but they must stay distinguishable regardless, because that is a fact about today's
+            row count and not a property of either notice. */}
+        {clauseOverflowMm > 0 && (
+          <div className="print:hidden mb-3 rounded-lg border-2 border-red-300 bg-red-50 px-3.5 py-2.5">
+            <p className="text-sm font-bold text-red-900">
+              The clause text is longer than the page allows &mdash; about{' '}
+              {clauseOverflowMm} mm of this estimate will be cut off when printed
+            </p>
+            <p className="text-xs text-red-900 mt-1">
+              This is the <strong>estimate clause paragraph</strong> for{' '}
+              {isAmorphous ? 'Amorphous' : 'CRGO Wound Core'} transformers, together with the
+              LT-coil and radiator notes below the table. They are printed in full on page one
+              and cannot flow onto a second page, so anything past the bottom margin is lost
+              rather than carried over. <strong>The printed sheet will not show that anything is
+              missing</strong> &mdash; check this warning, not the preview.
+            </p>
+            <p className="text-xs text-red-900 mt-1">
+              Shorten <strong>Amorphous clause text</strong>, <strong>LT-coil note</strong> or{' '}
+              <strong>radiator note</strong> in{' '}
+              <Link to="/agency-settings" className="font-bold underline">Agency Settings</Link>.
+              This is not the letterhead reservation and reducing the header or footer height
+              will not fix it.
+            </p>
+          </div>
+        )}
         {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
             the operator about a SETTING, not part of the estimate the division receives. */}
         {paginatedByLetterhead && (
@@ -1206,7 +1289,7 @@ export default function SingleJobEstimateReport({
           return (
             <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
               <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
-                <div>
+                <div ref={isFirst ? contentColumnRef : undefined}>
                   <div className="text-center mb-1 pb-0.5 border-b-2 border-black">
                     <h2 className="text-lg font-black uppercase tracking-wider">{titleText}</h2>
                   </div>
