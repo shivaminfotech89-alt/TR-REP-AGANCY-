@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency, getEstimateMasterForCore, atClause } from '../lib/AgencyContext';
+import { CARD, CARD_PAD, LABEL, NUM, TABLE, TH, TD } from '../lib/ui';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
 import { 
@@ -576,49 +577,49 @@ export default function Reports() {
 
       {/* Quick Metric Dashboard */}
       <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-slate-900">{stats.total}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">Total Jobs</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-amber-600">{stats.pendingExternal + stats.pendingInternal}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">In Inspection</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-blue-600">{stats.pendingTesting}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">In Testing</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-indigo-600">{stats.readyForDispatch}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">Ready Dispatch</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-emerald-600">{stats.dispatched}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">Delivered</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-purple-600">{stats.billedCount}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">Bills Sent</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-teal-600">{stats.paymentReceivedCount}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">Payments Recv</div>
         </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm text-center">
+        <div className={`${CARD} ${CARD_PAD} text-center`}>
           <div className="text-xl font-black text-rose-600">{stats.scrap}</div>
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mt-1">Scrap Jobs</div>
         </div>
       </div>
 
       {/* Main Card with Navigation Tabs */}
-      <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+      <div className={`${CARD} overflow-hidden`}>
         
         {/* Navigation Tabs */}
         <div className="flex border-b border-slate-200 bg-slate-50/50 overflow-x-auto">
@@ -626,7 +627,7 @@ export default function Reports() {
             onClick={() => setActiveTab('master')}
             className={`px-5 py-3.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-2 ${
               activeTab === 'master'
-                ? 'bg-white text-blue-700 border-b-2 border-blue-600 shadow-sm'
+                ? 'bg-white text-blue-700 border-b-2 border-blue-600'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -638,7 +639,7 @@ export default function Reports() {
             onClick={() => setActiveTab('pending')}
             className={`px-5 py-3.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-2 ${
               activeTab === 'pending'
-                ? 'bg-white text-amber-700 border-b-2 border-amber-600 shadow-sm'
+                ? 'bg-white text-amber-700 border-b-2 border-amber-600'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -650,7 +651,7 @@ export default function Reports() {
             onClick={() => setActiveTab('testing_ready')}
             className={`px-5 py-3.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-2 ${
               activeTab === 'testing_ready'
-                ? 'bg-white text-indigo-700 border-b-2 border-indigo-600 shadow-sm'
+                ? 'bg-white text-indigo-700 border-b-2 border-indigo-600'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -662,7 +663,7 @@ export default function Reports() {
             onClick={() => setActiveTab('delivered')}
             className={`px-5 py-3.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-2 ${
               activeTab === 'delivered'
-                ? 'bg-white text-emerald-700 border-b-2 border-emerald-600 shadow-sm'
+                ? 'bg-white text-emerald-700 border-b-2 border-emerald-600'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -674,7 +675,7 @@ export default function Reports() {
             onClick={() => setActiveTab('scrap')}
             className={`px-5 py-3.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap transition-colors flex items-center gap-2 ${
               activeTab === 'scrap'
-                ? 'bg-white text-rose-700 border-b-2 border-rose-600 shadow-sm'
+                ? 'bg-white text-rose-700 border-b-2 border-rose-600'
                 : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
@@ -752,21 +753,28 @@ export default function Reports() {
               No matching job records found for this report filter.
             </div>
           ) : (
-            <table className="w-full text-left text-xs border-collapse">
+            <>
+            {/* ⚠ min-w SO THE ROW SCROLLS INSTEAD OF SQUEEZING (AUDIT G15). Twelve columns, and
+                several carry two facts each - "MR No & Date", "Capacity & Make", "Estimate &
+                Billing". With no minimum they compress and wrap on a narrow screen, which
+                satisfies "hide no column" while defeating what the rule is for: the operator
+                still cannot read the row. Dispatch and Billing already carry min-w for this
+                reason; this table had none. */}
+            <table className={`${TABLE} text-xs min-w-[1100px]`}>
               <thead className="bg-slate-100 text-slate-600 border-b border-slate-200">
                 <tr>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">#</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Job No</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">MR No & Date</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Division</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Capacity & Make</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Serial No</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Current Stage</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Inspections & Testing</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Delivery Challan</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Estimate & Billing</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px]">Payment Status</th>
-                  <th className="px-3 py-3 font-bold uppercase tracking-wider text-[10px] text-right">Actions</th>
+                  <th className={`${TH}`}>#</th>
+                  <th className={`${TH}`}>Job No</th>
+                  <th className={`${TH}`}>MR No & Date</th>
+                  <th className={`${TH}`}>Division</th>
+                  <th className={`${TH}`}>Capacity & Make</th>
+                  <th className={`${TH}`}>Serial No</th>
+                  <th className={`${TH}`}>Current Stage</th>
+                  <th className={`${TH}`}>Inspections & Testing</th>
+                  <th className={`${TH}`}>Delivery Challan</th>
+                  <th className={`${TH}`}>Estimate & Billing</th>
+                  <th className={`${TH}`}>Payment Status</th>
+                  <th className={`${TH} text-right`}>Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-200">
@@ -776,15 +784,15 @@ export default function Reports() {
 
                   return (
                     <tr key={job.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-3 py-3 text-slate-400 font-mono">{idx + 1}</td>
-                      <td className="px-3 py-3 font-mono font-bold">
+                      <td className="px-3 py-3 text-slate-400 font-mono tabular-nums">{idx + 1}</td>
+                      <td className="px-3 py-3 font-mono tabular-nums font-bold">
                         <span className="flex items-center gap-1.5">
                           <span className={matchesGpFilter(job, 'GP') ? GP_TEXT_CLASS : 'text-slate-900'}>{job.jobNo}</span>
                           {matchesGpFilter(job, 'GP') && <GpChip />}
                         </span>
                       </td>
                       <td className="px-3 py-3">
-                        <div className="font-mono font-bold text-slate-800">{job.mrNo || 'N/A'}</div>
+                        <div className="font-mono tabular-nums font-bold text-slate-800">{job.mrNo || 'N/A'}</div>
                         <div className="text-[10px] text-slate-500">{cycle.receiveDate}</div>
                       </td>
                       <td className="px-3 py-3 font-medium text-slate-700">{job.division || '-'}</td>
@@ -792,7 +800,7 @@ export default function Reports() {
                         <div className="font-bold text-slate-800">{job.capacityKva} KVA</div>
                         <div className="text-[10px] text-slate-500">{job.make || '-'} ({job.coreType || 'CRGO'})</div>
                       </td>
-                      <td className="px-3 py-3 font-mono text-slate-700">{job.serialNo || '-'}</td>
+                      <td className="px-3 py-3 font-mono tabular-nums text-slate-700">{job.serialNo || '-'}</td>
                       <td className="px-3 py-3">
                         {getStageBadge(job)}
                       </td>
@@ -819,7 +827,7 @@ export default function Reports() {
                       <td className="px-3 py-3">
                         {cycle.isDelivered ? (
                           <div className="space-y-0.5">
-                            <div className="font-mono font-bold text-emerald-800">{cycle.challanNo}</div>
+                            <div className="font-mono tabular-nums font-bold text-emerald-800">{cycle.challanNo}</div>
                             <div className="text-[10px] text-slate-500">Date: {cycle.deliveryDate}</div>
                             <div className="text-[10px] text-slate-500">Vehicle: {cycle.vehicleNo}</div>
                           </div>
@@ -835,7 +843,7 @@ export default function Reports() {
                           <span className="font-bold text-slate-800">Bill Sent:</span> {cycle.billSentDate !== '-' ? `${cycle.billSentDate} (${cycle.billNo})` : 'Not Recorded'}
                         </div>
                         {cycle.billAmount > 0 && (
-                          <div className="text-slate-500 font-mono text-[10px]">
+                          <div className="text-slate-500 font-mono tabular-nums text-[10px]">
                             ₹{cycle.billAmount.toLocaleString('en-IN')}
                           </div>
                         )}
@@ -866,6 +874,7 @@ export default function Reports() {
                 })}
               </tbody>
             </table>
+            </>
           )}
         </div>
 
@@ -898,11 +907,11 @@ export default function Reports() {
             <div className="mb-4 bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs grid grid-cols-2 sm:grid-cols-4 gap-2">
               <div>
                 <span className="text-slate-400 block uppercase font-bold text-[10px]">Job No</span>
-                <span className="font-bold font-mono text-slate-800 text-sm">{editingJob.jobNo}</span>
+                <span className="font-bold font-mono tabular-nums text-slate-800 text-sm">{editingJob.jobNo}</span>
               </div>
               <div>
                 <span className="text-slate-400 block uppercase font-bold text-[10px]">MR No</span>
-                <span className="font-bold font-mono text-slate-800 text-sm">{editingJob.mrNo}</span>
+                <span className="font-bold font-mono tabular-nums text-slate-800 text-sm">{editingJob.mrNo}</span>
               </div>
               <div>
                 <span className="text-slate-400 block uppercase font-bold text-[10px]">Division</span>
@@ -939,7 +948,7 @@ export default function Reports() {
                       placeholder="e.g. UGVCL/EST/105"
                       value={dateFormData.estimateRefNo}
                       onChange={e => setDateFormData(prev => ({ ...prev, estimateRefNo: e.target.value }))}
-                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono"
+                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono tabular-nums"
                     />
                   </div>
                   <div>
@@ -949,7 +958,7 @@ export default function Reports() {
                       placeholder="e.g. 18500"
                       value={dateFormData.estimateAmount}
                       onChange={e => setDateFormData(prev => ({ ...prev, estimateAmount: e.target.value }))}
-                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono"
+                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono tabular-nums"
                     />
                   </div>
                 </div>
@@ -978,7 +987,7 @@ export default function Reports() {
                       placeholder="e.g. HE/T-42/26-27"
                       value={dateFormData.billNo}
                       onChange={e => setDateFormData(prev => ({ ...prev, billNo: e.target.value }))}
-                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono"
+                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono tabular-nums"
                     />
                   </div>
                   <div>
@@ -988,7 +997,7 @@ export default function Reports() {
                       placeholder="e.g. 21400"
                       value={dateFormData.billAmount}
                       onChange={e => setDateFormData(prev => ({ ...prev, billAmount: e.target.value }))}
-                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono"
+                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono tabular-nums"
                     />
                   </div>
                 </div>
@@ -1032,7 +1041,7 @@ export default function Reports() {
                       placeholder="e.g. 21400"
                       value={dateFormData.paymentAmount}
                       onChange={e => setDateFormData(prev => ({ ...prev, paymentAmount: e.target.value }))}
-                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono"
+                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono tabular-nums"
                     />
                   </div>
                   <div>
@@ -1042,7 +1051,7 @@ export default function Reports() {
                       placeholder="e.g. UTR#SBIN20260312001"
                       value={dateFormData.paymentRefNo}
                       onChange={e => setDateFormData(prev => ({ ...prev, paymentRefNo: e.target.value }))}
-                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono"
+                      className="w-full px-2.5 py-1.5 text-xs border rounded bg-white font-mono tabular-nums"
                     />
                   </div>
                 </div>
