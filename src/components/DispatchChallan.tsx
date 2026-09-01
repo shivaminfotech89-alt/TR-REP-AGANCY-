@@ -28,12 +28,11 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
-import { CARD, CARD_PAD, NUM, TONE, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
+import { APP_MARK, CARD, CARD_PAD, NUM, TONE, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
-import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function DispatchChallan() {
   const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
@@ -624,9 +623,9 @@ export default function DispatchChallan() {
           {/* Title & Brand info */}
           <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <img 
-              src={appLogo} 
+              src={APP_MARK} 
               alt="Logo" 
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-blue-400/40 object-cover shrink-0" 
+              className="w-10 h-10 sm:w-11 sm:h-11 shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0 flex-1">

@@ -36,8 +36,8 @@ import { useAgency, getCircleLimitsEstimateMaster, isIntakeOpen } from '../lib/A
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
-import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
+import { APP_MARK } from '../lib/ui';
 
 interface TransformerEntry {
   jobNo: string;
@@ -1893,9 +1893,9 @@ ${intakeGate.reason}`);
               <ArrowLeft className="w-4 h-4" />
             </Link>
             <img 
-              src={appLogo} 
+              src={APP_MARK} 
               alt="Logo" 
-              className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl border border-blue-400/40 object-cover shrink-0" 
+              className="w-10 h-10 sm:w-11 sm:h-11 shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0 flex-1">

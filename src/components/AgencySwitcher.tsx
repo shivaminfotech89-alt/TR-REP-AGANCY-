@@ -63,7 +63,7 @@ export default function AgencySwitcher({ appLogo }: { appLogo?: string }) {
           <img
             src={appLogo}
             alt=""
-            className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0"
+            className="w-7 h-7 sm:w-9 sm:h-9 shrink-0"
             referrerPolicy="no-referrer"
           />
         ) : (

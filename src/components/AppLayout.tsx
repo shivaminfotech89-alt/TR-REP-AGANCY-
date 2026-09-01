@@ -47,7 +47,7 @@ import AgencySettings from './AgencySettings';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
-import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
+import { APP_MARK } from '../lib/ui';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
@@ -158,9 +158,9 @@ export default function AppLayout({ user }: { user: User }) {
             className="flex items-center gap-3 min-w-0"
           >
             <img 
-              src={appLogo} 
+              src={APP_MARK} 
               alt="Transformer Logo" 
-              className="w-10 h-10 rounded-lg object-cover border border-slate-300/40 shadow-xs shrink-0" 
+              className="w-10 h-10 shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0">
@@ -481,7 +481,7 @@ export default function AppLayout({ user }: { user: User }) {
               <Menu className="w-5 h-5" />
             </button>
 
-            <AgencySwitcher appLogo={appLogo} />
+            <AgencySwitcher appLogo={APP_MARK} />
           </div>
           
           <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">

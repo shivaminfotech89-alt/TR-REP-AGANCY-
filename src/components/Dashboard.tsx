@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
 import { computeOilBalance, describeOil } from '../lib/oilBalance';
-import { CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
+import { APP_MARK, CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
 import { AllotmentWidget } from './AllotmentWidget';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -30,7 +30,6 @@ import {
   ArrowUpRight,
   Sparkles
 } from 'lucide-react';
-import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 
 export default function Dashboard() {
   const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
@@ -483,9 +482,9 @@ export default function Dashboard() {
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">
             <img 
-              src={appLogo} 
+              src={APP_MARK} 
               alt="Logo" 
-              className="w-8 h-8 rounded-lg border border-blue-400/40 object-cover shrink-0" 
+              className="w-8 h-8 shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0">

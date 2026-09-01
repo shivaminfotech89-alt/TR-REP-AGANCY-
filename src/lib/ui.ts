@@ -205,3 +205,24 @@ export const TABLE_WRAP = 'overflow-x-auto -mx-2.5 sm:mx-0 px-2.5 sm:px-0';
 export const TABLE = 'w-full text-left border-collapse';
 export const TH = 'px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 bg-slate-50 border-b border-slate-200 whitespace-nowrap';
 export const TD = 'px-2 py-1.5 text-xs text-slate-800 border-b border-slate-100 whitespace-nowrap';
+
+/**
+ * THE APP MARK - ONE FILE, SHARED BY THE TAB ICON, THE MANIFEST AND ALL 8 UI SITES (AUDIT G25).
+ *
+ * ⚠ NOT AN IMPORTED ASSET, AND DELIBERATELY SO. `public/favicon.svg` is already referenced by
+ * index.html and manifest.json; importing a copy into the bundle would give the app two marks
+ * that look identical until someone edits one. The trade-off is that files in `public/` are not
+ * content-hashed by Vite, so a future edit to the mark relies on ordinary cache expiry.
+ *
+ * ⚠ THE MARK BRINGS ITS OWN TILE, so the sites that render it carry NO `rounded-*`, `border-*`
+ * or `shadow-*`. Those were written for an opaque rectangular JPEG: a CSS radius clips into the
+ * SVG's own rounded corners, a CSS border traces a box the eye no longer sees, and a CSS shadow
+ * falls square behind a rounded shape.
+ *
+ * ⚠ THE OPAQUE NAVY TILE IS LOad-BEARING - do not make it transparent. Its light-blue strokes
+ * are only 1.8:1 against a near-white sidebar and would vanish on six of the nine themes; the
+ * tile carries them at 5.7:1 and is itself 10.4:1 against those sidebars. On the three
+ * near-black themes the tile edge is 1.9:1 and merges into the rail, but the contents still
+ * read at 10.9:1 - the silhouette floats, which is cosmetic, not a legibility failure.
+ */
+export const APP_MARK = '/favicon.svg';

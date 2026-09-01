@@ -3500,6 +3500,106 @@ changed, the checks passed, and the sentence next to it was not part of either.*
 
 ---
 
+## G25. A 1024px badge rendered at 28px, and the mark that was already in the repo
+
+**Reported by the user:** the logo is not clearly visible.
+
+The obvious diagnoses were all wrong. It was not too small, not low-resolution, and only
+secondarily a contrast problem.
+
+### What it actually was
+
+`src/assets/images/transformer_app_logo_*.jpg` is a **1024 × 1024 JPEG, 637 KB** — a circular
+badge with **three concentric rings of text** and a shaded transformer illustration with
+individually drawn coil windings. It was rendered at 8 UI sites between **28px and 64px**.
+
+| | |
+|---|---|
+| downscale at the sidebar | **25.6×** |
+| downscale at the largest site (sign-in card) | 16× |
+| share of the canvas the badge occupies | ~70% — the rest is the file's own margin |
+| effective mark inside a 40px box | **~28px** |
+
+**The fault was detail density, not resolution or box size.** At 25× reduction, ring text and
+hairline windings average toward the background and the whole resolves to a blue-grey disc with
+an orange blob. **Enlarging it would not have fixed it** — a mark drawn to be read at 300px does
+not read at 40px at any scale, which is why the remedy was a different mark rather than a bigger
+one.
+
+Two secondary faults, both consequences of it being a photograph-shaped asset: ~30% of every box
+was spent on the JPEG's opaque off-white margin, and that margin dissolved into the six
+near-white sidebars while punching a white square into the three near-black ones.
+
+### And it said VOLTCORE
+
+The badge's rings read *VOLTCORE · TRANSFORMER REPAIR · OVERHAUL SERVICES*, sitting immediately
+left of an `<h1>` reading **TR REP AGENCY**. Illegible at 28px, and wrong at 64px.
+
+Nothing found this. It is not a data fault, not a logic fault, and no check in this codebase has
+an opinion about it — **it was visible on every screen, every day, to everyone.**
+
+### The fix was already in the repository
+
+`public/favicon.svg` — five geometric paths, no text, drawn for small sizes, already referenced
+by `index.html` and `manifest.json`. The app had been carrying **two unrelated marks** and using
+the worse one everywhere except the browser tab.
+
+Measured before adopting it, from the SVG geometry:
+
+| | 28px | 40px | 64px |
+|---|---|---|---|
+| body stroke (3u) | 1.31px | 1.88px | 3px |
+| bushing pins (6u × 3u) | **2.6 × 1.3px** | 3.8 × 1.9px | 6 × 3px |
+| bolt outline (1.5u) | 0.66px — vanishes, harmlessly | 0.94px | 1.5px |
+
+The pins are the weakest element at 28px and the one thing the user is checking on screen.
+
+### The tile is load-bearing, which inverts the obvious instinct
+
+The instinct with a logo that dissolves into its background is to make it transparent. **That
+would have broken six of the nine themes.**
+
+| | ratio |
+|---|---|
+| body stroke `#93C5FD` on a **near-white sidebar**, tile removed | **1.8:1** — vanishes |
+| body stroke on its own navy tile | 5.7:1 |
+| navy tile vs the six near-white sidebars | 10.4:1 |
+| navy tile vs the three near-black sidebars | **1.9:1** — edge merges |
+| contents vs those same near-black sidebars | **10.9:1** |
+
+So on dark themes only the *silhouette* merges; the mark still reads. **A floating mark is
+cosmetic; an invisible one is not** — the two were worth separating rather than adding a ring
+speculatively for a problem nobody has seen.
+
+### The chrome was written for the old asset
+
+Every site carried `rounded-*`, `border-*` and `shadow-*`. All three assume an opaque rectangle:
+a CSS radius (fixed 8px) clips into the SVG's own corners (6.1px at 28px), a CSS border traces a
+box the eye no longer sees, and a CSS shadow falls square behind a rounded shape. All removed.
+**Replacing an asset without revisiting the styling written for it leaves decoration describing
+something that is gone** — the same shape as G24's subtitle, in CSS instead of prose.
+
+### One file, not two
+
+`APP_MARK = '/favicon.svg'` in `ui.ts`, referenced by all 8 sites. Importing a bundled copy
+would have restored the two-marks problem in a form that stays invisible until someone edits one
+of them. The trade-off is stated where the constant is defined: `public/` assets are not
+content-hashed by Vite, so a future edit relies on ordinary cache expiry.
+
+### Deliberately not done
+
+**The JPEGs stay.** `transformer_hero_bg_*.jpg` is still live as the landing hero backdrop
+(`LandingPage.tsx:211`, 14% opacity, greyscale). The logo JPEG is now unreferenced but was left
+in place pending a decision, rather than deleted in a change about legibility.
+
+**The name stays.** `TR REP AGENCY` remains in every heading and in `<title>`. The mark now
+carries no name at all, so removing VOLTCORE settles the inconsistency that existed today
+without asserting a new one.
+
+---
+
+---
+
 ## Terminology hazard: "Type" means four different things
 
 A column headed **Type** appears on five screens and means something different on

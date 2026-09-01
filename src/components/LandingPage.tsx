@@ -32,8 +32,8 @@ import {
   PhoneCall,
   Menu
 } from 'lucide-react';
-import appLogo from '../assets/images/transformer_app_logo_1786648240128.jpg';
 import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
+import { APP_MARK } from '../lib/ui';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -81,9 +81,9 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
         <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-2.5 sm:space-x-3">
             <img 
-              src={appLogo} 
+              src={APP_MARK} 
               alt="TR Rep Agency" 
-              className="w-9 h-9 sm:w-10 sm:h-10 rounded-lg object-cover border border-slate-200 shadow-xs shrink-0" 
+              className="w-9 h-9 sm:w-10 sm:h-10 shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0">
@@ -303,9 +303,9 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
                 <div className="text-center mb-5 sm:mb-6">
                   <div className="inline-block relative mb-2 sm:mb-3">
                     <img 
-                      src={appLogo} 
+                      src={APP_MARK} 
                       alt="TR Rep Agency" 
-                      className="w-14 h-14 sm:w-16 sm:h-16 rounded-xl mx-auto border-2 border-blue-100 shadow-sm object-cover" 
+                      className="w-14 h-14 sm:w-16 sm:h-16 mx-auto" 
                       referrerPolicy="no-referrer"
                     />
                     <span className="absolute -bottom-1 -right-1 bg-emerald-600 text-white text-[8px] sm:text-[9px] font-black uppercase px-1.5 py-0.5 rounded-full border-2 border-white shadow-xs">
@@ -861,9 +861,9 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
           <div className="flex flex-col md:flex-row items-center justify-between gap-4 sm:gap-6">
             <div className="flex items-center space-x-3 text-center md:text-left">
               <img 
-                src={appLogo} 
+                src={APP_MARK} 
                 alt="TR Rep Agency" 
-                className="w-8 h-8 rounded-lg object-cover border border-slate-700 shrink-0" 
+                className="w-8 h-8 shrink-0" 
                 referrerPolicy="no-referrer"
               />
               <div>
