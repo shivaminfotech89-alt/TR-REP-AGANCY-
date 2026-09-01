@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
 import { computeOilBalance, describeOil } from '../lib/oilBalance';
+import { CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
 import { AllotmentWidget } from './AllotmentWidget';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
@@ -436,10 +437,14 @@ export default function Dashboard() {
       {/* WHAT THESE FIGURES COVER — stated, not selected (AUDIT F87). The scope control is
           the sidebar's, and it is the only one; this says what it currently means so the
           numbers are never read as the agency's when they are one tender's. */}
-      <div className="flex flex-wrap items-center gap-2 bg-white rounded-xl border border-slate-200 px-3 py-2">
-        <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Showing</span>
+      {/* ⚠ RESTYLED, NOT WEAKENED (AUDIT G9). Every branch, every word and the link all stay;
+          the chips gain a DOT so the state survives a photocopy, which the pill colour alone
+          did not. Indigo/amber here are the same three tones the sidebar's tender chip uses. */}
+      <div className={`flex flex-wrap items-center gap-x-2 gap-y-1 ${CARD} px-2.5 py-1.5`}>
+        <span className={LABEL}>Showing</span>
         {showingAll ? (
-          <span className="text-[11px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">
+          <span className={chip('info')}>
+            <span className={`w-1.5 h-1.5 rounded-full ${TONE.info.dot} shrink-0`} />
             totals across every tender
           </span>
         ) : scopedAt ? (
@@ -448,7 +453,8 @@ export default function Dashboard() {
             {String(scopedAt.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
           </span>
         ) : (
-          <span className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full">
+          <span className={chip('warn')}>
+            <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0`} />
             no tender selected &mdash; nothing to show
           </span>
         )}
@@ -460,34 +466,40 @@ export default function Dashboard() {
         {!showingAll && unassignedCount > 0 && (
           <Link
             to="/mr-ledger"
-            className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2 py-0.5 rounded-full hover:bg-amber-100"
+            className={`${chip('warn')} hover:bg-amber-100`}
           >
+            <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0`} />
             {unassignedCount} job{unassignedCount === 1 ? '' : 's'} belong to no tender &mdash; not counted here
           </Link>
         )}
       </div>
 
       {/* 1. COMPACT HEADER & TOP DIVISION SELECTOR BAR */}
-      <div className="bg-slate-900 rounded-xl sm:rounded-2xl p-3.5 sm:p-4 text-white shadow-md border border-slate-800">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
+      {/* SLIMMER, SAME INFORMATION (AUDIT G9). p-3.5/p-4 + a 48px logo + rounded-2xl spent about
+          90px of vertical space on identity the sidebar already shows. Every field is kept -
+          agency, circle, unit and MR counts - in roughly half the height, which on a workshop
+          screen is one more row of the pipeline visible without scrolling. */}
+      <div className="bg-slate-900 rounded-lg p-2.5 sm:p-3 text-white border border-slate-800">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5">
             <img 
               src={appLogo} 
               alt="Logo" 
-              className="w-10 h-10 sm:w-12 sm:h-12 rounded-xl border border-blue-400/40 object-cover shrink-0" 
+              className="w-8 h-8 rounded-lg border border-blue-400/40 object-cover shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                <h1 className="text-base sm:text-lg font-black text-white truncate tracking-tight">
+                <h1 className="text-sm sm:text-base font-black text-white truncate tracking-tight">
                   {activeAgency?.name || 'TR REP AGENCY'}
                 </h1>
-                <span className="hidden sm:inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                   Circle: {activeAgency?.circleOfficeName || 'SABARMATI'}
                 </span>
               </div>
-              <p className="text-xs text-slate-400 truncate">
-                Live Workshop Dashboard &bull; {stats.totalJobs} Units ({stats.totalMrs} MRs)
+              <p className="text-[11px] text-slate-400 truncate">
+                Live Workshop Dashboard &bull; <span className={NUM_INLINE}>{stats.totalJobs}</span> Units
+                {' '}(<span className={NUM_INLINE}>{stats.totalMrs}</span> MRs)
               </p>
             </div>
           </div>
@@ -524,12 +536,12 @@ export default function Dashboard() {
               onClick={() => setSelectedDivision('All')}
               className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 ${
                 selectedDivision === 'All'
-                  ? 'bg-blue-600 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white'
                   : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
               }`}
             >
               <span>All Divisions</span>
-              <span className="text-[10px] px-1.5 py-0.2 bg-black/30 rounded-full font-mono">
+              <span className="text-[10px] px-1.5 py-0.2 bg-black/30 rounded-full font-mono tabular-nums">
                 {jobs.length}
               </span>
             </button>
@@ -544,12 +556,12 @@ export default function Dashboard() {
                   onClick={() => setSelectedDivision(div)}
                   className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1 shrink-0 ${
                     isSelected
-                      ? 'bg-cyan-600 text-white shadow-xs'
+                      ? 'bg-cyan-600 text-white'
                       : 'bg-slate-800 text-slate-300 hover:bg-slate-700 border border-slate-700'
                   }`}
                 >
                   <span>{div}</span>
-                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${isSelected ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-400'}`}>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono tabular-nums ${isSelected ? 'bg-black/30 text-white' : 'bg-slate-900 text-slate-400'}`}>
                     {count}
                   </span>
                 </button>
@@ -574,7 +586,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5">
         
         {/* 1. TRANSFORMER REPAIRED */}
-        <div className="bg-white border border-emerald-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+        <div className={`${cardTone('good')} ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] sm:text-xs font-black uppercase text-emerald-800 flex items-center gap-1 truncate">
@@ -584,30 +596,30 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl sm:text-3xl font-black text-emerald-950 font-mono">{stats.totalRepaired}</span>
+              <span className={`${METRIC} text-emerald-950`}>{stats.totalRepaired}</span>
               <span className="text-[10px] text-slate-400">units</span>
             </div>
 
             <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-emerald-100 text-[10px]">
-              <div className="bg-emerald-50/70 p-1.5 rounded">
-                <span className="text-slate-500 block leading-none">Ready</span>
-                <span className="font-bold text-emerald-900 font-mono text-xs">{stats.readyForDispatch}</span>
-              </div>
-              <div className="bg-emerald-50/70 p-1.5 rounded">
-                <span className="text-slate-500 block leading-none">Dispatched</span>
-                <span className="font-bold text-emerald-900 font-mono text-xs">{stats.dispatchedRepairable}</span>
-              </div>
+              <div>
+                  <span className="text-slate-500 block leading-none">Ready</span>
+                  <span className={`${NUM} font-bold text-emerald-900 text-xs`}>{stats.readyForDispatch}</span>
+                </div>
+              <div>
+                  <span className="text-slate-500 block leading-none">Dispatched</span>
+                  <span className={`${NUM} font-bold text-emerald-900 text-xs`}>{stats.dispatchedRepairable}</span>
+                </div>
             </div>
           </div>
 
-          <Link to="/challan/new" className="mt-2.5 pt-1.5 border-t border-slate-100 text-[11px] text-emerald-700 font-bold flex items-center justify-between hover:underline">
+          <Link to="/challan/new" className={`${CARD_LINK} text-emerald-700`}>
             <span>Challan</span>
             <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
 
         {/* 2. TRANSFORMER UNDER REPAIRING */}
-        <div className="bg-white border border-blue-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+        <div className={`${cardTone('info')} ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] sm:text-xs font-black uppercase text-blue-800 flex items-center gap-1 truncate">
@@ -617,34 +629,34 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl sm:text-3xl font-black text-blue-950 font-mono">{stats.totalUnderRepair}</span>
+              <span className={`${METRIC} text-blue-950`}>{stats.totalUnderRepair}</span>
               <span className="text-[10px] text-slate-400">units WIP</span>
             </div>
 
             <div className="grid grid-cols-3 gap-1 mt-2 pt-2 border-t border-blue-100 text-[10px] text-center">
               <div className="bg-blue-50/70 p-1 rounded">
                 <span className="text-slate-500 block text-[9px] leading-none">Ext</span>
-                <span className="font-bold text-blue-900 font-mono">{stats.pendingExternal}</span>
+                <span className="font-bold text-blue-900 font-mono tabular-nums">{stats.pendingExternal}</span>
               </div>
               <div className="bg-amber-50/70 p-1 rounded">
                 <span className="text-amber-700 block text-[9px] leading-none">Core</span>
-                <span className="font-bold text-amber-900 font-mono">{stats.pendingInternal}</span>
+                <span className="font-bold text-amber-900 font-mono tabular-nums">{stats.pendingInternal}</span>
               </div>
               <div className="bg-teal-50/70 p-1 rounded">
                 <span className="text-teal-700 block text-[9px] leading-none">Test</span>
-                <span className="font-bold text-teal-900 font-mono">{stats.pendingTesting}</span>
+                <span className="font-bold text-teal-900 font-mono tabular-nums">{stats.pendingTesting}</span>
               </div>
             </div>
           </div>
 
-          <Link to="/internal-inspection" className="mt-2.5 pt-1.5 border-t border-slate-100 text-[11px] text-blue-700 font-bold flex items-center justify-between hover:underline">
+          <Link to="/internal-inspection" className={`${CARD_LINK} text-blue-700`}>
             <span>Floor WIP</span>
             <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
 
         {/* 3. SCRAP DECLARED */}
-        <div className="bg-white border border-rose-200 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between">
+        <div className={`${cardTone('bad')} ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] sm:text-xs font-black uppercase text-rose-800 flex items-center gap-1 truncate">
@@ -654,32 +666,34 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl sm:text-3xl font-black text-rose-950 font-mono">{stats.scrapDeclared}</span>
+              <span className={`${METRIC} text-rose-950`}>{stats.scrapDeclared}</span>
               <span className="text-[10px] text-slate-400">
                 ({filteredJobs.length > 0 ? ((stats.scrapDeclared / filteredJobs.length) * 100).toFixed(0) : 0}%)
               </span>
             </div>
 
             <div className="grid grid-cols-2 gap-1 mt-2 pt-2 border-t border-rose-100 text-[10px]">
-              <div className="bg-amber-50/70 p-1.5 rounded">
+              <div>
                 <span className="text-amber-800 block leading-none">In Yard</span>
-                <span className="font-bold text-amber-950 font-mono text-xs">{stats.scrapPendingDelivery}</span>
+                <span className="font-bold text-amber-950 font-mono tabular-nums text-xs">{stats.scrapPendingDelivery}</span>
               </div>
               <div className="bg-slate-100 p-1.5 rounded">
                 <span className="text-slate-600 block leading-none">Returned</span>
-                <span className="font-bold text-slate-900 font-mono text-xs">{stats.scrapDelivered}</span>
+                <span className="font-bold text-slate-900 font-mono tabular-nums text-xs">{stats.scrapDelivered}</span>
               </div>
             </div>
           </div>
 
-          <Link to="/reports" className="mt-2.5 pt-1.5 border-t border-slate-100 text-[11px] text-rose-700 font-bold flex items-center justify-between hover:underline">
+          <Link to="/reports" className={`${CARD_LINK} text-rose-700`}>
             <span>Scrap Report</span>
             <ChevronRight className="w-3 h-3" />
           </Link>
         </div>
 
         {/* 4. SCRAP PENDING TO DELIVERED */}
-        <div className="bg-white border-2 border-amber-300 rounded-xl p-3 sm:p-4 shadow-xs flex flex-col justify-between bg-gradient-to-b from-amber-50/30 to-white">
+        {/* Kept visually LOUDEST of the four — it is the one that means someone must act. The
+            gradient goes, the accent edge stays at full weight (AUDIT G9). */}
+        <div className={`${cardTone('warn')} border-l-4 bg-amber-50/40 ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] sm:text-xs font-black uppercase text-amber-900 flex items-center gap-1 truncate">
@@ -689,7 +703,7 @@ export default function Dashboard() {
             </div>
 
             <div className="flex items-baseline gap-1.5">
-              <span className="text-2xl sm:text-3xl font-black text-amber-950 font-mono">{stats.scrapPendingDelivery}</span>
+              <span className={`${METRIC} text-amber-950`}>{stats.scrapPendingDelivery}</span>
               <span className="text-[10px] text-amber-700">units to DISCOM</span>
             </div>
 
@@ -709,67 +723,67 @@ export default function Dashboard() {
       </div>
 
       {/* 3. COMPACT LIVE WORKSHOP PIPELINE */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+      <div className={`${CARD} ${CARD_PAD}`}>
         <div className="flex items-center justify-between mb-2.5">
-          <h2 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+          <h2 className={CARD_TITLE}>
             <Activity className="w-4 h-4 text-blue-600" />
             <span>Live Workshop Lifecycle Stages</span>
           </h2>
-          <span className="text-[11px] text-slate-500 font-mono font-bold">
+          <span className="text-[11px] text-slate-500 font-mono tabular-nums font-bold">
             {stats.totalJobs} Active TRs
           </span>
         </div>
 
         <div className="grid grid-cols-4 sm:grid-cols-7 gap-1.5 text-center">
           {/* 1. Intake */}
-          <Link to="/external-inspection" className="p-2 rounded-lg bg-slate-50 hover:bg-slate-100 border border-slate-200 transition-colors">
+          <Link to="/external-inspection" className="p-1.5 rounded border border-slate-200 bg-slate-50/60 hover:bg-slate-100 transition-colors">
             <span className="text-[9px] text-slate-500 uppercase block font-bold truncate">Ext. Insp</span>
-            <span className="text-lg font-black text-slate-800 font-mono">{stats.pendingExternal}</span>
+            <span className={`${NUM} text-lg font-black text-slate-800`}>{stats.pendingExternal}</span>
           </Link>
 
           {/* 2. Core/Wind */}
-          <Link to="/internal-inspection" className="p-2 rounded-lg bg-amber-50/70 hover:bg-amber-100 border border-amber-200 transition-colors">
+          <Link to="/internal-inspection" className="p-1.5 rounded border border-amber-200 bg-amber-50/60 hover:bg-amber-100 transition-colors">
             <span className="text-[9px] text-amber-700 uppercase block font-bold truncate">Internal</span>
-            <span className="text-lg font-black text-amber-900 font-mono">{stats.pendingInternal}</span>
+            <span className={`${NUM} text-lg font-black text-amber-900`}>{stats.pendingInternal}</span>
           </Link>
 
           {/* 3. Testing */}
-          <Link to="/testing-report" className="p-2 rounded-lg bg-teal-50/70 hover:bg-teal-100 border border-teal-200 transition-colors">
+          <Link to="/testing-report" className="p-1.5 rounded border border-teal-200 bg-teal-50/60 hover:bg-teal-100 transition-colors">
             <span className="text-[9px] text-teal-700 uppercase block font-bold truncate">Testing</span>
-            <span className="text-lg font-black text-teal-900 font-mono">{stats.pendingTesting}</span>
+            <span className={`${NUM} text-lg font-black text-teal-900`}>{stats.pendingTesting}</span>
           </Link>
 
           {/* 4. Ready */}
-          <Link to="/challan/new" className="p-2 rounded-lg bg-blue-50/70 hover:bg-blue-100 border border-blue-200 transition-colors">
+          <Link to="/challan/new" className="p-1.5 rounded border border-blue-200 bg-blue-50/60 hover:bg-blue-100 transition-colors">
             <span className="text-[9px] text-blue-700 uppercase block font-bold truncate">Ready</span>
-            <span className="text-lg font-black text-blue-900 font-mono">{stats.readyForDispatch}</span>
+            <span className={`${NUM} text-lg font-black text-blue-900`}>{stats.readyForDispatch}</span>
           </Link>
 
           {/* 5. Dispatched */}
-          <Link to="/reports" className="p-2 rounded-lg bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 transition-colors">
+          <Link to="/reports" className="p-1.5 rounded border border-emerald-200 bg-emerald-50/60 hover:bg-emerald-100 transition-colors">
             <span className="text-[9px] text-emerald-700 uppercase block font-bold truncate">Delivered</span>
-            <span className="text-lg font-black text-emerald-900 font-mono">{stats.dispatchedRepairable}</span>
+            <span className={`${NUM} text-lg font-black text-emerald-900`}>{stats.dispatchedRepairable}</span>
           </Link>
 
           {/* 6. GP Guarantee */}
-          <Link to="/mr-ledger" className="p-2 rounded-lg bg-amber-100/60 hover:bg-amber-200/60 border border-amber-300 transition-colors">
+          <Link to="/mr-ledger" className="p-1.5 rounded border border-amber-200 bg-amber-50/60 hover:bg-amber-100 transition-colors">
             <span className="text-[9px] text-amber-900 uppercase block font-bold truncate">GP (Wty)</span>
-            <span className="text-lg font-black text-amber-950 font-mono">{stats.gpTotal}</span>
+            <span className={`${NUM} text-lg font-black text-amber-950`}>{stats.gpTotal}</span>
           </Link>
 
           {/* 7. Scrap */}
-          <Link to="/reports" className="p-2 rounded-lg bg-rose-50/70 hover:bg-rose-100 border border-rose-200 transition-colors col-span-2 sm:col-span-1">
+          <Link to="/reports" className="p-1.5 rounded border border-rose-200 bg-rose-50/60 hover:bg-rose-100 transition-colors col-span-2 sm:col-span-1">
             <span className="text-[9px] text-rose-700 uppercase block font-bold truncate">Scrap</span>
-            <span className="text-lg font-black text-rose-900 font-mono">{stats.scrapDeclared}</span>
+            <span className={`${NUM} text-lg font-black text-rose-900`}>{stats.scrapDeclared}</span>
           </Link>
         </div>
       </div>
 
       {/* 4. TABBED KVA BREAKDOWN MATRIX (COMPACT & MOBILE-FIRST) */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+      <div className={`${CARD} ${CARD_PAD}`}>
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 border-b border-slate-100 pb-2.5">
           <div>
-            <h3 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-1.5">
+            <h3 className={CARD_TITLE}>
               <BarChart3 className="w-4 h-4 text-indigo-600" />
               <span>KVA Capacity Breakdown Matrix</span>
             </h3>
@@ -781,7 +795,7 @@ export default function Dashboard() {
               onClick={() => setActiveKvaTab('repaired')}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                 activeKvaTab === 'repaired'
-                  ? 'bg-emerald-600 text-white shadow-xs'
+                  ? 'bg-emerald-600 text-white'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -793,7 +807,7 @@ export default function Dashboard() {
               onClick={() => setActiveKvaTab('under_repair')}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                 activeKvaTab === 'under_repair'
-                  ? 'bg-blue-600 text-white shadow-xs'
+                  ? 'bg-blue-600 text-white'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -805,7 +819,7 @@ export default function Dashboard() {
               onClick={() => setActiveKvaTab('scrap')}
               className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                 activeKvaTab === 'scrap'
-                  ? 'bg-rose-600 text-white shadow-xs'
+                  ? 'bg-rose-600 text-white'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -826,10 +840,10 @@ export default function Dashboard() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-emerald-50/70 text-emerald-900 border-b border-emerald-200">
-                    <th className="py-2 px-2.5 font-bold">Capacity</th>
-                    <th className="py-2 px-2.5 font-bold text-center">Ready in Workshop</th>
-                    <th className="py-2 px-2.5 font-bold text-center">Dispatched</th>
-                    <th className="py-2 px-2.5 font-bold text-right">Total</th>
+                    <th className="py-1.5 px-2 font-bold">Capacity</th>
+                    <th className="py-1.5 px-2 font-bold text-center">Ready in Workshop</th>
+                    <th className="py-1.5 px-2 font-bold text-center">Dispatched</th>
+                    <th className="py-1.5 px-2 font-bold text-right">Total</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -837,17 +851,17 @@ export default function Dashboard() {
                     .sort(([a], [b]) => Number(a) - Number(b))
                     .map(([kva, data]) => (
                       <tr key={kva} className="hover:bg-emerald-50/30">
-                        <td className="py-1.5 px-2.5 font-bold text-slate-900 font-mono">{kva} KVA</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-blue-700">{data.ready}</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-emerald-700">{data.dispatched}</td>
-                        <td className="py-1.5 px-2.5 text-right font-black font-mono text-emerald-950">{data.total}</td>
+                        <td className="py-1 px-2 font-bold text-slate-900 font-mono tabular-nums">{kva} KVA</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums font-bold text-blue-700">{data.ready}</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums font-bold text-emerald-700">{data.dispatched}</td>
+                        <td className="py-1 px-2 text-right font-black font-mono tabular-nums text-emerald-950">{data.total}</td>
                       </tr>
                     ))}
                   <tr className="bg-emerald-100/60 font-black text-emerald-950 border-t-2 border-emerald-300">
-                    <td className="py-2 px-2.5">TOTAL</td>
-                    <td className="py-2 px-2.5 text-center font-mono">{stats.readyForDispatch}</td>
-                    <td className="py-2 px-2.5 text-center font-mono">{stats.dispatchedRepairable}</td>
-                    <td className="py-2 px-2.5 text-right font-mono">{stats.totalRepaired} units</td>
+                    <td className="py-1.5 px-2">TOTAL</td>
+                    <td className="py-1.5 px-2 text-center font-mono tabular-nums">{stats.readyForDispatch}</td>
+                    <td className="py-1.5 px-2 text-center font-mono tabular-nums">{stats.dispatchedRepairable}</td>
+                    <td className="py-1.5 px-2 text-right font-mono tabular-nums">{stats.totalRepaired} units</td>
                   </tr>
                 </tbody>
               </table>
@@ -866,11 +880,11 @@ export default function Dashboard() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-blue-50/70 text-blue-900 border-b border-blue-200">
-                    <th className="py-2 px-2.5 font-bold">Capacity</th>
-                    <th className="py-2 px-2.5 font-bold text-center">Ext. Insp</th>
-                    <th className="py-2 px-2.5 font-bold text-center">Core & Wind</th>
-                    <th className="py-2 px-2.5 font-bold text-center">Testing</th>
-                    <th className="py-2 px-2.5 font-bold text-right">Total WIP</th>
+                    <th className="py-1.5 px-2 font-bold">Capacity</th>
+                    <th className="py-1.5 px-2 font-bold text-center">Ext. Insp</th>
+                    <th className="py-1.5 px-2 font-bold text-center">Core & Wind</th>
+                    <th className="py-1.5 px-2 font-bold text-center">Testing</th>
+                    <th className="py-1.5 px-2 font-bold text-right">Total WIP</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -878,19 +892,19 @@ export default function Dashboard() {
                     .sort(([a], [b]) => Number(a) - Number(b))
                     .map(([kva, data]) => (
                       <tr key={kva} className="hover:bg-blue-50/30">
-                        <td className="py-1.5 px-2.5 font-bold text-slate-900 font-mono">{kva} KVA</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono text-slate-700">{data.awaitingExt}</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono text-amber-700 font-bold">{data.awaitingInt}</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono text-teal-700 font-bold">{data.awaitingTest}</td>
-                        <td className="py-1.5 px-2.5 text-right font-black font-mono text-blue-950">{data.total}</td>
+                        <td className="py-1 px-2 font-bold text-slate-900 font-mono tabular-nums">{kva} KVA</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums text-slate-700">{data.awaitingExt}</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums text-amber-700 font-bold">{data.awaitingInt}</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums text-teal-700 font-bold">{data.awaitingTest}</td>
+                        <td className="py-1 px-2 text-right font-black font-mono tabular-nums text-blue-950">{data.total}</td>
                       </tr>
                     ))}
                   <tr className="bg-blue-100/60 font-black text-blue-950 border-t-2 border-blue-300">
-                    <td className="py-2 px-2.5">TOTAL WIP</td>
-                    <td className="py-2 px-2.5 text-center font-mono">{stats.pendingExternal}</td>
-                    <td className="py-2 px-2.5 text-center font-mono">{stats.pendingInternal}</td>
-                    <td className="py-2 px-2.5 text-center font-mono">{stats.pendingTesting}</td>
-                    <td className="py-2 px-2.5 text-right font-mono">{stats.totalUnderRepair} units</td>
+                    <td className="py-1.5 px-2">TOTAL WIP</td>
+                    <td className="py-1.5 px-2 text-center font-mono tabular-nums">{stats.pendingExternal}</td>
+                    <td className="py-1.5 px-2 text-center font-mono tabular-nums">{stats.pendingInternal}</td>
+                    <td className="py-1.5 px-2 text-center font-mono tabular-nums">{stats.pendingTesting}</td>
+                    <td className="py-1.5 px-2 text-right font-mono tabular-nums">{stats.totalUnderRepair} units</td>
                   </tr>
                 </tbody>
               </table>
@@ -909,10 +923,10 @@ export default function Dashboard() {
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
                   <tr className="bg-rose-50/70 text-rose-900 border-b border-rose-200">
-                    <th className="py-2 px-2.5 font-bold">Capacity</th>
-                    <th className="py-2 px-2.5 font-bold text-center text-amber-900">Scrap Pending Delivery</th>
-                    <th className="py-2 px-2.5 font-bold text-center">Returned Store</th>
-                    <th className="py-2 px-2.5 font-bold text-right">Total Scrap</th>
+                    <th className="py-1.5 px-2 font-bold">Capacity</th>
+                    <th className="py-1.5 px-2 font-bold text-center text-amber-900">Scrap Pending Delivery</th>
+                    <th className="py-1.5 px-2 font-bold text-center">Returned Store</th>
+                    <th className="py-1.5 px-2 font-bold text-right">Total Scrap</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -920,17 +934,17 @@ export default function Dashboard() {
                     .sort(([a], [b]) => Number(a) - Number(b))
                     .map(([kva, data]) => (
                       <tr key={kva} className="hover:bg-rose-50/30">
-                        <td className="py-1.5 px-2.5 font-bold text-slate-900 font-mono">{kva} KVA</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono font-bold text-amber-900 bg-amber-100/50">{data.pendingDelivery}</td>
-                        <td className="py-1.5 px-2.5 text-center font-mono text-slate-700">{data.delivered}</td>
-                        <td className="py-1.5 px-2.5 text-right font-black font-mono text-rose-950">{data.total}</td>
+                        <td className="py-1 px-2 font-bold text-slate-900 font-mono tabular-nums">{kva} KVA</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums font-bold text-amber-900 bg-amber-100/50">{data.pendingDelivery}</td>
+                        <td className="py-1 px-2 text-center font-mono tabular-nums text-slate-700">{data.delivered}</td>
+                        <td className="py-1 px-2 text-right font-black font-mono tabular-nums text-rose-950">{data.total}</td>
                       </tr>
                     ))}
                   <tr className="bg-rose-100/60 font-black text-rose-950 border-t-2 border-rose-300">
-                    <td className="py-2 px-2.5">TOTAL SCRAP</td>
-                    <td className="py-2 px-2.5 text-center font-mono text-amber-900">{stats.scrapPendingDelivery}</td>
-                    <td className="py-2 px-2.5 text-center font-mono">{stats.scrapDelivered}</td>
-                    <td className="py-2 px-2.5 text-right font-mono">{stats.scrapDeclared} units</td>
+                    <td className="py-1.5 px-2">TOTAL SCRAP</td>
+                    <td className="py-2 px-2.5 text-center font-mono tabular-nums text-amber-900">{stats.scrapPendingDelivery}</td>
+                    <td className="py-1.5 px-2 text-center font-mono tabular-nums">{stats.scrapDelivered}</td>
+                    <td className="py-1.5 px-2 text-right font-mono tabular-nums">{stats.scrapDeclared} units</td>
                   </tr>
                 </tbody>
               </table>
@@ -940,61 +954,61 @@ export default function Dashboard() {
       </div>
 
       {/* 5. COMPACT WORKSHOP SHORTCUTS (Mobile 3-col / Desktop 6-col) */}
-      <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+      <div className={`${CARD} ${CARD_PAD}`}>
         <div className="flex items-center justify-between mb-2.5">
-          <h2 className="text-xs sm:text-sm font-bold text-slate-800">Quick Workshop Actions</h2>
+          <h2 className={CARD_TITLE}>Quick Workshop Actions</h2>
           <Link to="/reports" className="text-[11px] font-bold text-blue-600 hover:underline">
             All Reports &rarr;
           </Link>
         </div>
 
         <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
-          <Link to="/new-job" className="p-2.5 bg-emerald-50/70 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-center transition-colors">
+          <Link to="/new-job" className="p-2 rounded border border-emerald-200 bg-emerald-50/60 hover:bg-emerald-100 text-center transition-colors">
             <span className="text-[10px] font-black text-emerald-800 block">MR INTAKE</span>
             <span className="text-[11px] text-emerald-950 font-bold block truncate mt-0.5">New Job</span>
           </Link>
 
-          <Link to="/mr-ledger" className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-center transition-colors">
+          <Link to="/mr-ledger" className="p-2 rounded border border-slate-200 bg-slate-50/60 hover:bg-slate-100 text-center transition-colors">
             <span className="text-[10px] font-black text-slate-600 block">REGISTER</span>
             <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">MR Ledger</span>
           </Link>
 
-          <Link to="/external-inspection" className="p-2.5 bg-cyan-50/70 hover:bg-cyan-100 border border-cyan-200 rounded-lg text-center transition-colors">
+          <Link to="/external-inspection" className="p-2 rounded border border-cyan-200 bg-cyan-50/60 hover:bg-cyan-100 text-center transition-colors">
             <span className="text-[10px] font-black text-cyan-800 block">INSPECTION</span>
             <span className="text-[11px] text-cyan-950 font-bold block truncate mt-0.5">External</span>
           </Link>
 
-          <Link to="/internal-inspection" className="p-2.5 bg-amber-50/70 hover:bg-amber-100 border border-amber-200 rounded-lg text-center transition-colors">
+          <Link to="/internal-inspection" className="p-2 rounded border border-amber-200 bg-amber-50/60 hover:bg-amber-100 text-center transition-colors">
             <span className="text-[10px] font-black text-amber-800 block">WINDING</span>
             <span className="text-[11px] text-amber-950 font-bold block truncate mt-0.5">Internal</span>
           </Link>
 
-          <Link to="/testing-report" className="p-2.5 bg-teal-50/70 hover:bg-teal-100 border border-teal-200 rounded-lg text-center transition-colors">
+          <Link to="/testing-report" className="p-2 rounded border border-teal-200 bg-teal-50/60 hover:bg-teal-100 text-center transition-colors">
             <span className="text-[10px] font-black text-teal-800 block">TESTING</span>
             <span className="text-[11px] text-teal-950 font-bold block truncate mt-0.5">Report</span>
           </Link>
 
-          <Link to="/estimates/new" className="p-2.5 bg-purple-50/70 hover:bg-purple-100 border border-purple-200 rounded-lg text-center transition-colors">
+          <Link to="/estimates/new" className="p-2 rounded border border-purple-200 bg-purple-50/60 hover:bg-purple-100 text-center transition-colors">
             <span className="text-[10px] font-black text-purple-800 block">ESTIMATE</span>
             <span className="text-[11px] text-purple-950 font-bold block truncate mt-0.5">Rates</span>
           </Link>
 
-          <Link to="/challan/new" className="p-2.5 bg-blue-50/70 hover:bg-blue-100 border border-blue-200 rounded-lg text-center transition-colors">
+          <Link to="/challan/new" className="p-2 rounded border border-blue-200 bg-blue-50/60 hover:bg-blue-100 text-center transition-colors">
             <span className="text-[10px] font-black text-blue-800 block">DELIVERY</span>
             <span className="text-[11px] text-blue-950 font-bold block truncate mt-0.5">Challan</span>
           </Link>
 
-          <Link to="/bills/new" className="p-2.5 bg-indigo-50/70 hover:bg-indigo-100 border border-indigo-200 rounded-lg text-center transition-colors">
+          <Link to="/bills/new" className="p-2 rounded border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100 text-center transition-colors">
             <span className="text-[10px] font-black text-indigo-800 block">INVOICE</span>
             <span className="text-[11px] text-indigo-950 font-bold block truncate mt-0.5">Billing</span>
           </Link>
 
-          <Link to="/oil-inward" className="p-2.5 bg-sky-50/70 hover:bg-sky-100 border border-sky-200 rounded-lg text-center transition-colors">
+          <Link to="/oil-inward" className="p-2 rounded border border-sky-200 bg-sky-50/60 hover:bg-sky-100 text-center transition-colors">
             <span className="text-[10px] font-black text-sky-800 block">OIL</span>
             <span className="text-[11px] text-sky-950 font-bold block truncate mt-0.5">Ledger</span>
           </Link>
 
-          <Link to="/reports" className="p-2.5 bg-rose-50/70 hover:bg-rose-100 border border-rose-200 rounded-lg text-center transition-colors">
+          <Link to="/reports" className="p-2 rounded border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-center transition-colors">
             <span className="text-[10px] font-black text-rose-800 block">REPORTS</span>
             <span className="text-[11px] text-rose-950 font-bold block truncate mt-0.5">Hub</span>
           </Link>
@@ -1004,7 +1018,7 @@ export default function Dashboard() {
             <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">AT Rates</span>
           </Link>
 
-          <Link to="/agency-settings" className="p-2.5 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-lg text-center transition-colors">
+          <Link to="/agency-settings" className="p-2 rounded border border-slate-200 bg-slate-50/60 hover:bg-slate-100 text-center transition-colors">
             <span className="text-[10px] font-black text-slate-600 block">SETTINGS</span>
             <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">Agency</span>
           </Link>
@@ -1022,12 +1036,12 @@ export default function Dashboard() {
         )}
 
         {/* Card 2: Guarantee Period (GP) & Warranty */}
-        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+        <div className={`${CARD} ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
                 <ShieldCheck className="w-4 h-4 text-amber-600" />
-                <h3 className="text-xs font-bold text-slate-800">Guarantee Period (GP) & Warranty</h3>
+                <h3 className={CARD_TITLE}>Guarantee Period (GP) & Warranty</h3>
               </div>
               <span className="text-[10px] font-bold px-1.5 py-0.2 bg-amber-100 text-amber-800 rounded">
                 18 Months
@@ -1037,15 +1051,15 @@ export default function Dashboard() {
             <div className="grid grid-cols-3 gap-1.5 p-2 bg-amber-50/60 rounded-lg border border-amber-100 text-center mb-2.5">
               <div>
                 <span className="text-[9px] text-slate-500 uppercase block">GP Intake</span>
-                <span className="font-mono font-black text-amber-950 text-sm">{stats.gpTotal}</span>
+                <span className="font-mono tabular-nums font-black text-amber-950 text-sm">{stats.gpTotal}</span>
               </div>
               <div className="border-x border-amber-200">
                 <span className="text-[9px] text-amber-700 uppercase block">In Shop</span>
-                <span className="font-mono font-black text-amber-700 text-sm">{stats.gpPending}</span>
+                <span className="font-mono tabular-nums font-black text-amber-700 text-sm">{stats.gpPending}</span>
               </div>
               <div>
                 <span className="text-[9px] text-emerald-700 uppercase block">Delivered</span>
-                <span className="font-mono font-black text-emerald-700 text-sm">{stats.gpDispatched}</span>
+                <span className="font-mono tabular-nums font-black text-emerald-700 text-sm">{stats.gpDispatched}</span>
               </div>
             </div>
 
@@ -1077,12 +1091,12 @@ export default function Dashboard() {
         </div>
 
         {/* Card 3: Oil Accounting */}
-        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+        <div className={`${CARD} ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
                 <Droplet className="w-4 h-4 text-sky-600" />
-                <h3 className="text-xs font-bold text-slate-800">Oil Account Ledger</h3>
+                <h3 className={CARD_TITLE}>Oil Account Ledger</h3>
               </div>
               <Link to="/oil-inward" className="text-[10px] font-bold text-sky-600 hover:underline">
                 Manage
@@ -1102,16 +1116,16 @@ export default function Dashboard() {
                 <div className="space-y-1.5 text-[11px]">
                   <div className="flex justify-between">
                     <span className="text-slate-500">Shortage:</span>
-                    <span className="font-mono font-bold text-amber-700">{oilMetrics.shortage.toFixed(2)} L</span>
+                    <span className="font-mono tabular-nums font-bold text-amber-700">{oilMetrics.shortage.toFixed(2)} L</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-500">Oil received:</span>
-                    <span className="font-mono font-bold text-blue-700">{oilMetrics.received.toFixed(2)} L</span>
+                    <span className="font-mono tabular-nums font-bold text-blue-700">{oilMetrics.received.toFixed(2)} L</span>
                   </div>
                   <div className="pt-1 border-t border-slate-100">
                     <div className="flex justify-between">
                       <span className="font-bold text-slate-900">Net balance:</span>
-                      <span className={`font-mono font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
+                      <span className={`font-mono tabular-nums font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
                         {d.signed}
                       </span>
                     </div>
@@ -1133,14 +1147,14 @@ export default function Dashboard() {
         </div>
 
         {/* Card 4: Division Workload */}
-        <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs flex flex-col justify-between">
+        <div className={`${CARD} ${CARD_PAD} flex flex-col justify-between`}>
           <div>
             <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-1.5">
                 <Building2 className="w-4 h-4 text-cyan-600" />
-                <h3 className="text-xs font-bold text-slate-800">Division Distribution</h3>
+                <h3 className={CARD_TITLE}>Division Distribution</h3>
               </div>
-              <span className="text-[10px] text-slate-400 font-mono">{availableDivisions.length} Divs</span>
+              <span className="text-[10px] text-slate-400 font-mono tabular-nums">{availableDivisions.length} Divs</span>
             </div>
 
             <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
@@ -1160,7 +1174,7 @@ export default function Dashboard() {
                       <span className="text-emerald-700 font-bold">{data.repaired}R</span>
                       <span className="text-blue-700 font-bold">{data.underRepair}W</span>
                       <span className="text-rose-700 font-bold">{data.scrap}S</span>
-                      <span className="font-mono font-bold bg-white px-1 border rounded">{data.total}</span>
+                      <span className="font-mono tabular-nums font-bold bg-white px-1 border rounded">{data.total}</span>
                     </div>
                   </div>
                 );
@@ -1177,9 +1191,9 @@ export default function Dashboard() {
 
       {/* 7. ACTIVE BACKLOG ACTION QUEUE */}
       {pendingBacklog.length > 0 && (
-        <div className="bg-white border border-slate-200 rounded-xl p-3.5 sm:p-4 shadow-xs">
+        <div className={`${CARD} ${CARD_PAD}`}>
           <div className="flex items-center justify-between mb-2.5">
-            <h3 className="text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1.5">
+            <h3 className={CARD_TITLE}>
               <Clock className="w-4 h-4 text-amber-500" />
               <span>Pending Action Backlog</span>
             </h3>
@@ -1216,7 +1230,7 @@ export default function Dashboard() {
                 >
                   <div className="flex items-center justify-between text-xs">
                     <span className="font-bold text-slate-900 truncate">{job.jobNo || 'TR'}</span>
-                    <span className="text-[10px] font-mono text-slate-500 font-bold">{job.capacityKva || '-'} KVA</span>
+                    <span className="text-[10px] font-mono tabular-nums text-slate-500 font-bold">{job.capacityKva || '-'} KVA</span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] text-slate-500 mt-1">
                     <span className="truncate">{job.division || '-'}</span>
