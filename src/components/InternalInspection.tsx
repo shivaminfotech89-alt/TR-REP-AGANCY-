@@ -846,6 +846,26 @@ export default function InternalInspection() {
   if (isPrintOpen && selectedMrNo) {
     const sampleJob = mrJobs[0];
     const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
+    /**
+     * NINE ROWS A PAGE - AND IT IS NOT A VERTICAL LIMIT (AUDIT G20).
+     *
+     * ⚠ THE BINDING CONSTRAINT IS WIDTH, WHICH IS THE OPPOSITE OF WHAT A ROW COUNT IMPLIES.
+     * This sheet is LANDSCAPE A4 and the table has 27 columns across 297mm. Vertically it is
+     * nowhere near full: content area ~176mm, and nine rows plus the header, title and
+     * signature block use about 68mm - roughly 115mm SPARE. The page is two-thirds empty.
+     *
+     * So a reader wondering whether 9 can go up should be asking about column width, not
+     * height. And a reader making the text bigger - as G20 did, 7.5px to 9.5px - is spending
+     * from a very large vertical surplus and a very small horizontal one.
+     *
+     * ⚠ IF THE TEXT EVER OVERFLOWS 297mm, the honest fixes are FEWER COLUMNS PER PAGE or a
+     * SMALLER CHUNK_SIZE. Not smaller type: unreadable print is the fault this number's
+     * neighbours were just changed to fix, and compensating horizontally by shrinking would
+     * undo that silently.
+     *
+     * There is no mm budget behind this the way layoutEstimatePages has one - 9 is a measured
+     * number with no model, and this comment is the model it never had.
+     */
     const CHUNK_SIZE = 9;
     const jobChunks: typeof mrJobs[] = [];
     for (let i = 0; i < mrJobs.length; i += CHUNK_SIZE) {
@@ -908,7 +928,7 @@ export default function InternalInspection() {
                       <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
                     </div>
 
-                    <table className="w-full border-collapse border border-black text-[7.5px] text-center">
+                    <table className="w-full border-collapse border border-black text-[9.5px] text-center">
                       <thead>
                         {/* Grouped High-Level Header */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
@@ -966,10 +986,10 @@ export default function InternalInspection() {
                               <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
                                 {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
                               </td>
-                              <td className="border border-black p-0.5 font-mono text-[7px] truncate max-w-[55px]">{job.serialNo || '-'}</td>
+                              <td className="border border-black p-0.5 font-mono text-[8.5px] truncate max-w-[55px]">{job.serialNo || '-'}</td>
                               <td className="border border-black p-0.5 truncate max-w-[45px]">{job.make || '-'}</td>
                               <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
-                              <td className="border border-black p-0.5 font-bold uppercase text-[7px] text-blue-900">
+                              <td className="border border-black p-0.5 font-bold uppercase text-[8.5px] text-blue-900">
                                 {transCore}
                               </td>
                               <td className="border border-black p-0.5 font-bold">{data.windingType || 'AL'}</td>
@@ -1007,7 +1027,7 @@ export default function InternalInspection() {
                     </table>
 
                     {scrapNote && isLastPage && (
-                      <div className="mt-2 p-1.5 bg-amber-50 print:bg-transparent border border-amber-300 print:border-black text-[8px] font-bold text-amber-900 print:text-black uppercase">
+                      <div className="mt-2 p-1.5 bg-amber-50 print:bg-transparent border border-amber-300 print:border-black text-[9px] font-bold text-amber-900 print:text-black uppercase">
                         {scrapNote}
                       </div>
                     )}
@@ -1018,7 +1038,7 @@ export default function InternalInspection() {
                       <div className="text-center">
                         <div className="h-8"></div>
                         <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY</div>
-                        <div className="text-[8px] text-slate-700 font-normal">Junior Engineer</div>
+                        <div className="text-[9px] text-slate-700 font-normal">Junior Engineer</div>
                       </div>
                       <div className="text-center">
                         <div className="h-8"></div>
@@ -1026,12 +1046,12 @@ export default function InternalInspection() {
                       </div>
                       <div className="text-center">
                         <div className="h-8 flex items-center justify-center">
-                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[7.5px] text-slate-500 font-normal">
+                          <div className="border border-dashed border-slate-400 px-2 py-0.5 rounded text-[8.5px] text-slate-500 font-normal">
                             OFFICIAL STAMP
                           </div>
                         </div>
                         <div className="border-t border-dotted border-black pt-0.5">FOR {activeAgency?.name}</div>
-                        <div className="text-[8px] text-slate-700 font-normal">Authorized Signatory</div>
+                        <div className="text-[9px] text-slate-700 font-normal">Authorized Signatory</div>
                       </div>
                     </div>
                   )}
