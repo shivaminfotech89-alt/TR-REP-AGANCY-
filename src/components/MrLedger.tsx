@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   collection, 
   query, 
@@ -14,6 +14,8 @@ import {
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, atClause, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
 import { issuedMarks } from '../lib/issuedDocuments.js';
+import { mrStageSummary } from '../lib/inspectionStage';
+import { CARD, LABEL, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import { inspectionsForJob } from '../lib/inspectionLink.js';
 import { 
   Loader2, 
@@ -194,6 +196,58 @@ export default function MrLedger() {
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CANCELLED'>('ALL');
   const [expandedMrs, setExpandedMrs] = useState<Set<string>>(new Set());
+
+  /**
+   * EXTERNAL INSPECTIONS, for the stage column (AUDIT G10).
+   *
+   * ⚠ ONE EXTRA READ, TAKEN DELIBERATELY. The stage could have been derived from `job.status`
+   * alone with no query at all - but every inspection screen derives it from `mrStageSummary`,
+   * and a stage counted one way here and another way there is two measurements of one quantity
+   * that nobody puts side by side. That is F87 exactly, and it cost a fortnight last time.
+   * `inspections` carries no agencyId, so this is owner-scoped and matched per job.
+   */
+  const [mrInspections, setMrInspections] = useState<any[]>([]);
+  useEffect(() => {
+    if (!auth.currentUser) { setMrInspections([]); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'inspections'),
+          where('ownerId', '==', auth.currentUser!.uid),
+        ));
+        if (!cancelled) setMrInspections(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch {
+        // Unknown, not empty. An empty list would render every MR as "not started",
+        // which is a claim; leaving it empty and saying so is not.
+        if (!cancelled) setMrInspections([]);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [auth.currentUser?.uid]);
+
+  /**
+   * WHAT AN MR ACTUALLY HOLDS — counted, never collapsed to one value (AUDIT G10/G11).
+   *
+   * ⚠ COUNTS, NOT A DOMINANT VALUE. An MR with three OGP jobs and one GP is two facts. "OGP 3
+   * · GP 1" states both and is no longer to read; "mostly OGP" puts one word where two facts
+   * are, and the marker is exactly what an operator scanning forty rows does not see. Same
+   * decision as the per-division oil split (F86).
+   *
+   * ⚠ AND IT DOES NOT SILENTLY CORRECT. If an MR is mixed on repair type that may be a data
+   * fault rather than a legitimate mix - a GP job is repaired at NO COST - so this reports
+   * what is there and decides nothing.
+   */
+  const mixOf = (jobs: any[], pick: (j: any) => any, fallback: string) => {
+    const counts: Record<string, number> = {};
+    for (const j of jobs) {
+      const k = String(pick(j) ?? '').trim().toUpperCase() || fallback;
+      counts[k] = (counts[k] || 0) + 1;
+    }
+    const entries = Object.entries(counts).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    return { entries, mixed: entries.length > 1 };
+  };
+
   
   // Notification Toast
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -899,8 +953,13 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     return matchesSearch && matchesDivision && matchesStatus;
   });
 
+  // ⚠ NO max-w ON THE PAGE CONTAINER (AUDIT G10). This was `max-w-6xl mx-auto` - 1152px
+  // centred, which on a 1920px workshop screen left ~380px of gutter on each side while the
+  // register itself scrolled. The register is the widest table in the app and is what this
+  // screen is for; AppLayout's content area imposes no width of its own, so the constraint
+  // was entirely local.
   return (
-    <div className="max-w-6xl mx-auto space-y-4 sm:space-y-6 pb-20">
+    <div className="space-y-4 sm:space-y-6 pb-20">
       
       {/* TOAST NOTIFICATION */}
       {notification && (
@@ -962,16 +1021,20 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
       {/* HIDDEN IN "ALL TENDERS" MODE, because there the tender clause is dropped and these
           jobs are already IN the list below - the banner would be counting them twice and
           calling one of the copies missing (AUDIT F87). */}
+      {/* RESTYLED, NOT REWORDED (AUDIT G10). Every word, the count, the expander and the list
+          below are unchanged; only the chrome moves to ui.ts. The dot is ADDED - the amber
+          fill alone did not survive a photocopy of this register. */}
       {!viewingAllTenders && unassignedJobs.length > 0 && (
-        <div className="bg-amber-50 border-2 border-amber-300 rounded-xl overflow-hidden">
+        <div className="border-l-2 border-l-amber-500 border border-amber-300 bg-amber-50 rounded-lg overflow-hidden">
           <button
             type="button"
             onClick={() => setShowUnassigned(o => !o)}
-            className="w-full text-left p-3.5 flex items-start gap-2.5 hover:bg-amber-100/60"
+            className="w-full text-left p-2.5 sm:p-3 flex items-start gap-2 hover:bg-amber-100/60"
           >
-            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-bold text-amber-900">
+              <p className="text-sm font-bold text-amber-900 flex items-center gap-1.5">
+                <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0`} />
                 {unassignedJobs.length} job{unassignedJobs.length === 1 ? '' : 's'} belong to no tender
               </p>
               <p className="text-xs text-amber-800 mt-0.5">
@@ -980,7 +1043,7 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                 attributed to the tender its MR belongs to.
               </p>
             </div>
-            <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 text-white">
+            <span className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded bg-amber-600 text-white">
               {showUnassigned ? 'Hide' : 'Show'}
             </span>
           </button>
@@ -1102,111 +1165,189 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
         </div>
 
         {/* MR Listing */}
-        <div className="divide-y divide-slate-200">
-          {loading ? (
-            <div className="p-12 text-center">
-              <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
-              <p className="text-sm text-slate-500 mt-4">Loading register...</p>
-            </div>
-          ) : filteredGroups.length === 0 ? (
-            <div className="p-12 text-center text-slate-500">
-              <Filter className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-              <p className="font-medium text-slate-700">No MR records found matching your filters.</p>
-              <p className="text-xs text-slate-400 mt-1">Try selecting "All Divisions" or clear your search term.</p>
-            </div>
-          ) : (
-            filteredGroups.map(group => (
-              <div 
-                key={group.mrNo} 
-                className={`transition-colors ${
-                  group.isCancelled ? 'bg-rose-50/20 hover:bg-rose-50/40 opacity-90' : 'bg-white hover:bg-slate-50/50'
-                }`}
-              >
-                
-                {/* MR HEADER ROW */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:p-4 gap-3">
-                  
-                  {/* LEFT: Clickable expander with MR info */}
-                  <div 
-                    onClick={() => toggleExpand(group.mrNo)}
-                    className="flex items-start sm:items-center space-x-3 min-w-0 cursor-pointer flex-1"
-                  >
-                    <div className="text-slate-400 hover:text-blue-600 transition-colors mt-0.5 sm:mt-0 shrink-0">
-                      {expandedMrs.has(group.mrNo) ? <ChevronDown className="w-5 h-5 text-blue-600" /> : <ChevronRight className="w-5 h-5" />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <h3 className={`font-bold text-sm ${group.isCancelled ? 'text-slate-600 line-through' : 'text-slate-900'}`}>
-                          MR No: <span className={`font-mono font-black ${group.isCancelled ? 'text-rose-700 no-underline' : 'text-blue-600'}`}>{group.mrNo}</span>
-                        </h3>
+        {loading ? (
+          <div className="p-12 text-center">
+            <Loader2 className="w-8 h-8 animate-spin text-blue-600 mx-auto" />
+            <p className="text-sm text-slate-500 mt-4">Loading register...</p>
+          </div>
+        ) : filteredGroups.length === 0 ? (
+          <div className="p-12 text-center text-slate-500">
+            <Filter className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="font-medium text-slate-700">No MR records found matching your filters.</p>
+            <p className="text-xs text-slate-400 mt-1">Try selecting "All Divisions" or clear your search term.</p>
+          </div>
+        ) : (
+          <div className={TABLE_WRAP}>
+            <table className={TABLE}>
+              <thead>
+                <tr>
+                  <th className={`${TH} w-8`} />
+                  <th className={TH}>MR No</th>
+                  <th className={TH}>MR Date</th>
+                  <th className={TH}>Division</th>
+                  <th className={`${TH} text-right`}>Units</th>
+                  <th className={TH}>Type</th>
+                  <th className={TH}>Core</th>
+                  <th className={TH}>Stage</th>
+                  <th className={`${TH} text-right`}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredGroups.map(group => (
+              <React.Fragment key={group.mrNo}>
 
-                        {group.isCancelled ? (
-                          <span className="text-[10px] font-black uppercase text-rose-800 bg-rose-100 border border-rose-300 px-2 py-0.5 rounded flex items-center gap-1 shadow-2xs">
-                            <Ban className="w-3 h-3 text-rose-600" /> CANCELLED
-                          </span>
-                        ) : null}
-
-                        <span className="text-[10px] font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          {group.division}
-                        </span>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded border ${
-                          group.repairType === 'GP'
-                            ? 'bg-amber-100 text-amber-800 border-amber-300'
-                            : 'bg-blue-100 text-blue-800 border-blue-200'
-                        }`}>
-                          {group.repairType || 'OGP'}
-                        </span>
-                        <span className="text-[10px] font-medium text-slate-600 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          Received: <span className="font-mono font-bold text-slate-800">{formatDDMMYYYY(group.dateOfIssue)}</span>
-                        </span>
-                        <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
-                          {group.jobs.length} Unit{group.jobs.length !== 1 ? 's' : ''}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  {/* RIGHT: ACTION BUTTONS */}
-                  <div className="flex items-center space-x-2 pl-8 sm:pl-0 shrink-0">
+                {/* A TABLE ROW, NOT A CARD HEADER (AUDIT G10). Nine columns, none hidden at
+                    any breakpoint - the wrapper scrolls sideways instead, because an operator
+                    needs the whole row and a register missing its middle columns on a narrow
+                    screen is a different and wrong register. Every action stays VISIBLE in its
+                    own column: a hidden destructive action is worse than a wide table. */}
+                {(() => {
+                  const repair = mixOf(group.jobs, (j: any) => j.repairType, "OGP");
+                  const core = mixOf(group.jobs, (j: any) => j.coreType, "(no core)");
+                  const divs = mixOf(group.jobs, (j: any) => j.division, "(none)");
+                  const stage = mrStageSummary(group.jobs, mrInspections);
+                  const steps = [
+                    { key: "Ext", st: stage.external },
+                    { key: "Int", st: stage.internal },
+                    { key: "Test", st: stage.testing },
+                    { key: "Disp", st: stage.dispatch },
+                  ];
+                  const pending = steps.find((s) => !s.st.complete);
+                  const stageLabel = pending
+                    ? `${pending.key} ${pending.st.doneCount}/${pending.st.total}`
+                    : "Dispatched";
+                  return (
+                <tr
+                  className={`border-b border-slate-100 transition-colors ${
+                    group.isCancelled ? "bg-rose-50/30 hover:bg-rose-50/50" : "hover:bg-slate-50"
+                  }`}
+                >
+                  <td className={`${TD} w-8`}>
                     <button
                       type="button"
-                      onClick={() => handleOpenFullMrEdit(group)}
-                      className="inline-flex items-center space-x-1.5 text-xs font-bold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-3 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
-                      title="Open Full MR Edit mode to edit all jobs, dates, divisions and numbers"
+                      onClick={() => toggleExpand(group.mrNo)}
+                      className="text-slate-400 hover:text-blue-600 transition-colors"
+                      title={expandedMrs.has(group.mrNo) ? "Collapse" : "Expand transformers"}
                     >
-                      <Edit className="w-3.5 h-3.5" />
-                      <span>Full Edit MR</span>
+                      {expandedMrs.has(group.mrNo) ? <ChevronDown className="w-4 h-4 text-blue-600" /> : <ChevronRight className="w-4 h-4" />}
                     </button>
+                  </td>
 
-                    {group.isCancelled ? (
-                      <button
-                        type="button"
-                        onClick={() => handleReactivateMr(group)}
-                        disabled={isReactivatingMr}
-                        className="inline-flex items-center space-x-1 text-xs font-bold text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-300 hover:border-emerald-600 px-2.5 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
-                        title="Reactivate this cancelled MR"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Reactivate MR</span>
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => setCancelConfirmMr(group)}
-                        className="inline-flex items-center space-x-1 text-xs font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-300 hover:border-rose-600 px-2.5 py-1.5 rounded-lg transition-all shadow-2xs cursor-pointer"
-                        title="Cancel this MR (release job numbers for reuse and stop downstream processing)"
-                      >
-                        <Ban className="w-3.5 h-3.5" />
-                        <span>Cancel MR</span>
-                      </button>
+                  <td className={TD}>
+                    <button type="button" onClick={() => toggleExpand(group.mrNo)} className="text-left">
+                      <span className={`${NUM} font-black ${group.isCancelled ? "text-rose-700 line-through" : "text-blue-700"}`}>
+                        {group.mrNo}
+                      </span>
+                    </button>
+                    {/* CANCELLED keeps its WORD and its ICON - the row tint is never the only
+                        signal, because this register is printed and photocopied. */}
+                    {group.isCancelled && (
+                      <span className={`${chip("bad")} ml-1.5 align-middle`}>
+                        <Ban className="w-3 h-3" /> CANCELLED
+                      </span>
                     )}
-                  </div>
+                  </td>
 
-                </div>
-                
-                {/* Collapsible Transformer Details Table */}
+                  <td className={`${TD} ${NUM_INLINE} text-slate-700`}>{formatDDMMYYYY(group.dateOfIssue)}</td>
+
+                  <td className={TD}>
+                    <span className="inline-flex flex-wrap items-center gap-x-1">
+                      {divs.entries.map(([v, n], i, arr) => (
+                        <span key={v} className="font-semibold text-slate-800">
+                          {v}{divs.mixed && <span className={`${NUM} text-slate-500`}> {n}</span>}
+                          {i < arr.length - 1 && <span className="text-slate-300"> &middot;</span>}
+                        </span>
+                      ))}
+                    </span>
+                  </td>
+
+                  <td className={`${TD} text-right`}>
+                    <span className={`${NUM} font-bold text-slate-900`}>{group.jobs.length}</span>
+                  </td>
+
+                  <td className={TD}>
+                    {/* COUNTS, NEVER A DOMINANT VALUE. "OGP 3 / GP 1" is two facts; "mostly
+                        OGP" is one word where two facts are (AUDIT G11, and F86 before it). */}
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      {repair.entries.map(([v, n]) => (
+                        <span key={v} className={chip(v === "GP" ? "warn" : "info")}>
+                          {v}{repair.mixed && <span className={NUM}> {n}</span>}
+                        </span>
+                      ))}
+                    </span>
+                  </td>
+
+                  <td className={TD}>
+                    <span className="inline-flex flex-wrap items-center gap-1">
+                      {core.entries.map(([v, n]) => (
+                        <span key={v} className={chip("neutral")}>
+                          {v}{core.mixed && <span className={NUM}> {n}</span>}
+                        </span>
+                      ))}
+                    </span>
+                  </td>
+
+                  <td className={TD}>
+                    {/* DOTS AND A WORD: the shape survives greyscale, the word survives
+                        everything. `mrStageSummary` is the SAME definition the inspection
+                        screens use - a stage counted twice is F87 (AUDIT G10). */}
+                    <span className="inline-flex items-center gap-1.5" title={steps.map((s) => `${s.key} ${s.st.doneCount}/${s.st.total}`).join("  ")}>
+                      <span className="inline-flex items-center gap-0.5">
+                        {steps.map((s) => (
+                          <span key={s.key} className={`w-1.5 h-1.5 rounded-full ${s.st.complete ? TONE.good.dot : "bg-slate-300"}`} />
+                        ))}
+                      </span>
+                      <span className="text-[11px] font-semibold text-slate-700 whitespace-nowrap">{stageLabel}</span>
+                    </span>
+                  </td>
+
+                  <td className={`${TD} text-right`}>
+                    <span className="inline-flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenFullMrEdit(group)}
+                        className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-white bg-blue-50 hover:bg-blue-600 border border-blue-200 hover:border-blue-600 px-2 py-1 rounded transition-all cursor-pointer"
+                        title="Open Full MR Edit mode to edit all jobs, dates, divisions and numbers"
+                      >
+                        <Edit className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                      {group.isCancelled ? (
+                        <button
+                          type="button"
+                          onClick={() => handleReactivateMr(group)}
+                          disabled={isReactivatingMr}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-700 hover:text-white bg-emerald-50 hover:bg-emerald-600 border border-emerald-300 hover:border-emerald-600 px-2 py-1 rounded transition-all cursor-pointer"
+                          title="Reactivate this cancelled MR"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Reactivate</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setCancelConfirmMr(group)}
+                          className="inline-flex items-center gap-1 text-[11px] font-bold text-rose-700 hover:text-white bg-rose-50 hover:bg-rose-600 border border-rose-300 hover:border-rose-600 px-2 py-1 rounded transition-all cursor-pointer"
+                          title="Cancel this MR (release job numbers for reuse and stop downstream processing)"
+                        >
+                          <Ban className="w-3 h-3" />
+                          <span>Cancel</span>
+                        </button>
+                      )}
+                    </span>
+                  </td>
+                </tr>
+                  );
+                })()}
+
+                {/* THE EXPANDED PANEL IS A SPANNING ROW (AUDIT G10). It was a <div>, which is
+                    invalid inside <tbody>: the parser hoists it out of the table, so the rows
+                    would render and the panel would land somewhere else entirely. colSpan
+                    matches the nine header columns. */}
                 {expandedMrs.has(group.mrNo) && (
-                  <div className="bg-slate-50/90 p-3 sm:p-4 border-t border-slate-200 overflow-x-auto">
+                  <tr className="bg-slate-50/90">
+                    <td colSpan={9} className="p-0 border-b border-slate-200">
+                      <div className="p-3 sm:p-4 overflow-x-auto">
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-xs font-bold text-slate-700 flex items-center gap-2">
                         <span>Transformers in MR #{group.mrNo} ({group.jobs.length})</span>
@@ -1281,13 +1422,17 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                         ))}
                       </tbody>
                     </table>
-                  </div>
+                      </div>
+                    </td>
+                  </tr>
                 )}
 
-              </div>
-            ))
-          )}
-        </div>
+              </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ========================================================================= */}
@@ -1476,9 +1621,13 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
                       <span>Add Unit to this MR</span>
                     </button>
                   ) : (
-                    <span className="px-3 py-1.5 bg-amber-50 text-amber-900 border border-amber-300 rounded-lg text-[11px] font-semibold max-w-xs">
-                      No new units: {intakeGate.reason} The units already on this MR can still be
-                      edited, inspected, tested and dispatched.
+                    <span className="inline-flex items-start gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-900 border border-l-2 border-l-amber-500 border-amber-300 rounded text-[11px] font-semibold max-w-xs">
+                      {/* Dot added; text untouched (AUDIT G10). */}
+                      <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0 mt-1`} />
+                      <span>
+                        No new units: {intakeGate.reason} The units already on this MR can still be
+                        edited, inspected, tested and dispatched.
+                      </span>
                     </span>
                   )}
                 </div>
