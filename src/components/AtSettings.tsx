@@ -51,9 +51,6 @@ export function AtSettings() {
    *
    * Newest by publishedAt, because a DISCOM's current schedule is the last one published.
    */
-  const newestTemplate = publishedAts.length
-    ? [...publishedAts].sort((a, b) => Number(b.publishedAt ?? 0) - Number(a.publishedAt ?? 0))[0]
-    : null;
 
   /** The template chosen for the new AT, resolved. Null means "enter rates myself later". */
   const chosenTemplate = publishedAts.find(t => t.id === newAtTemplateId) ?? null;
@@ -295,6 +292,22 @@ export function AtSettings() {
     : inheritedSchedule;
 
   /**
+   * THE TEMPLATE THE FORM OPENS ON - MATCHED BY SCHEDULE, NOT BY RECENCY.
+   *
+   * ⚠ RECENCY IS THE WRONG TEST THE MOMENT A SECOND TEMPLATE EXISTS. With one published it
+   * was harmless; with a 2020 and a 2026 template both live, "newest" means an agency still
+   * working the previous tender opens on the NEW one - and this default WRITES DATA on save,
+   * so clicking through would adopt the wrong tender's rates.
+   *
+   * Matched against the schedule the agency's own previous tender is on, which is the same
+   * evidence `inheritedSchedule` uses: a new tender is most likely on the schedule the last
+   * one used. When nothing matches, there is NO default - an unmatched guess is worse than
+   * asking, because the operator would have to notice a pre-made choice to undo it.
+   */
+  const defaultTemplate = publishedAts.filter(t => t.scheduleId === inheritedSchedule.id)
+    .sort((a, b) => Number(b.publishedAt ?? 0) - Number(a.publishedAt ?? 0))[0] ?? null;
+
+  /**
    * Opens the create form PRE-FILLED from the previous AT rather than defaulting the write.
    *
    * Deliberately not an inherited default applied at save time. An inherited value is MORE
@@ -418,8 +431,8 @@ export function AtSettings() {
    * year's figures is useful; applying them is the part that made them look decided.
    */
   const openAddForm = () => {
-    // Open on the recommended path, not beside it. See newestTemplate.
-    if (newestTemplate) applyTemplateChoice(newestTemplate.id);
+    // Open on the recommended path, not beside it. See defaultTemplate.
+    if (defaultTemplate) applyTemplateChoice(defaultTemplate.id);
     setShowAddForm(true);
   };
 
