@@ -257,6 +257,38 @@ export interface AtMaster {
    * would say so.
    */
   scheduleId?: string;
+  /**
+   * WHERE THE scheduleId CAME FROM. 'template' = it arrived with an adopted rate template,
+   * chosen by the administrator when publishing. 'inherited' = copied from this agency's
+   * previous tender at creation. 'default' = the app's default, because the agency had no
+   * previous tender.
+   *
+   * The three are not interchangeable and must not share a sentence: "carried over from
+   * AT 26-27" and "defaulted, because this is your first tender" are different claims, and
+   * only one of them cites evidence.
+   */
+  scheduleSource?: 'template' | 'inherited' | 'default';
+  /** The AT the schedule was copied from, when scheduleSource is 'inherited'. */
+  scheduleInheritedFromAtId?: string;
+  /**
+   * WHO CONFIRMED THE INHERITED SCHEDULE, AND WHEN.
+   *
+   * ⚠ A DISPLAYED WARNING WAS MEASURED AND FOUND INSUFFICIENT. `ratesSource:
+   * 'inherited-agency'` has rendered "Nobody has confirmed them against this tender" on six
+   * of nine ATs for the length of this audit, and nobody has. Display does not convert into
+   * action, so the inherited schedule is confirmed by an act instead - once per tender,
+   * before the first estimate is ISSUED under it.
+   *
+   * Recorded rather than merely gated: a confirmation that leaves no trace is worth less
+   * than the warning it replaces, because afterwards nobody can tell whether it happened or
+   * the field was simply never wrong. The oil carry-forward records its own `...At` and
+   * source AT for the same reason; it does not record who, and this does.
+   *
+   * A template-sourced schedule needs no confirmation: the administrator chose it when
+   * publishing and the agency was shown it before adopting.
+   */
+  scheduleConfirmedBy?: string;
+  scheduleConfirmedAt?: number;
   /** When the rates were last set on this AT, whatever the source. */
   ratesUpdatedAt?: number;
 

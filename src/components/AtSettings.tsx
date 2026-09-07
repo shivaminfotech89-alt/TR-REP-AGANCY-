@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
-import { selectableSchedules, DEFAULT_SCHEDULE_ID, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
+import { selectableSchedules, DEFAULT_SCHEDULE_ID, SCHEDULES, ScheduleId, isScheduleId } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
@@ -57,15 +57,6 @@ export function AtSettings() {
 
   /** The template chosen for the new AT, resolved. Null means "enter rates myself later". */
   const chosenTemplate = publishedAts.find(t => t.id === newAtTemplateId) ?? null;
-  /**
-   * WHICH UGVCL SCHEDULE THIS TENDER IS PRICED FROM.
-   *
-   * ⚠ NO SILENT DEFAULT ON A NEW AT. An absent scheduleId resolves to UGVCL-2020, which is
-   * right for tenders created before schedules were versioned and wrong for every one
-   * created after - a 2026 tender would price at 2020 rates and nothing would say so. The
-   * form therefore asks, and offers only schedules that are fully transcribed.
-   */
-  const [newAtScheduleId, setNewAtScheduleId] = useState<string>(DEFAULT_SCHEDULE_ID);
   // Kept until dismissed, not a toast. It reports what the new AT's job numbering will
   // start from, and any job number that could not be read - the operator creating the AT
   // is the person who needs that, and a console log reaches the wrong person entirely.
@@ -278,6 +269,32 @@ export function AtSettings() {
     : null;
 
   /**
+   * THE SCHEDULE A NEW AT WILL BE CREATED ON - DERIVED, NOT CHOSEN.
+   *
+   * ⚠ THE OPERATOR NEVER PICKS THIS. A schedule is a property of the tender, not a separate
+   * decision: the administrator sets it when publishing a rate template, and adopting the
+   * template brings it. Offering a selector invited an agency to answer a question about
+   * UGVCL's paperwork that only the paperwork can answer.
+   *
+   * With no template it is CARRIED OVER from the agency's most recent tender, because a new
+   * tender with no template published is most likely still on the schedule the previous one
+   * used - and the admin publishing a template later is what changes that. With no previous
+   * tender it falls to the app default, which is a weaker claim and is worded differently.
+   *
+   * Either way it is stamped with its source and needs one confirmation before the first
+   * estimate is issued - see scheduleNeedsConfirmation.
+   */
+  const inheritedSchedule: { id: string; source: 'inherited' | 'default'; fromAtId?: string } =
+    carryOverSource && isScheduleId(String(carryOverSource.scheduleId ?? ''))
+      ? { id: String(carryOverSource.scheduleId), source: 'inherited', fromAtId: carryOverSource.id }
+      : { id: DEFAULT_SCHEDULE_ID, source: 'default' };
+
+  /** What the AT will actually be created on, once a template choice is taken into account. */
+  const effectiveSchedule = chosenTemplate?.scheduleId && isScheduleId(chosenTemplate.scheduleId)
+    ? { id: chosenTemplate.scheduleId, source: 'template' as const, fromAtId: undefined }
+    : inheritedSchedule;
+
+  /**
    * Opens the create form PRE-FILLED from the previous AT rather than defaulting the write.
    *
    * Deliberately not an inherited default applied at save time. An inherited value is MORE
@@ -427,11 +444,8 @@ export function AtSettings() {
         endDate: t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : prev.endDate,
       }));
     }
-    // The schedule travels with the rates - see the read-only field in the form. Set here
-    // as well as by adoption so the AT is never written on one schedule and corrected to
-    // another a moment later; a document that was briefly wrong is a document that could
-    // be read while wrong.
-    if (t.scheduleId) setNewAtScheduleId(t.scheduleId);
+    // The schedule travels with the rates and is derived at save from the template - see
+    // effectiveSchedule. Nothing to set here; the form displays it as a fact.
   };
 
   /** Offer the previous tender's percentages - an act, not a default. */
@@ -518,7 +532,9 @@ export function AtSettings() {
         atPercentageCRGO: Number(newAt.atPercentageCRGO),
         atPercentageAmorphous: Number(newAt.atPercentageAmorphous),
         atPercentageWoundCore: Number(newAt.atPercentageWoundCore),
-        scheduleId: newAtScheduleId,
+        scheduleId: effectiveSchedule.id,
+        scheduleSource: effectiveSchedule.source,
+        ...(effectiveSchedule.fromAtId ? { scheduleInheritedFromAtId: effectiveSchedule.fromAtId } : {}),
       });
       // Creating an AT is a clear signal of intent to work with it, so make it active.
       // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
@@ -561,7 +577,6 @@ export function AtSettings() {
       if (created?.seed) { setSeedReport(created.seed); setSeedReportAtNo(newAt.atNumber); setSeedReportAtId(created.id); }
       setShowAddForm(false);
       setNewAtTemplateId('');
-      setNewAtScheduleId(DEFAULT_SCHEDULE_ID);
       setNewAt({
         atNumber: '',
         name: '',
@@ -1167,20 +1182,26 @@ export function AtSettings() {
                       )}
                     </>
                   ) : (
-                    <select
-                      value={newAtScheduleId}
-                      onChange={e => setNewAtScheduleId(e.target.value)}
-                      className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
-                    >
-                      {selectableSchedules().map(s => (
-                        <option key={s.id} value={s.id}>{s.label}</option>
-                      ))}
-                    </select>
+                    /* NO SELECTOR. A schedule is a property of the tender, not a decision for
+                       the agency - it is carried over from their previous one and confirmed
+                       once, before the first estimate is issued. Shown as a fact so the
+                       operator reads which schedule applies rather than answering a question
+                       about UGVCL's paperwork that only the paperwork can answer. */
+                    <div className="px-3 py-2 text-xs rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">
+                      {SCHEDULES[inheritedSchedule.id as ScheduleId]?.label ?? inheritedSchedule.id}
+                      <span className="ml-2 text-[11px] font-normal text-slate-500">
+                        {inheritedSchedule.source === 'inherited'
+                          ? `carried over from ${carryOverSource?.atNumber || 'your previous tender'}`
+                          : 'the standing schedule - this is your first tender'}
+                      </span>
+                    </div>
                   )}
                   <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
                     {chosenTemplate?.scheduleId
-                      ? 'The template was published against this schedule, so it travels with the rates. Choose "Enter rates myself later" below if you need to set the schedule yourself.'
-                      : 'Schedule-A and Schedule-B are reissued with each tender, so this decides what every item on a job under this AT costs. Jobs under older tenders keep pricing from the schedule they were awarded under.'}
+                      ? 'The template was published against this schedule, so it travels with the rates.'
+                      : inheritedSchedule.source === 'inherited'
+                        ? 'Schedule-A and Schedule-B are reissued with each tender, and a new tender usually stays on the previous schedule until the administrator publishes a template for the new one. You will be asked to confirm this once, before the first estimate is issued.'
+                        : 'Schedule-A and Schedule-B are reissued with each tender. This agency has no previous tender to carry a schedule over from, so the standing one applies. You will be asked to confirm this once, before the first estimate is issued.'}
                   </p>
                 </div>
 

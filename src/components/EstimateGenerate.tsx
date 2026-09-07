@@ -1,6 +1,7 @@
 
 import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
+import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
@@ -46,7 +47,7 @@ const ROWS_FIRST_PAGE = 14;
 const ROWS_PER_PAGE = 22;
 
 export default function EstimateGenerate() {
-  const { activeAgency, activeAtMaster, atMasters, updateAgency, viewingAllTenders } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, updateAgency, updateAtMaster, viewingAllTenders } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +80,9 @@ export default function EstimateGenerate() {
   const [sendDate, setSendDate] = useState(new Date().toISOString().split('T')[0]);
   const [sendRemarks, setSendRemarks] = useState('');
   const [submittingSend, setSubmittingSend] = useState(false);
+  /** The AT whose schedule must be confirmed before this estimate can be sent. */
+  const [scheduleConfirmAt, setScheduleConfirmAt] = useState<any | null>(null);
+  const [confirmingSchedule, setConfirmingSchedule] = useState(false);
 
   // Approval Received Modal State
   const [showApprModal, setShowApprModal] = useState(false);
@@ -653,11 +657,63 @@ export default function EstimateGenerate() {
   };
 
   // Confirm Sending Estimate
+  /**
+   * Record that a person confirmed this tender's rate schedule.
+   *
+   * ⚠ WHO AND WHEN, NOT JUST A FLAG. A confirmation that leaves no trace is worth less than
+   * the warning it replaces: afterwards nobody can tell whether someone checked or the
+   * field was simply never wrong. The oil carry-forward records its own timestamp and
+   * source AT for the same reason - it does not record who, and this does.
+   */
+  const handleConfirmSchedule = async () => {
+    if (!scheduleConfirmAt || !auth.currentUser) return;
+    setConfirmingSchedule(true);
+    try {
+      const stamp = {
+        scheduleConfirmedBy: auth.currentUser.email || auth.currentUser.uid,
+        scheduleConfirmedAt: Date.now(),
+      };
+      // updateAtMaster writes and updates the context's copy in one call - without the
+      // second half the gate fires again on the next click, against an AT the database now
+      // considers confirmed.
+      await updateAtMaster(scheduleConfirmAt.id, stamp);
+      setScheduleConfirmAt(null);
+    } catch (err) {
+      console.error(err);
+      alert('Could not record the confirmation. Nothing was changed, and the estimate has not been sent.');
+    } finally {
+      setConfirmingSchedule(false);
+    }
+  };
+
   const handleConfirmSendEstimate = async () => {
     if (!sendTargetMr || !sendRefNo.trim() || !sendDate || !auth.currentUser) {
       alert('Please enter both Reference No and Send Date');
       return;
     }
+
+    /**
+     * CONFIRM THE TENDER'S RATE SCHEDULE ONCE, BEFORE THE FIRST ESTIMATE LEAVES.
+     *
+     * ⚠ A GATE, BECAUSE DISPLAY WAS MEASURED AND FOUND INSUFFICIENT. `ratesSource:
+     * 'inherited-agency'` has rendered "Nobody has confirmed them against this tender" on
+     * six of nine ATs for the length of this audit and nobody has acted on one. The
+     * schedule is worse placed than that warning: it appears on NO printed document, so an
+     * estimate priced from the wrong one is complete, plausible and unreported.
+     *
+     * Placed HERE and not at AT creation on purpose. An inherited schedule is usually
+     * right, so blocking creation would stop a yard over a question nearly always answered
+     * yes. This is the point where the money leaves.
+     *
+     * Skipped entirely for a template-sourced schedule: the administrator chose it when
+     * publishing and the agency was shown it before adopting.
+     */
+    const sendAt = atForJob((mrGroups[sendTargetMr] || [])[0], atMasters) ?? activeAtMaster;
+    if (scheduleNeedsConfirmation(sendAt)) {
+      setScheduleConfirmAt(sendAt);
+      return;
+    }
+
     setSubmittingSend(true);
     try {
       const targetJobs = mrGroups[sendTargetMr] || [];
@@ -2004,6 +2060,67 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
       )}
 
       {/* MODAL 1: SEND ESTIMATE (Prompt for Ref No and Date) */}
+      {/* CONFIRM THE TENDER'S RATE SCHEDULE — once, before the first estimate is issued.
+          ⚠ IT NAMES THE SCHEDULE, WHERE IT CAME FROM, AND WHAT IT DECIDES. "Confirm to
+          continue" would be a click that means nothing: the reader would have agreed to a
+          sentence carrying no fact, which is worse than the warning it replaces because it
+          creates a record of a confirmation nobody actually made. */}
+      {scheduleConfirmAt && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-lg shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-amber-300 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center gap-3 mb-3">
+              <div className="bg-amber-100 p-2.5 rounded-xl shrink-0 text-amber-700"><AlertTriangle className="w-6 h-6" /></div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Which rate schedule prices this tender?</h3>
+                <p className="text-xs text-amber-800 font-medium">
+                  Asked once for AT {scheduleConfirmAt.atNumber || scheduleConfirmAt.name}, before its first estimate goes out.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 p-3 rounded-lg bg-slate-50 border border-slate-300">
+              <div className="text-[11px] uppercase font-bold tracking-wider text-slate-500">This tender is set to</div>
+              <div className="text-sm font-bold text-slate-900 mt-0.5">
+                {scheduleSetForAt(scheduleConfirmAt).label}
+              </div>
+              <div className="text-xs text-slate-700 mt-1 leading-relaxed">
+                {scheduleProvenance(scheduleConfirmAt, atMasters)}
+              </div>
+            </div>
+
+            <p className="text-xs text-slate-700 mt-3 leading-relaxed">
+              <strong className="font-bold">Every rate on every estimate and every bill under this tender comes
+              from that schedule</strong> — the item-wise Schedule-A rates, the Amorphous and Wound Core fixed
+              rates, and the radiator and coil figures. UGVCL reissues them with each tender, and the app holds
+              more than one, so this is what decides whether a job here is priced at the old rates or the new.
+            </p>
+            <p className="text-xs text-slate-700 mt-2 leading-relaxed">
+              The schedule is not printed on the estimate, so an estimate priced from the wrong one looks
+              entirely normal. That is why you are being asked rather than shown.
+            </p>
+
+            <p className="text-[11px] text-slate-500 mt-3 leading-relaxed">
+              If this is wrong, close this and change the tender&rsquo;s schedule in Agency Settings before
+              sending — adopting the administrator&rsquo;s rate template for the new tender is what changes it.
+              Your name and the date are recorded against this confirmation.
+            </p>
+
+            <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setScheduleConfirmAt(null)}
+                      className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300">
+                Not now — don&rsquo;t send
+              </button>
+              <button type="button" onClick={handleConfirmSchedule} disabled={confirmingSchedule}
+                      className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm disabled:opacity-50">
+                {confirmingSchedule
+                  ? 'Recording…'
+                  : `Yes — this tender is priced from ${scheduleSetForAt(scheduleConfirmAt).label}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showSendModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
           <div className="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in zoom-in-95 duration-150">

@@ -539,3 +539,42 @@ export function scheduleReadiness(at: any): string | null {
 export function selectableSchedules(): ScheduleSet[] {
   return Object.values(SCHEDULES).filter(s => s.complete);
 }
+
+/**
+ * DOES THIS TENDER'S SCHEDULE STILL NEED CONFIRMING?
+ *
+ * True when the schedule was inherited from the previous tender or defaulted, and nobody
+ * has since said it is right. False for a schedule that arrived with a rate template - the
+ * administrator chose that one when publishing and the agency saw it before adopting - and
+ * false once someone has confirmed.
+ *
+ * ⚠ THE GATE THIS FEEDS SITS BEFORE THE FIRST ISSUED ESTIMATE, not before the AT is created
+ * and not before jobs are booked. An inherited schedule is usually right, so blocking
+ * creation would stop a yard over a question that is nearly always answered "yes"; but the
+ * schedule appears on no printed document, so an estimate priced from the wrong one is
+ * complete, plausible and unreported. The issue point is where those two facts meet.
+ */
+export function scheduleNeedsConfirmation(at: any): boolean {
+  if (!at) return false;
+  const source = String(at.scheduleSource ?? '').trim();
+  if (source === 'template') return false;
+  if (Number(at.scheduleConfirmedAt) > 0) return false;
+  // A record predating these fields has no source. It carries a scheduleId from the
+  // backfill, which was verified against what the tender was already charging, so it is
+  // treated as needing confirmation only if it never got one - the same question, asked of
+  // an AT whose answer was established by script rather than by a person.
+  return true;
+}
+
+/** One sentence naming where an AT's schedule came from. Never blank - see AUDIT F50. */
+export function scheduleProvenance(at: any, atMasters: any[]): string {
+  const set = scheduleSetForAt(at);
+  const source = String(at?.scheduleSource ?? '').trim();
+  if (source === 'template') return `${set.label}, which came with the rate template this tender adopted.`;
+  if (source === 'inherited') {
+    const from = atMasters.find(a => a.id === at?.scheduleInheritedFromAtId);
+    return `${set.label}, carried over from ${from?.atNumber || 'the previous tender'} when this tender was created.`;
+  }
+  if (source === 'default') return `${set.label}, applied because this was the agency's first tender and there was none to carry over from.`;
+  return `${set.label}, recorded before this app tracked where a schedule came from.`;
+}
