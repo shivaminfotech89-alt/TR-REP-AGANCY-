@@ -38,6 +38,25 @@ export function AtSettings() {
    * point of the click rather than a passenger on another one.
    */
   const [newAtTemplateId, setNewAtTemplateId] = useState('');
+
+  /**
+   * The template the form OPENS on - the newest published one, when any exists.
+   *
+   * ⚠ THIS DEFAULT ACTS RATHER THAN SUGGESTS, and that is a different class of default.
+   * Most defaults put a value in a box and wait; this one copies five rate schedules onto
+   * the AT when the form is saved. It is deliberate: the alternative outcome is the NO
+   * RATES state, which blocks every estimate and bill under the tender, and two ATs are
+   * sitting in it. Adoption is reversible - copy another template, or edit in Estimate
+   * Master - and the form names what will be copied before it is.
+   *
+   * Newest by publishedAt, because a DISCOM's current schedule is the last one published.
+   */
+  const newestTemplate = publishedAts.length
+    ? [...publishedAts].sort((a, b) => Number(b.publishedAt ?? 0) - Number(a.publishedAt ?? 0))[0]
+    : null;
+
+  /** The template chosen for the new AT, resolved. Null means "enter rates myself later". */
+  const chosenTemplate = publishedAts.find(t => t.id === newAtTemplateId) ?? null;
   /**
    * WHICH UGVCL SCHEDULE THIS TENDER IS PRICED FROM.
    *
@@ -240,9 +259,11 @@ export function AtSettings() {
     name: '',
     startDate: new Date().toISOString().split('T')[0],
     endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-    atPercentageCRGO: '4',
-    atPercentageAmorphous: '4',
-    atPercentageWoundCore: '4',
+    // EMPTY, NOT '4'. See the parse guard in handleAdd for why a pre-filled
+    // percentage is a figure nobody chose.
+    atPercentageCRGO: '',
+    atPercentageAmorphous: '',
+    atPercentageWoundCore: '',
   });
 
   const agencyAts = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -366,16 +387,62 @@ export function AtSettings() {
     </div>
   );
 
+  /**
+   * Opens the create form EMPTY. The percentages are answered, not inherited.
+   *
+   * ⚠ THIS USED TO PRE-FILL FROM THE PREVIOUS AT, AND THE REASONING AGAINST IT WAS ALREADY
+   * WRITTEN DOWN HERE. The old comment said an inherited value "is MORE dangerous than a
+   * placeholder: 4% is obviously unset, whereas last year's 8% looks deliberate and would
+   * price a whole tender wrongly while appearing configured - the F1 shape exactly" - and
+   * then pre-filled anyway, on the argument that showing the number before submit made it
+   * chosen. It does not. A field already holding a plausible number is submitted unread.
+   *
+   * The convenience is kept as `copyPercentagesFromPreviousAt`, a button. Offering last
+   * year's figures is useful; applying them is the part that made them look decided.
+   */
   const openAddForm = () => {
-    if (carryOverSource) {
+    // Open on the recommended path, not beside it. See newestTemplate.
+    if (newestTemplate) applyTemplateChoice(newestTemplate.id);
+    setShowAddForm(true);
+  };
+
+  /**
+   * Choose a template, and carry across what it knows.
+   *
+   * Shared by the select and by `openAddForm`, which opens on the newest template - a
+   * default that only set the id would leave the dates unfilled, so the form would behave
+   * differently depending on whether the operator touched the control it was already on.
+   */
+  const applyTemplateChoice = (id: string) => {
+    setNewAtTemplateId(id);
+    const t = publishedAts.find(x => x.id === id);
+    if (!t) return;
+    // PREFILL THE PERIOD, DO NOT IMPOSE IT. A template carries the tender's own dates;
+    // filling them here turns a lookup into a check. They stay editable because the
+    // agency's AT period is its own - it may join a tender late or close early.
+    if (t.startDate || t.endDate) {
       setNewAt(prev => ({
         ...prev,
-        atPercentageCRGO: String(carryOverSource.atPercentageCRGO ?? carryOverSource.atPercentage ?? 4),
-        atPercentageAmorphous: String(carryOverSource.atPercentageAmorphous ?? carryOverSource.atPercentage ?? 4),
-        atPercentageWoundCore: String(carryOverSource.atPercentageWoundCore ?? carryOverSource.atPercentage ?? 4),
+        startDate: t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : prev.startDate,
+        endDate: t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : prev.endDate,
       }));
     }
-    setShowAddForm(true);
+    // The schedule travels with the rates - see the read-only field in the form. Set here
+    // as well as by adoption so the AT is never written on one schedule and corrected to
+    // another a moment later; a document that was briefly wrong is a document that could
+    // be read while wrong.
+    if (t.scheduleId) setNewAtScheduleId(t.scheduleId);
+  };
+
+  /** Offer the previous tender's percentages - an act, not a default. */
+  const copyPercentagesFromPreviousAt = () => {
+    if (!carryOverSource) return;
+    setNewAt(prev => ({
+      ...prev,
+      atPercentageCRGO: String(carryOverSource.atPercentageCRGO ?? carryOverSource.atPercentage ?? ''),
+      atPercentageAmorphous: String(carryOverSource.atPercentageAmorphous ?? carryOverSource.atPercentage ?? ''),
+      atPercentageWoundCore: String(carryOverSource.atPercentageWoundCore ?? carryOverSource.atPercentage ?? ''),
+    }));
   };
 
 
@@ -390,6 +457,51 @@ export function AtSettings() {
       alert('Select an agency before creating an AT. An AT belongs to one agency, and one created without it would not appear under any.');
       return;
     }
+
+    /**
+     * THE THREE PERCENTAGES ARE ANSWERED OR THE AT IS NOT CREATED.
+     *
+     * ⚠ A BLANK MUST NOT BECOME A NUMBER. This wrote `Number(field) || 0`, so an empty box
+     * stored 0 - and `getAtPercentageForCore` returns 0 faithfully, because 0 is not NaN.
+     * The tender then priced at exactly the schedule rate, for ever, and nothing said so.
+     *
+     * That is worse than the 4% it was assumed to be. 4 is a suspicious round number and
+     * invites a check; "at tender rate" reads like a decision to bid at par. For any agency
+     * that bid above - and live data holds 5, 7 and 8 - it silently under-claims every job
+     * under that tender.
+     *
+     * Same refusal as `calculateJobTotal` returning null rather than `?? 0`: a missing
+     * answer must not be coerced into a figure.
+     *
+     * A TYPED ZERO IS A REAL ANSWER and is accepted - bidding at par is legitimate. Blank
+     * and zero were indistinguishable after the write; parsing separately is what tells
+     * them apart.
+     */
+    const pcts: Array<[string, string]> = [
+      ['CRGO', newAt.atPercentageCRGO],
+      ['Amorphous', newAt.atPercentageAmorphous],
+      ['Wound Core', newAt.atPercentageWoundCore],
+    ];
+    const unanswered = pcts.filter(([, v]) => {
+      const t = String(v ?? '').trim();
+      return t === '' || t === '-' || t === '.' || t === '-.' || isNaN(Number(t));
+    });
+    if (unanswered.length > 0) {
+      alert(
+        `Enter the estimate percentage for ${unanswered.map(([k]) => k).join(', ')}.
+
+`
+        + `This is the percentage your agency quoted ABOVE (+) or BELOW (-) the UGVCL schedule `
+        + `in its bid, and it multiplies every line of every estimate and every bill under this tender. `
+        + `It is not the same for every core type - agencies here carry +8 on Amorphous against +4 on CRGO, `
+        + `and one carries -8.
+
+`
+        + `If the bid was at the schedule rate exactly, type 0.`
+      );
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const created = await addAtMaster({
@@ -400,10 +512,12 @@ export function AtSettings() {
         status: 'Active',
         agencyId: activeAgency.id,
         lastJobNumbers: {},
-        atPercentage: Number(newAt.atPercentageCRGO) || 0,
-        atPercentageCRGO: Number(newAt.atPercentageCRGO) || 0,
-        atPercentageAmorphous: Number(newAt.atPercentageAmorphous) || 0,
-        atPercentageWoundCore: Number(newAt.atPercentageWoundCore) || 0,
+        // Validated above, so `Number` cannot be NaN here and `|| 0` is gone with it -
+        // that fallback is what turned a blank into a bid at par.
+        atPercentage: Number(newAt.atPercentageCRGO),
+        atPercentageCRGO: Number(newAt.atPercentageCRGO),
+        atPercentageAmorphous: Number(newAt.atPercentageAmorphous),
+        atPercentageWoundCore: Number(newAt.atPercentageWoundCore),
         scheduleId: newAtScheduleId,
       });
       // Creating an AT is a clear signal of intent to work with it, so make it active.
@@ -453,9 +567,9 @@ export function AtSettings() {
         name: '',
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-        atPercentageCRGO: '4',
-        atPercentageAmorphous: '4',
-        atPercentageWoundCore: '4',
+        atPercentageCRGO: '',
+        atPercentageAmorphous: '',
+        atPercentageWoundCore: '',
       });
     } catch (err: any) {
       // Surface the real reason - the context throws a named error for an orphan AT.
@@ -1022,19 +1136,33 @@ export function AtSettings() {
                     the consequence instead of preventing the choice. */}
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">UGVCL schedule this tender is priced from</label>
-                  <select
-                    value={newAtScheduleId}
-                    onChange={e => setNewAtScheduleId(e.target.value)}
-                    className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
-                  >
-                    {selectableSchedules().map(s => (
-                      <option key={s.id} value={s.id}>{s.label}</option>
-                    ))}
-                  </select>
+                  {/* ⚠ THE TEMPLATE'S SCHEDULE WINS, AND THE FIELD SAYS SO INSTEAD OF LOSING
+                      SILENTLY. Templates carry a scheduleId and `adoptPublishedAt` copies it
+                      onto the AT, so a chosen template overrides whatever is selected here -
+                      it has to, because the rates and the schedule must come from one tender
+                      or the AT prices master rows from one and Schedule-A fallbacks from
+                      another. Leaving an editable selector that is then quietly overwritten
+                      is worse than having no selector: it invites a choice and discards it. */}
+                  {chosenTemplate?.scheduleId ? (
+                    <div className="px-3 py-2 text-xs rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">
+                      {selectableSchedules().find(s => s.id === chosenTemplate.scheduleId)?.label ?? chosenTemplate.scheduleId}
+                      <span className="ml-2 text-[11px] font-normal text-slate-500">comes with the template</span>
+                    </div>
+                  ) : (
+                    <select
+                      value={newAtScheduleId}
+                      onChange={e => setNewAtScheduleId(e.target.value)}
+                      className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                    >
+                      {selectableSchedules().map(s => (
+                        <option key={s.id} value={s.id}>{s.label}</option>
+                      ))}
+                    </select>
+                  )}
                   <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
-                    Schedule-A and Schedule-B are reissued with each tender, so this decides what every
-                    item on a job under this AT costs. Jobs under older tenders keep pricing from the
-                    schedule they were awarded under.
+                    {chosenTemplate?.scheduleId
+                      ? 'The template was published against this schedule, so it travels with the rates. Choose "Enter rates myself later" below if you need to set the schedule yourself.'
+                      : 'Schedule-A and Schedule-B are reissued with each tender, so this decides what every item on a job under this AT costs. Jobs under older tenders keep pricing from the schedule they were awarded under.'}
                   </p>
                 </div>
 
@@ -1049,30 +1177,18 @@ export function AtSettings() {
                     <>
                       <select
                         value={newAtTemplateId}
-                        onChange={e => {
-                          setNewAtTemplateId(e.target.value);
-                          // PREFILL THE PERIOD, DO NOT IMPOSE IT. A template carries the
-                          // tender's own dates; filling them here turns a lookup into a
-                          // check. They stay editable because the agency's AT period is
-                          // its own - it may join a tender late or close early - and
-                          // nothing downstream reads the template's dates again.
-                          const t = publishedAts.find(x => x.id === e.target.value);
-                          if (t?.startDate || t?.endDate) {
-                            setNewAt(prev => ({
-                              ...prev,
-                              startDate: t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : prev.startDate,
-                              endDate: t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : prev.endDate,
-                            }));
-                          }
-                        }}
+                        onChange={e => applyTemplateChoice(e.target.value)}
                         className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
                       >
-                        <option value="">Enter rates myself later</option>
+                        {/* TEMPLATES FIRST, MANUAL ENTRY LAST. The recommended path used
+                            to sit below the exception with the exception selected - two
+                            equal-looking options where one is right almost always. */}
                         {publishedAts.map(t => (
                           <option key={t.id} value={t.id}>
                             Copy &ldquo;{t.name}&rdquo; v{t.version}{t.atNumber ? ` (AT ${t.atNumber})` : ''}
                           </option>
                         ))}
+                        <option value="">Enter rates myself later (no rates until you do)</option>
                       </select>
                       <p className={`mt-1 text-[11px] leading-relaxed ${newAtTemplateId ? 'text-emerald-800' : 'text-amber-800'}`}>
                         {newAtTemplateId
@@ -1084,9 +1200,18 @@ export function AtSettings() {
                 </div>
                 {carryOverSource && (
                   <div className="sm:col-span-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-[11px] text-amber-900 leading-relaxed">
-                    <strong className="font-bold">AT percentages below are carried over from {carryOverSource.atNumber || 'the previous AT'}.</strong>{' '}
-                    They are a starting point, not defaults - check them against the new tender before creating.
-                    A carried-over percentage prices every estimate under this AT and looks deliberate whether it is or not.
+                    <strong className="font-bold">The percentages below start empty and must be answered.</strong>{' '}
+                    They are what your agency quoted above (+) or below (&minus;) the UGVCL schedule in its bid,
+                    and they multiply every line of every estimate and every bill under this tender.
+                    {' '}
+                    <button
+                      type="button"
+                      onClick={copyPercentagesFromPreviousAt}
+                      className="underline font-bold hover:text-amber-950"
+                    >
+                      Copy from {carryOverSource.atNumber || 'the previous AT'}
+                    </button>
+                    {' '}if this tender was bid at the same percentages &mdash; then check them against the new bid.
                   </div>
                 )}
                 <div>
