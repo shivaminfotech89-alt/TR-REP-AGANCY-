@@ -6581,6 +6581,62 @@ is only ever learned the expensive way.
 
 ---
 
+### O41. The circle limits are not versioned by tender, and Schedule-A now is
+
+**Rate schedules became per-tender at `ugvclSchedules.ts`; the sanction ceiling they are
+measured against did not.** Schedule-A and Schedule-B live in `SCHEDULES`, keyed by
+`ScheduleId`, and an AT names which one prices its jobs. The Clause 4.0 circle limits live
+somewhere else entirely — `estimateMasterCircleLimits`, a **master section** on the agency
+or the AT, resolved by `getCircleLimitsEstimateMaster` and read by `checkJobCircleLimit`.
+Nothing keys it by schedule, so **every tender is measured against the same ceiling.**
+
+**Why that now matters.** UGVCL-2026 raises Schedule-A by roughly 0.85% across nearly every
+row. If the Clause 4.0 limits are reissued with the tender and are not transcribed alongside
+it, a 2026 job costs ~0.85% more and is checked against the 2020 ceiling — so jobs cross the
+limit **earlier than the tender says they should**.
+
+**It is not hypothetical, and the margin is thin.** Across 47 CRGO/OH jobs with a resolvable
+limit:
+
+| job | kVA | estimate | limit | % of limit |
+|---|---|---|---|---|
+| `SU-5` | 10 | 9,077.15 | 8,716 | **104.1% — already over** |
+| `SU-7` | 200 | 47,115.02 | 47,170 | **99.9%** |
+| `SU-10` | 200 | 46,422.69 | 47,170 | 98.4% |
+| `SU-6` | 200 | 45,222.21 | 47,170 | 95.9% |
+
+`SU-7` has **Rs 54.98 of headroom on a Rs 47,170 ceiling.** A 0.85% rise adds about Rs 400,
+so it crosses. At 2% a second job joins it. *(These are test records, so the closeness of
+`SU-7` is partly luck — but the mechanism does not depend on it: any job in the top few
+percent of its band crosses on a rate rise the ceiling does not follow.)*
+
+**AND THE ERROR REACHES PAPER, ADDRESSED TO THE AUTHORITY IT IS WRONG ABOUT.**
+`EstimateGenerate.tsx:1007` prints **"REPAIRABLE (> CIRCLE LIMIT)"** in the Condition column
+of the estimate sent to the circle office. So the document tells the Superintending Engineer
+that his own sanction power is exceeded — using a limit from a superseded tender, on an
+estimate priced from the current one.
+
+**The direction is conservative and that is not the same as harmless.** Over-reporting sends
+an estimate for higher sanction that did not need it: delay and correspondence, not
+overcharging. But it is a false statement on an issued document, and the reader is the person
+who would know the current limit.
+
+**Held, not fixed — the Clause 4.0 pages for AT 1819 have not been supplied.** Two shapes are
+available once they are: move the limits into `ScheduleSet` beside Schedule-A and B, or key
+the master section by schedule id. The first is more honest about what they are; the second
+preserves the per-agency override that exists today. Deciding without the pages would be
+guessing at whether the limits even changed.
+
+**Adjacent, same shape, also not fixed: the circle-limits section is freely editable.** It is
+not in `REFERENCE_SECTIONS`, so any agency can type over the Superintending Engineer's
+sanction powers — the same "someone else's decision offered for editing" argument that locked
+the Amorphous and Wound Core rates. The difference is that those repair rates were read by
+nothing, so locking them changed no figure; these **are** read, on every estimate, so locking
+them is a behaviour change and needs the same ruling the fixed-rate sections got: is this the
+tender's fact or the agency's?
+
+---
+
 ### O40. The Schedule-B extras exist, are priced, and cannot reach an estimate — O16 follow-on
 
 **Rows 3-6 of the Amorphous / Wound Core master are real tender charges with real rates, and
