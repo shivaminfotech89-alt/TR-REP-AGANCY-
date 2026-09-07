@@ -51,17 +51,28 @@ one step that has to happen in order.
 *Already created the new AT? Switch back to the old one in the bar at the top
 of Agency Settings, do the estimating, then switch forward again.*
 
-### 2. Check the AT percentages before you press Create
+### 2. Enter the AT percentages — all three, from your bid
 
-When you open the create form, the percentages are **already filled in from
-last year's AT**. That is a starting point, not an answer.
+The three percentage boxes now open **empty** and the form will not create the
+AT until all three are filled. They used to be pre-filled from last year's AT,
+which meant they were usually submitted unread.
 
-**If you skip it: every estimate under this tender is priced at last year's
-percentage and looks correct.** A wrong percentage is invisible on the
-finished document — there is no line saying which percentage was used.
+They are what **your agency quoted above (+) or below (−) the UGVCL schedule**
+in its bid document — not a property of the tender, which is why they differ
+between agencies working the same one. Live examples: +7 across the board on
+one tender, and +4 CRGO with −8 Amorphous and −4 Wound Core on another.
 
-Check all three (CRGO, Amorphous, Wound Core) against the new tender document.
-The form says where the numbers came from; read it rather than clicking past.
+There is a **Copy from *(previous AT)*** link if this tender was bid at the
+same percentages. Use it, then check the numbers against the new bid.
+
+**If the bid was at the schedule rate exactly, type 0.** A blank is refused; a
+typed zero is accepted. They are not the same thing, and a blank used to be
+stored as zero silently — which read as "bid at par" rather than "nobody
+answered".
+
+**If you skip it: you cannot** — the form blocks. That is the point. A wrong
+percentage is invisible on the finished document, because no line says which
+percentage was used.
 
 ### 3. Enter the divisions and prefixes — if any prefix changed
 
@@ -103,25 +114,73 @@ free number. It is a heads-up, not a task.
 
 ## If the tender's RATES changed, not just its dates
 
-A new AT number does not by itself change any price. Rates live in the estimate master, and
-**a rate change does not arrive with a software update** — once your master holds a rate for
-an item, that is the rate used, and the built-in tender schedule is no longer consulted for
-it.
+A new AT number does not by itself change any price. Since rate schedules became
+per-tender, **which schedule an AT uses is a property of the tender**, chosen once by the
+administrator and carried onto the AT — you never pick it yourself.
 
-So if the new tender changes any item rate:
+There are **two cases**, and they cost very different amounts.
 
-1. Update the shared default first — Estimate Master, edit the rates, then **Publish as
-   Default for All Users**. This writes the central copy every agency starts from.
-2. **Each agency must then reload from it.** Publishing does not silently rewrite an agency
-   that already has its own rates; that is deliberate, so nobody's customised rates are
-   overwritten behind their back.
-3. Check one estimate afterwards and compare it against the tender before sending anything.
+### First: which case are you in? Three cells, not fifty-one.
 
-**If you skip this: estimates keep using last tender's rates and look completely normal.**
-There is no warning, because an out-of-date rate is indistinguishable from a current one.
+Do **not** compare the whole sheet. Open the new tender's Schedule-A and check these three
+against what the app currently prices. They are spread across the sheet and all three moved
+between the 2020 and 2026 tenders, so if a tender reprices at all these will show it:
 
-If the tender's rates did **not** change — only its number and dates — there is nothing to
-do here.
+| Sr. | item | UGVCL-2020 | UGVCL-2026 |
+|---|---|---|---|
+| **1a** at 25 KVA | Labour charge only | 2061 | **2079** |
+| **17** (any capacity) | Sealed → bolted conversion | 1511 | **1524** |
+| **21** at 63 KVA | Overhauling | 3162 | **3189** |
+
+- **All three match a schedule the app already has** → Case A. The tender reuses that
+  schedule. Nothing about rates needs doing.
+- **Any one differs** → Case B. The tender has repriced and **the new schedule has to be
+  entered in code before any job is booked under it.**
+
+Two of those figures sit at the top and bottom of the sheet and one is a single flat number,
+so the check takes a minute. If you want more certainty, add `12A(b)` — the aluminium HV
+coil per kg, 163 in 2020 and 165 in 2026 — because it is the most expensive line on most
+estimates.
+
+### Case A — the tender reuses an existing schedule
+
+1. Create the AT as normal. The **Rate schedule** field shows which schedule applies as a
+   statement of fact; you do not choose it.
+2. If a rate template exists for that schedule it is **pre-selected** and its rates are
+   copied onto the AT when you save. That is the whole job.
+3. If no template exists, ask the administrator to publish one — Admin Panel → **New tender
+   template** → name it, give the tender number and period, choose the schedule, publish.
+   It takes a minute and every agency on that tender can then adopt it.
+
+### Case B — the tender repriced
+
+**The rates cannot be typed in.** Schedule-A, Schedule-B, the radiator table and the Clause
+4.0 sanction limits live in the app's code, not in any screen, and that is deliberate: they
+are the tender's figures, not an agency's, so no agency can edit them.
+
+1. **Send the schedule pages to whoever maintains the app.** All of them — Schedule-A,
+   Schedule-B and the Clause 4.0 limits. A partial set means a tender priced half from the
+   new schedule and half from the old, which is worse than waiting.
+2. They add it as a new schedule and tell you when it is live.
+3. The administrator publishes a template against the new schedule.
+4. You create the AT and pick that template — or, if the AT already exists, adopt onto it
+   from Estimate Master → **Copy to this AT**.
+
+**A correction in the code reaches every AT on that schedule the moment it ships** — no
+republishing, no re-adopting, nobody clicking anything. That is the opposite of anything held
+in the estimate master, which needs a new template version and every agency to take it.
+
+### Before the first estimate goes out
+
+The first time you send an estimate under a tender whose schedule was carried over rather
+than chosen, the app asks you to confirm it once — naming the schedule and where it came
+from. **Read it rather than clicking through.** It is the only point at which a wrong
+schedule can be caught: the schedule is not printed on the estimate, so a job priced from the
+wrong tender looks entirely normal on paper.
+
+**If you skip all this: estimates use the previous tender's rates and look completely
+normal.** There is no warning on the document, because an out-of-date rate is
+indistinguishable from a current one.
 
 ## After either one — a quick check
 

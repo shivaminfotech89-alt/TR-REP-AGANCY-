@@ -6673,6 +6673,48 @@ for pricing, which is what they should be.**
 
 ---
 
+### O44. A deleted rate template leaves an AT pointing at nothing, and three screens absorb it
+
+**Not reachable today, and recorded before it is.** `firestore.rules:456-459` grants
+`get`, `list`, `create` and `update` on `published_ats` and **no `delete`** — so deletion is
+denied to everyone including the super admin, and there is no `deleteDoc` against that
+collection anywhere in `src/`. The admin register is read-only. A template can only be
+removed from the Firebase console or by an admin-SDK script.
+
+**If one were removed, pricing would be fine and the reporting would not.** Adoption COPIES
+the five sections onto the AT, so the rates keep working. But the AT's
+`ratesSource: 'published:<id>'` then names a document that does not exist, and all three
+displays **absorb the dangling reference into a healthy-looking state** rather than naming
+it:
+
+| screen | what it does |
+|---|---|
+| Admin register | Iterates `publishedAts`, so the template vanishes and its adopters are counted nowhere. **The AT becomes invisible to the one screen built to show who is on what.** |
+| AT rates summary (`AgencySettings:267`) | `tpl` is `undefined` → `behind` falsy → tone **`ok`**, label *"From template v1"*, detail *"Copied from **a published template**"*. Reports health, names nothing. |
+| Estimate Master banner (`:2477`) | Prints *"Copied from published template **&lt;raw document id&gt;** v1"*, then — `drifted` being falsy — **"This is the current version of that template."** Which is false about a template that no longer exists. |
+
+**The last one is the worst, because it is confident.** A missing template and an up-to-date
+one produce the same green banner and the same sentence.
+
+**This is the deleted-AT shape.** A job whose `atId` names a removed tender was handled by
+saying so; here the same situation resolves to a fallback that reads as normal. The audit's
+own rule applies: an absent thing must be reported as absent, not defaulted into looking
+present.
+
+**The fix is a fourth state, not a guard.** `ratesSource` has three today —
+`inherited-agency`, `published:<id>`, and hand-entered. The missing one is *"the template
+this was copied from no longer exists"*, and the sentence for it already exists on the
+neighbouring branch at `AtSettings:795`, which gets hand-entered rates right: **"They were
+entered by hand for this tender and exist nowhere else. Nothing recreates them."** A deleted
+template puts an AT in exactly that position — the rates are now the AT's own, and nothing
+recreates them — so it should say so.
+
+**Left open deliberately.** Building the state before deletion is reachable would be
+speculative, and adding a delete button is a separate decision nobody has asked for. What
+must not happen is deletion becoming reachable *first*.
+
+---
+
 ### O42. The tender's witnessing and sequencing rules: transcribed, present, and enforced nowhere
 
 The 2026-28 tender text carries three conditions on how work may proceed:
