@@ -567,6 +567,11 @@ export default function EstimateGenerate() {
    *    alone would put Repairing Charge on the capacity row correctly and then leave the
    *    master's row '2' ("Labour charge per transformer") empty, dropping the labour amount
    *    out of the exported sheet entirely. The description disambiguates them.
+   *
+   *    Both lines are emitted on flat AND per-coil rows, but only the per-coil rows carry a
+   *    rate: on a flat row the labour line is Rs 0, because the tender charges labour only
+   *    where the repair is priced per coil. So an exported sheet showing row '2' at zero for
+   *    a 25 KVA Amorphous job is correct, not a missing rate.
    */
   const estimateCache = new Map<string, any>();
   const builderLineFor = (masterItem: any, job: any) => {

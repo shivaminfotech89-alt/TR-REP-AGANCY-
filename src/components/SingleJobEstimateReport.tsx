@@ -324,8 +324,14 @@ export function buildSingleJobEstimateData(
   }
 
   // Amorphous / CRGO Wound Core: FIXED RATE, not itemised. No physical/internal/labour
-  // breakdown - external inspection is oil accounting only (no charge) and there is no
-  // internal inspection for these core types, so none of the 29 CRGO items apply.
+  // breakdown - none of the 29 CRGO items apply, and external inspection is oil accounting
+  // only (no charge).
+  //
+  // ⚠ THESE CORE TYPES DO HAVE AN INTERNAL INSPECTION. This comment used to assert they do
+  // not, which is what made the branch look independent of inspection data. All 16 Amorphous
+  // and Wound Core jobs in the database carry one, and this branch DEPENDS on it twice over:
+  // the winding material selects the Schedule-B row, and the damaged phase count is the
+  // quantity on the per-coil rows.
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
     const entry = findScheduleBEntry(kvaNum, isCopper, job.make);
     const fixedItems: SingleEstimateLineItem[] = [];
@@ -333,33 +339,65 @@ export function buildSingleJobEstimateData(
 
     // Schedule-B is banded by winding material too, so an unrecognised value picks the
     // wrong fixed rate here just as surely as it picks the wrong per-kg rate on CRGO.
-    if (internalData && windingMaterial === null) {
+    //
+    // A WHOLLY MISSING record blocks as well, which the old guard did not do: it tested
+    // `internalData && windingMaterial === null`, so an absent record skipped the check
+    // entirely and `isCopper` stayed false - a silent guess at aluminium, on the field that
+    // chooses the row. Same shape as the itemised path's missing-record block below.
+    const hasInternalRecord = !!internalData && Object.keys(internalData).length > 0;
+    if (!hasInternalRecord) {
+      fixedRateErrors.push({ kind: 'missing-input', message: `${jobLabel}: no internal inspection data - the winding material and the damaged coil count cannot be read.` });
+    } else if (windingMaterial === null) {
       fixedRateErrors.push(windingMaterialError(jobLabel, internalData.windingType));
     }
 
+    // FOR AMORPHOUS AND WOUND CORE, A LIMB IS A COIL - so the count is at most 3.
+    //
+    // The quantity on a per-coil row is the number of PHASES showing HV damage, not the
+    // number of damaged coil SECTIONS. `totCoil` (= damR + damY + damB) counts sections and
+    // reads 12 on a transformer with 4 coils per limb; charging that against a per-limb rate
+    // would bill four times the repair. On ASU-3 (200 kVA Al) that is Rs 121,776 instead of
+    // Rs 30,444.
+    //
+    // Derived from what internal inspection already records. There is no coil-count field
+    // and none is needed - the previous comment here claimed `totCoil` was "a coil WEIGHT in
+    // kg", which is wrong: `totCoil` is the count and `totWt` (= totCoil x wtOfCoil) is the
+    // weight. The itemised path 450 lines below computes the same three fields as
+    // `hvDamagedCoils`. Do not add an operator-entered count; it would be a second record of
+    // a fact already captured, and the two would drift.
+    const damagedPhases = [internalData?.damR, internalData?.damY, internalData?.damB]
+      .filter(v => (Number(v) || 0) > 0).length;
+
     if (!entry) {
-      fixedRateErrors.push({ kind: 'missing-rate', message: `No fixed-rate entry found for ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} winding in UGVCL Schedule-B.` });
+      // NO FALLBACK, EVER. Copper has no 10/16/25 KVA row, aluminium has no 5 KVA row, and
+      // nothing is rated above 200 KVA. Naming the combination is the whole value of the
+      // message: "no rate found" alone sends the reader to the wrong table.
+      fixedRateErrors.push({ kind: 'missing-rate', message: `${jobLabel}: no Schedule-B fixed rate for ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} winding. Schedule-B rates Aluminium at 10/16/25/63/100/200 KVA and Copper at 5/63/100/200 KVA only.` });
+      // ONE line, not two. Whether a labour charge is due depends on the row's basis, and
+      // with no row there is no basis - printing "Labour Charge / rate not found" asserts a
+      // charge that may not exist on the row this job should have matched.
       fixedItems.push({ sr: 1, desc: 'Repairing Charge - Fixed Rate (Internal & External)', unit: 'NOS', qty: '-', numQty: 0, rate: null, amt: 0 });
-      fixedItems.push({ sr: 2, desc: 'Labour Charge', unit: 'NOS', qty: '-', numQty: 0, rate: null, amt: 0 });
-    } else {
-      // basis 'coil': a standard three-phase distribution transformer has 3 limbs, so
-      // 3 coils. There's no coil-count field on the job (internalData.totCoil is a coil
-      // WEIGHT in kg, used elsewhere as weight x rate-per-kg - not a count, and using it
-      // as one here would bill e.g. a 47kg coil as 47 units). If a real coil-count field
-      // is ever added to the data model, replace this constant with it.
-      const COIL_COUNT_THREE_PHASE = 3;
-      const qty = entry.basis === 'coil' ? COIL_COUNT_THREE_PHASE : 1;
-      const mainAmt = entry.fixedRate * qty;
+    } else if (entry.basis === 'coil') {
+      // PER COIL: rate x damaged phases, plus the labour charge ONCE per transformer.
+      //
+      // Only when the record exists. With no internal inspection at all the block above has
+      // already said so, and a second block naming one of its fields would report the
+      // symptom beside the cause and read as two separate problems.
+      if (hasInternalRecord && damagedPhases === 0) {
+        fixedRateErrors.push({ kind: 'missing-input', message: `${jobLabel}: Schedule-B ${entry.sr} is charged per coil, but no phase is marked HV damaged on the internal inspection (R/Y/B all zero or blank), so there is no quantity to charge.` });
+      }
       fixedItems.push({
         sr: 1,
         itemCode: entry.sr,
         desc: 'Repairing Charge - Fixed Rate (Internal & External)',
         unit: 'NOS',
-        qty: String(qty),
-        numQty: qty,
+        qty: String(damagedPhases),
+        numQty: damagedPhases,
         rate: entry.fixedRate,
-        amt: mainAmt
+        amt: entry.fixedRate * damagedPhases
       });
+      // Separately, and once: it is per transformer, not per coil. Kept as its own line so
+      // the sheet shows material and labour apart rather than as one blended figure.
       const labourRate = entry.labourPerTransformer ?? 0;
       fixedItems.push({
         sr: 2,
@@ -370,6 +408,41 @@ export function buildSingleJobEstimateData(
         numQty: 1,
         rate: labourRate,
         amt: labourRate
+      });
+    } else {
+      // FLAT: one price for the whole transformer. No coil count - the damage count does not
+      // reach the figure at all.
+      fixedItems.push({
+        sr: 1,
+        itemCode: entry.sr,
+        desc: 'Repairing Charge - Fixed Rate (Internal & External)',
+        unit: 'NOS',
+        qty: '1',
+        numQty: 1,
+        rate: entry.fixedRate,
+        amt: entry.fixedRate
+      });
+      // ⚠ THE Rs 0 LABOUR LINE ON FLAT ROWS IS DELIBERATE, AND IT IS NOT A PRICING FACT.
+      //
+      // The flat rows carry no `labourPerTransformer`, so this line always reads Rs 0 - the
+      // tender charges labour only on the per-coil rows. It is kept because removing it
+      // changes the PRINTED SHEET for 14 of the 16 Amorphous / Wound Core jobs, and what the
+      // printed estimate looks like is a document decision, not a rate decision. Held back
+      // deliberately rather than folded into a pricing change (decided with the operator).
+      //
+      // If it is ever dropped, the Excel export needs looking at with it: EstimateGenerate's
+      // `builderLineFor` matches the master's row '2' by the description 'Labour Charge', and
+      // with no such line the row lands empty.
+      const flatLabourRate = entry.labourPerTransformer ?? 0;
+      fixedItems.push({
+        sr: 2,
+        itemCode: entry.sr,
+        desc: 'Labour Charge',
+        unit: 'NOS',
+        qty: '1',
+        numQty: 1,
+        rate: flatLabourRate,
+        amt: flatLabourRate
       });
     }
 
