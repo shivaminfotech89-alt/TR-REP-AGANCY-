@@ -578,3 +578,25 @@ export function scheduleProvenance(at: any, atMasters: any[]): string {
   if (source === 'default') return `${set.label}, applied because this was the agency's first tender and there was none to carry over from.`;
   return `${set.label}, recorded before this app tracked where a schedule came from.`;
 }
+
+// ⚠ TEMPORARY DIAGNOSTIC — remove once the missing-2026 report is closed.
+//
+// UNCONDITIONAL AND AT MODULE SCOPE, on purpose. The first diagnostic sat inside the admin
+// template form, so its absence was ambiguous: it could mean stale code, or simply that the
+// form was never rendered. This one runs the moment anything imports the schedules, which
+// every pricing path does - so if it does not appear in the console on ANY page, the running
+// bundle is not the code on disk, and no reasoning about the registry applies until that is
+// fixed.
+//
+// It also reports which origin served it, because two dev servers have been running against
+// this same working tree on ports 3000 and 3001.
+if (typeof console !== 'undefined') {
+  // eslint-disable-next-line no-console
+  console.log('[schedules-loaded]', {
+    servedFrom: typeof window !== 'undefined' ? (window as any).location?.origin : '(no window)',
+    buildMarker: 'SCHEDULES_MODULE_DIAG_v2',
+    ids: Object.keys(SCHEDULES),
+    complete: Object.values(SCHEDULES).map(s => `${s.id}=${s.complete}`),
+    selectable: selectableSchedules().map(s => s.id),
+  });
+}

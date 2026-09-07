@@ -595,9 +595,28 @@ export default function AdminPanel() {
                     className={`w-full px-3 py-2 text-xs border rounded-lg bg-white ${tplScheduleId ? 'border-slate-300' : 'border-amber-400 bg-amber-50'}`}
                   >
                     <option value="">-- choose --</option>
-                    {selectableSchedules().map(s => (
-                      <option key={s.id} value={s.id}>{s.label}</option>
-                    ))}
+                    {/* ⚠ TEMPORARY DIAGNOSTIC — remove once the missing-2026 report is closed.
+                        Three code-reading explanations failed to account for the symptom, so
+                        this reports what the RUNNING code sees rather than what the source
+                        says. It logs the origin because two Vite dev servers are running
+                        against this same working tree (ports 3000 and 3001), and the build
+                        marker because a server whose module graph predates the rename of
+                        ugvclSchedule2020.ts would serve a registry that genuinely has no
+                        UGVCL-2026 in it. */}
+                    {(() => {
+                      const list = selectableSchedules();
+                      // eslint-disable-next-line no-console
+                      console.log('[schedule-diag]', {
+                        servedFrom: typeof window !== 'undefined' ? window.location.origin : '(no window)',
+                        buildMarker: 'SCHEDULE_DIAG_2026_v1',
+                        registryKeys: Object.keys(SCHEDULES),
+                        registry: Object.values(SCHEDULES).map(s => ({ id: s.id, label: s.label, complete: s.complete, scheduleARows: s.scheduleA.length })),
+                        selectable: list.map(s => s.id),
+                      });
+                      return list.map(s => (
+                        <option key={s.id} value={s.id}>{s.label}</option>
+                      ));
+                    })()}
                   </select>
                   <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
                     Travels with the rates onto every AT that adopts this template, and decides what

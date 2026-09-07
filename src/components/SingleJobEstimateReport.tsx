@@ -4,7 +4,22 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
-import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT, ScheduleSet, scheduleSetForAt, scheduleReadiness } from '../lib/ugvclSchedules';
+import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT, ScheduleSet, scheduleSetForAt, scheduleReadiness, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
+
+/**
+ * THE SCHEDULE THE AGENCY MASTERS WERE COPIED FROM.
+ *
+ * Not a preference and not the newest - it is a historical fact about the migration that
+ * populated `estimateMaster*` when rates moved onto tenders. `resolveRate` compares master
+ * cells against it to tell a copy from a decision.
+ */
+const MASTER_BASELINE_SCHEDULE_ID: ScheduleId = 'UGVCL-2020';
+
+/** What a schedule lookup yields: this tender's figure, and the migration baseline's. */
+interface ScheduleLookup {
+  current: number | undefined;
+  baseline: number | undefined;
+}
 import { scheduleSrForMasterCode } from '../lib/scheduleItemMap';
 import { resolveScrapCharge } from '../lib/estimateCalc';
 
@@ -582,18 +597,23 @@ export function buildSingleJobEstimateData(
    * "no rate found", naming the wrong cause: the rate is configured, the MAPPING is missing.
    * Variant items are absent from the table's `sr` and keep selecting at their call site.
    */
-  const scheduleRateFor = (masterCode: string): number | undefined => {
+  const scheduleRateFor = (masterCode: string): ScheduleLookup => {
     const sr = scheduleSrForMasterCode(masterCode);
     if (!sr) throw new Error(`No Schedule-A mapping for master item code "${masterCode}" - add it to SCHEDULE_ITEM_MAP or record it in NOT_FROM_SCHEDULE_A.`);
     return scheduleRate(sr);
   };
 
-  const scheduleRate = (sr: string): number | undefined => {
+  /**
+   * A SCHEDULE LOOKUP CARRIES TWO FIGURES: what this tender charges, and what the tender the
+   * agency masters were COPIED FROM charged. `resolveRate` needs both - see the copy test there.
+   */
+  const scheduleRate = (sr: string): ScheduleLookup => {
     // THE JOB'S OWN TENDER'S SCHEDULE, not the module constant. This is the single line
     // that carries the per-tender schedule to all 31 call sites of scheduleRate /
     // scheduleRateFor below - the payoff of F55 and F57 having funnelled them here.
     const entry = scheduleSet.scheduleA.find(i => i.sr === sr);
-    return entry?.rates[band];
+    const base = SCHEDULES[MASTER_BASELINE_SCHEDULE_ID].scheduleA.find(i => i.sr === sr);
+    return { current: entry?.rates[band], baseline: base?.rates[band] };
   };
 
   // Lookup order: (1) the agency's own saved estimate master, if it has a value for
@@ -613,18 +633,50 @@ export function buildSingleJobEstimateData(
    * additive: a master that only has the old generic row still resolves exactly as before,
    * and one that has the split rows starts being read instead of ignored.
    */
-  const resolveRate = (masterCode: string | string[], scheduleValue: number | undefined): number | null => {
+  const resolveRate = (masterCode: string | string[], lookup: ScheduleLookup | undefined): number | null => {
+    const current = lookup?.current;
+    const baseline = lookup?.baseline;
     const codes = Array.isArray(masterCode) ? masterCode : [masterCode];
     for (const code of codes) {
       const found = masterList.find(m => m.itemCode?.toLowerCase() === code.toLowerCase());
       if (found?.rates) {
         const masterVal = found.rates[kva as keyof typeof found.rates];
         if (masterVal !== undefined && masterVal !== null && !isNaN(Number(masterVal)) && Number(masterVal) > 0) {
+          /**
+           * ⚠ A MASTER CELL EQUAL TO THE SCHEDULE IT WAS COPIED FROM IS NOT AN OVERRIDE.
+           *
+           * The masters were POPULATED BY MIGRATION from the UGVCL-2020 schedule when rates
+           * moved onto tenders. A copied cell and a typed one are byte-identical, so this
+           * lookup could not tell "the agency negotiated 2061" from "2061 is what the 2020
+           * tender said, copied here". It returned the master value either way - and that
+           * is why versioning the schedule never reached the price: THE SCHEDULE CHANGED
+           * UNDERNEATH A LAYER THAT HAD ALREADY COPIED IT. An AT stamped UGVCL-2026 priced
+           * 1a at 2061 instead of 2079 because a 2020 copy sat in front of it.
+           *
+           * Measured before changing: across every agency and AT, 1,555 of 1,572 populated
+           * CRGO cells are byte-identical to the 2020 schedule. The other 17 are two cells
+           * repeated - 1f@100 = 230 against 229, and 11B@100 = 148.99 against 149 - the
+           * public_config residue already recorded in AUDIT. ZERO cells are a genuine
+           * negotiated rate. The only cells in the database that differ from the schedule
+           * are wrong by a rupee in a direction nobody chose.
+           *
+           * ⚠ THE BASELINE IS ALWAYS UGVCL-2020, NEVER THIS TENDER'S SCHEDULE. The question
+           * is "was this copied?", and the migration copied from 2020. Comparing against the
+           * job's own schedule would make every 2020 copy look like an override the moment
+           * the tender changed, which is the bug itself.
+           *
+           * ⚠ AND THIS TEST ONLY WORKS WHILE NO REAL OVERRIDES EXIST. It is safe today
+           * because there are none. If an agency ever needs one, it must be recorded by an
+           * EXPLICIT MARKER on the cell - a flag saying someone typed it - not by this
+           * difference test, which would silently discard an override that happens to equal
+           * the old tender's figure. Do not extend this; replace it.
+           */
+          if (baseline !== undefined && Number(masterVal) === baseline) break;
           return Number(masterVal);
         }
       }
     }
-    return (scheduleValue !== undefined && scheduleValue > 0) ? scheduleValue : null;
+    return (current !== undefined && current > 0) ? current : null;
   };
 
   // Only items that actually apply to this job (qty > 0 / 'Y') need a resolvable rate -
@@ -798,7 +850,9 @@ export function buildSingleJobEstimateData(
   // tender at all, so it's left unresolved (blocked) rather than interpolated.
   const radQty = Number(externalData?.damRadNo) || 0;
   const radApplies = radQty > 0;
-  const radScheduleValue = kvaNum > 100 ? scheduleSet.radiatorAbove100[kvaNum] : scheduleRate('20');
+  const radScheduleValue: ScheduleLookup = kvaNum > 100
+    ? { current: scheduleSet.radiatorAbove100[kvaNum], baseline: SCHEDULES[MASTER_BASELINE_SCHEDULE_ID].radiatorAbove100[kvaNum] }
+    : scheduleRate('20');
   const radRate = resolveRate('21', radScheduleValue);
   recordErrorIfApplies(radApplies, radRate, 'Radiator Replacement');
   physicalItems.push({ sr: srCounter++, itemCode: '21', desc: 'Radiator Replacement', unit: 'NO', qty: radQty > 0 ? radQty.toString() : '0', numQty: radQty, rate: radRate, amt: radApplies ? radQty * (radRate ?? 0) : 0 });
