@@ -25,8 +25,18 @@ function atPercentageHint(value: string): string {
 }
 
 export function AtSettings() {
-  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster, forgetAtMaster } = useAgency();
+  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster, forgetAtMaster, publishedAts, adoptPublishedAt } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
+  /**
+   * The published template to copy onto the AT being CREATED. '' means "enter rates later".
+   *
+   * ⚠ SEPARATE STATE, NOT PART OF `newAt`. The edit form reuses that shape, and an existing
+   * AT must not carry a template choice: re-adopting on an ordinary "save changes" would
+   * replace a tender's rates as a side effect of correcting its dates. Copying onto an AT
+   * that already exists is Estimate Master's "Copy to this AT", where it is the whole
+   * point of the click rather than a passenger on another one.
+   */
+  const [newAtTemplateId, setNewAtTemplateId] = useState('');
   // Kept until dismissed, not a toast. It reports what the new AT's job numbering will
   // start from, and any job number that could not be read - the operator creating the AT
   // is the person who needs that, and a console log reaches the wrong person entirely.
@@ -388,9 +398,44 @@ export function AtSettings() {
       // Creating an AT is a clear signal of intent to work with it, so make it active.
       // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
       // a newly created AT showed a card with no way into its configuration.
+      // COPY THE CHOSEN TEMPLATE ONTO THE NEW AT, BEFORE IT IS EVER LOOKED AT.
+      //
+      // Without this an AT is born in the NO RATES state - which atRatesReadiness treats as
+      // blocking for every estimate and every bill under it - and the operator only finds
+      // out later, from a blocked estimate, that a second step existed on another screen.
+      // Two ATs in live data are sitting in exactly that state.
+      //
+      // ⚠ NO ROLLBACK IF THE COPY FAILS. The AT is already written and is a real tender the
+      // operator asked for; deleting a just-created AT to tidy up a failed second step is
+      // the more dangerous operation of the two - it is the same instinct that made the MR
+      // row-removal path destroy jobs (AUDIT O33). Say plainly what happened and leave the
+      // AT, which is recoverable from Estimate Master in one click.
+      let adoptionFailed = '';
+      if (created?.id && newAtTemplateId) {
+        try {
+          await adoptPublishedAt(created.id, newAtTemplateId);
+        } catch (err: any) {
+          console.error(err);
+          adoptionFailed = err?.message || 'The rates could not be copied.';
+        }
+      }
+
       if (created?.id) setActiveAtMasterId(created.id);
+      if (adoptionFailed) {
+        alert(
+          `AT ${newAt.atNumber} was created, but the published rates were NOT copied onto it.
+
+`
+          + `${adoptionFailed}
+
+`
+          + `The AT exists and has no rates, so estimates and bills against it are blocked until it has some. `
+          + `Open Estimate Master with this AT selected and use "Copy to this AT" on the template.`
+        );
+      }
       if (created?.seed) { setSeedReport(created.seed); setSeedReportAtNo(newAt.atNumber); setSeedReportAtId(created.id); }
       setShowAddForm(false);
+      setNewAtTemplateId('');
       setNewAt({
         atNumber: '',
         name: '',
@@ -952,6 +997,45 @@ export function AtSettings() {
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Description (Optional)</label>
                   <input type="text" value={newAt.name} onChange={e => setNewAt({...newAt, name: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" placeholder="e.g. Annual Tender" />
+                </div>
+
+                {/* RATES, CHOSEN WHERE THE AT IS CREATED.
+                    An AT with no rates blocks every estimate and every bill under it, and
+                    until now nothing on this form said so - the rates were a separate action
+                    on another screen, found after the block rather than before it.
+
+                    ⚠ "Enter rates myself later" IS THE DEFAULT AND MUST REMAIN SELECTABLE.
+                    Not every tender will have a template published, and an agency entering
+                    its own schedule is a first-class case, not a fallback. The field states
+                    the consequence instead of preventing the choice. */}
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Rate schedule</label>
+                  {publishedAts.length === 0 ? (
+                    <div className="px-3 py-2 text-[11px] rounded-lg bg-slate-100 border border-slate-200 text-slate-600">
+                      No published templates yet, so this AT starts with <strong>no rates</strong>. Enter them in
+                      Estimate Master before raising an estimate against it - they are blocked until you do.
+                    </div>
+                  ) : (
+                    <>
+                      <select
+                        value={newAtTemplateId}
+                        onChange={e => setNewAtTemplateId(e.target.value)}
+                        className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                      >
+                        <option value="">Enter rates myself later</option>
+                        {publishedAts.map(t => (
+                          <option key={t.id} value={t.id}>
+                            Copy &ldquo;{t.name}&rdquo; v{t.version}{t.atNumber ? ` (AT ${t.atNumber})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className={`mt-1 text-[11px] leading-relaxed ${newAtTemplateId ? 'text-emerald-800' : 'text-amber-800'}`}>
+                        {newAtTemplateId
+                          ? 'All five schedules are copied onto this AT when it is created. It is a copy - later revisions of the template will not change your rates, you will simply be told a newer version exists.'
+                          : 'This AT will be created with NO RATES. Estimates and bills against it are blocked until you enter them in Estimate Master.'}
+                      </p>
+                    </>
+                  )}
                 </div>
                 {carryOverSource && (
                   <div className="sm:col-span-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-[11px] text-amber-900 leading-relaxed">
