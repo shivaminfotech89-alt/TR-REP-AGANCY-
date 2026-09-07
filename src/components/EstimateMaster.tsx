@@ -20,7 +20,7 @@ import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { CARD } from '../lib/ui';
 import { checkMasterSection, storedSection, storedSectionForRates, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
-import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100 } from '../lib/ugvclSchedule2020';
+import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt } from '../lib/ugvclSchedules';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
@@ -49,11 +49,11 @@ const SECTION_FIELD: Record<SectionKey, string> = {
  * material, capacity) has no single inherited value, and printing one would be a confident
  * half-truth. Those render a marker instead.
  */
-function inheritedScheduleRate(itemCode: string, kva: string): number | null {
+function inheritedScheduleRate(set: ScheduleSet, itemCode: string, kva: string): number | null {
   if (variantAxisForMasterCode(itemCode)) return null;
   const sr = scheduleSrForMasterCode(itemCode);
   if (!sr) return null;
-  const entry = SCHEDULE_A.find(i => i.sr === sr);
+  const entry = set.scheduleA.find(i => i.sr === sr);
   if (!entry) return null;
   const v = entry.rates[bandForKva(Number(kva) || 0)];
   return typeof v === 'number' && v > 0 ? v : null;
@@ -72,12 +72,12 @@ function inheritedScheduleRate(itemCode: string, kva: string): number | null {
  * widen all ten capacity columns for all 31 rows. Two short lines cost height on two rows
  * instead of width on the whole table.
  */
-function inheritedWindingPair(itemCode: string, kva: string): { al: number; cu: number } | null {
+function inheritedWindingPair(set: ScheduleSet, itemCode: string, kva: string): { al: number; cu: number } | null {
   const v = variantAxisForMasterCode(itemCode);
   if (!v || v.axis !== 'winding-material') return null;
   const rateFor = (sr: string | undefined): number | null => {
     if (!sr) return null;
-    const entry = SCHEDULE_A.find(i => i.sr === sr);
+    const entry = set.scheduleA.find(i => i.sr === sr);
     if (!entry) return null;
     const r = entry.rates[bandForKva(Number(kva) || 0)];
     return typeof r === 'number' && r > 0 ? r : null;
@@ -94,7 +94,7 @@ function inheritedWindingPair(itemCode: string, kva: string): { al: number; cu: 
  *
  * ⚠ THIS MIRRORS THE ESTIMATE'S OWN LINE, DELIBERATELY. SingleJobEstimateReport computes
  *
- *     const radScheduleValue = kvaNum > 100 ? RADIATOR_ABOVE_100[kvaNum] : scheduleRate('20');
+ *     const radScheduleValue = kvaNum > 100 ? set.radiatorAbove100[kvaNum] : scheduleRate('20');
  *
  * and this is the same expression against the same two sources. That equivalence is the whole
  * licence for showing a figure here: the grid must never print a rate the estimate will not
@@ -110,7 +110,7 @@ function inheritedWindingPair(itemCode: string, kva: string): { al: number; cu: 
  * this CAPACITY".
  *
  * ⚠ 315 KVA RETURNS NULL, AND THAT IS THE POINT. The tender does not price it.
- * `RADIATOR_ABOVE_100[315]` is undefined, `resolveRate` returns null, and the estimate BLOCKS
+ * `set.radiatorAbove100[315]` is undefined, `resolveRate` returns null, and the estimate BLOCKS
  * with a missing-rate error rather than interpolating between 200 and 500. The grid keeps its
  * marker on exactly that cell - a figure there would be the falsehood the marker exists to
  * prevent, and it is the one cell in the whole table where the tender genuinely has no answer.
@@ -118,15 +118,15 @@ function inheritedWindingPair(itemCode: string, kva: string): { al: number; cu: 
  * 5 KVA also returns null: the schedule's B5 rate for radiator is 0, which is "not priced"
  * rather than "free", and `> 0` is the same test the estimate applies.
  */
-function inheritedRadiatorRate(itemCode: string, kva: string): number | null {
+function inheritedRadiatorRate(set: ScheduleSet, itemCode: string, kva: string): number | null {
   const v = variantAxisForMasterCode(itemCode);
   if (!v || v.axis !== 'capacity') return null;
   const n = Number(kva) || 0;
   if (n > 100) {
-    const exact = RADIATOR_ABOVE_100[n];
+    const exact = set.radiatorAbove100[n];
     return typeof exact === 'number' && exact > 0 ? exact : null;   // 315: not priced -> marker
   }
-  const entry = SCHEDULE_A.find(i => i.sr === (v.options as Record<string, string>)['upto-100']);
+  const entry = set.scheduleA.find(i => i.sr === (v.options as Record<string, string>)['upto-100']);
   if (!entry) return null;
   const r = entry.rates[bandForKva(n)];
   return typeof r === 'number' && r > 0 ? r : null;
@@ -151,14 +151,14 @@ function inheritedRadiatorRate(itemCode: string, kva: string): number | null {
  * says the rate and its condition, so an agency that ever does 22 KV work sees immediately
  * that this is not their number, where a bare `176.00` would not.
  */
-function inheritedKvRate(itemCode: string, kva: string): { value: number; kv: string } | null {
+function inheritedKvRate(set: ScheduleSet, itemCode: string, kva: string): { value: number; kv: string } | null {
   const v = variantAxisForMasterCode(itemCode);
   if (!v || v.axis !== 'kv-class') return null;
   // The 11 KV option, by name. Not options[0] - an ordering change in the map would silently
   // relabel the figure, which is the class of fault this file keeps recording.
   const sr = (v.options as Record<string, string>)['11'];
   if (!sr) return null;
-  const entry = SCHEDULE_A.find(i => i.sr === sr);
+  const entry = set.scheduleA.find(i => i.sr === sr);
   if (!entry) return null;
   const r = entry.rates[bandForKva(Number(kva) || 0)];
   return typeof r === 'number' && r > 0 ? { value: r, kv: '11' } : null;
@@ -1560,6 +1560,11 @@ export default function EstimateMaster() {
   ) => {
     const isEditing = editingSection === sectionKey;
     const isReference = isReferenceSection(sectionKey);
+    // The placeholders below show "the tender rate that applies while this cell is blank".
+    // WHICH tender's rate depends on the AT being edited, not on the app - see
+    // ugvclSchedules.ts. Reading the module constant would show 2020 figures under a 2026
+    // tender, as a greyed-out number that looks authoritative and is not this AT's.
+    const gridSchedule = scheduleSetForAt(selectedAt);
 
     return (
       <div className={`${CARD} overflow-hidden transition-all`}>
@@ -2048,10 +2053,10 @@ export default function EstimateMaster() {
                             {(() => {
                               const stored = rateVal !== null && rateVal !== undefined
                                 && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
-                              const inherited = stored ? null : inheritedScheduleRate(item.itemCode, kva);
-                              const pair = stored || inherited !== null ? null : inheritedWindingPair(item.itemCode, kva);
-                              const kvRate = stored || inherited !== null || pair ? null : inheritedKvRate(item.itemCode, kva);
-                              const radRate = stored || inherited !== null || pair || kvRate ? null : inheritedRadiatorRate(item.itemCode, kva);
+                              const inherited = stored ? null : inheritedScheduleRate(gridSchedule, item.itemCode, kva);
+                              const pair = stored || inherited !== null ? null : inheritedWindingPair(gridSchedule, item.itemCode, kva);
+                              const kvRate = stored || inherited !== null || pair ? null : inheritedKvRate(gridSchedule, item.itemCode, kva);
+                              const radRate = stored || inherited !== null || pair || kvRate ? null : inheritedRadiatorRate(gridSchedule, item.itemCode, kva);
                               const marker = stored || pair || kvRate || radRate !== null ? null : variantMarker(item.itemCode);
                               const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                               const radTitle = radRate !== null

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
+import { selectableSchedules, DEFAULT_SCHEDULE_ID } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
@@ -37,6 +38,15 @@ export function AtSettings() {
    * point of the click rather than a passenger on another one.
    */
   const [newAtTemplateId, setNewAtTemplateId] = useState('');
+  /**
+   * WHICH UGVCL SCHEDULE THIS TENDER IS PRICED FROM.
+   *
+   * ⚠ NO SILENT DEFAULT ON A NEW AT. An absent scheduleId resolves to UGVCL-2020, which is
+   * right for tenders created before schedules were versioned and wrong for every one
+   * created after - a 2026 tender would price at 2020 rates and nothing would say so. The
+   * form therefore asks, and offers only schedules that are fully transcribed.
+   */
+  const [newAtScheduleId, setNewAtScheduleId] = useState<string>(DEFAULT_SCHEDULE_ID);
   // Kept until dismissed, not a toast. It reports what the new AT's job numbering will
   // start from, and any job number that could not be read - the operator creating the AT
   // is the person who needs that, and a console log reaches the wrong person entirely.
@@ -394,6 +404,7 @@ export function AtSettings() {
         atPercentageCRGO: Number(newAt.atPercentageCRGO) || 0,
         atPercentageAmorphous: Number(newAt.atPercentageAmorphous) || 0,
         atPercentageWoundCore: Number(newAt.atPercentageWoundCore) || 0,
+        scheduleId: newAtScheduleId,
       });
       // Creating an AT is a clear signal of intent to work with it, so make it active.
       // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
@@ -436,6 +447,7 @@ export function AtSettings() {
       if (created?.seed) { setSeedReport(created.seed); setSeedReportAtNo(newAt.atNumber); setSeedReportAtId(created.id); }
       setShowAddForm(false);
       setNewAtTemplateId('');
+      setNewAtScheduleId(DEFAULT_SCHEDULE_ID);
       setNewAt({
         atNumber: '',
         name: '',
@@ -1009,7 +1021,25 @@ export function AtSettings() {
                     its own schedule is a first-class case, not a fallback. The field states
                     the consequence instead of preventing the choice. */}
                 <div className="md:col-span-2">
-                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Rate schedule</label>
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">UGVCL schedule this tender is priced from</label>
+                  <select
+                    value={newAtScheduleId}
+                    onChange={e => setNewAtScheduleId(e.target.value)}
+                    className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
+                  >
+                    {selectableSchedules().map(s => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
+                    Schedule-A and Schedule-B are reissued with each tender, so this decides what every
+                    item on a job under this AT costs. Jobs under older tenders keep pricing from the
+                    schedule they were awarded under.
+                  </p>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Agency rate master</label>
                   {publishedAts.length === 0 ? (
                     <div className="px-3 py-2 text-[11px] rounded-lg bg-slate-100 border border-slate-200 text-slate-600">
                       No published templates yet, so this AT starts with <strong>no rates</strong>. Enter them in

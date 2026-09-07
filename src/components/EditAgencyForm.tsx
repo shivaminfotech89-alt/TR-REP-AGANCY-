@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
-import { AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
+import { AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedules';
 
 export default function EditAgencyForm({ agency }: { agency: any }) {
   const { updateAgency, activeAtMaster } = useAgency();

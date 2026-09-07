@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
-import { SUPPLY_ORDER_OPTIONS, SUPPLY_ORDER_ADB_1804 } from '../lib/ugvclSchedule2020';
+import { SUPPLY_ORDER_OPTIONS, SUPPLY_ORDER_ADB_1804 } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { matchesAtScope } from '../lib/AgencyContext';
 import { OtherTenderNote } from './OtherTenderNote';

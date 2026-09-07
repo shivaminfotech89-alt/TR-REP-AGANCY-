@@ -3,7 +3,7 @@ import { getAuth } from 'firebase/auth';
 import { initializeFirestore, getFirestore, collection, query, where, getDocs, doc, getDoc, writeBatch, updateDoc } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { formatDDMMYYYY, toMillis } from './utils';
-import { SCHEDULE_A, bandForKva } from './ugvclSchedule2020';
+import { SCHEDULE_A, bandForKva } from './ugvclSchedules';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from './scheduleItemMap';
 import { defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData } from './estimateData';
 

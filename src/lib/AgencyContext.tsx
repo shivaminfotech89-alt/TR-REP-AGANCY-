@@ -103,7 +103,7 @@ export interface Agency {
   forwardingCcText?: string;
 
   // Amorphous / CRGO Wound Core fixed-rate estimate report text (Schedule-B tender
-  // clause + notes). Defaults live in ugvclSchedule2020.ts; overridden per-agency here
+  // clause + notes). Defaults live in ugvclSchedules.ts; overridden per-agency here
   // since another DISCOM's tender wording may differ.
   amorphousClauseText?: string;
   amorphousNoteLtCoil?: string;
@@ -248,6 +248,15 @@ export interface AtMaster {
   ratesSource?: string;
   /** Version of the published template this was copied from, if any. See publishedAtVersion drift. */
   publishedAtVersion?: number;
+  /**
+   * WHICH UGVCL RATE SCHEDULE THIS TENDER IS PRICED FROM - see lib/ugvclSchedules.ts.
+   *
+   * Absent means UGVCL-2020, which is correct for every AT created before this field
+   * existed: 2020 was the only schedule, so that is what they are already charging. New
+   * ATs must choose explicitly, or a 2026 tender would price at 2020 rates and nothing
+   * would say so.
+   */
+  scheduleId?: string;
   /** When the rates were last set on this AT, whatever the source. */
   ratesUpdatedAt?: number;
 
@@ -345,6 +354,8 @@ export interface PublishedAt {
    */
   startDate?: number;
   endDate?: number;
+  /** The rate schedule this tender is priced from; copied onto the AT on adoption. */
+  scheduleId?: string;
 
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
@@ -2146,6 +2157,10 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       publishedAtVersion: Number(tpl.version) || 1,
       ratesUpdatedAt: Date.now(),
     };
+    // The schedule travels with the rates. A template published for the 2026-28 tender
+    // whose adopter stayed on UGVCL-2020 would price its master rows from one tender and
+    // its Schedule-A fallbacks from another - a mixture, labelled as one thing.
+    if (tpl.scheduleId) payload.scheduleId = tpl.scheduleId;
     ESTIMATE_SECTION_FIELDS.forEach(k => {
       const v = (tpl as any)[k];
       if (Array.isArray(v) && v.length) payload[k] = v;

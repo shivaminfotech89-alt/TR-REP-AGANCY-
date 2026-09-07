@@ -1,10 +1,22 @@
-// src/lib/ugvclSchedule2020.ts
+// src/lib/ugvclSchedules.ts
 //
-// UGVCL-2020 Schedule-A (CRGO item-wise) and Schedule-B (Amorphous / CRGO
-// Wound Core fixed rate), transcribed from the tender document.
+// THE UGVCL RATE SCHEDULES, ONE SET PER TENDER. Schedule-A (CRGO item-wise) and
+// Schedule-B (Amorphous / CRGO Wound Core fixed rate), transcribed from the
+// tender documents.
+//
+// ⚠ THERE IS MORE THAN ONE SCHEDULE NOW, AND THE TENDER DECIDES WHICH APPLIES.
+//
+// The file was `ugvclSchedule2020.ts` and held exactly one, on the evidence that
+// the schedule had been transcribed once and never revised. That evidence was
+// about this repository, not about UGVCL: AT 1819 (2026-28) reprices nearly
+// every row of Schedule-A by roughly 0.85%, so a second schedule exists and both
+// have to be live at once. Jobs still being finished under AT 26-27 must keep
+// pricing at 2020 rates while anything booked under 1819 uses 2026 - which is
+// exactly what F72 and F73 built the per-tender resolution for.
 //
 // Rates are exclusive of GST. The AT's above/below percentage is applied on
-// top, as entered by the user in AT details.
+// top, as entered by the user in AT details - and it is per AGENCY as well as
+// per tender, because it is what that agency bid. It is never part of a schedule.
 //
 // ---------------------------------------------------------------------------
 // THE CAPACITY BAND PROBLEM
@@ -277,3 +289,150 @@ export const AMORPHOUS_ESTIMATE_TEXT = {
   noteLtCoil: 'Note: In case of damage of LT coil if any, the damaged coil should be replaced at the same cost i.e. without any extra charge.',
   noteRadiator: "If the Radiator/s of tank or Conservator tank required to replace instead of repairing as demanded by the concerned UGVCL Engineer, the charges for that is required to pay extra as per the 'Item No. 3 to 6' of schedule, for which old material is required to credit in the respective Division Store.",
 };
+
+// ---------------------------------------------------------------------------
+// THE SCHEDULE REGISTRY — one ScheduleSet per tender
+// ---------------------------------------------------------------------------
+
+export type ScheduleId = 'UGVCL-2020' | 'UGVCL-2026';
+
+export interface ScheduleSet {
+  id: ScheduleId;
+  /** What an operator picks it by. */
+  label: string;
+  /**
+   * ⚠ FALSE WHILE THE TRANSCRIPTION IS INCOMPLETE, and it is load-bearing.
+   *
+   * A schedule that is registered but not yet transcribed must never price anything. An
+   * incomplete set resolves no rates, so `resolveRate` returns null and the estimate blocks
+   * by name - the safe failure - but an operator would meet that as a wall of blocked jobs
+   * with no explanation. `scheduleReadiness` turns it into one sentence instead, and the AT
+   * form refuses to offer an incomplete schedule at all.
+   */
+  complete: boolean;
+  /** Why it is incomplete, shown wherever that matters. Empty when complete. */
+  incompleteReason: string;
+  scheduleA: ScheduleAItem[];
+  scheduleB: ScheduleBItem[];
+  /** Radiator replacement above 100 KVA, priced per capacity rather than by band. */
+  radiatorAbove100: Record<number, number>;
+  extras: typeof SCHEDULE_B_EXTRAS;
+  notes: typeof SCHEDULE_NOTES;
+  amorphousText: typeof AMORPHOUS_ESTIMATE_TEXT;
+}
+
+export const SCHEDULES: Record<ScheduleId, ScheduleSet> = {
+  'UGVCL-2020': {
+    id: 'UGVCL-2020',
+    label: 'UGVCL 2020 (Schedule-A & B)',
+    complete: true,
+    incompleteReason: '',
+    scheduleA: SCHEDULE_A,
+    scheduleB: SCHEDULE_B,
+    radiatorAbove100: RADIATOR_ABOVE_100,
+    extras: SCHEDULE_B_EXTRAS,
+    notes: SCHEDULE_NOTES,
+    amorphousText: AMORPHOUS_ESTIMATE_TEXT,
+  },
+
+  /**
+   * UGVCL-2026 — A/T UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819 dated 07.09.2026.
+   *
+   * ⚠ REGISTERED AND DELIBERATELY EMPTY. The Schedule-A pages have been read and diffed
+   * against 2020 - 255 of 306 cells move - but NOTHING IS TRANSCRIBED HERE YET, and it is
+   * not an oversight:
+   *
+   *   1. Schedule-B is not in the pages supplied. Transcribing A alone would leave every
+   *      Amorphous and Wound Core job under this tender priced from the 2020 fixed rates,
+   *      silently, because nothing compares the two.
+   *   2. The Clause 4.0 circle limits are not in them either, so a 2026 job would be
+   *      measured against the 2020 sanction ceiling.
+   *   3. THE HEADING WIDENED, AND IT MAY NOT BE COSMETIC. 2020 read "CRGO
+   *      (STACK/DRY/PAT/SDT)"; 2026 reads "CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous
+   *      Core". If that means Amorphous and Wound Core are ITEMISED under Schedule-A in
+   *      this tender rather than carrying a separate fixed rate, then the fixed-rate branch
+   *      in buildSingleJobEstimateData is the wrong model for 2026 and transcribing A alone
+   *      would encode that wrong model as though it were settled.
+   *
+   * Awaiting the Schedule-B and Clause 4.0 pages. Until then this stays `complete: false`,
+   * no AT can select it, and any AT that somehow names it blocks with the reason below
+   * rather than pricing from a half-schedule.
+   */
+  'UGVCL-2026': {
+    id: 'UGVCL-2026',
+    label: 'UGVCL 2026-28 (AT/1819)',
+    complete: false,
+    incompleteReason:
+      'The 2026-28 schedule is not yet transcribed. Schedule-A has been read, but Schedule-B '
+      + '(Amorphous / Wound Core fixed rates) and the Clause 4.0 circle limits have not been '
+      + 'supplied, and the tender heading may place Amorphous under Schedule-A rather than a '
+      + 'fixed rate. Nothing can be priced from it until those are settled.',
+    scheduleA: [],
+    scheduleB: [],
+    radiatorAbove100: {},
+    extras: SCHEDULE_B_EXTRAS,
+    notes: SCHEDULE_NOTES,
+    amorphousText: AMORPHOUS_ESTIMATE_TEXT,
+  },
+};
+
+/**
+ * THE SCHEDULE AN AT WITH NO `scheduleId` USES.
+ *
+ * ⚠ 2020 IS THE RIGHT ANSWER FOR EXISTING RECORDS AND THE WRONG ONE FOR NEW.
+ *
+ * Every AT created before this field existed prices from the 2020 schedule today, because
+ * it was the only one - so resolving absent to 2020 preserves what those tenders are
+ * already charging, which is the whole requirement. It is verifiable rather than inferred:
+ * they all predate the 2026 tender.
+ *
+ * But a NEW AT falling through to this default would silently price a 2026 tender at 2020
+ * rates - the defect this registry exists to prevent - so the AT form requires an explicit
+ * choice and the pre-existing ATs are stamped by `scripts/admin/backfill-schedule-id.js`.
+ * After that backfill, an absent `scheduleId` means "nobody chose", not "created early".
+ *
+ * ⚠ THE BACKFILL HOLDS ONE AT BACK, and the reason generalises. Nine ATs exist and eight are
+ * pre-2026 tenders that genuinely price from 2020. The ninth is ZENITH's
+ * `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819` - A/T 1819 itself, the tender this whole
+ * change is for. Stamping it 2020 along with the rest would have priced the new tender at
+ * the old schedule, introduced by the very migration meant to prevent that. A blanket
+ * backfill is only safe where the value is the same for every row, and here it was not.
+ */
+export const DEFAULT_SCHEDULE_ID: ScheduleId = 'UGVCL-2020';
+
+export function isScheduleId(v: unknown): v is ScheduleId {
+  return typeof v === 'string' && Object.prototype.hasOwnProperty.call(SCHEDULES, v);
+}
+
+/** The schedule id an AT names, or the dated default. Never throws. */
+export function scheduleIdForAt(at: any): ScheduleId {
+  const raw = String(at?.scheduleId ?? '').trim();
+  return isScheduleId(raw) ? raw : DEFAULT_SCHEDULE_ID;
+}
+
+/** The whole schedule set an AT prices from. */
+export function scheduleSetForAt(at: any): ScheduleSet {
+  return SCHEDULES[scheduleIdForAt(at)];
+}
+
+/**
+ * Is this AT's schedule usable, and if not, why?
+ *
+ * Returns null when fine. Mirrors `atRatesReadiness`'s shape deliberately: both answer
+ * "can this tender price work", and a second differently-shaped answer to that question is
+ * how the two would drift.
+ */
+export function scheduleReadiness(at: any): string | null {
+  const raw = String(at?.scheduleId ?? '').trim();
+  if (raw && !isScheduleId(raw)) {
+    return `This tender names rate schedule "${raw}", which this version of the app does not have. `
+      + `Estimates and bills against it are blocked - the alternative is pricing from a different schedule than the one named.`;
+  }
+  const set = scheduleSetForAt(at);
+  return set.complete ? null : set.incompleteReason;
+}
+
+/** Schedules an AT may be created against - the incomplete ones are not offered. */
+export function selectableSchedules(): ScheduleSet[] {
+  return Object.values(SCHEDULES).filter(s => s.complete);
+}

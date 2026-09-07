@@ -4,7 +4,7 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
-import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedule2020';
+import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT, ScheduleSet, scheduleSetForAt, scheduleReadiness } from '../lib/ugvclSchedules';
 import { scheduleSrForMasterCode } from '../lib/scheduleItemMap';
 import { resolveScrapCharge } from '../lib/estimateCalc';
 
@@ -62,10 +62,15 @@ function windingMaterialError(jobLabel: string, raw: unknown): EstimateRateError
   };
 }
 
-/** The Schedule-B rows for a capacity and winding. More than one means a variant fork. */
-function scheduleBCandidates(kvaNum: number, isCopper: boolean): ScheduleBItem[] {
+/**
+ * The Schedule-B rows for a capacity and winding. More than one means a variant fork.
+ *
+ * Takes the SET rather than reading the module constant, because which Schedule-B applies is
+ * a property of the tender the job was booked under, not of the app.
+ */
+function scheduleBCandidates(set: ScheduleSet, kvaNum: number, isCopper: boolean): ScheduleBItem[] {
   const wantedWinding: 'Aluminium' | 'Copper' = isCopper ? 'Copper' : 'Aluminium';
-  return SCHEDULE_B.filter(e => e.kva === kvaNum && e.winding === wantedWinding);
+  return set.scheduleB.filter(e => e.kva === kvaNum && e.winding === wantedWinding);
 }
 
 /**
@@ -90,8 +95,8 @@ function scheduleBCandidates(kvaNum: number, isCopper: boolean): ScheduleBItem[]
  * 1d-2 have `wtOfCoil` of 0. There is no field anywhere holding total coil weight. Do not
  * reach for this as a derivation or a cross-check; it cannot support either.
  */
-function findScheduleBEntry(kvaNum: number, isCopper: boolean, supplyOrderRef: string): ScheduleBItem | undefined {
-  const candidates = scheduleBCandidates(kvaNum, isCopper);
+function findScheduleBEntry(set: ScheduleSet, kvaNum: number, isCopper: boolean, supplyOrderRef: string): ScheduleBItem | undefined {
+  const candidates = scheduleBCandidates(set, kvaNum, isCopper);
   if (candidates.length <= 1) return candidates[0];
   const ref = String(supplyOrderRef ?? '').trim().toUpperCase();
   // Only an exact, affirmative match takes the variant. Blank never reaches here - the
@@ -267,6 +272,10 @@ export function buildSingleJobEstimateData(
   const kva = String(job.capacityKva || '25').trim();
   const kvaNum = Number(kva) || 0;
   const band = bandForKva(kvaNum);
+  // THE TENDER DECIDES WHICH SCHEDULE PRICES THIS JOB (see ugvclSchedules.ts).
+  // `atMaster` is already the JOB's own AT - see the note below - so this resolves the
+  // schedule that tender was awarded under, not whichever one is newest.
+  const scheduleSet = scheduleSetForAt(atMaster);
   const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
   // `atMaster` here is ALREADY the job's own AT - both callers pass
   // `atForJob(job, atMasters) ?? activeAtMaster` (F72), so the rates and the AT
@@ -300,6 +309,27 @@ export function buildSingleJobEstimateData(
 
   const rateErrors: EstimateRateError[] = [];
   const coreClass = classifyCoreType(coreType);
+
+  /**
+   * THE TENDER NAMES A SCHEDULE THIS APP CANNOT PRICE FROM.
+   *
+   * Either the AT names a schedule id the app does not have - a record written by a newer
+   * version, or by hand - or it names one that is registered but not yet transcribed. Both
+   * must block, and for the same reason: the alternative is pricing from a DIFFERENT
+   * schedule than the tender awarded, which is a wrong figure that looks entirely normal.
+   *
+   * An incomplete schedule would already produce nulls from every lookup and block per item,
+   * so this does not add safety - it adds an EXPLANATION. Without it an operator meets a
+   * page of "no rate found" messages naming individual items, when the cause is one thing
+   * and nothing to do with any of them.
+   *
+   * Pushed here so it reaches the scrap short-circuit and the itemised path; the fixed-rate
+   * branch carries its own error array and re-pushes it.
+   */
+  const scheduleBlock = scheduleReadiness(atMaster);
+  if (scheduleBlock) {
+    rateErrors.push({ kind: 'missing-rate', message: `${jobLabel}: ${scheduleBlock}` });
+  }
 
   // SCRAP SHORT-CIRCUIT - must come before the core-type branch.
   //
@@ -362,9 +392,11 @@ export function buildSingleJobEstimateData(
   // quantity on the per-coil rows.
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
     const supplyOrderRef = String(job.supplyOrderRef ?? '').trim();
-    const entry = findScheduleBEntry(kvaNum, isCopper, supplyOrderRef);
+    const entry = findScheduleBEntry(scheduleSet, kvaNum, isCopper, supplyOrderRef);
     const fixedItems: SingleEstimateLineItem[] = [];
     const fixedRateErrors: EstimateRateError[] = [];
+    // Same block as the other two paths - this branch returns its own array. See scheduleBlock.
+    if (scheduleBlock) fixedRateErrors.push({ kind: 'missing-rate', message: `${jobLabel}: ${scheduleBlock}` });
 
     // A CAPACITY WITH TWO ROWS CANNOT BE PRICED FROM A BLANK FIELD.
     //
@@ -380,10 +412,10 @@ export function buildSingleJobEstimateData(
     //
     // Derived from the table, not hardcoded to 63: add a second row at another capacity and
     // this block starts covering it without being edited.
-    if (scheduleBCandidates(kvaNum, isCopper).length > 1 && !supplyOrderRef) {
+    if (scheduleBCandidates(scheduleSet, kvaNum, isCopper).length > 1 && !supplyOrderRef) {
       fixedRateErrors.push({
         kind: 'missing-input',
-        message: `${jobLabel}: ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} has two Schedule-B rates - Rs ${scheduleBCandidates(kvaNum, isCopper).map(c => c.fixedRate.toLocaleString('en-IN')).join(' and Rs ')} - so "Supply Order (ADB)" must be answered on the external inspection before it can be priced. Choose ADB/1804 or "Other - not ADB/1804".`,
+        message: `${jobLabel}: ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} has two Schedule-B rates - Rs ${scheduleBCandidates(scheduleSet, kvaNum, isCopper).map(c => c.fixedRate.toLocaleString('en-IN')).join(' and Rs ')} - so "Supply Order (ADB)" must be answered on the external inspection before it can be priced. Choose ADB/1804 or "Other - not ADB/1804".`,
       });
     }
 
@@ -557,7 +589,10 @@ export function buildSingleJobEstimateData(
   };
 
   const scheduleRate = (sr: string): number | undefined => {
-    const entry = SCHEDULE_A.find(i => i.sr === sr);
+    // THE JOB'S OWN TENDER'S SCHEDULE, not the module constant. This is the single line
+    // that carries the per-tender schedule to all 31 call sites of scheduleRate /
+    // scheduleRateFor below - the payoff of F55 and F57 having funnelled them here.
+    const entry = scheduleSet.scheduleA.find(i => i.sr === sr);
     return entry?.rates[band];
   };
 
@@ -763,7 +798,7 @@ export function buildSingleJobEstimateData(
   // tender at all, so it's left unresolved (blocked) rather than interpolated.
   const radQty = Number(externalData?.damRadNo) || 0;
   const radApplies = radQty > 0;
-  const radScheduleValue = kvaNum > 100 ? RADIATOR_ABOVE_100[kvaNum] : scheduleRate('20');
+  const radScheduleValue = kvaNum > 100 ? scheduleSet.radiatorAbove100[kvaNum] : scheduleRate('20');
   const radRate = resolveRate('21', radScheduleValue);
   recordErrorIfApplies(radApplies, radRate, 'Radiator Replacement');
   physicalItems.push({ sr: srCounter++, itemCode: '21', desc: 'Radiator Replacement', unit: 'NO', qty: radQty > 0 ? radQty.toString() : '0', numQty: radQty, rate: radRate, amt: radApplies ? radQty * (radRate ?? 0) : 0 });
@@ -881,7 +916,7 @@ export function buildSingleJobEstimateData(
   // `sealType` is recorded at EXTERNAL inspection and describes the transformer AS RECEIVED.
   // A unit that arrives sealed gets converted to bolted, and Schedule-A sr 17 - "Extra
   // payment for conversion of sealed transformer into bolted type", Rs 1,511 flat
-  // (ugvclSchedule2020.ts:149) - is what pays for that conversion. The charge therefore
+  // (ugvclSchedules.ts:149) - is what pays for that conversion. The charge therefore
   // applies to a SEALED arrival, not a bolted one. It is Schedule-A, not Schedule-B: B has
   // no item 17, and the master row '17' maps to Schedule-A sr 17 (scheduleItemMap.ts:71).
   //
