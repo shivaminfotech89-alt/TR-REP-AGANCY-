@@ -712,7 +712,7 @@ export default function EstimateMaster() {
    * UGVCL's schedule. A field recording someone else's decision should not offer itself for
    * editing.
    */
-  const REFERENCE_SECTIONS: SectionKey[] = ['AMORPHOUS', 'WOUND_CORE'];
+  const REFERENCE_SECTIONS: SectionKey[] = ['AMORPHOUS', 'WOUND_CORE', 'CIRCLE_LIMITS'];
   const isReferenceSection = (section: SectionKey) => REFERENCE_SECTIONS.includes(section);
 
   /**
@@ -728,8 +728,26 @@ export default function EstimateMaster() {
    * is a behaviour change nobody asked for.
    */
   const SCRAP_ROW_CODE = '0';
+
+  /**
+   * The ONE row a reference section still lets an agency set, by section.
+   *
+   * ⚠ NAMED PER SECTION RATHER THAN TESTED GLOBALLY. This was `itemCode === '0'` for any
+   * reference section, which was right while only Amorphous and Wound Core were locked and
+   * became a trap the moment Circle Limits joined them: a circle-limits row that happened to
+   * carry the code "0" would have unlocked itself. Circle Limits has NO editable row - the
+   * whole section is the Superintending Engineer's sanction authority under Clause 4.0 - and
+   * the absence is stated here rather than left to the shape of a comparison.
+   */
+  const EDITABLE_ROW_IN_REFERENCE_SECTION: Partial<Record<SectionKey, string>> = {
+    AMORPHOUS: SCRAP_ROW_CODE,
+    WOUND_CORE: SCRAP_ROW_CODE,
+    // CIRCLE_LIMITS: deliberately absent.
+  };
+
   const isRowEditable = (section: SectionKey, item: EstimateItem) =>
-    !isReferenceSection(section) || String(item.itemCode ?? '').trim() === SCRAP_ROW_CODE;
+    !isReferenceSection(section)
+    || EDITABLE_ROW_IN_REFERENCE_SECTION[section] === String(item.itemCode ?? '').trim();
 
   const handleItemDetailsChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number, field: 'itemCode' | 'itemName' | 'unit', value: string) => {
     const data = [...getSectionData(section)];
@@ -1871,7 +1889,39 @@ export default function EstimateMaster() {
                 be the same defect as the one the lock fixes, pointing the other way: row "0"
                 prices five live jobs. Saying the wrong thing confidently about money is not
                 improved by saying it about fewer rows. */}
-            {isReference && (
+            {/* CIRCLE LIMITS ARE LOCKED FOR A DIFFERENT REASON AND SAY SO.
+                The fixed-rate sections are read-only because the estimate does not read them
+                at all. These ARE read, on every estimate - the lock is not an honesty fix, it
+                is that a sanction limit is the Superintending Engineer's authority under
+                Clause 4.0 and not the agency's to set. Reusing the fixed-rate wording would
+                tell an operator these figures are inert, and they decide whether an estimate
+                prints "> CIRCLE LIMIT" on a document addressed to that same officer. */}
+            {sectionKey === 'CIRCLE_LIMITS' && (
+              <div className="m-3 mb-0 p-3 rounded-lg border border-rose-300 bg-rose-50 text-rose-900 text-[11px] leading-relaxed">
+                <p className="font-bold text-rose-950 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  Clause 4.0 sanction limits - the tender&rsquo;s figures, read-only
+                </p>
+                <p className="mt-1">
+                  These are the Superintending Engineer&rsquo;s approval powers, set by the UGVCL
+                  tender at 25% of the cost of a new transformer. They are not an agency setting, so
+                  they cannot be edited here &mdash; the same reason the MR&rsquo;s division and the
+                  Schedule-B rates are fixed: they record someone else&rsquo;s decision.
+                </p>
+                <p className="mt-1.5">
+                  <strong className="font-bold">They are live.</strong> Every CRGO and Overhauling
+                  estimate is checked against them, and one that exceeds its limit prints
+                  &ldquo;&gt; CIRCLE LIMIT&rdquo; on the sheet sent to the circle office. Amorphous and
+                  Wound Core are fixed-rate and are not checked.
+                </p>
+                <p className="mt-1.5 text-rose-800">
+                  If the tender reissues these figures, they are corrected in the app rather than here
+                  &mdash; use <strong>Restore Clause 4.0 Standard</strong> above to return to the
+                  shipped schedule.
+                </p>
+              </div>
+            )}
+            {isReference && sectionKey !== 'CIRCLE_LIMITS' && (
               <div className="m-3 mb-0 p-3 rounded-lg border border-sky-300 bg-sky-50 text-sky-900 text-[11px] leading-relaxed">
                 <p className="font-bold text-sky-950 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
@@ -1933,7 +1983,12 @@ export default function EstimateMaster() {
                         const rateVal = item.rates?.[kva];
                         return (
                           <td key={itemIdx} className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 border-r border-slate-100">
-                            {isEditing ? (
+                            {/* ⚠ THE MATRIX VIEW HAS ITS OWN INPUT AND ITS OWN GATE. The row
+                                map further down is where every other section is locked, and
+                                this table is not part of it - so gating only there would have
+                                left the Circle Limits lock bypassable by clicking "Matrix
+                                View (KVA Rows)". A lock with a second door is not a lock. */}
+                            {isEditing && !isReferenceSection('CIRCLE_LIMITS') ? (
                               <input
                                 type="number"
                                 step="0.01"
