@@ -825,12 +825,37 @@ export function buildSingleJobEstimateData(
   physicalItems.push({ sr: srCounter++, itemCode: '11B', desc: 'LV Connectors', unit: 'NO', qty: lvcQty.toString(), numQty: lvcQty, rate: lvcRate, amt: lvcApplies ? lvcQty * (lvcRate ?? 0) : 0 });
 
   // 16. Sealed to Bolted
-  const stbIsBolted = (externalData?.sealType === 'B' || externalData?.sealType === 'Bolted' || externalData?.sealType === 'Y');
-  const stbQtyStr = stbIsBolted ? 'Y' : 'N';
-  const stbRate = resolveRate('17', scheduleRateFor('17'));
-  recordErrorIfApplies(stbIsBolted, stbRate, 'Sealed to Bolted');
-  const stbAmt = stbIsBolted ? (stbRate ?? 0) : 0;
-  physicalItems.push({ sr: srCounter++, itemCode: '17', desc: 'Sealed to Bolted', unit: 'NO', qty: stbQtyStr, numQty: stbIsBolted ? 1 : 0, rate: stbRate, amt: stbAmt });
+  //
+  // ⚠ THE CONDITION IS THAT THE UNIT ARRIVED **SEALED**, AND THE NAME MUST SAY SO.
+  //
+  // `sealType` is recorded at EXTERNAL inspection and describes the transformer AS RECEIVED.
+  // A unit that arrives sealed gets converted to bolted, and Schedule-A sr 17 - "Extra
+  // payment for conversion of sealed transformer into bolted type", Rs 1,511 flat
+  // (ugvclSchedule2020.ts:149) - is what pays for that conversion. The charge therefore
+  // applies to a SEALED arrival, not a bolted one. It is Schedule-A, not Schedule-B: B has
+  // no item 17, and the master row '17' maps to Schedule-A sr 17 (scheduleItemMap.ts:71).
+  //
+  // This tested `'B' || 'Bolted' || 'Y'`. The select emits only 'BL' or 'SL'
+  // (ExternalInspection.tsx:1448), so not one of the three could ever match, and the item
+  // has never charged on any job: 0 of 64 in the database. Nothing reported the silence,
+  // because `recordErrorIfApplies` only demands a rate for an item that APPLIES - so a
+  // missing rate for 17 never blocked either. An item that cannot fire cannot complain.
+  //
+  // THE OLD NAME WAS HALF THE DEFECT. `stbIsBolted` claimed to be true for a bolted unit
+  // while the correct condition is the opposite one; a boolean whose name asserts the
+  // reverse of its value is how the next reader puts the bug back.
+  //
+  // An unrecognised value charges nothing rather than blocking. That is the conservative
+  // direction here and it is NOT the winding-material case, where either answer picks a
+  // wrong rate and the block is the only honest outcome. Here the field is required at save
+  // (ExternalInspection.tsx:445) and every stored record holds 'BL' or 'SL'.
+  const sealTypeRaw = String(externalData?.sealType ?? '').trim().toUpperCase();
+  const arrivedSealed = sealTypeRaw === 'SL' || sealTypeRaw.startsWith('SEAL');
+  const sealConversionQtyStr = arrivedSealed ? 'Y' : 'N';
+  const sealConversionRate = resolveRate('17', scheduleRateFor('17'));
+  recordErrorIfApplies(arrivedSealed, sealConversionRate, 'Sealed to Bolted');
+  const sealConversionAmt = arrivedSealed ? (sealConversionRate ?? 0) : 0;
+  physicalItems.push({ sr: srCounter++, itemCode: '17', desc: 'Sealed to Bolted', unit: 'NO', qty: sealConversionQtyStr, numQty: arrivedSealed ? 1 : 0, rate: sealConversionRate, amt: sealConversionAmt });
 
 
   // 2. INTERNAL ESTIMATION ITEMS
