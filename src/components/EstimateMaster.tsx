@@ -20,7 +20,7 @@ import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { CARD } from '../lib/ui';
 import { checkMasterSection, storedSection, storedSectionForRates, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
-import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt } from '../lib/ugvclSchedules';
+import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt, SCHEDULES } from '../lib/ugvclSchedules';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
@@ -1919,6 +1919,20 @@ export default function EstimateMaster() {
                   &mdash; use <strong>Restore Clause 4.0 Standard</strong> above to return to the
                   shipped schedule.
                 </p>
+                {/* THE BORROWED-SCHEDULE NOTICE. A schedule can be usable without being
+                    finished, and a mixture that nothing announces is the failure that would
+                    never be reported - see borrowedFrom in ugvclSchedules.ts. Shown here
+                    because this is where the borrowed figures are read; deliberately NOT on
+                    the printed sheet, which is a document to a DISCOM rather than a report
+                    on this app's transcription state. */}
+                {gridSchedule.borrowedFrom.circleLimits && (
+                  <p className="mt-1.5 p-2 rounded border border-amber-400 bg-amber-50 text-amber-900">
+                    <strong className="font-bold">These are {SCHEDULES[gridSchedule.borrowedFrom.circleLimits].label} figures.</strong>{' '}
+                    The Clause 4.0 pages for {gridSchedule.label} have not been supplied, so this tender is
+                    checked against the previous tender&rsquo;s sanction limits. If the new tender raised
+                    them, jobs will flag as over-limit slightly early.
+                  </p>
+                )}
               </div>
             )}
             {isReference && sectionKey !== 'CIRCLE_LIMITS' && (
@@ -1947,6 +1961,17 @@ export default function EstimateMaster() {
                   uses this list as its structure, so a row taken out here disappears from that
                   document too.
                 </p>
+                {/* See the matching notice on Circle Limits. */}
+                {gridSchedule.borrowedFrom.scheduleB && (
+                  <p className="mt-1.5 p-2 rounded border border-amber-400 bg-amber-50 text-amber-900">
+                    <strong className="font-bold">
+                      This tender prices {sectionTitle} from {SCHEDULES[gridSchedule.borrowedFrom.scheduleB].label}.
+                    </strong>{' '}
+                    Schedule-B has not been supplied for {gridSchedule.label}, so the fixed rates come from the
+                    previous tender while the itemised CRGO rows on this AT come from the new one. Temporary,
+                    and it is why this line exists rather than the two sitting side by side unannounced.
+                  </p>
+                )}
               </div>
             )}
             {sectionKey === 'CIRCLE_LIMITS' && circleLimitsViewMode === 'matrix' ? (

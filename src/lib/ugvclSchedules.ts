@@ -291,6 +291,98 @@ export const AMORPHOUS_ESTIMATE_TEXT = {
 };
 
 // ---------------------------------------------------------------------------
+// SCHEDULE-A — UGVCL-2026, A/T UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819
+// dated 07.09.2026, accepted at 7.00% above the estimated rate.
+// ---------------------------------------------------------------------------
+//
+// ⚠ RATES ONLY. The item NAMES and UNITS are taken from the 2020 rows by `sr`, because the
+// two schedules describe the same 51 items in the same order - the tender reissues prices,
+// not the work. Repeating the descriptions would create a second place for them to be
+// wrong, and the 2026 paper's wording differs cosmetically (fuller scope text) without
+// naming a different item.
+//
+// The bands are UNCHANGED - the 2026 heading states the same six explicitly. Only the
+// figures moved: 255 of 306 cells, by roughly 0.85%, with five rows untouched (5, 9B,
+// 12C-a, 12C-b, 13C-a). Every cell above ~1.2% is a 2020 decimal rounded to an integer
+// (28.75 -> 29, 59.8 -> 61, 51.75 -> 52), not a larger rise.
+//
+// Transcribed from schedule-a-ugvcl-2026.md, and diffed cell-by-cell against 2020 before
+// commit rather than read across by eye.
+const SCHEDULE_A_2026_RATES: Array<[string, BandRates]> = [
+  ['3', { B5: 116, B10_16: 138, B25: 157, B50_63_75: 157, B100: 157, B_ABOVE_100: 177 }],
+  ['5', flat(46)],
+  ['6', { B5: 0, B10_16: 312, B25: 312, B50_63_75: 312, B100: 312, B_ABOVE_100: 312 }],
+  ['7', { B5: 0, B10_16: 0, B25: 0, B50_63_75: 3464, B100: 4042, B_ABOVE_100: 5196 }],
+  ['10', { B5: 61, B10_16: 61, B25: 61, B50_63_75: 61, B100: 61, B_ABOVE_100: 99 }],
+  ['15', flat(55)],
+  ['16', flat(144)],
+  ['17', flat(1524)],
+  ['19', { B5: 116, B10_16: 116, B25: 174, B50_63_75: 174, B100: 174, B_ABOVE_100: 174 }],
+  ['20', { B5: 0, B10_16: 1061, B25: 1061, B50_63_75: 1258, B100: 1458, B_ABOVE_100: 1988.29 }],
+  ['21', { B5: 2009, B10_16: 2481, B25: 3189, B50_63_75: 3189, B100: 3189, B_ABOVE_100: 3510 }],
+  ['1a', { B5: 1386, B10_16: 1617, B25: 2079, B50_63_75: 2079, B100: 2079, B_ABOVE_100: 2079 }],
+  ['1b', { B5: 29, B10_16: 40, B25: 46, B50_63_75: 46, B100: 46, B_ABOVE_100: 46 }],
+  ['1c', { B5: 21, B10_16: 29, B25: 34, B50_63_75: 34, B100: 34, B_ABOVE_100: 58 }],
+  ['1d', { B5: 116, B10_16: 230, B25: 288, B50_63_75: 288, B100: 288, B_ABOVE_100: 392 }],
+  ['1e', { B5: 34, B10_16: 46, B25: 58, B50_63_75: 58, B100: 58, B_ABOVE_100: 80 }],
+  ['1f', { B5: 138, B10_16: 184, B25: 230, B50_63_75: 230, B100: 230, B_ABOVE_100: 347 }],
+  ['2a', { B5: 24, B10_16: 29, B25: 34, B50_63_75: 34, B100: 34, B_ABOVE_100: 34 }],
+  ['2b', { B5: 86, B10_16: 116, B25: 150, B50_63_75: 150, B100: 150, B_ABOVE_100: 197 }],
+  ['4i', flat(138)],
+  ['4ii', flat(205)],
+  ['8-A', flat(177)],
+  ['8-B', flat(268)],
+  ['9A', flat(132)],
+  ['9B', flat(80)],
+  ['11A', { B5: 157, B10_16: 157, B25: 157, B50_63_75: 157, B100: 157, B_ABOVE_100: 291 }],
+  ['11B', { B5: 150, B10_16: 150, B25: 150, B50_63_75: 150, B100: 150, B_ABOVE_100: 184 }],
+  ['12A-a', flat(360)],
+  ['12A-a1', flat(411)],
+  ['12A-b', flat(165)],
+  ['12A-b1', flat(215)],
+  ['12B-a', flat(524)],
+  ['12B-a1', flat(574)],
+  ['12B-b', flat(221)],
+  ['12B-b1', flat(272)],
+  ['12C-a', flat(11)],
+  ['12C-b', flat(34)],
+  ['13A-a', flat(317)],
+  ['13A-a1', flat(367)],
+  ['13A-b', flat(150)],
+  ['13A-b1', flat(201)],
+  ['13B-a', flat(495)],
+  ['13B-a1', flat(545)],
+  ['13B-b', flat(207)],
+  ['13B-b1', flat(257)],
+  ['13C-a', flat(17)],
+  ['13C-b', flat(52)],
+  ['14-i', flat(102)],
+  ['14-ii', flat(116)],
+  ['18a', flat(55)],
+  ['18b', flat(55)],
+];
+
+/**
+ * The 2026 Schedule-A, built by pairing the rates above with the 2020 rows' names and units.
+ *
+ * A row present in 2026 but absent from 2020 would be dropped silently, so it throws instead:
+ * the two schedules are the same 51 items and a mismatch means the transcription is wrong,
+ * not that a rate is missing.
+ */
+export const SCHEDULE_A_2026: ScheduleAItem[] = SCHEDULE_A_2026_RATES.map(([sr, rates]) => {
+  const base = SCHEDULE_A.find(i => i.sr === sr);
+  if (!base) throw new Error(`UGVCL-2026 prices Schedule-A item "${sr}", which the 2020 schedule does not describe. Add the item's name and unit rather than letting it resolve to nothing.`);
+  return { sr, name: base.name, unit: base.unit, rates };
+});
+
+/** Radiator replacement above 100 KVA — the one place 2026 keeps decimals. */
+export const RADIATOR_ABOVE_100_2026: Record<number, number> = {
+  200: 1988.29,
+  500: 2652.20,
+  // 315 KVA is not listed in the 2026 document either. Do not interpolate - block and ask.
+};
+
+// ---------------------------------------------------------------------------
 // THE SCHEDULE REGISTRY — one ScheduleSet per tender
 // ---------------------------------------------------------------------------
 
@@ -312,6 +404,21 @@ export interface ScheduleSet {
   complete: boolean;
   /** Why it is incomplete, shown wherever that matters. Empty when complete. */
   incompleteReason: string;
+  /**
+   * PARTS OF THIS SET BORROWED FROM ANOTHER SCHEDULE, pending their own pages.
+   *
+   * A schedule can be usable without being finished. UGVCL-2026's Schedule-A is
+   * transcribed; its Schedule-B has not been supplied, so it uses 2020's rather than
+   * blocking every Amorphous job under the new tender. That is a deliberate, temporary
+   * mixture and it is DECLARED rather than left to be inferred from equal-looking arrays -
+   * an estimate carrying 2026 itemised rows beside 2020 fixed rates, with nothing saying
+   * so, is the failure that would never be reported.
+   *
+   * Rendered wherever rates are shown. Deliberately NOT on the printed sheet: the tender
+   * governs what is charged, and a note about this app's transcription state is not part
+   * of a document sent to a DISCOM.
+   */
+  borrowedFrom: Partial<Record<'scheduleB' | 'circleLimits', ScheduleId>>;
   scheduleA: ScheduleAItem[];
   scheduleB: ScheduleBItem[];
   /** Radiator replacement above 100 KVA, priced per capacity rather than by band. */
@@ -327,6 +434,7 @@ export const SCHEDULES: Record<ScheduleId, ScheduleSet> = {
     label: 'UGVCL 2020 (Schedule-A & B)',
     complete: true,
     incompleteReason: '',
+    borrowedFrom: {},
     scheduleA: SCHEDULE_A,
     scheduleB: SCHEDULE_B,
     radiatorAbove100: RADIATOR_ABOVE_100,
@@ -336,40 +444,35 @@ export const SCHEDULES: Record<ScheduleId, ScheduleSet> = {
   },
 
   /**
-   * UGVCL-2026 — A/T UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819 dated 07.09.2026.
+   * UGVCL-2026 — A/T UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819 dated 07.09.2026,
+   * accepted at 7.00% above the estimated rate.
    *
-   * ⚠ REGISTERED AND DELIBERATELY EMPTY. The Schedule-A pages have been read and diffed
-   * against 2020 - 255 of 306 cells move - but NOTHING IS TRANSCRIBED HERE YET, and it is
-   * not an oversight:
+   * Schedule-A is transcribed and diffed: 255 of 306 cells moved, five rows unchanged.
    *
-   *   1. Schedule-B is not in the pages supplied. Transcribing A alone would leave every
-   *      Amorphous and Wound Core job under this tender priced from the 2020 fixed rates,
-   *      silently, because nothing compares the two.
-   *   2. The Clause 4.0 circle limits are not in them either, so a 2026 job would be
-   *      measured against the 2020 sanction ceiling.
-   *   3. THE HEADING WIDENED, AND IT MAY NOT BE COSMETIC. 2020 read "CRGO
-   *      (STACK/DRY/PAT/SDT)"; 2026 reads "CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous
-   *      Core". If that means Amorphous and Wound Core are ITEMISED under Schedule-A in
-   *      this tender rather than carrying a separate fixed rate, then the fixed-rate branch
-   *      in buildSingleJobEstimateData is the wrong model for 2026 and transcribing A alone
-   *      would encode that wrong model as though it were settled.
+   * ⚠ SCHEDULE-B AND THE CIRCLE LIMITS ARE 2020'S, PENDING THEIR OWN PAGES - see
+   * `borrowedFrom`. The alternative was leaving the whole schedule unselectable, which
+   * blocks the tender the agency is actually working under. The mixture is temporary,
+   * declared, and shown on screen wherever rates are displayed.
    *
-   * Awaiting the Schedule-B and Clause 4.0 pages. Until then this stays `complete: false`,
-   * no AT can select it, and any AT that somehow names it blocks with the reason below
-   * rather than pricing from a half-schedule.
+   * ⚠ AND IT MAY BE THE WRONG MIXTURE. The 2026 heading widened from "CRGO
+   * (STACK/DRY/PAT/SDT)" to "CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous Core". If that
+   * means Amorphous and Wound Core are ITEMISED under Schedule-A in this tender rather
+   * than carrying a separate fixed rate, then borrowing 2020's Schedule-B is not a
+   * placeholder for the right answer - it is the wrong model, and the fixed-rate branch in
+   * buildSingleJobEstimateData should not run for 1819 jobs at all. Which branch prices a
+   * core type is currently decided by `coreClass` alone; it would have to become
+   * schedule-dependent. AUDIT records this as the open question the Schedule-B pages must
+   * settle first. DO NOT let the fallback quietly become the answer because it works.
    */
   'UGVCL-2026': {
     id: 'UGVCL-2026',
     label: 'UGVCL 2026-28 (AT/1819)',
-    complete: false,
-    incompleteReason:
-      'The 2026-28 schedule is not yet transcribed. Schedule-A has been read, but Schedule-B '
-      + '(Amorphous / Wound Core fixed rates) and the Clause 4.0 circle limits have not been '
-      + 'supplied, and the tender heading may place Amorphous under Schedule-A rather than a '
-      + 'fixed rate. Nothing can be priced from it until those are settled.',
-    scheduleA: [],
-    scheduleB: [],
-    radiatorAbove100: {},
+    complete: true,
+    incompleteReason: '',
+    borrowedFrom: { scheduleB: 'UGVCL-2020', circleLimits: 'UGVCL-2020' },
+    scheduleA: SCHEDULE_A_2026,
+    scheduleB: SCHEDULE_B,
+    radiatorAbove100: RADIATOR_ABOVE_100_2026,
     extras: SCHEDULE_B_EXTRAS,
     notes: SCHEDULE_NOTES,
     amorphousText: AMORPHOUS_ESTIMATE_TEXT,

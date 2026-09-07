@@ -25,6 +25,8 @@ import { db, all, banner } from './_db.js';
 
 const MODE = 'dry-run';           // 'dry-run' | 'apply'
 const SCHEDULE_ID = 'UGVCL-2020';
+/** A/T 1819 IS the 2026-28 tender, so it is stamped 2026 - see IS_2026_TENDER. */
+const SCHEDULE_ID_2026 = 'UGVCL-2026';
 
 banner(`BACKFILL scheduleId=${SCHEDULE_ID}  [${MODE}]`);
 
@@ -37,8 +39,9 @@ banner(`BACKFILL scheduleId=${SCHEDULE_ID}  [${MODE}]`);
  * price the new tender at the old schedule, which is the exact defect the scheduleId field
  * was added to prevent - introduced by the migration meant to prevent it.
  *
- * It is skipped and reported, not guessed at: it should be set to UGVCL-2026 by hand once
- * that schedule is transcribed, and until then it is correctly unpriceable.
+ * It is now stamped UGVCL-2026, which is only correct because that schedule has since been
+ * transcribed. Until it was, this AT was HELD BACK rather than guessed at - a blanket
+ * backfill is only safe where the value is the same for every row, and here it never was.
  *
  * Matched on the tender number rather than the agency, because the agency could rename.
  */
@@ -52,16 +55,14 @@ const missing = candidates.filter(a => !IS_2026_TENDER(a));
 
 console.log(`  ATs total                 : ${ats.length}`);
 console.log(`  already carry a scheduleId: ${already.length}`);
-console.log(`  HELD BACK (2026 tender)   : ${held.length}`);
+console.log(`  to stamp ${SCHEDULE_ID_2026}     : ${held.length}   (A/T 1819 itself)`);
 console.log(`  to stamp ${SCHEDULE_ID}     : ${missing.length}\n`);
 
 already.forEach(a => console.log(`    (skip) ${String(a.atNumber || a.id).padEnd(44)} scheduleId=${a.scheduleId}`));
 if (already.length) console.log('');
 
 held.forEach(a => {
-  console.log(`    *** HELD  ${String(a.atNumber || a.id).padEnd(44)} this IS A/T 1819 - set it to UGVCL-2026 by hand`);
-  console.log(`              once that schedule is transcribed. Stamping 2020 would price the`);
-  console.log(`              new tender at the old rates.`);
+  console.log(`    ${MODE === 'apply' ? 'STAMP' : 'would stamp'}  ${String(a.atNumber || a.id).padEnd(44)} -> ${SCHEDULE_ID_2026}   (this IS A/T 1819)`);
 });
 if (held.length) console.log('');
 
@@ -77,5 +78,10 @@ if (MODE !== 'apply') {
     await db.collection('atMasters').doc(a.id).update({ scheduleId: SCHEDULE_ID });
     n++;
   }
-  console.log(`\n  Stamped ${n} AT(s).`);
+  let n26 = 0;
+  for (const a of held) {
+    await db.collection('atMasters').doc(a.id).update({ scheduleId: SCHEDULE_ID_2026 });
+    n26++;
+  }
+  console.log(`\n  Stamped ${n} AT(s) ${SCHEDULE_ID} and ${n26} ${SCHEDULE_ID_2026}.`);
 }
