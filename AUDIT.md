@@ -6151,8 +6151,30 @@ comparison that could not detect mistyping.
 
 **WHAT REACHES `public_config` NOW: ONE AGENCY.** Only IDEAL ENGINEERING COMPANY resolves
 through it — no sections of its own, no ATs. Every other agency answers from its AT or its
-own sections first, and the migration copied *agency* sections onto the ATs, so the ATs carry
-the `null` version rather than the baseline's 230 and 148.99.
+own sections first.
+
+> **CORRECTED 2026-09-07.** This paragraph used to end: *"and the migration copied agency
+> sections onto the ATs, so the ATs carry the `null` version rather than the baseline's 230
+> and 148.99."* **The data contradicts the second half.** A fresh census across every AT and
+> agency finds **four ATs carrying 230** at `1f`/100 KVA — ADMIN's `2026_27`, PATEL's
+> `.../2020-21/1087`, and both of UPENDRA's, `24-25` and `AT2026-27` — and **seven holders
+> carrying 148.99** at `11B`/100 KVA.
+>
+> The mechanism described is right and the conclusion drawn from it was too broad: the
+> migration did copy agency sections onto the ATs, which is precisely *why* some ATs carry
+> the 230 version — the agencies they were copied from (PATEL, ZENITH, ADMIN, UPENDRA) hold
+> it. Whether an AT has 230 or `null` depends on which agency it descended from, not on the
+> migration having filtered it out.
+>
+> **What that changes and what it does not.** The two cells are still unreachable by any
+> live estimate — they sit at the 100 KVA column of two items, and no job has priced through
+> them — so the entry's conclusion stands. What is no longer true is the reassuring form of
+> it: the drift did not stay confined to `public_config`, it was carried onto four tenders,
+> and freezing the baseline does not reach those copies.
+>
+> Found while gathering evidence on whether tender rates ever change between periods. The
+> census was looking for repricing and found this instead: **the only two cells that differ
+> anywhere in the database are these, and neither is a tender difference.**
 
 So freezing it creates no drift; the drift already exists and is already unreachable. **The
 risk is the opposite one: it becomes a fossil that still looks authoritative** — two rates in

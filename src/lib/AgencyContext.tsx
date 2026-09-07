@@ -334,6 +334,18 @@ export interface PublishedAt {
   publishedAt?: number;
   publishedBy?: string;
 
+  /**
+   * THE TENDER'S OWN PERIOD, as a SUGGESTION to whoever adopts it.
+   *
+   * Prefills the dates on the Add AT form when a template is chosen there, so the operator
+   * is correcting a date rather than looking one up. It is not authoritative and is never
+   * written onto an existing AT: `adoptPublishedAt` copies rates and nothing else, because
+   * changing a tender's period as a side effect of taking its rates is the shape that made
+   * re-adoption on save dangerous in the first place.
+   */
+  startDate?: number;
+  endDate?: number;
+
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
   estimateMasterWoundCore?: EstimateItem[];
@@ -928,7 +940,7 @@ interface AgencyContextType {
   publishedAts: PublishedAt[];
   /** Admin only. Creates a new template, or bumps an existing one's version. */
   publishAtTemplate: (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string },
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ) => Promise<string>;
   /** Copy a template's sections onto an AT, stamping which template and version. */
@@ -2062,7 +2074,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * leave their `publishedAtVersion` pointing at nothing.
    */
   const publishAtTemplate = async (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string },
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ): Promise<string> => {
     if (!isSuperAdmin) throw new Error('Only the administrator can publish a rate template.');
@@ -2092,6 +2104,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       publishedAt: Date.now(),
       publishedBy: auth.currentUser?.email || auth.currentUser?.uid || '',
     };
+    // Omitted rather than written as 0 or null when not given: firestore.rules validates
+    // these only when present, and a 0 here would render as 1 January 1970 on the adopter's
+    // form - a date nobody typed, presented as the tender's.
+    if (Number(tpl.startDate) > 0) payload.startDate = Number(tpl.startDate);
+    if (Number(tpl.endDate) > 0) payload.endDate = Number(tpl.endDate);
     Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payload[k] = v; });
 
     const ref = tpl.id ? doc(db, 'published_ats', tpl.id) : doc(collection(db, 'published_ats'));

@@ -1019,7 +1019,22 @@ export function AtSettings() {
                     <>
                       <select
                         value={newAtTemplateId}
-                        onChange={e => setNewAtTemplateId(e.target.value)}
+                        onChange={e => {
+                          setNewAtTemplateId(e.target.value);
+                          // PREFILL THE PERIOD, DO NOT IMPOSE IT. A template carries the
+                          // tender's own dates; filling them here turns a lookup into a
+                          // check. They stay editable because the agency's AT period is
+                          // its own - it may join a tender late or close early - and
+                          // nothing downstream reads the template's dates again.
+                          const t = publishedAts.find(x => x.id === e.target.value);
+                          if (t?.startDate || t?.endDate) {
+                            setNewAt(prev => ({
+                              ...prev,
+                              startDate: t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : prev.startDate,
+                              endDate: t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : prev.endDate,
+                            }));
+                          }
+                        }}
                         className="w-full px-3 py-2 text-xs border rounded-lg bg-white"
                       >
                         <option value="">Enter rates myself later</option>

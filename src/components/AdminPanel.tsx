@@ -3,6 +3,10 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useAgency, Agency } from '../lib/AgencyContext';
+import {
+  defaultEstimateData, defaultAmorphousEstimateData, defaultWoundCoreEstimateData,
+  defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData,
+} from '../lib/estimateData';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
@@ -16,12 +20,91 @@ export default function AdminPanel() {
   // list is an unfiltered read across every account, so any writer reached from this screen
   // is a cross-account write by construction. Leaving the function in scope is leaving the
   // hazard one line from being used again.
-  const { agencies, publishedAts, atMasters } = useAgency();
+  const { agencies, publishedAts, atMasters, publishAtTemplate } = useAgency();
   const currentUser = auth.currentUser;
   const isSuperAdminEmail = currentUser?.email === 'shivaminfotech89@gmail.com';
 
   const [activeTab, setActiveTab] = useState<'agencies' | 'users' | 'tickets' | 'razorpay' | 'system'>('agencies');
+
+  /**
+   * AUTHORING A RATE TEMPLATE, WITH NO AGENCY AND NO AT.
+   *
+   * Publishing used to be reachable only from Estimate Master, which requires an agency
+   * (`EstimateMaster.tsx:608`) and an AT under it, with all five schedules already typed in.
+   * So the administrator had to create an agency and a tender of their own purely to have
+   * somewhere for the rates to sit before they could be published - and the template then
+   * carried whatever that AT happened to hold.
+   *
+   * ⚠ THE RATES ARE SEEDED FROM THE SHIPPED TRANSCRIPTION, NOT TYPED. `estimateData.ts` is
+   * the UGVCL schedule as transcribed from the tender document, and the evidence says a new
+   * tender does not reprice it: the schedule has been transcribed once and never revised,
+   * and four of the five sections are byte-identical across every AT and agency in the
+   * database - spanning periods labelled 2020-21, 24-25, 26-27 and 2026-28. Repricing is
+   * carried by the AT percentage, which is per-tender AND per-agency.
+   *
+   * A figure that genuinely differs is corrected afterwards in Estimate Master and
+   * republished as a new version. That keeps ONE rate grid in the app: a second one here
+   * would be the second implementation this codebase keeps retiring.
+   */
+  const [showTplForm, setShowTplForm] = useState(false);
+  const [tplTargetId, setTplTargetId] = useState('');
+  const [tplName, setTplName] = useState('');
+  const [tplAtNumber, setTplAtNumber] = useState('');
+  const [tplNotes, setTplNotes] = useState('');
+  const [tplStart, setTplStart] = useState('');
+  const [tplEnd, setTplEnd] = useState('');
+  const [tplSaving, setTplSaving] = useState(false);
+  const [tplMsg, setTplMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const resetTplForm = () => {
+    setTplTargetId(''); setTplName(''); setTplAtNumber(''); setTplNotes('');
+    setTplStart(''); setTplEnd('');
+  };
+
+  const handlePublishNewTemplate = async () => {
+    if (!tplName.trim()) {
+      alert('Give the template a name operators will recognise, e.g. "UGVCL 2026-28 Schedule A".');
+      return;
+    }
+    setTplSaving(true);
+    try {
+      // ALL FIVE SECTIONS, ALWAYS. publishAtTemplate refuses a partial template by name,
+      // and a partial one would produce an AT that is a mixture labelled as though it all
+      // came from one place.
+      const id = await publishAtTemplate(
+        {
+          id: tplTargetId || undefined,
+          name: tplName.trim(),
+          atNumber: tplAtNumber.trim(),
+          notes: tplNotes.trim(),
+          startDate: tplStart ? new Date(tplStart).getTime() : undefined,
+          endDate: tplEnd ? new Date(tplEnd).getTime() : undefined,
+        },
+        {
+          estimateMasterCRGO: JSON.parse(JSON.stringify(defaultEstimateData)),
+          estimateMasterAmorphous: JSON.parse(JSON.stringify(defaultAmorphousEstimateData)),
+          estimateMasterWoundCore: JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)),
+          estimateMasterOverhauling: JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)),
+          estimateMasterCircleLimits: JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)),
+        },
+      );
+      const tpl = publishedAts.find(t => t.id === id);
+      setTplMsg(
+        `Published "${tplName.trim()}"${tpl ? ` v${tpl.version}` : ''}. `
+        + `Any agency can now select it when creating an AT, or copy it onto an existing one from Estimate Master. `
+        + `Nobody's existing rates changed.`
+      );
+      setShowTplForm(false);
+      resetTplForm();
+      setTimeout(() => setTplMsg(null), 10000);
+    } catch (err: any) {
+      console.error(err);
+      alert(err?.message || 'Could not publish the template. Nothing was written.');
+    } finally {
+      setTplSaving(false);
+    }
+  };
 
   // Firestore Data State
   const [allAgencies, setAllAgencies] = useState<Agency[]>([]);
@@ -398,18 +481,134 @@ export default function AdminPanel() {
            screen. */}
       {activeTab === 'agencies' && (
         <div className={`${CARD} p-6 space-y-4 mb-6`}>
-          <div>
-            <h2 className="text-base font-bold text-slate-900">Published AT rate templates</h2>
-            <p className="text-xs text-slate-500">
-              Tender schedules any user can copy onto their own AT. Published from Estimate Master;
-              revising one bumps its version and changes nobody&rsquo;s existing rates.
-            </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-900">Published AT rate templates</h2>
+              <p className="text-xs text-slate-500">
+                Tender schedules any user can copy onto their own AT &mdash; when creating one, or from
+                Estimate Master. Revising a template bumps its version and changes nobody&rsquo;s existing rates.
+              </p>
+            </div>
+            {isSuperAdminEmail && !showTplForm && (
+              <button
+                type="button"
+                onClick={() => { resetTplForm(); setShowTplForm(true); }}
+                className="shrink-0 flex items-center px-3 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm"
+              >
+                <PlusCircle className="w-4 h-4 mr-1.5" /> New tender template
+              </button>
+            )}
           </div>
+
+          {tplMsg && (
+            <div className="text-xs bg-emerald-50 border border-emerald-300 text-emerald-900 rounded-lg p-3 font-medium">
+              {tplMsg}
+            </div>
+          )}
+
+          {/* AUTHORING FORM - metadata only. See handlePublishNewTemplate for why the five
+              rate schedules are seeded from the shipped transcription rather than typed. */}
+          {isSuperAdminEmail && showTplForm && (
+            <div className="border-2 border-purple-200 bg-purple-50/40 rounded-xl p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-purple-950">
+                  {tplTargetId ? 'Revise a published template' : 'New tender template'}
+                </h3>
+                <button type="button" onClick={() => { setShowTplForm(false); resetTplForm(); }}
+                        className="text-slate-400 hover:text-slate-600 text-xs font-bold">Cancel</button>
+              </div>
+
+              {publishedAts.length > 0 && (
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Publish as</label>
+                  <select
+                    value={tplTargetId}
+                    onChange={e => {
+                      setTplTargetId(e.target.value);
+                      const t = publishedAts.find(x => x.id === e.target.value);
+                      if (t) {
+                        setTplName(t.name);
+                        setTplAtNumber(t.atNumber || '');
+                        setTplStart(t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : '');
+                        setTplEnd(t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : '');
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                  >
+                    <option value="">A NEW template</option>
+                    {publishedAts.map(t => (
+                      <option key={t.id} value={t.id}>Revise &ldquo;{t.name}&rdquo; (v{t.version} &rarr; v{Number(t.version) + 1})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Template name</label>
+                  <input value={tplName} onChange={e => setTplName(e.target.value)} maxLength={200}
+                         placeholder="UGVCL 2026-28 Schedule A"
+                         className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">AT / tender number</label>
+                  {/* FREE TEXT, AND IT MUST STAY FREE TEXT. The DISCOM's references carry
+                      slashes, spaces and mixed case. This value is only ever displayed - it is
+                      never a document id, a path segment or a map key anywhere in the app - so
+                      nothing here needs escaping, and nothing truncates it below the 150
+                      characters firestore.rules allows. */}
+                  <input value={tplAtNumber} onChange={e => setTplAtNumber(e.target.value)} maxLength={150}
+                         placeholder="UGVCL/EE-T-1/TRANS REP/2026-28/01/AT/1819"
+                         className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Tender period from</label>
+                  <input type="date" value={tplStart} onChange={e => setTplStart(e.target.value)}
+                         className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Tender period to</label>
+                  <input type="date" value={tplEnd} onChange={e => setTplEnd(e.target.value)}
+                         className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">What changed in this version</label>
+                  <textarea value={tplNotes} onChange={e => setTplNotes(e.target.value)} rows={2} maxLength={2000}
+                            placeholder="Shown to anyone whose copy is behind this version."
+                            className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
+                </div>
+              </div>
+
+              <div className="text-[11px] leading-relaxed bg-white border border-purple-200 rounded-lg p-3 text-slate-700">
+                <strong className="font-bold text-purple-950">The five rate schedules come from the app&rsquo;s UGVCL transcription</strong>
+                {' '}&mdash; CRGO, Amorphous, Wound Core, Overhauling and Circle Limits, complete. A new tender
+                normally reprices through the AT percentage rather than the schedule itself, so this is the
+                schedule as tendered. If a figure genuinely differs, publish this, copy it onto an AT,
+                correct the figure in Estimate Master and publish again as a new version.
+                <div className="mt-1.5 pt-1.5 border-t border-purple-100">
+                  <strong className="font-bold">The AT percentage is not part of a template.</strong> It is what each
+                  agency quoted above or below the schedule, so it stays on their own AT.
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button type="button" onClick={() => { setShowTplForm(false); resetTplForm(); }}
+                        className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg border border-slate-300">
+                  Cancel
+                </button>
+                <button type="button" onClick={handlePublishNewTemplate} disabled={tplSaving || !tplName.trim()}
+                        className="px-4 py-2 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg shadow-sm disabled:opacity-50">
+                  {tplSaving ? 'Publishing...' : tplTargetId ? 'Publish new version' : 'Publish template'}
+                </button>
+              </div>
+            </div>
+          )}
 
           {publishedAts.length === 0 ? (
             <div className="text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-3">
-              None published yet. Open <strong>Estimate Master</strong> with the AT whose rates you want to
-              publish selected, then use &ldquo;Publish this AT as a template&rdquo;.
+              None published yet. Use <strong>New tender template</strong> above &mdash; it needs no agency and
+              no AT, and carries the five UGVCL schedules as transcribed. Publishing an existing
+              AT&rsquo;s rates instead is still available from Estimate Master.
             </div>
           ) : (
             <div className="overflow-x-auto">
