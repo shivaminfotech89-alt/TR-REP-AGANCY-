@@ -6581,6 +6581,121 @@ is only ever learned the expensive way.
 
 ---
 
+### O42. The tender's witnessing and sequencing rules: transcribed, present, and enforced nowhere
+
+The 2026-28 tender text carries three conditions on how work may proceed:
+
+- inspection must be **witnessed by a UGVCL representative**
+- transformers **must not be opened in their absence**
+- repair **may only begin after the estimate is approved**
+
+**The app records none of the first two, and does not enforce the third. Both halves are
+worse than "not implemented", because both are already half-present.**
+
+#### Half one: the rule is in the codebase and rendered nowhere
+
+`ugvclSchedules.ts:278` holds it verbatim:
+
+> `estimateApproval: 'Repairing cost is capped at 25% of the cost of a NEW transformer.
+> Failed transformers may not be opened before approval of the estimate, except in the
+> presence of an authorised UGVCL representative.'`
+
+**`SCHEDULE_NOTES` is referenced by nothing but the schedule registry** — the definition, and
+the two `notes:` fields in `SCHEDULES`. It appears on no screen and no printed document.
+Somebody transcribed the tender's own condition into the code, and no reader of this app has
+ever seen it.
+
+That is the F50 shape at document scale: the information exists, is correct, and is not
+where the person who needs it is looking. An operator about to open a transformer has no
+way to learn from the app that they may not.
+
+**What DOES exist is two printed signature LINES, and neither is a record.**
+`NewJob.tsx:2957` prints *"DISCOM Representative / Driver Signature"*; `TestingReport.tsx:610`
+prints *"TESTING SUPERVISED / WITNESSED"*. Both are ink-on-paper rules. There is no field, no
+name, no date, no boolean, nothing queryable. **Asked "who witnessed the opening of this
+transformer", the app cannot answer for any job** — the answer exists only on a printed sheet,
+if anyone signed one.
+
+#### Half two: approval is recorded and gates nothing
+
+`approvalNo` and `estimateApprovalStatus` **are** written — `EstimateGenerate.tsx:756` and
+`:772` — so the app knows which estimates were approved and under what number. The
+sequencing rule is therefore *representable*.
+
+**Neither inspection screen reads either field.** `InternalInspection.tsx` — which is the
+dismantling record, the thing the tender forbids before approval — contains no reference to
+`approvalNo` or `estimateApprovalStatus`, and neither does `ExternalInspection.tsx`. An
+internal inspection can be completed, saved and priced at any time, in any order, regardless
+of whether the estimate exists, was sent, or was approved.
+
+So the constraint is not missing for want of data. **The data is there and nothing consults
+it** — the same shape as O29's `approvedAmount` and F48's `externalData.kv`, and the third
+instance of it in this audit.
+
+#### Why this is worth an entry rather than a fix
+
+**Enforcement is a decision nobody has made, and the wrong enforcement is worse than none.**
+Blocking internal inspection on `estimateApprovalStatus === 'Approved'` would stop work in a
+yard whenever a DISCOM is slow, and the tender itself provides an exception — opening IS
+permitted before approval when a UGVCL representative is present, which is precisely the
+fact the app does not record. So the gate cannot be built before the witnessing capture, and
+the witnessing capture is a new field on a printed form this audit has repeatedly been told
+not to disturb.
+
+**What the app can say truthfully today: nothing.** It cannot report that a transformer was
+opened without approval, because it does not know when it was opened relative to approval;
+and it cannot report that a witness was present, because it has never been asked.
+
+---
+
+### O43. Two Clause 4.0 cells that reverse the pattern — suspected transcription errors
+
+**In the shipped Clause 4.0 limits, two cells run the wrong way**, and both sit in the same
+capacity region:
+
+| | |
+|---|---|
+| **4-Star below 3-Star at 10 kVA** | 3-Star **8,716**, 4-Star **7,707**. Every other capacity has 4-Star above 3-Star: 5 (5,422 / 6,206), 16 (8,696 / 11,729), 25, 63, 100, 200, 500. **One reversal in eight.** |
+| **3-Star's 10 kVA above its 16 kVA** | 8,716 at 10 kVA against 8,696 at 16 kVA — a sanction ceiling that falls as the transformer gets larger. The row is otherwise monotonic: 5,422 · **8,716 · 8,696** · 10,124 · 20,423 · 24,609 · 47,170 · 148,260. |
+
+**Recorded as suspected TRANSCRIPTION errors, not tender quirks.** One anomaly could be a
+tender oddity; two, adjacent, in a table that is otherwise perfectly ordered, points at the
+entry rather than the source. The operator reports the same 4-Star reversal appears on the
+2026-28 paper, which is consistent with either reading — a quirk carried across two tenders,
+or a transcription repeated from the same misread column.
+
+**Awaiting the paper.** These are not corrected here: a limit is the Superintending
+Engineer's sanction authority and correcting it from inference is exactly the fabricated-rate
+pattern this audit exists to prevent. Two cells that look wrong are not evidence of what the
+right ones are.
+
+#### What it costs if they are errors
+
+**Every 10 and 16 kVA job has been checked against a wrong ceiling since the schedule was
+entered.** Nine jobs sit at those capacities today:
+
+| job | kVA | estimate | limit used | |
+|---|---|---|---|---|
+| `SU-22` | 10 | 4,485.31 | 8,716 | 51.5% |
+| `KLL-8` | 10 | 6,832.18 | 8,716 | 78.4% |
+| **`SU-5`** | 10 | **9,077.15** | **8,716** | **OVER — the only flagged job in the database** |
+| `SU-23` | 16 | 5,070.83 | 8,696 | 58.3% |
+
+*(The other five are Amorphous or Wound Core, which carry no limit — see the fixed-rate
+exclusion.)*
+
+**`SU-5` is the one that matters.** It is the single job in the entire database flagged as
+exceeding its circle limit, it is a 10 kVA unit, and the ceiling it was measured against is
+one of the two suspect cells. If 8,716 is wrong, the one "over limit" finding the app has
+ever produced rests on a mistyped number — and it prints
+**"REPAIRABLE (&gt; CIRCLE LIMIT)"** on the estimate that goes to the circle office.
+
+**Nothing is safe to conclude from that until the paper is checked**, which is the point of
+recording it rather than acting: the direction of the error is unknown. A higher true limit
+means `SU-5` was never over; a lower one means it is further over than reported.
+
+---
+
 ### O41. The circle limits are not versioned by tender, and Schedule-A now is
 
 **Rate schedules became per-tender at `ugvclSchedules.ts`; the sanction ceiling they are
