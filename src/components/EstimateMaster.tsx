@@ -18,7 +18,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { CARD } from '../lib/ui';
-import { checkMasterSection, storedSection, MasterSection } from '../lib/estimateMasterHealth';
+import { checkMasterSection, storedSection, storedSectionForRates, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
 import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100 } from '../lib/ugvclSchedule2020';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
@@ -1023,9 +1023,15 @@ export default function EstimateMaster() {
     section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS'
   ) => {
     const shown = getSectionData(section);
+    // THE AT FIRST, THE AGENCY ONLY WHERE THE AT HAS NOTHING - the same rung order the
+    // price resolves through (AUDIT F73). This read the agency alone, so "Publish this AT
+    // as a template" published the AGENCY's rows for every section the admin had not edited
+    // in that session, under a name seeded from the AT's number.
     const stored = section === 'CIRCLE_LIMITS'
-      ? activeAgency?.estimateMasterCircleLimits
-      : storedSection(activeAgency, section as MasterSection);
+      ? ((selectedAt as any)?.estimateMasterCircleLimits?.length
+          ? (selectedAt as any).estimateMasterCircleLimits
+          : activeAgency?.estimateMasterCircleLimits)
+      : storedSectionForRates(selectedAt, activeAgency, section as MasterSection);
     const edited = Boolean(editedSections[section]);
 
     // Rows on screen whose code is absent from storage - the normaliser's additions.
@@ -1088,7 +1094,11 @@ export default function EstimateMaster() {
     const offenders = sections
       .filter(sec => sec !== 'CIRCLE_LIMITS')
       .map(sec => {
-        const stored = storedSection(activeAgency, sec as MasterSection);
+        // THE SAME SOURCE THE PUBLISH READS. It tested the agency while publishPlanFor
+        // published the AT-or-agency resolution, so it could refuse an AT holding a correct
+        // schedule over content that was never going to be sent - and pass one whose own
+        // section was mis-filed because the agency's happened to be fine.
+        const stored = storedSectionForRates(selectedAt, activeAgency, sec as MasterSection);
         const health = checkMasterSection(sec as MasterSection, stored);
         // An empty Overhauling section is the normal state (it holds optional overrides
         // of Schedule-A), so emptiness there is not fallback content and must not block.

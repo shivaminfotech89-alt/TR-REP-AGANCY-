@@ -244,11 +244,31 @@ export function storedSection(agency: any, section: MasterSection): EstimateItem
  * one, the agency's otherwise. That mirrors getEstimateMasterForCore's top two rungs, per
  * section, and it must keep mirroring them.
  */
+/**
+ * THE SECTION THE PRICE ACTUALLY COMES FROM: the AT's stored rows when it has any, the
+ * agency's otherwise. Mirrors `getEstimateMasterForCore`'s top two rungs, per section.
+ *
+ * ⚠ ANYTHING ASKING "WHAT ARE THIS TENDER'S RATES" MUST COME THROUGH HERE. Reading
+ * `storedSection(agency, …)` directly answers a question that stopped being the right one
+ * at F73, when rates moved onto the tender - it reports the agency's rows for an AT that
+ * prices from its own, and reports nothing for an AT whose agency section is empty.
+ *
+ * That is not hypothetical: the publish path did exactly this. `publishPlanFor` built the
+ * template payload from `storedSection(activeAgency, …)` while the modal said "Publish this
+ * AT as a template" and seeded the name from the AT's number, so an unedited section
+ * published the AGENCY's rows - which is every section, on every publish, unless the admin
+ * happened to edit it in that session. `blockPublishIfFallbackResolved` read the agency too,
+ * so it could refuse an AT holding a correct schedule because of content it was not going to
+ * publish. Both directions wrong, and both from the same missing rung.
+ */
+export function storedSectionForRates(at: any, agency: any, section: MasterSection): EstimateItem[] | undefined {
+  const fromAt = storedSection(at, section);
+  return (Array.isArray(fromAt) && fromAt.length > 0) ? fromAt : storedSection(agency, section);
+}
+
 export function validateEstimateMaster(at: any, agency: any, coreType: string): MasterHealth {
   const section = sectionForCoreType(coreType);
-  const fromAt = storedSection(at, section);
-  const stored = (Array.isArray(fromAt) && fromAt.length > 0) ? fromAt : storedSection(agency, section);
-  return checkMasterSection(section, stored);
+  return checkMasterSection(section, storedSectionForRates(at, agency, section));
 }
 
 /**
