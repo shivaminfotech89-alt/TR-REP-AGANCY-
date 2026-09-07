@@ -114,6 +114,33 @@ export interface CircleLimitCheck {
 // the agency's "Circle Authority Estimate Approval Limit" master, resolved by the
 // caller (via getCircleLimitsEstimateMaster) rather than looked up in here, so this
 // stays free of any AgencyContext dependency.
+/**
+ * WHICH CORE TYPES THE CLAUSE 4.0 CIRCLE APPROVAL LIMIT APPLIES TO.
+ *
+ * The limit caps a repair at 25% of the cost of a NEW transformer, so it only means
+ * anything where the repair cost is itemised and can vary. Amorphous and CRGO Wound Core
+ * are priced from `SCHEDULE_B` at a fixed rate per capacity: the figure is the tender's,
+ * nothing observed on the bench can move it, and there is no cap on it to breach.
+ *
+ * ⚠ OVERHAULING KEEPS ITS LIMIT, AND THE DISTINCTION IS THE POINT OF THIS FUNCTION.
+ * `classifyCoreType` returns 'OH' separately, so "not CRGO" would have excluded it too -
+ * and that would be this same defect pointing the other way. Overhauling is a SERVICE
+ * TYPE, not a core material: an overhauled unit is still a CRGO transformer. The tender
+ * clause names "CRGO (STACK/DRY/PAT/SDT) Transformers", which are CRGO core sub-types; it
+ * excludes Amorphous and Wound Core because those are different core materials, not
+ * because of how the work is priced. OH is itemised from Schedule-A sr 21 with physical
+ * damages "charged extra at above rates", so its cost varies and the cap is real.
+ *
+ * The old inline guard in InternalInspection excluded OH as well, but for a DIFFERENT
+ * stated reason - "OH cannot realistically approach the limit". That is a practical
+ * observation, and the data supports it (the one OH job uses 17.9% of its limit). It is
+ * not the same claim as "no limit applies", and only the second belongs in `hasLimit`.
+ */
+export function coreTypeHasCircleLimit(coreType: string | undefined): boolean {
+  const cls = classifyCoreType(coreType || 'CRGO');
+  return cls !== 'AMORPHOUS' && cls !== 'WOUND_CORE';
+}
+
 export function checkJobCircleLimit(
   job: any,
   externalData: any,
@@ -125,6 +152,38 @@ export function checkJobCircleLimit(
   const est = getJobFullEstimate(job, externalData, internalData, agency, atMaster);
   const finalAmt = est.finalAmount;
   const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
+
+  // THE GUARD LIVES HERE, NOT AT THE CALL SITES.
+  //
+  // It used to live in exactly one of the six places that check - the Internal Inspection
+  // indicator - and that was the only one which never reached paper. The other five
+  // measured a fixed-rate job against a CRGO limit: the MR badge, the "OVER LIMIT" banner,
+  // `mrHasExceededCircleLimit`, `exceedingJobsInSelectedMr`, and - the one that matters -
+  // the Condition column of the PRINTED ESTIMATE (EstimateGenerate:1007), which asserted
+  // "REPAIRABLE (> CIRCLE LIMIT)" on a document sent to the circle office, about a sanction
+  // limit that does not exist for that core type.
+  //
+  // Two live Amorphous jobs were flagged when this was written: 21PS-AP-4 (100 KVA copper,
+  // Rs 63,966.24 against a 24,609 limit, +160%) and ASU-4 (63 KVA copper, +10%). Both are
+  // copper, and that is not a coincidence - the copper Schedule-B rows are per-coil times
+  // three plus labour, which lands far above a cap derived from CRGO repair costs.
+  //
+  // `limit` is 0 rather than the CRGO figure on purpose: returning a number that does not
+  // apply, next to `hasLimit: false`, invites exactly the reading this fix removes.
+  if (!coreTypeHasCircleLimit(job?.coreType)) {
+    const rating = getCircleLimitForJob(job.capacityKva, ratingKey, circleLimitsData);
+    return {
+      finalAmt,
+      limit: 0,
+      ratingLabel: rating.ratingLabel,
+      ratingCode: rating.ratingCode,
+      hasLimit: false,
+      exceeds: false,
+      diff: 0,
+      diffPct: 0
+    };
+  }
+
   const limitInfo = getCircleLimitForJob(job.capacityKva, ratingKey, circleLimitsData);
   const exceeds = limitInfo.hasLimit && finalAmt > limitInfo.limit;
   const diff = finalAmt - limitInfo.limit;

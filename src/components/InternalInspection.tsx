@@ -8,11 +8,10 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { PrintableA4Page } from './LetterheadHeader';
-import { classifyCoreType } from './SingleJobEstimateReport';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
-import { getJobFullEstimate, checkJobCircleLimit } from '../lib/estimateCalc';
+import { getJobFullEstimate, checkJobCircleLimit, coreTypeHasCircleLimit } from '../lib/estimateCalc';
 import { atForJob, matchesAtScope } from '../lib/AgencyContext';
 import { OtherTenderNote } from './OtherTenderNote';
 
@@ -723,10 +722,22 @@ export default function InternalInspection() {
   const renderCircleLimitIndicator = (job: any) => {
     // NOT blank. Amorphous and Wound Core price from Schedule-B at a fixed rate per
     // capacity, so nothing entered on this form can move the amount and there is nothing
-    // to check against the circle limit; OH cannot realistically approach it. That is a
-    // reason, and an empty cell does not convey a reason - it is indistinguishable from a
-    // broken one, which is the ambiguity this audit keeps removing.
-    if (classifyCoreType(job.coreType || 'CRGO') !== 'CRGO') {
+    // to check against the circle limit. That is a reason, and an empty cell does not
+    // convey a reason - it is indistinguishable from a broken one, which is the ambiguity
+    // this audit keeps removing.
+    //
+    // ⚠ THE PREDICATE IS SHARED NOW, AND IT NO LONGER EXCLUDES OH. This tested
+    // `!== 'CRGO'`, which caught Overhauling too and told it "Fixed rate - no limit
+    // check" - a sentence that is false about OH twice over: it is not fixed rate, it is
+    // itemised from Schedule-A sr 21, and it does have a limit. It was excluded here on
+    // the practical ground that it cannot approach the cap, which is true (the one OH job
+    // uses 17.9% of its limit) but is not what the message said. OH now gets the real
+    // indicator, which will simply show it comfortably within the limit.
+    //
+    // One predicate, in the same function that does the check - see
+    // `coreTypeHasCircleLimit`. This screen's guard was the only one that existed, and
+    // keeping a second copy of the rule here is how the two would drift.
+    if (!coreTypeHasCircleLimit(job.coreType)) {
       return (
         <span className="block text-[9px] font-semibold text-slate-400 italic"
               title="Amorphous and CRGO Wound Core are priced at a fixed rate per capacity from UGVCL Schedule-B, so the circle approval limit is not checked here.">
