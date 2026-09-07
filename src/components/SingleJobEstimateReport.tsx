@@ -62,15 +62,43 @@ function windingMaterialError(jobLabel: string, raw: unknown): EstimateRateError
   };
 }
 
-// Schedule-B has exactly one Aluminium/Copper x capacity combination, except 63 KVA
-// Aluminium which has two variants (1d-1 default, 1d-2 for Vijay/Vijai make only).
-function findScheduleBEntry(kvaNum: number, isCopper: boolean, make: string): ScheduleBItem | undefined {
+/** The Schedule-B rows for a capacity and winding. More than one means a variant fork. */
+function scheduleBCandidates(kvaNum: number, isCopper: boolean): ScheduleBItem[] {
   const wantedWinding: 'Aluminium' | 'Copper' = isCopper ? 'Copper' : 'Aluminium';
-  const candidates = SCHEDULE_B.filter(e => e.kva === kvaNum && e.winding === wantedWinding);
+  return SCHEDULE_B.filter(e => e.kva === kvaNum && e.winding === wantedWinding);
+}
+
+/**
+ * Schedule-B has exactly one row per capacity and winding, EXCEPT 63 KVA Aluminium, which
+ * has two: 1d-1 at Rs 13,746 for an ordinary unit, and 1d-2 at Rs 16,746 for one supplied
+ * under order ADB/1804, whose coils are heavier (90.21 kg against 50 to 67 kg).
+ *
+ * ⚠ SELECTED BY AN EXPLICIT FIELD, NOT BY MATCHING THE MAKE.
+ *
+ * This used to test `job.make` for the substring "vijay" or "vijai" - a substring match on
+ * free text, deciding Rs 3,000. The `make` column holds 51 distinct values across 64 jobs,
+ * entered by hand, and nothing validates it: a unit typed "VIJAY ELECTRICALS" priced as
+ * ADB/1804 and one typed "Vijai Elec." did too, while a genuine ADB/1804 unit from any other
+ * supplier, or one whose make was mistyped, silently took the cheaper rate. The maker is a
+ * DESCRIPTION of the order; the order is the fact, and it is now recorded as one.
+ *
+ * ⚠ COIL WEIGHT CANNOT BE USED TO TELL THE TWO APART, though the schedule distinguishes them
+ * by it. `totWt` on the internal inspection is `damaged coil count x wtOfCoil` - the weight
+ * of the coils found DAMAGED, not the transformer's total coil weight - so it is below the
+ * schedule's figure whenever fewer than all coils failed, which is the normal case. In live
+ * data AMSBT-3 shows 7.50 kg across 5 damaged coils and the three units currently resolving
+ * 1d-2 have `wtOfCoil` of 0. There is no field anywhere holding total coil weight. Do not
+ * reach for this as a derivation or a cross-check; it cannot support either.
+ */
+function findScheduleBEntry(kvaNum: number, isCopper: boolean, supplyOrderRef: string): ScheduleBItem | undefined {
+  const candidates = scheduleBCandidates(kvaNum, isCopper);
   if (candidates.length <= 1) return candidates[0];
-  const makeLower = (make || '').toLowerCase();
-  const isVijay = makeLower.includes('vijay') || makeLower.includes('vijai');
-  return candidates.find(e => Boolean(e.makeNote) === isVijay) || candidates[0];
+  const ref = String(supplyOrderRef ?? '').trim().toUpperCase();
+  // Only an exact, affirmative match takes the variant. Blank never reaches here - the
+  // caller blocks on it - and any other value means "not that order".
+  return candidates.find(e => (e.supplyOrder ?? '').toUpperCase() === ref)
+    ?? candidates.find(e => !e.supplyOrder)
+    ?? candidates[0];
 }
 
 // --- Print-layout constants, all in mm, measured against real printed/rendered output ---
@@ -333,9 +361,31 @@ export function buildSingleJobEstimateData(
   // the winding material selects the Schedule-B row, and the damaged phase count is the
   // quantity on the per-coil rows.
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
-    const entry = findScheduleBEntry(kvaNum, isCopper, job.make);
+    const supplyOrderRef = String(job.supplyOrderRef ?? '').trim();
+    const entry = findScheduleBEntry(kvaNum, isCopper, supplyOrderRef);
     const fixedItems: SingleEstimateLineItem[] = [];
     const fixedRateErrors: EstimateRateError[] = [];
+
+    // A CAPACITY WITH TWO ROWS CANNOT BE PRICED FROM A BLANK FIELD.
+    //
+    // 63 KVA Aluminium is the only such fork today, and the two rows are Rs 3,000 apart.
+    // They are not a default and an exception - they are two different transformers, and an
+    // unanswered field is not evidence of the cheaper one. Defaulting to 1d-1 would be a
+    // Rs 3,000 under-claim that looks like a perfectly normal estimate, which is the exact
+    // shape the winding-material block exists for.
+    //
+    // "Other - not ADB/1804" is a REAL ANSWER and passes straight through to 1d-1. Only a
+    // blank blocks, so an operator affirms this once per affected unit rather than being
+    // stopped on every 63 KVA job.
+    //
+    // Derived from the table, not hardcoded to 63: add a second row at another capacity and
+    // this block starts covering it without being edited.
+    if (scheduleBCandidates(kvaNum, isCopper).length > 1 && !supplyOrderRef) {
+      fixedRateErrors.push({
+        kind: 'missing-input',
+        message: `${jobLabel}: ${kvaNum} KVA ${isCopper ? 'Copper' : 'Aluminium'} has two Schedule-B rates - Rs ${scheduleBCandidates(kvaNum, isCopper).map(c => c.fixedRate.toLocaleString('en-IN')).join(' and Rs ')} - so "Supply Order (ADB)" must be answered on the external inspection before it can be priced. Choose ADB/1804 or "Other - not ADB/1804".`,
+      });
+    }
 
     // Schedule-B is banded by winding material too, so an unrecognised value picks the
     // wrong fixed rate here just as surely as it picks the wrong per-kg rate on CRGO.

@@ -461,6 +461,42 @@ one thing on those core types: the scrap row.
 
 ---
 
+## Terminology hazard: "AT" and "ADB" are both "the tender number" to a user
+
+**The third instance of this shape, and the first caught before it reached the code.**
+
+Two unrelated identifiers, both of which an operator will reasonably call *"the AT number"*:
+
+| what | what it actually is | where it lives |
+|---|---|---|
+| **AT** | **Annual Tender** — the rate contract a job is priced under. Carries the schedule, the above/below percentage and the estimate masters. | `atMasters`, `job.atId`, `AtSettings` |
+| **ADB/1804** | a **supply order** — the consignment a particular transformer arrived under. Identifies units with heavier coils, so Schedule-B prices them at 1d-2 (Rs 16,746) rather than 1d-1 (Rs 13,746). | `job.supplyOrderRef` |
+
+**How it surfaced.** The 63 KVA Aluminium fork was being changed from a substring match on
+`job.make` to an explicit field, and the field was requested as *"a field on the job for the
+AT number this unit falls under"* — meaning ADB/1804. Taken literally that would have put a
+field called "AT number" beside `atId`, holding a different kind of number, **in the field
+that chooses between two rates**.
+
+The request was not loose. To the person doing the work both *are* tender paperwork: the
+annual tender sets the rates, the supply order says which consignment the transformer came
+from, and both arrive as numbers on documents from the same DISCOM. **The ambiguity is real
+in the domain, not a slip in the asking** — which is exactly why the code has to be specific
+where the language is not.
+
+Named `supplyOrderRef`, labelled **"Supply Order (ADB)"**. The schedule row carries
+`supplyOrder: 'ADB/1804'` as the thing matched on, with `makeNote` kept for display and
+marked never-match.
+
+**The working rule, and it is the same one the two entries below arrive at from different
+directions: when a user names a field, check what the name already means in the code before
+using it.** "18" collided because a row was numbered by its position; "Type" collided because
+five screens each shortened a different phrase; this one would have collided because two
+documents in the same envelope both have numbers on them. None of the three is detectable
+from the value — only from what else already claims the word.
+
+---
+
 ## Terminology hazard: "18" means three different things
 
 Alongside the "Type" hazard below, and the same shape as the two agencies named **suchit**

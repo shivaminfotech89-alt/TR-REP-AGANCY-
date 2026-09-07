@@ -1,6 +1,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
+import { SUPPLY_ORDER_OPTIONS, SUPPLY_ORDER_ADB_1804 } from '../lib/ugvclSchedule2020';
 import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { matchesAtScope } from '../lib/AgencyContext';
 import { OtherTenderNote } from './OtherTenderNote';
@@ -48,6 +49,16 @@ export interface ExternalData {
   transType: string;
   starRating?: string;
   ratingLevel?: string;
+  /**
+   * The supply order this transformer arrived under - ADB/1804, "Other", or blank.
+   *
+   * Only 63 KVA Amorphous / Wound Core needs it: Schedule-B prices those two rows
+   * differently (1d-1 Rs 13,746, 1d-2 Rs 16,746). Stored on the JOB, like transType and
+   * starRating, because it is a nameplate fact about the unit rather than an observation of
+   * its condition - but captured HERE, because the inspector is the one holding the
+   * nameplate. Blank is a real state and blocks the estimate; it is not "not applicable".
+   */
+  supplyOrderRef?: string;
   inspectionId?: string; // added to track existing inspection ID
 }
 
@@ -219,6 +230,9 @@ export default function ExternalInspection() {
           transType: savedTransType,
           starRating: existingInsp.data.starRating || existingInsp.data.ratingLevel || currentStar,
           ratingLevel: existingInsp.data.starRating || existingInsp.data.ratingLevel || currentStar,
+          // The JOB is the record; the inspection copy is the audit trail. Read the job
+          // first so a value corrected elsewhere is not shadowed by a stale inspection.
+          supplyOrderRef: j.supplyOrderRef ?? existingInsp.data.supplyOrderRef ?? '',
           inspectionId: existingInsp.id
         };
       } else {
@@ -249,6 +263,7 @@ export default function ExternalInspection() {
           lvSideLvCc: '',
           transType: coreTypeFromJob,
           starRating: currentStar,
+          supplyOrderRef: j.supplyOrderRef ?? '',
           ratingLevel: currentStar
         };
       }
@@ -527,7 +542,8 @@ export default function ExternalInspection() {
             lvSideLvCc: jobData.lvSideLvCc,
             transType: currentCoreType,
             starRating: currentStarRating,
-            ratingLevel: currentStarRating
+            ratingLevel: currentStarRating,
+            supplyOrderRef: jobData.supplyOrderRef || ''
           },
           updatedAt: now,
           ownerId: auth.currentUser.uid,
@@ -572,6 +588,11 @@ export default function ExternalInspection() {
           starRating: currentStarRating,
           ratingLevel: currentStarRating,
           externalInspectionDate: externalInspectionDate,
+          // Written unconditionally, including as ''. A field that is only written when
+          // non-empty cannot be CLEARED - an operator who picked ADB/1804 by mistake would
+          // have no way to take it back, and the wrong rate would persist through every
+          // later save. Empty string, not undefined: Firestore drops undefined.
+          supplyOrderRef: jobData.supplyOrderRef || '',
           updatedAt: now
         };
         
@@ -684,6 +705,27 @@ export default function ExternalInspection() {
       className={`px-1.5 py-1 text-xs font-medium text-center border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-2xs print:border-0 print:shadow-none print:p-0 print:bg-transparent print:appearance-none print:text-black print:text-center ${widthClass}`}
     />
   );
+
+  /**
+   * Whether this unit needs a Supply Order answer.
+   *
+   * TRUE where Schedule-B prices the capacity from more than one row - today only 63 KVA
+   * Amorphous / Wound Core (1d-1 Rs 13,746 against 1d-2 Rs 16,746 for ADB/1804 units).
+   *
+   * Reads the CORE TYPE CHOSEN ON THIS FORM, not `job.coreType`: an operator correcting a
+   * unit from CRGO to Amorphous here must see the field appear immediately, otherwise the
+   * question only surfaces after the save, on a blocked estimate. That is the same live
+   * reading `isModifiedFromMr` does two lines up.
+   *
+   * Winding material is NOT a condition here - it is recorded at internal inspection, which
+   * has not happened yet. So a 63 KVA copper unit is asked too; the estimate simply never
+   * consults the answer, because copper has one row.
+   */
+  const supplyOrderApplies = (job: any) => {
+    const core = (formsData[job.id]?.transType || job.coreType || 'CRGO').trim().toUpperCase();
+    const isFixedRate = core.includes('AMORPHOUS') || core.includes('AM') || core.includes('WOUND') || core.includes('WC');
+    return isFixedRate && Number(String(job.capacityKva ?? '').trim()) === 63;
+  };
 
   const renderSelectField = (jobId: string, field: keyof ExternalData, options: string[], widthClass = 'w-14') => (
     <select
@@ -1380,7 +1422,8 @@ export default function ExternalInspection() {
                       const isModifiedFromMr = currentChosenCore !== (job.coreType || 'CRGO');
 
                       return (
-                      <tr key={job.id} className="hover:bg-slate-50/80 transition-colors group">
+                      <React.Fragment key={job.id}>
+                      <tr className="hover:bg-slate-50/80 transition-colors group">
                         <td className="p-2 text-xs font-mono tabular-nums text-slate-500 sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-200 z-10 text-center font-bold">
                           {index + 1}
                         </td>
@@ -1510,6 +1553,63 @@ export default function ExternalInspection() {
                           {netShrt >= 0 ? Math.round(netShrt) : '-'}
                         </td>
                       </tr>
+                      {/* SUPPLY ORDER - a SUB-ROW, and only for the units it applies to.
+                          Schedule-B prices 63 KVA Amorphous / Wound Core from two rows,
+                          Rs 13,746 and Rs 16,746, and only this field says which. Every
+                          other capacity has one row and needs no answer.
+
+                          ⚠ A SUB-ROW RATHER THAN A COLUMN, deliberately. This table's
+                          printed form is width-constrained, not height-constrained (AUDIT
+                          G20), and its layout was measured and fitted - a 30th column would
+                          be paid for by every job on every sheet to serve a handful. It is
+                          print:hidden, so the printed inspection report is untouched.
+
+                          ⚠ SHOWN FOR ANY 63 KVA fixed-rate unit, not only aluminium. The
+                          winding material is recorded at INTERNAL inspection, which has not
+                          happened yet when this form is filled, so it cannot be a condition
+                          here. The estimate consults the answer only where the fork is real
+                          and blocks only there; on a copper unit it is simply unused. */}
+                      {supplyOrderApplies(job) && (
+                        <tr className="bg-indigo-50/40 print:hidden">
+                          <td colSpan={30} className="px-3 py-2 border-b-2 border-indigo-200">
+                            <div className="flex flex-wrap items-center gap-2 text-xs">
+                              <span className="font-bold text-indigo-950">
+                                Job #{job.jobNo} - Supply Order (ADB):
+                              </span>
+                              <select
+                                value={formsData[job.id]?.supplyOrderRef || ''}
+                                onChange={(e) => handleChange(job.id, 'supplyOrderRef', e.target.value)}
+                                className={`px-2 py-1 text-xs font-bold border rounded bg-white shadow-2xs focus:ring-1 focus:ring-indigo-500 ${
+                                  formsData[job.id]?.supplyOrderRef
+                                    ? 'border-indigo-300 text-indigo-950'
+                                    : 'border-amber-500 bg-amber-50 text-amber-900 ring-1 ring-amber-400'
+                                }`}
+                              >
+                                {SUPPLY_ORDER_OPTIONS.map(opt => (
+                                  <option key={opt.value} value={opt.value}>{opt.label || '-- select --'}</option>
+                                ))}
+                              </select>
+                              {/* The unanswered state is marked in the row, not only at
+                                  estimate time. An operator who leaves it blank finds out
+                                  here, with the transformer in front of them, rather than
+                                  days later on a blocked estimate. */}
+                              {!formsData[job.id]?.supplyOrderRef ? (
+                                <span className="text-[11px] font-semibold text-amber-800">
+                                  Needed to price this unit - 63 KVA has two Schedule-B rates
+                                  (Rs 13,746 and Rs 16,746). Choose "Other - not ADB/1804" if it is an ordinary unit.
+                                </span>
+                              ) : (
+                                <span className="text-[11px] font-medium text-indigo-800">
+                                  {formsData[job.id]?.supplyOrderRef === SUPPLY_ORDER_ADB_1804
+                                    ? 'Rs 16,746 - ADB/1804 units carry heavier coils (90.21 kg).'
+                                    : 'Rs 13,746 - the ordinary 63 KVA rate.'}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                     )})}
                   </tbody>
                 </table>

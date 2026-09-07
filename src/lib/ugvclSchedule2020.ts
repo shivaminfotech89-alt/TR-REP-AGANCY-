@@ -186,9 +186,37 @@ export interface ScheduleBItem {
   fixedRate: number;
   /** Separate labour charge per transformer, where the schedule lists one. */
   labourPerTransformer?: number;
-  /** Make-specific variant. */
+  /**
+   * The SUPPLY ORDER this row is specific to, where the schedule prices one.
+   *
+   * Replaces the old `makeNote` free-text description as the thing the code MATCHES ON.
+   * 1d-2 is not "the Vijay rate" - it is the rate for units supplied under ADB/1804, which
+   * happen to be Vijay make and carry a heavier coil (90.21 kg against 1d-1's 50 to 67 kg).
+   * The order is the identifying fact; the maker is a description of it.
+   */
+  supplyOrder?: string;
+  /** Make-specific variant, for display. NEVER MATCH ON THIS - see supplyOrder. */
   makeNote?: string;
 }
+
+/**
+ * The supply-order values a job can carry, and what they mean to the rate lookup.
+ *
+ * ⚠ THIS IS NOT AN "AT NUMBER". In this codebase AT means ANNUAL TENDER - `atMasters`,
+ * `job.atId`, the rate contract a job is priced under. ADB/1804 is a supply order: the
+ * consignment a particular transformer arrived under. An operator will reasonably call both
+ * "the AT number", and naming this field that way would put a third meaning on the word in
+ * the field that chooses between two rates. See the terminology entry in AUDIT.
+ */
+export const SUPPLY_ORDER_ADB_1804 = 'ADB/1804';
+/** An affirmative "this unit is not from that order" - NOT the same as unanswered. */
+export const SUPPLY_ORDER_OTHER = 'OTHER';
+
+export const SUPPLY_ORDER_OPTIONS: { value: string; label: string }[] = [
+  { value: '', label: '' },
+  { value: SUPPLY_ORDER_ADB_1804, label: 'ADB/1804' },
+  { value: SUPPLY_ORDER_OTHER, label: 'Other - not ADB/1804' },
+];
 
 export const SCHEDULE_B: ScheduleBItem[] = [
   // 1 - Aluminium winding
@@ -196,7 +224,7 @@ export const SCHEDULE_B: ScheduleBItem[] = [
   { sr: '1b',   kva: 16,  winding: 'Aluminium', basis: 'transformer', weightNote: 'Total Al. coil weight 27 to 39 Kg', fixedRate: 5202 },
   { sr: '1c',   kva: 25,  winding: 'Aluminium', basis: 'transformer', weightNote: 'Total Al. coil weight 26 to 45 Kg', fixedRate: 8395 },
   { sr: '1d-1', kva: 63,  winding: 'Aluminium', basis: 'transformer', weightNote: 'Total Al. coil weight 50 to 67 Kg', fixedRate: 13746 },
-  { sr: '1d-2', kva: 63,  winding: 'Aluminium', basis: 'transformer', weightNote: 'Total Al. coil weight 90.21 Kg', fixedRate: 16746, makeNote: 'ADB/1804, Vijay Make' },
+  { sr: '1d-2', kva: 63,  winding: 'Aluminium', basis: 'transformer', weightNote: 'Total Al. coil weight 90.21 Kg', fixedRate: 16746, supplyOrder: SUPPLY_ORDER_ADB_1804, makeNote: 'ADB/1804, Vijay Make' },
   { sr: '1e',   kva: 100, winding: 'Aluminium', basis: 'transformer', weightNote: 'Total Al. coil weight 67 to 84 Kg', fixedRate: 17970 },
   { sr: '1f',   kva: 200, winding: 'Aluminium', basis: 'coil',        weightNote: 'Each coil, limb weight 69 Kg', fixedRate: 10148, labourPerTransformer: 2345 },
 
