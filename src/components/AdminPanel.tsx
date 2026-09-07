@@ -7,6 +7,7 @@ import {
   defaultEstimateData, defaultAmorphousEstimateData, defaultWoundCoreEstimateData,
   defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData,
 } from '../lib/estimateData';
+import { selectableSchedules, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
@@ -52,6 +53,18 @@ export default function AdminPanel() {
   const [tplAtNumber, setTplAtNumber] = useState('');
   const [tplNotes, setTplNotes] = useState('');
   const [tplStart, setTplStart] = useState('');
+  /**
+   * WHICH UGVCL SCHEDULE THIS TEMPLATE IS PUBLISHED AGAINST.
+   *
+   * ⚠ NO DEFAULT. It decides what every job under every adopting AT costs, and the two
+   * schedules differ on 255 of Schedule-A's 306 cells - a pre-selected value would be a
+   * pricing decision nobody made, the same argument that emptied the AT percentages.
+   *
+   * Offers only COMPLETE schedules. An incomplete one prices nothing and blocks every AT
+   * that names it, so publishing a template against one would produce a template that
+   * cannot be used - a failure discovered by the adopting agency rather than here.
+   */
+  const [tplScheduleId, setTplScheduleId] = useState<string>('');
   const [tplEnd, setTplEnd] = useState('');
   const [tplSaving, setTplSaving] = useState(false);
   const [tplMsg, setTplMsg] = useState<string | null>(null);
@@ -59,12 +72,21 @@ export default function AdminPanel() {
 
   const resetTplForm = () => {
     setTplTargetId(''); setTplName(''); setTplAtNumber(''); setTplNotes('');
-    setTplStart(''); setTplEnd('');
+    setTplStart(''); setTplEnd(''); setTplScheduleId('');
   };
 
   const handlePublishNewTemplate = async () => {
     if (!tplName.trim()) {
       alert('Give the template a name operators will recognise, e.g. "UGVCL 2026-28 Schedule A".');
+      return;
+    }
+    if (!tplScheduleId) {
+      alert(
+        'Choose the UGVCL schedule this template is published against.\n\n'
+        + 'It travels with the rates onto every AT that adopts this template, and decides what every '
+        + 'item on every job under those tenders costs. A template without one leaves the adopting AT '
+        + 'to fall back to whichever schedule its form defaulted to.'
+      );
       return;
     }
     setTplSaving(true);
@@ -80,6 +102,7 @@ export default function AdminPanel() {
           notes: tplNotes.trim(),
           startDate: tplStart ? new Date(tplStart).getTime() : undefined,
           endDate: tplEnd ? new Date(tplEnd).getTime() : undefined,
+          scheduleId: tplScheduleId,
         },
         {
           estimateMasterCRGO: JSON.parse(JSON.stringify(defaultEstimateData)),
@@ -531,6 +554,9 @@ export default function AdminPanel() {
                         setTplAtNumber(t.atNumber || '');
                         setTplStart(t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : '');
                         setTplEnd(t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : '');
+                        // A template published before this field existed has none. Left
+                        // empty so the admin must choose rather than inherit a blank.
+                        setTplScheduleId(t.scheduleId ?? '');
                       }
                     }}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
@@ -561,6 +587,48 @@ export default function AdminPanel() {
                          placeholder="UGVCL/EE-T-1/TRANS REP/2026-28/01/AT/1819"
                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono" />
                 </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">UGVCL schedule this template is published against</label>
+                  <select
+                    value={tplScheduleId}
+                    onChange={e => setTplScheduleId(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs border rounded-lg bg-white ${tplScheduleId ? 'border-slate-300' : 'border-amber-400 bg-amber-50'}`}
+                  >
+                    <option value="">-- choose --</option>
+                    {selectableSchedules().map(s => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
+                    Travels with the rates onto every AT that adopts this template, and decides what
+                    every item on every job under those tenders costs. Only fully transcribed schedules
+                    are offered &mdash; a template published against an incomplete one could not price
+                    anything.
+                  </p>
+                  {/* ⚠ A SCHEDULE CAN BE USABLE WITHOUT BEING FINISHED, and the admin must know
+                      before publishing rather than the adopting agency finding out afterwards.
+                      UGVCL-2026's Schedule-A is transcribed while its Schedule-B and Clause 4.0
+                      pages are borrowed from 2020 - a real, temporary mixture (see borrowedFrom).
+                      The Estimate Master notices tell the agency once they hold it; this one
+                      tells the person choosing to send it. */}
+                  {tplScheduleId && Object.keys(SCHEDULES[tplScheduleId as ScheduleId]?.borrowedFrom ?? {}).length > 0 && (
+                    <div className="mt-1.5 p-2 rounded border border-amber-400 bg-amber-50 text-amber-900 text-[11px] leading-relaxed">
+                      <strong className="font-bold">
+                        {SCHEDULES[tplScheduleId as ScheduleId].label} is not fully transcribed yet.
+                      </strong>{' '}
+                      {Object.entries(SCHEDULES[tplScheduleId as ScheduleId].borrowedFrom).map(([part, from]) => (
+                        <span key={part}>
+                          {part === 'scheduleB' ? 'The Amorphous / Wound Core fixed rates' : 'The Clause 4.0 circle limits'}
+                          {' '}come from {SCHEDULES[from as ScheduleId].label}.{' '}
+                        </span>
+                      ))}
+                      Anyone adopting this template gets that mixture. It is shown to them on their
+                      Estimate Master, and it stops being a mixture when you publish a new version with
+                      the missing pages transcribed.
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Tender period from</label>
                   <input type="date" value={tplStart} onChange={e => setTplStart(e.target.value)}

@@ -951,7 +951,7 @@ interface AgencyContextType {
   publishedAts: PublishedAt[];
   /** Admin only. Creates a new template, or bumps an existing one's version. */
   publishAtTemplate: (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number },
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string },
     sections: Record<string, EstimateItem[] | undefined>,
   ) => Promise<string>;
   /** Copy a template's sections onto an AT, stamping which template and version. */
@@ -2085,7 +2085,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * leave their `publishedAtVersion` pointing at nothing.
    */
   const publishAtTemplate = async (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number },
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string },
     sections: Record<string, EstimateItem[] | undefined>,
   ): Promise<string> => {
     if (!isSuperAdmin) throw new Error('Only the administrator can publish a rate template.');
@@ -2120,6 +2120,18 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     // form - a date nobody typed, presented as the tender's.
     if (Number(tpl.startDate) > 0) payload.startDate = Number(tpl.startDate);
     if (Number(tpl.endDate) > 0) payload.endDate = Number(tpl.endDate);
+    /**
+     * THE SCHEDULE THE TEMPLATE WAS PUBLISHED AGAINST, carried onto every AT that adopts it.
+     *
+     * Without it an adopting AT inherits nothing and falls to whatever the form defaults to,
+     * which is the silent mismatch the read-only schedule field on Add AT exists to prevent:
+     * an AT holding 2026 master rows while resolving Schedule-A fallbacks from 2020.
+     *
+     * Omitted rather than written empty when absent, so `adoptPublishedAt` can tell "this
+     * template names no schedule" from "this template names none deliberately" - the first
+     * is a pre-existing template, the second cannot occur because the form requires one.
+     */
+    if (String(tpl.scheduleId ?? '').trim()) payload.scheduleId = String(tpl.scheduleId).trim();
     Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payload[k] = v; });
 
     const ref = tpl.id ? doc(db, 'published_ats', tpl.id) : doc(collection(db, 'published_ats'));

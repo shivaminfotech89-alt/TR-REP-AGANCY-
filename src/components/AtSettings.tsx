@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
-import { selectableSchedules, DEFAULT_SCHEDULE_ID } from '../lib/ugvclSchedules';
+import { selectableSchedules, DEFAULT_SCHEDULE_ID, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
@@ -1144,10 +1144,28 @@ export function AtSettings() {
                       another. Leaving an editable selector that is then quietly overwritten
                       is worse than having no selector: it invites a choice and discards it. */}
                   {chosenTemplate?.scheduleId ? (
-                    <div className="px-3 py-2 text-xs rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">
-                      {selectableSchedules().find(s => s.id === chosenTemplate.scheduleId)?.label ?? chosenTemplate.scheduleId}
-                      <span className="ml-2 text-[11px] font-normal text-slate-500">comes with the template</span>
-                    </div>
+                    <>
+                      <div className="px-3 py-2 text-xs rounded-lg bg-slate-100 border border-slate-300 text-slate-700 font-medium">
+                        {selectableSchedules().find(s => s.id === chosenTemplate.scheduleId)?.label ?? chosenTemplate.scheduleId}
+                        <span className="ml-2 text-[11px] font-normal text-slate-500">comes with the template</span>
+                      </div>
+                      {/* The borrowed-schedule state, told to the agency BEFORE they adopt.
+                          Estimate Master says it once they hold the rates; by then they have
+                          already taken them. See borrowedFrom in ugvclSchedules.ts. */}
+                      {Object.keys(SCHEDULES[chosenTemplate.scheduleId as ScheduleId]?.borrowedFrom ?? {}).length > 0 && (
+                        <p className="mt-1.5 p-2 rounded-lg border border-amber-400 bg-amber-50 text-amber-900 text-[11px] leading-relaxed">
+                          <strong className="font-bold">Part of this schedule is still the previous tender&rsquo;s.</strong>{' '}
+                          {Object.entries(SCHEDULES[chosenTemplate.scheduleId as ScheduleId].borrowedFrom).map(([part, from]) => (
+                            <span key={part}>
+                              {part === 'scheduleB' ? 'Amorphous and Wound Core fixed rates' : 'The Clause 4.0 circle limits'}
+                              {' '}come from {SCHEDULES[from as ScheduleId].label}.{' '}
+                            </span>
+                          ))}
+                          The itemised CRGO rates are the new tender&rsquo;s. This is temporary and will be
+                          corrected by a new version of the template.
+                        </p>
+                      )}
+                    </>
                   ) : (
                     <select
                       value={newAtScheduleId}
