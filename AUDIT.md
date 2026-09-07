@@ -609,6 +609,70 @@ a counter check against live data remains the only thing that will say whether i
 one number or two. A type checker cannot tell the difference, and reporting its silence as
 if it could is the error this note exists to prevent repeating.
 
+#### The fourth instance, and the cost of closing it — measured 2026-09-07, NOT applied
+
+A green `tsc` has now been worth less than it looked **four times**, each for a different
+reason: `@types/react` absent; `any` at a boundary (F72, where a changed signature passed
+seven of eight call sites in silence); a cast written to quiet a complaint (O34); and now
+**a `number | null` return type checked by nothing**, because `strict` is absent from
+`tsconfig.json` and `strictNullChecks` with it. `calculateJobTotal` was given that return
+type deliberately so the compiler would visit its eight call sites. It visits none of them:
+`acc + calculateJobTotal(job)` raises no error. The sites were checked by hand instead, and
+the doc comment on that function now says so rather than claiming the compiler's help.
+
+**The number, obtained without changing the config** — `npx tsc --noEmit --strictNullChecks
+-p tsconfig.json`:
+
+**23 errors, 7 files.**
+
+| cluster | count |
+|---|---|
+| `auth.currentUser` possibly null | 9 |
+| `activeAgency` possibly null | 9 |
+| `activeAtMaster` possibly null | 1 |
+| `activeAgency.estimateMaster.length` possibly undefined | 1 |
+| `itemsList` possibly undefined | 1 |
+| `string \| null` passed as `string` (`AppLayout.tsx:303`) | 1 |
+| argument not assignable to `never` (`AgencyContext.tsx:1401`) | 1 |
+
+By file: **`NewJob.tsx` 13**, `EstimateGenerate` 3, `ExternalInspection` 2,
+`InternalInspection` 2, `AgencyContext` 1, `AppLayout` 1, `AllotmentWidget` 1.
+
+**They cluster the way the 40 did, only harder** — there, 36 of 40 were one mechanical class
+(undeclared properties) and 4 were real. Here **18 of 23 are one mechanical class on two
+symbols**: guard-before-use at an auth or context boundary. Both are honestly nullable — the
+Firebase user before sign-in, the agency before the context resolves.
+
+**⚠ AND THAT CLUSTER IS THE FINDING, BECAUSE THE OBVIOUS FIX FOR IT IS THE WRONG ONE.**
+Writing `if (!auth.currentUser) return;` at nine sites converts *possibly null* into
+*silently does nothing*. That closes the typecheck gap by opening the silent-failure gap —
+the identical trade refused four times in this session: the scrap charge that must not fall
+back to a hardcoded 500, the HV coil weight that must not default to 47 kg, the winding
+material that must not default to aluminium, and `calculateJobTotal` returning null rather
+than the `?? 0` that would have made a short invoice look finished. **Each of those eighteen
+sites needs a decision about whether the correct behaviour is an early return or a named
+block.** That is what turns an hour of guard clauses into a half-day, and it is the only
+reason the count is not the whole answer.
+
+**It closes the third of four gaps, not all four.** `strictNullChecks` does nothing about
+`any`. Every `job: any`, every destructure off one, and every `as any` — O34's subscription
+reads included — stays invisible. It would have caught this session's finding. **It would
+not have caught F72**, whose values were `any` at the boundary, and F72 is the one that
+reached eight call sites unnoticed.
+
+**`AgencyContext.tsx:1401` is benign — checked on its own merits and it is not a defect.**
+The suspicion was reasonable and wrong: an argument rejected as `never` means an array
+inferred as `never[]` is being pushed to, which usually indicates a collection nobody gave an
+element type and which may be accumulating the wrong thing. Here `countOverridesForApply`
+declares `const results = [];` at `:1346` with no annotation, and the function's **own return
+type already spells the element shape out in full** — `Array<{ id; name; overrides;
+inheritingCellsFrozen; sections; sectionWrites }>` — which the pushed object matches field
+for field. It is a missing annotation on a local accumulator, fixable by reusing the return
+type that is already written above it. The mildest of the 23, not the most interesting.
+
+**Not applied.** Recorded so the decision is made on a number rather than an impression, and
+so the next person to cite a clean `tsc` knows which of the four holes is still open.
+
 ---
 
 ## Pattern: the app RECOMPUTES documents rather than REPRODUCING them
@@ -3812,6 +3876,11 @@ above are settled.
 > **The code defect is NOT closed with it.** O2 (job numbers are not uniquely allocated)
 > is what produced these collisions and is untouched, so a clean database will produce
 > them again. Read O2, not this.
+>
+> **⚠ THE DATA BELOW HAS MOVED SINCE THIS WAS WRITTEN — see the re-census at the end of
+> this entry (2026-09-07).** `101` is gone, `MSBT-10` has appeared, and the two MEGHA
+> collisions are unchanged. A reader who takes "3 collisions" from the tables above and
+> finds two in the database would not know which reading is stale. It is the tables.
 
 
 Confirmed by `scripts/duplicate-jobno-console.js`: 37 jobs scanned, 3 duplicated
@@ -3865,6 +3934,48 @@ disambiguation), but the underlying ambiguity remains until renumbering.
 
 Resolve both together: whoever identifies which physical transformer this record is
 can settle the renumbering and the Repairable/Scrap determination in one pass.
+
+#### Re-census, 2026-09-07 — what the database holds now
+
+Read with the Admin SDK across every owner, applying **this entry's own same-transformer
+test** (serial + make + capacity). **63 jobs scanned, 59 distinct job numbers, 3
+repeated** — against 37 / 3 above.
+
+| number | records | then | now |
+|---|---|---|---|
+| `MSBT-12` | 3 | true collision | **unchanged** — all three doc IDs present, `BxVxraTszbqkpZprmhwp` still the 25 kVA `DVDVDFV` against two 100 kVA `121` records. The RENUMBER verdict stands and has not been acted on. |
+| `MSBT-1` | 2 | true collision | **unchanged** — both doc IDs present, still two units under one number |
+| `101` | 0 | true collision | **both records deleted** |
+| `MSBT-10` | 2 | not recorded | **new repeat, and NOT a collision** |
+
+**`101` WAS RESOLVED BY DELETION, NOT RENUMBERING — and it was the evidentially important
+one.** Neither `dXMZ8WALx0QpOK6oAM79` nor `P9q3SxKkehJVEbGxCmSe` exists any more. This
+entry singles that pair out above: both records were pre-AT within one agency (DRISHIV),
+which makes it the only observed instance that came from **O2 paths 1-3** rather than
+path 4, and therefore the only empirical evidence that **agency-wide counters would not
+have prevented it**. Both MEGHA pairs are path 4 and would have been.
+
+**That evidence now exists only in this entry.** Anyone re-running
+`scripts/duplicate-jobno-console.js` will find nothing but path-4 collisions and could
+reasonably conclude agency-wide counters are a complete fix. They are not, and the
+record that proved it has been deleted. This is the reason the entry is being amended
+rather than left closed.
+
+**`MSBT-10` is the pattern working, not a fourth collision.** Both records —
+`BShPQhnu11n0s5yrkIQ5` (MR 85558) and `DfLga5UJcnp4oVdLT7uc` (MR 6652) — carry the *same*
+serial `213213213213`, make `DFDFDFDFDFDFXCXC` and 200 kVA, and one is flagged
+`repairType: 'GP'`. It passes this entry's same-transformer test, which is exactly the
+shape identified above as `MSBT-12`'s legitimate KEEP pair: a GP return of a unit already
+repaired, reusing its number on purpose. Both sit under the same AT and the same agency,
+so had it been a collision it would have been paths 1-3.
+
+On this entry's own counting the tally moved from **3 numbers / 0 legitimate GP repeats /
+3 collisions** to **3 numbers / 1 legitimate GP repeat / 2 collisions**. The list of
+*collisions* above is still accurate. The list of *repeats* is stale in both directions.
+
+**Nothing here changes the CLOSED status.** The records are still test data, still due to
+be wiped, and O2 is still the live defect. What changed is that a closed entry's data no
+longer matches the database, and a stale table is worse than an open question.
 
 ### O3. The AT percentage applied twice — in the bill Excel export, and in four stored fields
 
