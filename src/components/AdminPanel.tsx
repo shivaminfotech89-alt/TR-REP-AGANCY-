@@ -563,7 +563,7 @@ export default function AdminPanel() {
                   >
                     <option value="">A NEW template</option>
                     {publishedAts.map(t => (
-                      <option key={t.id} value={t.id}>Revise &ldquo;{t.name}&rdquo; (v{t.version} &rarr; v{Number(t.version) + 1})</option>
+                      <option key={t.id} value={t.id}>Revise &ldquo;{t.name}&rdquo; &mdash; currently v{t.version}</option>
                     ))}
                   </select>
                 </div>

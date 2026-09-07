@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { sectionsDiffer } from './compareSections';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { 
   defaultEstimateData, 
@@ -2127,6 +2128,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     // then stamps `ratesSource: 'published:<id>'`. A partial template therefore produces an
     // AT that is a MIXTURE, labelled as though it all came from one place. Refused here, by
     // name, rather than discovered later as a rate nobody can account for.
+    const payloadSections: Record<string, unknown> = {};
+    Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payloadSections[k] = v; });
+
     const missing = ESTIMATE_SECTION_FIELDS.filter(k => {
       const v = sections[k];
       return !Array.isArray(v) || v.length === 0;
@@ -2138,7 +2142,34 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       );
     }
     const existing = tpl.id ? publishedAts.find(t => t.id === tpl.id) : undefined;
-    const version = (Number(existing?.version) || 0) + 1;
+
+    /**
+     * THE VERSION BUMPS ONLY WHEN THE RATES MOVE.
+     *
+     * ⚠ IT USED TO BUMP ON EVERY REPUBLISH, INCLUDING A TYPO IN THE NOTES. Adopters keep the
+     * rates they copied - a copy never follows the template - so a bump is not a change to
+     * them, it is a PROMPT: their Estimate Master turns amber and says "the template is now
+     * at vN, review the differences and re-copy". Firing that when nothing repriced asks an
+     * operator to act on nothing, and the one prompt that will ever matter is the one
+     * raised when a tender genuinely reprices. Teaching them to dismiss it is the opposite
+     * of what it is for.
+     *
+     * Observed rather than predicted: both live templates reached v2 through republishes
+     * that changed only metadata, and their five sections are byte-identical to the version
+     * before - so the single adopter was already being prompted to take an update that
+     * would have changed nothing.
+     *
+     * ⚠ COMPARED WITH sectionsDiffer, NEVER JSON.stringify. Firestore does not preserve key
+     * order, so a naive comparison finds every section changed on every republish and this
+     * guard would silently never fire - it would look implemented and do nothing. That
+     * failure has already happened twice in this codebase; see lib/compareSections.ts.
+     *
+     * NOT FIXED HERE: "review the differences" is still unfollowable, because setDoc with
+     * merge:false overwrites the document and no prior version is stored. Showing a real
+     * diff needs version history, which is a larger change than the noise it removes.
+     */
+    const repriced = !existing || sectionsDiffer(existing as any, payloadSections, ESTIMATE_SECTION_FIELDS);
+    const version = repriced ? (Number(existing?.version) || 0) + 1 : Number(existing?.version) || 1;
     const payload: any = {
       name: tpl.name,
       atNumber: tpl.atNumber || '',

@@ -2601,7 +2601,7 @@ export default function EstimateMaster() {
                 >
                   <option value="">A NEW template</option>
                   {publishedAts.map(t => (
-                    <option key={t.id} value={t.id}>Revise &ldquo;{t.name}&rdquo; (now v{t.version} &rarr; v{Number(t.version) + 1})</option>
+                    <option key={t.id} value={t.id}>Revise &ldquo;{t.name}&rdquo; &mdash; currently v{t.version}</option>
                   ))}
                 </select>
               </>
@@ -2611,9 +2611,11 @@ export default function EstimateMaster() {
                 v3's rates and is shown that the template has moved on; replacing the
                 document would leave their publishedAtVersion pointing at nothing. */}
             <p className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg p-3 mt-3">
-              Revising a template <strong>bumps its version</strong>. Anyone who already copied it keeps the rates
-              they copied &mdash; a copy never follows the template, or a live estimate would move under them &mdash;
-              and their Estimate Master screen tells them a newer version exists.
+              Revising a template <strong>bumps its version only if the rates change</strong>. Correcting a name,
+              a tender number or these notes leaves the version where it is, so nobody is prompted to take an
+              update that would change nothing. When rates DO change, anyone who already copied it keeps the
+              rates they copied &mdash; a copy never follows the template, or a live estimate would move under
+              them &mdash; and their Estimate Master screen tells them a newer version exists.
             </p>
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
