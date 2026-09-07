@@ -6581,6 +6581,98 @@ is only ever learned the expensive way.
 
 ---
 
+## Pattern: a copy cannot be told from a decision, and the thing it copied moved
+
+**The estimate master could not distinguish a deliberate override from a migrated copy,
+because they are byte-identical.** That is why versioning the rate schedule never reached
+the price: **the schedule changed underneath a layer that had already copied it.**
+
+`resolveRate` checks the agency/AT master before Schedule-A, so a master cell wins. The
+masters were populated by a MIGRATION from the UGVCL-2020 schedule when rates moved onto
+tenders — nobody typed those figures. So an AT stamped `UGVCL-2026` priced item `1a` at
+**2061** instead of **2079**, because a 2020 copy sat in front of the 2026 schedule.
+
+**It was live with no template adopted.** ZENITH's AT 1819, `ratesSource: none`, priced a
+25 kVA CRGO job at `1a` 2061, `1d` 286, `2b` 149 — all 2020 — while item `16` came out at
+144, correctly 2026, because that master row is null and fell through. **A mixture per item
+and per capacity, on an estimate that names no schedule anywhere.**
+
+This is `ratesSource: 'inherited-agency'` one level down. There, values carried over from
+the agency were labelled "nobody has confirmed them". Here the carrying-over left no label
+at all, because a copied number and a chosen number are the same number.
+
+**The fix (`4aadb6f`): a master cell equal to the schedule it was copied from is not an
+override.** `resolveRate` compares each master value against the **UGVCL-2020** baseline —
+always 2020, never the job's own schedule, because the question is "was this copied?" and
+the migration copied from 2020. Comparing against the current schedule would make every copy
+look like an override the moment the tender changed, which is the bug itself.
+
+**⚠ THE TEST IS SAFE ONLY WHILE NO REAL OVERRIDES EXIST, and that is a property of today's
+data rather than of the design.** A genuine override that happened to equal the 2020 figure
+would be silently discarded. If an agency ever needs one it must be recorded by an
+**explicit marker** — a flag saying a person typed this cell — not by a difference test.
+**Do not extend the difference test; replace it.** Not built now: a mechanism for a case that
+has never occurred in 1,572 cells is speculative.
+
+### The evidence, and how strong it actually is
+
+Across every agency and AT: **1,572 populated comparable CRGO cells, 1,555 byte-identical to
+the 2020 schedule, 17 differing, ZERO genuine overrides.**
+
+The 17 are two cells repeated — `1f@100` = **230** against the schedule's 229, and `11B@100`
+= **148.99** against 149 — the `public_config` residue already recorded above. Under the fix
+they resolve to 229 and 149, which is the tender figure and a correction, on ten holders:
+PATEL, ZENITH, ADMIN, UPENDRA, megha transformer, GUJARAT and four ATs.
+
+**What those 17 demonstrate is the argument for the whole change: the only cells in the
+entire database that differ from the schedule are wrong by a rupee in a direction nobody
+chose.** The master was never used as an override mechanism.
+
+**⚠ AND THAT CENSUS IS CORROBORATED, NOT VERIFIED.** It holds because its 17 differing cells
+matched two artefacts this audit had already recorded independently — not because the method
+was checked. Two censuses in the same session returned confidently wrong numbers, and both
+were caught by an implausible output rather than by review:
+
+| wrong answer | cause |
+|---|---|
+| **414 differing Overhauling cells** | `SCHEDULE_ITEM_MAP` pairs master codes to Schedule-A `sr`s **for the CRGO section only**. The Overhauling section reuses codes `3`/`4`/`5`/`6` for the Schedule-B extras — tank 54/kg, conservator 54/kg, radiator 1057/1256/1452, sealing 189. Mapping it through the CRGO table compared unrelated items. The tell: a radiator table sitting where an oil-gauge glass had been looked up. |
+| **4 jobs "moved" by the fix** | the before/after comparison keyed on `jobNo`, so it compared **different transformers with each other**. |
+
+**⚠ KEYING ANYTHING ON `jobNo` COMPARES DIFFERENT TRANSFORMERS.** C1 records three `MSBT-12`
+records, two `MSBT-1` and two `MSBT-10` — 59 distinct numbers across 63 jobs. **Any census
+must key on document id.** Re-keyed, the real answer was 0 of 64 jobs moved, which is what a
+copy resolving to the figure it copied should do.
+
+That is the third and fourth instance of the "check that reports confidently outside its own
+model" family already listed at the `public_config` entry, and both were mine.
+
+### The propagation asymmetry — registry versus master
+
+Rate corrections now reach agencies by **two routes with opposite behaviour**, and the
+difference has caught this work twice:
+
+| | where it lives | how a fix propagates |
+|---|---|---|
+| **Schedule-A / Schedule-B / radiator** | `SCHEDULES[…]` in code, selected by the AT's `scheduleId` | **instantly, to every AT on that schedule.** No republish, no re-adoption, no agency action |
+| **Master sections** (CRGO overrides, the scrap row, the export skeleton) | `estimateMaster*` on the agency or AT | **a republish and every agency taking the new version.** A copy never follows the template — that is deliberate, so a live estimate cannot move under an operator |
+
+So when the 2026 Schedule-B pages arrive, correcting `SCHEDULES['UGVCL-2026'].scheduleB`
+fixes every AT on that schedule at once. Nothing needs republishing and nobody needs to click
+anything. The opposite is true of anything in a master section.
+
+**A consequence that inverted an earlier plan.** Before the copy test, the fix proposed for
+the admin template form was to seed its master sections **from the chosen schedule**, so a
+2026 template carried 2026 figures. **Under the copy test that is now actively wrong:** cells
+seeded from 2026 would DIFFER from the 2020 baseline, be read as genuine overrides, win over
+the schedule — and then not follow any future 2026 revision. Seeding from the shipped 2020
+constant is correct, because those cells are recognised as copies and ignored.
+
+Verified rather than argued: adopting the 2026 template onto AT 1819 in memory leaves every
+rate at 2026 and `baseTotal` unchanged at 5,613. **The template's master sections are inert
+for pricing, which is what they should be.**
+
+---
+
 ### O42. The tender's witnessing and sequencing rules: transcribed, present, and enforced nowhere
 
 The 2026-28 tender text carries three conditions on how work may proceed:
