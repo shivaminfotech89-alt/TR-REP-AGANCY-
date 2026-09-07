@@ -5269,9 +5269,47 @@ for the other 26 candidates, which were never at risk.
 
 ### O24. Nobody can tell whether an inflated spreadsheet was ever sent anywhere
 
-> **CLOSED — NOT APPLICABLE, and the code defect IS fixed.** Every sheet that could have
-> been exported came from test data being wiped before launch, so nothing wrong is in
-> anyone's hands and the agencies do not need asking.
+> **⚠ REOPENED — THE ANSWER CAME BACK, AND IT IS YES (2026-09-07).** The heading is now
+> wrong in the only way that matters: the operator confirms the estimate Excel export **is
+> used routinely — notes are added to it and it is sent to division offices**, and the
+> agencies hold copies of what they sent.
+>
+> **So inflated spreadsheets did go out.** The earlier closure — "every sheet that could
+> have been exported came from test data" — was an inference from the database, and the
+> database was the wrong place to look: nothing about an export is ever written back to it.
+> The files exist only on the agencies' machines and in division offices.
+>
+> **THE WINDOW, from git history:**
+>
+> | | commit | date |
+> |---|---|---|
+> | export added, already self-contradicting | `1f1e735` *"feat(estimate): add multi-core estimate support and excel export"* | **2026-08-14** |
+> | fixed | `5fd1ca9` *"fix: delete second estimate engine, route export and matrix through builder"* (F54/F55) | **2026-08-24** |
+>
+> **Ten days, 84 commits.** Any `Estimate_Report_MR_<mr>.xlsx` produced in that window is
+> affected. Anything exported from 2026-08-24 onward reads both halves from one builder and
+> reconciles.
+>
+> **It was wrong from the first commit, not from a later regression.** At `1f1e735` the item
+> rows were already computed inline from invented quantities while the BASE REPAIR COST,
+> AT % RISE / FALL and GRAND TOTAL rows already came from `calculateJobTotal` — i.e. through
+> the builder, with real inspection data. The refactor into `calculateJobItemDetails` on
+> 2026-08-18 (`6282d3f`, `dc90f74`) moved that arithmetic without changing it. So every sheet
+> in the window contradicts itself, and there is no earlier "good" version to compare against.
+>
+> **NOTHING RECORDS THAT AN EXPORT HAPPENED. Stated plainly because it decides the method:**
+> `handleExportExcel` ends at `XLSX.writeFile` and writes nothing back — no Firestore write,
+> no job field, no state change, no `exports` collection. The app has no telemetry of any
+> kind (the only `analytics`/`logEvent` hits in the tree are inside vendored Firebase SDK
+> code under `functions/node_modules`). **The affected set cannot be reconstructed from the
+> database at all. It can only be identified from the agencies' own copies** — their sent
+> folders, their email, and the division offices' files.
+>
+> **What to tell them to look for.** Any `Estimate_Report_MR_*.xlsx` dated between
+> 2026-08-14 and 2026-08-24. The test needs no reference copy and no software: **add up the
+> item column and compare it with the GRAND TOTAL printed beneath.** If the column exceeds
+> the total, that sheet is affected. The totals row was always correct, so the GRAND TOTAL on
+> those files is the figure that should have been claimed.
 >
 > The defect itself was fixed in F54: the export's item rows now come from the same
 > builder as its totals, so a sheet cannot disagree with itself again.
@@ -5308,6 +5346,19 @@ the second is the one they will not think to volunteer:
 1. Have you ever used **Export Excel** on the estimate screen?
 2. Where did those files go - sent to a division office, used for reconciliation, or kept
    locally?
+
+**ANSWERED, 2026-09-07 — see the block at the top of this entry.** Yes to the first, and the
+second is the worst of the three available answers: the sheets are annotated and sent to
+division offices, and the agencies keep copies. The two-part question was right to ask; what
+it got wrong was the closure written before it was put, which read the empty database as
+evidence of no exposure when the database was never going to hold any.
+
+**The transferable lesson, and it is the reason this entry is worth keeping after the fix:
+absence of evidence in a system with no telemetry is not evidence of absence.** Every other
+open question in this audit was settled by querying live data. This one could not be, because
+the action leaves no trace by design - a file is written to the operator's disk and the
+process ends. When the only record of an action is outside the system, the system cannot be
+asked, and closing the question from inside it produces a confident wrong answer.
 
 `scripts/excel-export-delta-console.js` (read-only) reproduces the old item-row sum from
 live data for three jobs per agency, so the size of the discrepancy can be quoted when
@@ -5453,6 +5504,31 @@ but it is a change to a printed sheet and has not been proposed.
 ---
 
 ### O29. The DISCOM's approved amount is captured, displayed, and never read by the bill
+
+> **RESOLVED BY DOMAIN ANSWER, NOT BY A CODE CHANGE (2026-09-07).** The operator confirms:
+> **UGVCL approves the same amount that was submitted. The approved figure always equals the
+> estimate.**
+>
+> That is the first of the three outcomes below, and it means the bill recomputing rather
+> than reading `approvedAmount` produces the RIGHT number. **This is not a live defect and
+> nothing here should be fixed.** No bill has claimed an unapproved figure, because there
+> has never been a divergence to miss.
+>
+> **What is still true, and is the reason the entry stays open rather than being deleted.**
+> The field is written at two sites and read by none. The Approved Estimates table renders
+> a divergence (`:2247`) that does not occur, so the UI expresses a case the business does
+> not have — harmless, but it is why this looked like a defect from the code alone.
+>
+> **What would change it, stated so the next reader does not have to re-derive it:** if UGVCL
+> ever approves a revised figure, the bill would silently ignore it and claim the recomputed
+> total instead, with nothing on the invoice saying so. **The field to honour already exists
+> and is already populated**, so that remains a one-line change in `calculateJobTotal` —
+> prefer `approvedAmount` when present — and not a design question. The reason to keep this
+> entry is that the one line is easy and finding out it was needed would not be.
+>
+> **The classification matters more than the outcome.** A defect that exists only in the
+> code's model of the business is not the same as a defect in the business, and the audit was
+> right that it could not tell them apart. Only the operator could, and did.
 
 **The app already knows the answer and does not consult it.** This is the 8-B shape (F48),
 where the HV bushing priced every transformer at the 11 KV rate while `externalData.kv` sat
