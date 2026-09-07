@@ -694,14 +694,55 @@ export default function EstimateMaster() {
     else setCircleLimitsData(newData);
   };
 
+  /**
+   * SECTIONS THAT SHOW THE TENDER'S OWN RATES AND ARE NOT THE AGENCY'S TO SET.
+   *
+   * Amorphous and CRGO Wound Core price from the hardcoded `SCHEDULE_B` table in
+   * `SingleJobEstimateReport.tsx`, whose branch returns BEFORE the estimate master is
+   * consulted (`:337`; the master is read at `:291`, `:534` and `:580`, all outside that
+   * branch). So every repair rate typed into these two sections was stored, shown back as
+   * saved, and read by nothing: an agency could edit a rate, save it, watch it persist, and
+   * every estimate would go on charging the tender figure with nothing saying so.
+   *
+   * ⚠ LOCKED, NOT REMOVED, AND FOR TWO SEPARATE REASONS. One row is still live money - see
+   * `isRowEditable`. And the row LIST is a document's structure, not just a display: the
+   * estimate Excel export walks it to decide what rows the sheet has (AUDIT O39).
+   *
+   * Same argument as G24's MR header: the division is the division's fact and Schedule-B is
+   * UGVCL's schedule. A field recording someone else's decision should not offer itself for
+   * editing.
+   */
+  const REFERENCE_SECTIONS: SectionKey[] = ['AMORPHOUS', 'WOUND_CORE'];
+  const isReferenceSection = (section: SectionKey) => REFERENCE_SECTIONS.includes(section);
+
+  /**
+   * THE SCRAP ROW IS LIVE MONEY AND STAYS EDITABLE.
+   *
+   * Item code "0" is the flat inspection-and-dismantling charge, and unlike every other row
+   * in these two sections it IS read: `resolveScrapCharge` resolves it for the estimate
+   * (`SingleJobEstimateReport.tsx:291`), the bill (`BillingSystem` x4) and Reports (`:126`).
+   * Five Amorphous / Wound Core jobs are scrap today and bill Rs 500 from this row.
+   *
+   * ⚠ DO NOT FOLD IT INTO THE LOCK FOR TIDINESS. Captioning a row that prices live jobs
+   * "shown for reference" would be this same defect pointing the other way, and freezing it
+   * is a behaviour change nobody asked for.
+   */
+  const SCRAP_ROW_CODE = '0';
+  const isRowEditable = (section: SectionKey, item: EstimateItem) =>
+    !isReferenceSection(section) || String(item.itemCode ?? '').trim() === SCRAP_ROW_CODE;
+
   const handleItemDetailsChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number, field: 'itemCode' | 'itemName' | 'unit', value: string) => {
     const data = [...getSectionData(section)];
+    // The inputs are not rendered for a locked row, so this cannot be reached from the UI.
+    // It is here so the lock is a property of the data path and not only of the markup.
+    if (!isRowEditable(section, data[index])) return;
     data[index] = { ...data[index], [field]: value };
     setSectionData(section, data);
   };
 
   const handleRateChange = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number, kva: KvaType, value: string) => {
     const data = [...getSectionData(section)];
+    if (!isRowEditable(section, data[index])) return;   // see handleItemDetailsChange
     if (value.trim() === '') {
       data[index].rates[kva] = null;
     } else {
@@ -749,6 +790,9 @@ export default function EstimateMaster() {
   };
 
   const handleAddItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
+    // A reference section lists the tender's rows, and that list is the exported estimate
+    // sheet's structure (AUDIT O39) - adding to it changes a document.
+    if (isReferenceSection(section)) return;
     const data = [...getSectionData(section)];
     const isFixedTable = section === 'AMORPHOUS' || section === 'WOUND_CORE' || section === 'OVERHAULING';
     // ITEM CODE LEFT BLANK ON PURPOSE. It used to be `${data.length + 1}` - a row's
@@ -821,34 +865,72 @@ export default function EstimateMaster() {
     }
   };
 
-  // Synchronize Wound Core to be exactly identical to Amorphous Estimate Master
+  /**
+   * Copy the SCRAP CHARGE from Amorphous to Wound Core.
+   *
+   * ⚠ NARROWED FROM A WHOLE-SECTION CLONE, DELIBERATELY. This used to replace every Wound
+   * Core row with a copy of the Amorphous ones. With the tender rows now read-only
+   * (`isReferenceSection`), those rows are identical in both sections BY CONSTRUCTION -
+   * `defaultWoundCoreEstimateData` is a deep copy of the Amorphous default
+   * (`estimateData.ts:121`) and neither can be edited - so copying them is a guaranteed
+   * no-op. Row "0" is the only row that can differ, because it is the only one still
+   * editable.
+   *
+   * It is narrowed rather than deleted because D2 records that the two core types are
+   * INTENDED to mirror, and cites this button as the evidence. Removing it would leave no
+   * way to keep the two scrap charges in step except typing the figure twice.
+   *
+   * The message still states the DIRECTION and what was overwritten, for the reason the old
+   * one did: an operation whose feedback does not describe what it did is the "Move ALL My
+   * Data" shape. What changed is that it no longer claims to have replaced 13 items.
+   */
   const handleSyncWoundCoreWithAmorphous = () => {
+    const source = amorphousData.find(it => String(it.itemCode ?? '').trim() === SCRAP_ROW_CODE);
+    if (!source) {
+      setSyncSuccessMsg(
+        `⚠ The Amorphous section has no "${SCRAP_ROW_CODE}" scrap row to copy. Nothing was changed.`
+      );
+      setTimeout(() => setSyncSuccessMsg(null), 6000);
+      return;
+    }
+    const targetIdx = woundCoreData.findIndex(it => String(it.itemCode ?? '').trim() === SCRAP_ROW_CODE);
+    if (targetIdx === -1) {
+      setSyncSuccessMsg(
+        `⚠ The Wound Core section has no "${SCRAP_ROW_CODE}" scrap row to copy INTO, so there is ` +
+        `nothing to overwrite. Add the row first - a missing scrap row blocks scrap billing for ` +
+        `this core type.`
+      );
+      setTimeout(() => setSyncSuccessMsg(null), 8000);
+      return;
+    }
+
+    const wasRate = woundCoreData[targetIdx]?.rates?.['25'] ?? woundCoreData[targetIdx]?.fixedRate;
+    const nowRate = source.rates?.['25'] ?? source.fixedRate;
+
     markEdited('WOUND_CORE');
-    const before = woundCoreData.length;
-    const cloned = JSON.parse(JSON.stringify(amorphousData)).map((it: EstimateItem) => ({
-      ...it,
-      unit: (it.unit || '').toLowerCase().includes('each') ? 'QTY' : (it.unit || 'QTY')
-    }));
-    setWoundCoreData(cloned);
+    const next = [...woundCoreData];
+    next[targetIdx] = JSON.parse(JSON.stringify(source));
+    setWoundCoreData(next);
     setEditingSection('WOUND_CORE');
     setOpenWoundCore(true);
-    // The message states the DIRECTION and the overwrite. "Updated to match" named
-    // neither the section read nor the section replaced, so it read equally as a merge or
-    // as the reverse copy - for one click that destroys a whole section. Same family as
-    // the "Move ALL My Data" bulk-move button: an operation whose feedback does not describe
-    // what it did.
+
     setSyncSuccessMsg(
-      `✓ COPIED Amorphous → Wound Core. The Wound Core section's ${before} item(s) were REPLACED ` +
-      `by ${cloned.length} item(s) copied from Amorphous, with unit "QTY". Amorphous is unchanged. ` +
-      `Nothing is saved yet - click "Save as Default" to keep this, or reload the page to discard it.`
+      `✓ COPIED the scrap charge Amorphous → Wound Core. Row "${SCRAP_ROW_CODE}" changed from ` +
+      `${wasRate ?? '(none)'} to ${nowRate ?? '(none)'}. The tender rate rows are read-only and ` +
+      `identical in both sections, so nothing else was touched. Amorphous is unchanged. Nothing ` +
+      `is saved yet - click "Save as Default" to keep this, or reload the page to discard it.`
     );
-    setTimeout(() => setSyncSuccessMsg(null), 6000);
+    setTimeout(() => setSyncSuccessMsg(null), 8000);
   };
 
   const handleDeleteItem = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', index: number) => {
     const data = [...getSectionData(section)];
     const item = data[index];
     if (!item) return;
+    // A tender row in a reference section is not the agency's to remove, and the row list
+    // is the exported estimate sheet's structure (AUDIT O39). The scrap row falls through
+    // to the load-bearing-code guard below, which is the check that actually matters for it.
+    if (!isRowEditable(section, item)) return;
 
     const code = String(item.itemCode ?? '').trim();
     const name = String(item.itemName ?? '').trim();
@@ -1467,6 +1549,7 @@ export default function EstimateMaster() {
     themeColor: string
   ) => {
     const isEditing = editingSection === sectionKey;
+    const isReference = isReferenceSection(sectionKey);
 
     return (
       <div className={`${CARD} overflow-hidden transition-all`}>
@@ -1660,10 +1743,10 @@ export default function EstimateMaster() {
                       handleSyncWoundCoreWithAmorphous();
                     }}
                     className="flex items-center px-2.5 py-1.5 text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 rounded-lg transition-colors shadow-2xs"
-                    title="Copies Amorphous → Wound Core. REPLACES every item in the Wound Core section with a copy of the Amorphous section. Amorphous is not changed. Not saved until you click Save as Default."
+                    title="Copies the SCRAP CHARGE (row 0) from Amorphous to Wound Core. The tender rate rows are read-only and already identical in both sections, so the scrap charge is the only row that can differ. Amorphous is not changed. Not saved until you click Save as Default."
                   >
                     <RefreshCw className="w-3.5 h-3.5 mr-1" />
-                    Make Same as Amorphous
+                    Copy Scrap Charge from Amorphous
                   </button>
                 )}
                 {sectionKey === 'CIRCLE_LIMITS' && (
@@ -1703,9 +1786,21 @@ export default function EstimateMaster() {
                     </button>
                   </>
                 )}
+                {/* Adding a row to a reference section would put a row in the exported
+                    estimate sheet that the tender does not have, and give it a rate nothing
+                    reads. Disabled rather than hidden, with the reason in the tooltip -
+                    a control that is missing looks like one that never existed. */}
                 <button 
                   onClick={() => handleAddItem(sectionKey)}
-                  className="flex items-center px-3 py-1.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 rounded-lg transition-colors shadow-2xs"
+                  disabled={isReference}
+                  className={`flex items-center px-3 py-1.5 text-xs font-bold border rounded-lg transition-colors shadow-2xs ${
+                    isReference
+                      ? 'bg-slate-50 text-slate-400 border-slate-200 cursor-not-allowed'
+                      : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                  }`}
+                  title={isReference
+                    ? 'This section lists the rows of the UGVCL tender itself. Rows cannot be added - the exported estimate sheet uses this list as its structure.'
+                    : undefined}
                 >
                   <Plus className="w-3.5 h-3.5 mr-1" />
                   Add Item
@@ -1756,6 +1851,39 @@ export default function EstimateMaster() {
         {/* Accordion Content Table */}
         {isOpen && (
           <div className="overflow-x-auto">
+            {/* ⚠ THIS NOTE MUST KEEP NAMING WHICH ROW IS WHICH.
+                A blanket "these are reference rates" over a section containing row "0" would
+                be the same defect as the one the lock fixes, pointing the other way: row "0"
+                prices five live jobs. Saying the wrong thing confidently about money is not
+                improved by saying it about fewer rows. */}
+            {isReference && (
+              <div className="m-3 mb-0 p-3 rounded-lg border border-sky-300 bg-sky-50 text-sky-900 text-[11px] leading-relaxed">
+                <p className="font-bold text-sky-950 flex items-center gap-1.5">
+                  <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                  These are the tender rates, shown for reference - the estimate does not read them
+                </p>
+                <p className="mt-1">
+                  {sectionTitle} transformers are priced from UGVCL Schedule-B, which is held in the
+                  app and applied directly. Rows <strong className="font-mono font-bold">1a</strong>-
+                  <strong className="font-mono font-bold">1f</strong> and{' '}
+                  <strong className="font-mono font-bold">2</strong>-
+                  <strong className="font-mono font-bold">6</strong> are shown so the schedule can be
+                  checked against the tender document, and they are <strong>read-only</strong>: the
+                  estimate would ignore any change made here, so editing them could only mislead.
+                </p>
+                <p className="mt-1.5 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900">
+                  <strong className="font-bold">Row {SCRAP_ROW_CODE} is the exception and IS editable.</strong>{' '}
+                  The scrap inspection-and-dismantling charge is read by the estimate, the bill and
+                  Reports, so what is set here is what a scrap {sectionTitle.toLowerCase()} transformer
+                  is actually charged. Change it only against the tender.
+                </p>
+                <p className="mt-1.5 text-sky-800">
+                  The rows themselves cannot be added or removed: the exported estimate spreadsheet
+                  uses this list as its structure, so a row taken out here disappears from that
+                  document too.
+                </p>
+              </div>
+            )}
             {sectionKey === 'CIRCLE_LIMITS' && circleLimitsViewMode === 'matrix' ? (
               /* Transposed Matrix View (Capacity Rows x Level Columns) matching scanned circular */
               <table className="w-full text-left text-sm text-slate-600 min-w-max">
@@ -1838,10 +1966,15 @@ export default function EstimateMaster() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {data.map((item, idx) => (
+                  {data.map((item, idx) => {
+                  /* PER-ROW, NOT PER-SECTION. In a reference section only the scrap row is
+                     the agency's to set, so editability is decided per row rather than by
+                     the section's Edit button alone - see isRowEditable. */
+                  const rowEditable = isEditing && isRowEditable(sectionKey, item);
+                  return (
                     <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
                       <td className="px-3.5 py-2.5 font-bold text-slate-900 whitespace-nowrap sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-100 align-top w-16">
-                        {isEditing ? (
+                        {rowEditable ? (
                           <input 
                             type="text" 
                             value={item.itemCode} 
@@ -1869,7 +2002,7 @@ export default function EstimateMaster() {
                         )}
                       </td>
                       <td className="px-3.5 py-2.5 sticky left-[64px] bg-white group-hover:bg-slate-50 border-r border-slate-100 min-w-[280px] max-w-md whitespace-normal break-words align-top">
-                        {isEditing ? (
+                        {rowEditable ? (
                           <textarea 
                             rows={item.itemName.length > 80 ? 4 : item.itemName.length > 30 ? 2 : 1}
                             value={item.itemName} 
@@ -1884,7 +2017,7 @@ export default function EstimateMaster() {
                         )}
                       </td>
                       <td className="px-3.5 py-2.5 border-r border-slate-100 min-w-[130px] w-36 whitespace-normal break-words align-top">
-                        {isEditing ? (
+                        {rowEditable ? (
                           <input 
                             type="text" 
                             value={item.unit} 
@@ -1921,7 +2054,7 @@ export default function EstimateMaster() {
                                 ? `From the UGVCL tender schedule. Aluminium ${fmt(pair.al)}, copper ${fmt(pair.cu)} - the estimate picks one using the Winding Type on the internal inspection. Nothing is stored for this cell. Type over it to override BOTH materials with a single rate.`
                                 : undefined;
 
-                              if (isEditing) {
+                              if (rowEditable) {
                                 return (
                                   <input
                                     type="number"
@@ -2039,23 +2172,29 @@ export default function EstimateMaster() {
                         <td className="px-2 py-2.5 text-center align-top w-16">
                           <button
                             type="button"
-                            disabled={!isEditing}
+                            disabled={!rowEditable}
                             onClick={() => handleDeleteItem(sectionKey, idx)}
                             className={`p-1 rounded ${
-                              isEditing
+                              rowEditable
                                 ? 'text-red-500 hover:bg-red-50'
                                 : 'text-slate-300 cursor-not-allowed'
                             }`}
-                            title={isEditing
+                            /* A reference row is undeletable for a SECOND reason beyond the
+                               rate lock: the row LIST is the estimate Excel export's skeleton
+                               (AUDIT O39), so removing one changes a document, not a setting. */
+                            title={rowEditable
                               ? `Delete row "${item.itemCode || '(no code)'}" - asks for confirmation, and is not saved until you click Save`
-                              : 'Click Edit on this section to remove rows'}
+                              : isEditing
+                                ? `"${item.itemCode}" is a UGVCL tender row, shown for reference - it cannot be removed. The exported estimate sheet uses these rows as its structure.`
+                                : 'Click Edit on this section to remove rows'}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
                         </td>
                       )}
                     </tr>
-                  ))}
+                  );
+                  })}
                 </tbody>
               </table>
             )}

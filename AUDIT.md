@@ -6412,6 +6412,82 @@ wrong bill.**
 
 ---
 
+### O39. A settings screen doubles as a document's structure, and neither end says so
+
+**The estimate master's row LIST is the exported estimate spreadsheet's skeleton.**
+`EstimateGenerate.tsx:406` resolves `itemsList` through `getEstimateMasterForCore(…,
+coreType)` and `:421` iterates it — one exported row per master row, carrying the master's
+`itemCode` and `itemName`, with only the amounts coming from the builder via
+`builderLineFor`. So adding, deleting, renaming or reordering a row in **Agency Settings →
+Estimate Master** changes a document that goes to UGVCL.
+
+**This is true for every core type, not just the fixed-rate ones.** The CRGO master's rows
+shape the CRGO export the same way. It is filed here because the Amorphous lock is what
+surfaced it.
+
+**It is invisible from both ends, which is the whole finding:**
+
+| looking from | what you see |
+|---|---|
+| `EstimateMaster.tsx` | a settings grid of codes, names and rates. Nothing says a row is a line on an exported document. |
+| `EstimateGenerate.tsx:421` | `itemsList.forEach(...)` reading what looks like a constant. Nothing says it came from a user-editable table. |
+
+**A rate lock does not close it.** Locking the Amorphous and Wound Core rates removes the
+price risk from those sections and leaves the structural coupling untouched — an operator
+who can no longer change what a job costs could still change what the spreadsheet contains.
+That is why Add and Delete are disabled on the reference sections rather than only the rate
+cells, and why the delete tooltip names the export as a second, separate reason.
+
+**Not closed for the other sections.** CRGO and Overhauling are still freely editable and
+still shape their exports, correctly so — those rows genuinely are the agency's. The open
+question is whether that coupling should be *stated* at both ends rather than discovered:
+a line in the Estimate Master header saying the rows structure the exported sheet, and a
+comment at `:421` saying the array is user-editable. Cheap, and it is the kind of fact that
+is only ever learned the expensive way.
+
+---
+
+### O40. The Schedule-B extras exist, are priced, and cannot reach an estimate — O16 follow-on
+
+**Rows 3-6 of the Amorphous / Wound Core master are real tender charges with real rates, and
+there is no path by which any of them reaches an Amorphous or Wound Core estimate.**
+
+| row | charge | rate | reaches an estimate |
+|---|---|---|---|
+| `3` | Tank replacement, same size & thickness | Rs 54/kg | **no** |
+| `4` | Conservator tank replacement, same size | Rs 54/kg | **no** |
+| `5` | Complete radiator replacement | Rs 1,057 | **no** |
+| `6` | Sealing of an uneconomical unit by welding | Rs 189 | **no** |
+
+They are the same items as `SCHEDULE_B_EXTRAS` in `ugvclSchedule2020.ts:215`, whose own
+comment states the rule: *"Charged extra, only when the UGVCL engineer demands replacement
+instead of repair. Old material must be credited to the divisional store."* The fixed-rate
+branch emits exactly two lines — the repairing charge and, on per-coil rows, labour — and
+has no mechanism for adding any of these.
+
+**So an agency that replaces a tank on an Amorphous unit, at an engineer's instruction, has
+no way to bill for it.** Not a wrong figure; no line at all.
+
+**This is the other half of O16.** That entry found the bill *itemising* Amorphous repairs
+and adding rows 2-6 to every one of them whether the work was done or not — the bill
+charging extras nobody had performed. The estimate has the opposite defect on the same rows:
+it cannot charge them when they *have* been performed. Both come from one cause, which O16
+names: the estimate and the bill were computing the same job by two different models. F57
+resolved that by making the bill delegate to the builder, which was right — and it means the
+bill inherited the estimate's silence about the extras along with everything else.
+
+**What it needs is a decision, not a patch.** Schedule-B is a fixed all-inclusive rate; the
+extras are conditional on an engineer's demand, which is an observation nobody currently
+records. There is no field for "the engineer required tank replacement", and inventing the
+quantity is the fabricated-quantity pattern this audit exists to prevent. Closing it means
+capturing the demand on an inspection first.
+
+**Read-only makes the display honest and leaves this standing.** The rows now say they are
+tender rates shown for reference, which is true. It does not say the tender charges them and
+this app cannot — the section looks complete, and is.
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D0. Job numbers are DERIVED, and typing over one does not persist
