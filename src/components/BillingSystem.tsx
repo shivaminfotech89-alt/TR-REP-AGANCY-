@@ -4,7 +4,7 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate } from '../lib/estimateCalc';
-import { classifyCoreType } from './SingleJobEstimateReport';
+import { classifyCoreType, EstimateRateError } from './SingleJobEstimateReport';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
@@ -535,7 +535,78 @@ export default function BillingSystem() {
   // SCHEDULE_B here. A second implementation of one rate schedule is how the scrap charge
   // came to sit under four different codes across six agencies; there is one Schedule-B
   // reader in this codebase and this is not it.
-  const calculateJobTotal = (job: any) => {
+  /**
+   * THE BLOCKING ERRORS FOR ONE JOB, from the same source that priced it.
+   *
+   * The estimate has refused to show a total for an unpriceable job since F46 - see the
+   * `rateErrors` block in SingleJobEstimateReport - and the bill did not. `calculateJobTotal`
+   * read `est.baseTotal` and ignored `est.rateErrors` entirely, so a transformer whose
+   * estimate said "Total withheld until a rate is confirmed" was billed anyway, at whatever
+   * figure the per-capacity defaults produced. Eight jobs in live data are in exactly that
+   * state today, none of them opened, one whole MR of three.
+   *
+   * A bill that prices a job the estimate refused is the worse half of the pair: the estimate
+   * is a proposal, the bill is a demand for money.
+   *
+   * Branches the same way `calculateJobTotal` does, because scrap resolves its flat charge
+   * without the builder and would otherwise report no errors at all.
+   */
+  const jobPricingErrors = (job: any): EstimateRateError[] => {
+    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+    if (isScrapJob) {
+      const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
+      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
+      return error ? [{ kind: 'missing-rate', message: error }] : [];
+    }
+    return getJobFullEstimate(
+      job,
+      externalInspMap[job.id],
+      internalInspMap[job.id],
+      activeAgency,
+      atForJob(job, atMasters) ?? activeAtMaster
+    ).rateErrors ?? [];
+  };
+
+  /**
+   * The short phrase that stands where the figure would have been, plus the full messages
+   * for the hover title and the banner.
+   *
+   * Wording follows the estimate's own cell (InternalInspection.tsx:773) rather than
+   * inventing a second vocabulary for the same conditions: an input problem is the
+   * operator's own next action and reads as one; a rate problem is a setup gap.
+   */
+  const jobBlockSummary = (errors: EstimateRateError[]): string => {
+    const inputs = errors.filter(e => e.kind === 'missing-input');
+    if (inputs.length > 0) {
+      if (inputs.some(e => e.message.includes('no external inspection data'))) return 'External inspection not done';
+      if (inputs.some(e => e.message.includes('no internal inspection data'))) return 'Internal inspection not done';
+      return 'Inspection field missing';
+    }
+    return 'Rate not configured';
+  };
+
+  /**
+   * THE AT-INCLUSIVE AMOUNT FOR ONE JOB - or NULL when the job cannot be priced at all.
+   *
+   * ⚠ NULL IS A REAL ANSWER, AND THE COMPILER WILL NOT HELP YOU HONOUR IT. `strict` is off in
+   * tsconfig.json, so `strictNullChecks` is off with it and `acc + calculateJobTotal(job)`
+   * raises nothing. The return type documents the contract; it does not enforce it. Every
+   * call site was therefore checked BY HAND, and a new one must be too - there are eight,
+   * listed here so the next reader can verify the set rather than trust this sentence:
+   *
+   *   subTotal · the Excel export row · handleSaveBillDates (batch + local state)
+   *   handleConfirmSendBill (batch + local state) · calculateMrBillSummary · the invoice row
+   *
+   * This is the F72 shape exactly - a signature change that the compiler could not check
+   * because the values flowing through it are `any` - and it was found by counting there too.
+   *
+   * A NULL MUST NEVER BE COERCED TO 0. Zero is a figure; it sums, it renders, and it produces
+   * a complete-looking invoice one transformer short. Withhold the total instead - see
+   * `subTotal` below, and the `rateErrors` block on the printed estimate that does the same.
+   */
+  const calculateJobTotal = (job: any): number | null => {
+    if (jobPricingErrors(job).length > 0) return null;
+
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
@@ -548,7 +619,10 @@ export default function BillingSystem() {
     // An unresolvable rate contributes nothing and is reported - never a hardcoded 500.
     if (isScrapJob) {
       const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData);
-      if (scrapCharge.rate === null) return 0;
+      // Unreachable now - `jobPricingErrors` returns the same resolution's error above and
+      // this function has already returned null. Kept as null rather than 0 so the two
+      // agree if they are ever separated: an unresolved charge is not a charge of nothing.
+      if (scrapCharge.rate === null) return null;
       return scrapCharge.rate * (1 + atPct / 100);
     }
 
@@ -633,15 +707,50 @@ export default function BillingSystem() {
   const cgstRate = typeof activeAgency?.cgstPercent === 'number' ? activeAgency.cgstPercent : 9;
   const sgstRate = typeof activeAgency?.sgstPercent === 'number' ? activeAgency.sgstPercent : 9;
 
-  const subTotal = useMemo(() => {
-    return selectedJobsData.reduce((acc, job) => acc + calculateJobTotal(job), 0);
+  /**
+   * Jobs on THIS bill that cannot be priced. Non-empty means the bill must not be produced.
+   *
+   * Same shape as `scrapChargeErrors` above and deliberately alongside it: both answer
+   * "is there something on this bill we cannot put a number against", and a second,
+   * differently-shaped answer to that question is how the two would drift.
+   */
+  const blockedBillJobs = useMemo(
+    () => selectedJobsData
+      .map(job => ({ job, errors: jobPricingErrors(job) }))
+      .filter(x => x.errors.length > 0),
+    [selectedJobsData, activeAgency, activeAtMaster, atMasters, externalInspMap, internalInspMap]
+  );
+
+  /**
+   * THE TAXABLE VALUE - or NULL when any job on the bill cannot be priced.
+   *
+   * ⚠ WITHHELD, NOT REDUCED. Skipping the blocked job and summing the rest would render a
+   * SUB TOTAL, a CGST, an SGST and a NET TOTAL that all look complete and are one
+   * transformer short - a tax invoice understated by a whole unit, with nothing on the page
+   * saying so. MR 00008 is the case that makes this concrete: all three of its jobs are
+   * blocked, so the "reduced" total would be Rs 0.00 presented as a finished invoice.
+   *
+   * The printed estimate has always done it this way - `rateErrors` replaces the totals
+   * block outright rather than trimming it - and this is the same rule on the bill.
+   */
+  const subTotal = useMemo<number | null>(() => {
+    if (blockedBillJobs.length > 0) return null;
+    // No job is blocked here, so no `calculateJobTotal` can return null - `?? 0` closes the
+    // type, it does not paper over a missing figure.
+    return selectedJobsData.reduce((acc, job) => acc + (calculateJobTotal(job) ?? 0), 0);
     // activeAgency/activeAtMaster cover every master calculateJobTotal reads - all
     // core types, not just CRGO - plus the AT percentage.
-  }, [selectedJobsData, activeAgency, activeAtMaster]);
+  }, [selectedJobsData, activeAgency, activeAtMaster, blockedBillJobs]);
 
-  const cgst = useMemo(() => subTotal * (cgstRate / 100), [subTotal, cgstRate]);
-  const sgst = useMemo(() => subTotal * (sgstRate / 100), [subTotal, sgstRate]);
-  const grandTotal = useMemo(() => subTotal + cgst + sgst, [subTotal, cgst, sgst]);
+  const cgst = useMemo(() => subTotal === null ? null : subTotal * (cgstRate / 100), [subTotal, cgstRate]);
+  const sgst = useMemo(() => subTotal === null ? null : subTotal * (sgstRate / 100), [subTotal, sgstRate]);
+  const grandTotal = useMemo(
+    () => (subTotal === null || cgst === null || sgst === null) ? null : subTotal + cgst + sgst,
+    [subTotal, cgst, sgst]
+  );
+
+  /** Money for print, where a withheld figure must not read as an amount. */
+  const rs = (n: number | null) => n === null ? '—' : n.toFixed(2);
 
   // Oil Data Calculations for Oil Account Document (Page 4)
   // OIL ACCOUNTING - deliberately uses the GP-INCLUSIVE set. A GP transformer still
@@ -1027,6 +1136,31 @@ export default function BillingSystem() {
     return false;
   };
 
+  /**
+   * PRE-ISSUE GATE. Refuses to produce a bill that contains a job the estimate would not
+   * price. Applied to print, export, quick save and send - every path that either shows a
+   * customer a figure or writes `billAmount`.
+   *
+   * ⚠ NOT APPLIED TO THE POST-ISSUE PATHS, and that distinction is the whole design. A bill
+   * that has already gone out has a stamped `billAmount` / `billTotalMrAmount`; recomputing
+   * it is what the recompute-versus-reproduce pattern warns against, and BLOCKING it would
+   * refuse to record a payment against a bill UGVCL already holds. Marking a bill paid must
+   * never depend on whether today's data can still reprice it. See `issuedMrTotal`.
+   */
+  const blockIfUnpriceableJobs = (action: string) => {
+    if (blockedBillJobs.length === 0) return false;
+    setSetupGap({
+      title: 'This bill contains a job that cannot be priced',
+      problem: `${blockedBillJobs.length} transformer(s) on this bill have no complete estimate, so no amount can be charged for them. The bill cannot be ${action} until each is resolved.`,
+      position: `Blocked action: ${action}`,
+      detail: blockedBillJobs.map(({ job, errors }) =>
+        `${job.jobNo || job.id}: ${errors.map(e => e.message.replace(/^[^:]+:\s*/, '')).join(' ')}`),
+      actionLabel: 'Open Inspections',
+      actionTo: '/inspections',
+    });
+    return true;
+  };
+
   const blockIfUnresolvedCharges = (action: string) => {
     if (scrapChargeErrors.length === 0) return false;
     // Same block as before - now with a route to where the missing item is added.
@@ -1044,6 +1178,7 @@ export default function BillingSystem() {
   const handlePrint = () => {
     if (blockIfDiscomIncomplete('printed')) return;
     if (blockIfUnresolvedCharges('print this bill')) return;
+    if (blockIfUnpriceableJobs('printed')) return;
     if (blockIfMasterMisfiled('printed')) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-billing-container', `Tax Invoice & Letter Documents - MR ${selectedMrNo}`, `Bill_Package_MR_${selectedMrNo}.pdf`);
@@ -1056,6 +1191,7 @@ export default function BillingSystem() {
     if (!selectedMrNo || selectedJobsData.length === 0) return;
     if (blockIfDiscomIncomplete('exported')) return;
     if (blockIfUnresolvedCharges('export this bill')) return;
+    if (blockIfUnpriceableJobs('exported')) return;
     if (blockIfMasterMisfiled('exported')) return;
 
     const wsData: any[][] = [];
@@ -1074,7 +1210,12 @@ export default function BillingSystem() {
       // 4% high at a 4% AT: TOTAL AMOUNT, SUB TOTAL, CGST, SGST, GRAND TOTAL and the oil
       // deduction computed from them. The printed invoice was correct throughout; only
       // this export was wrong (AUDIT O3).
-      const atInclusiveAmt = calculateJobTotal(job);
+      // Guarded: blockIfUnpriceableJobs('exported') returned above, so nothing here is null.
+      // Kept explicit rather than `?? 0` - a zero row in a file headed TAX INVOICE is the
+      // failure this whole change exists to prevent, so it must not be the fallback.
+      const priced = calculateJobTotal(job);
+      if (priced === null) return;
+      const atInclusiveAmt = priced;
       const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
       // BASE COST is a pre-AT column, so it is back-derived rather than relabelled: the
       // file must satisfy its own arithmetic, BASE COST x (1 + AT%) = TOTAL AMOUNT. It
@@ -1123,6 +1264,9 @@ export default function BillingSystem() {
 
   const handleSaveBillDates = async () => {
     if (!selectedMrNo || selectedJobsData.length === 0 || !auth.currentUser) return;
+    // Writes `billAmount`. A figure that cannot be computed must not be stored - least of all
+    // as the 0 a numeric fallback would have produced here.
+    if (blockIfUnpriceableJobs('saved')) return;
     setSavingBillDates(true);
     setSavedSuccessMsg('');
     try {
@@ -1130,7 +1274,10 @@ export default function BillingSystem() {
       const todayIso = billDate || new Date().toISOString().split('T')[0];
 
       selectedJobsData.forEach(job => {
+        // Guarded above. A null here would mean an unpriceable job reached a WRITE of
+        // billAmount, so it skips the job rather than storing a fabricated figure.
         const atInclusiveAmt = calculateJobTotal(job);
+        if (atInclusiveAmt === null) return;
         const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
@@ -1162,7 +1309,10 @@ export default function BillingSystem() {
       // Update local state
       setJobs(prev => prev.map(j => {
         if (selectedJobsData.some(sj => sj.id === j.id)) {
+          // Mirrors the batch above, including its skip: a job the batch did not write must
+          // not appear updated in memory either.
           const atInclusiveAmt = calculateJobTotal(j);
+          if (atInclusiveAmt === null) return j;
           const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
@@ -1197,8 +1347,13 @@ export default function BillingSystem() {
     const targetJobs = jobsForBillType(mr);
 
     let mrSubTotal = 0;
+    let mrBlocked = 0;
     targetJobs.forEach(job => {
-      mrSubTotal += calculateJobTotal(job);
+      const amt = calculateJobTotal(job);
+      // A blocked job contributes NOTHING and is COUNTED. The count is what callers test;
+      // the sum without it is not a subtotal of anything and must not be presented as one.
+      if (amt === null) { mrBlocked++; return; }
+      mrSubTotal += amt;
     });
 
     const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
@@ -1210,8 +1365,39 @@ export default function BillingSystem() {
     return {
       subTotal: mrSubTotal,
       grandTotal: mrGrandTotal,
-      jobCount: targetJobs.length
+      jobCount: targetJobs.length,
+      /** >0 means this figure is incomplete. Pre-issue callers must refuse it. */
+      blockedCount: mrBlocked
     };
+  };
+
+  /**
+   * THE TOTAL OF A BILL THAT HAS ALREADY BEEN ISSUED - reproduced, not recomputed.
+   *
+   * ⚠ THIS IS THE POST-ISSUE PATH AND IT MUST NOT BLOCK. Marking a bill paid, or listing it
+   * in the sent register, is a fact about a document UGVCL already holds. Whether today's
+   * master, AT percentage or inspection data could still reprice that job has no bearing on
+   * what was billed - and refusing to record a payment because a job's inspection record is
+   * incomplete would break working software to fix a defect that is not on this path.
+   *
+   * `billTotalMrAmount` is stamped on every job at send (see handleConfirmSendBill), so the
+   * issued figure is available and is preferred. `billAmount` summed across the MR's jobs is
+   * the fallback for bills sent before that field existed, and a recompute is the last resort
+   * for records that predate both - flagged by `reproduced` so a caller can tell which it got.
+   *
+   * This is the recompute-versus-reproduce pattern applied where the stamp already exists:
+   * the register was recomputing a number it had been storing all along.
+   */
+  const issuedMrTotal = (mr: string): { grandTotal: number; reproduced: boolean } => {
+    const groupJobs = mrGroups[mr] || [];
+
+    const stamped = groupJobs.find(j => Number(j.billTotalMrAmount) > 0);
+    if (stamped) return { grandTotal: Number(stamped.billTotalMrAmount), reproduced: true };
+
+    const summed = groupJobs.reduce((acc, j) => acc + (Number(j.billAmount) || 0), 0);
+    if (summed > 0) return { grandTotal: summed, reproduced: true };
+
+    return { grandTotal: calculateMrBillSummary(mr).grandTotal, reproduced: false };
   };
 
   // Open Send Bill Modal
@@ -1250,6 +1436,23 @@ export default function BillingSystem() {
       alert(`⚠️ Scrap charge not configured - this bill cannot be sent.\n\n${unresolvedScrap.join('\n\n')}`);
       return;
     }
+    // Never send a bill carrying a job the estimate would not price. Computed over
+    // `jobsForBillType(sendTargetMr)` rather than reusing `blockedBillJobs`, which is scoped
+    // to the MR open in the editor - the send dialog can target a different MR, and checking
+    // the wrong set would pass a bill nobody had looked at.
+    const unpriceable = jobsForBillType(sendTargetMr)
+      .map(job => ({ job, errors: jobPricingErrors(job) }))
+      .filter(x => x.errors.length > 0);
+    if (unpriceable.length > 0) {
+      alert(
+        `⚠️ This bill cannot be sent.\n\n${unpriceable.length} transformer(s) have no complete estimate, so no amount can be charged for them:\n\n` +
+        unpriceable
+          .map(({ job, errors }) => `${job.jobNo || job.id}: ${errors.map(e => e.message.replace(/^[^:]+:\s*/, '')).join(' ')}`)
+          .join('\n\n')
+      );
+      return;
+    }
+
     setSubmittingSendBill(true);
     try {
       // Stamp bill data only on jobs of the current bill type. Writing to every job in
@@ -1259,7 +1462,10 @@ export default function BillingSystem() {
       const { grandTotal } = calculateMrBillSummary(sendTargetMr);
 
       groupJobs.forEach(job => {
+        // Guarded above. A null here would mean an unpriceable job reached a WRITE of
+        // billAmount, so it skips the job rather than storing a fabricated figure.
         const atInclusiveAmt = calculateJobTotal(job);
+        if (atInclusiveAmt === null) return;
         const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
@@ -1296,7 +1502,10 @@ export default function BillingSystem() {
       // Update local state
       setJobs(prev => prev.map(j => {
         if (j.mrNo === sendTargetMr) {
+          // Mirrors the batch above, including its skip: a job the batch did not write must
+          // not appear updated in memory either.
           const atInclusiveAmt = calculateJobTotal(j);
+          if (atInclusiveAmt === null) return j;
           const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
@@ -1336,7 +1545,9 @@ export default function BillingSystem() {
     setPaidTargetMr(mr);
     const groupJobs = mrGroups[mr] || [];
     const sample = groupJobs[0] || {};
-    const { grandTotal } = calculateMrBillSummary(mr);
+    // POST-ISSUE: the amount to default the payment box to is what was BILLED, not what
+    // this MR would price at today. See issuedMrTotal.
+    const { grandTotal } = issuedMrTotal(mr);
 
     setPaymentMode(sample.paymentMode || 'NEFT / RTGS');
     setPaymentRefNo(sample.paymentRefNo || `UTR/${new Date().getFullYear()}/${mr}`);
@@ -1482,7 +1693,9 @@ export default function BillingSystem() {
         const sample = groupJobs[0] || {};
         const deliveredJobs = groupJobs.filter(j => j.status === 'Dispatched' && j.status !== 'Scrap' && j.condition !== 'Scrap');
         const isPaid = groupJobs.some(j => j.paymentStatus === 'Paid' || !!j.paymentRefNo);
-        const { grandTotal } = calculateMrBillSummary(mr);
+        // POST-ISSUE: this row describes a bill already sent, so it reproduces the stamped
+        // figure rather than repricing the MR. See issuedMrTotal.
+        const { grandTotal } = issuedMrTotal(mr);
 
         list.push({
           mrNo: mr,
@@ -2619,6 +2832,34 @@ export default function BillingSystem() {
             </div>
           )}
 
+          {/* A job on this bill has no complete estimate, so no amount can be charged for it.
+              Sits beside the scrap-charge banner because it answers the same question - is
+              there something here we cannot put a number against - and is worded to say what
+              is missing per job, since the fix is on the inspection, not in settings. */}
+          {blockedBillJobs.length > 0 && (
+            <div className="bg-rose-50 border-l-4 border-rose-600 p-4 rounded-lg text-rose-900 flex items-start gap-3 print:hidden shadow-sm">
+              <AlertTriangle className="w-5 h-5 text-rose-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-bold text-rose-950">
+                  {blockedBillJobs.length} transformer(s) cannot be priced - this bill cannot be issued
+                </p>
+                <p className="mt-1 text-xs text-rose-800">
+                  The estimate for these jobs is incomplete, so the totals below are withheld rather than
+                  computed without them.
+                </p>
+                <ul className="mt-1 space-y-1 text-xs text-rose-800 list-disc list-inside">
+                  {blockedBillJobs.map(({ job, errors }) => (
+                    <li key={job.id}>
+                      <span className="font-mono font-bold">{job.jobNo || job.id}</span>
+                      {' - '}
+                      {errors.map(e => e.message.replace(/^[^:]+:\s*/, '')).join(' ')}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          )}
+
           {/* Pending Delivery Warning Banner inside Editor */}
           {selectedMrPendingCount > 0 && (
             <div className="bg-amber-50 border-l-4 border-amber-500 p-4 rounded-lg text-amber-900 flex items-start gap-3 print:hidden shadow-sm">
@@ -2837,9 +3078,17 @@ export default function BillingSystem() {
                       <p>
                         Please find enclosed herewith our bill No. - <strong className="font-bold">{billNo}</strong> dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong>
                       </p>
-                      <p>
-                        <strong className="font-bold">Rs. {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-</strong> in words <strong className="font-bold">{numberToIndianWords(grandTotal)}</strong>
-                      </p>
+                      {/* The covering letter STATES A CLAIM. With a job unpriced there is no
+                          claim to state, so it says so rather than naming a short figure. */}
+                      {grandTotal === null ? (
+                        <p className="font-bold text-red-800">
+                          Amount withheld - {blockedBillJobs.length} transformer(s) on this bill cannot be priced.
+                        </p>
+                      ) : (
+                        <p>
+                          <strong className="font-bold">Rs. {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/-</strong> in words <strong className="font-bold">{numberToIndianWords(grandTotal)}</strong>
+                        </p>
+                      )}
                     </div>
                     <p className="pl-4">
                       Along with our Delivery Challan , Oil Account and relevant Test Certificate.
@@ -3045,6 +3294,7 @@ export default function BillingSystem() {
                     <tbody>
                       {selectedJobsData.map((job, idx) => {
                         const jobTotal = calculateJobTotal(job);
+                        const jobErrors = jobTotal === null ? jobPricingErrors(job) : [];
                         // Est. Amount is RECOMPUTED here, not read from job.estimateAmount.
                         //
                         // Two reasons. The stored figure is understated - it is built from
@@ -3080,28 +3330,62 @@ export default function BillingSystem() {
                             <td className="p-1 border-r border-black font-bold">{job.capacityKva}</td>
                             <td className="p-1 border-r border-black">11</td>
                             <td className="p-1 border-r border-black font-mono">{job.serialNo || '-'}</td>
-                            <td className="p-1 border-r border-black text-right font-mono">{estAmount.toFixed(2)}</td>
-                            <td className="p-1 text-right font-mono font-bold">{jobTotal.toFixed(2)}</td>
+                            {/* A JOB THAT CANNOT BE PRICED SHOWS THE REASON, NOT A FIGURE AND
+                                NOT A BLANK. Rs 0.00 reads as "nothing owed" and a blank reads
+                                as an oversight; both are wrong, and both sum to an invoice
+                                that looks finished. The wording matches the estimate's own
+                                cell (InternalInspection.tsx:773) so the two screens name the
+                                same condition the same way, with the full message on hover. */}
+                            {jobTotal === null ? (
+                              <td colSpan={2} className="p-1 text-center text-amber-700 font-semibold italic"
+                                  title={jobErrors.map(e => e.message).join('\n')}>
+                                {jobBlockSummary(jobErrors)} - cannot be billed
+                              </td>
+                            ) : (
+                              <>
+                                <td className="p-1 border-r border-black text-right font-mono">{estAmount.toFixed(2)}</td>
+                                <td className="p-1 text-right font-mono font-bold">{jobTotal.toFixed(2)}</td>
+                              </>
+                            )}
                           </tr>
                         );
                       })}
-                      {/* Financial Calculations */}
-                      <tr className="font-bold border-t border-black">
-                        <td colSpan={9} className="p-1 border-r border-black text-right">Total (Taxable Value):</td>
-                        <td className="p-1 text-right font-mono">{subTotal.toFixed(2)}</td>
-                      </tr>
-                      <tr className="font-bold border-t border-black">
-                        <td colSpan={9} className="p-1 border-r border-black text-right">CGST ({cgstRate.toFixed(2)}%):</td>
-                        <td className="p-1 text-right font-mono">{cgst.toFixed(2)}</td>
-                      </tr>
-                      <tr className="font-bold border-t border-black">
-                        <td colSpan={9} className="p-1 border-r border-black text-right">SGST ({sgstRate.toFixed(2)}%):</td>
-                        <td className="p-1 text-right font-mono">{sgst.toFixed(2)}</td>
-                      </tr>
-                      <tr className="font-black border-t border-black text-[10px]">
-                        <td colSpan={9} className="p-1 border-r border-black text-right">Net Total Invoice Value:</td>
-                        <td className="p-1 text-right font-mono font-bold">{grandTotal.toFixed(2)}</td>
-                      </tr>
+                      {/* Financial Calculations
+                          ⚠ WITHHELD AS A BLOCK, NOT REDUCED ROW BY ROW. With a blocked job on
+                          the bill there is no taxable value, so there is no CGST, no SGST and
+                          no net total either - printing the other three over a short subtotal
+                          is how an invoice comes to look complete while missing a transformer.
+                          The printed estimate replaces its totals the same way (AUDIT F46). */}
+                      {blockedBillJobs.length > 0 ? (
+                        <tr className="font-bold border-t-2 border-black">
+                          <td colSpan={10} className="p-2 text-center text-red-800 bg-red-50 print:bg-white">
+                            <span className="font-black uppercase tracking-wide">Totals withheld</span>
+                            {' - '}{blockedBillJobs.length} transformer(s) on this bill cannot be priced.
+                            <span className="block font-normal not-italic text-[8.5px] mt-0.5">
+                              This bill cannot be issued until each is resolved. No amount is claimed above.
+                            </span>
+                          </td>
+                        </tr>
+                      ) : (
+                        <>
+                          <tr className="font-bold border-t border-black">
+                            <td colSpan={9} className="p-1 border-r border-black text-right">Total (Taxable Value):</td>
+                            <td className="p-1 text-right font-mono">{rs(subTotal)}</td>
+                          </tr>
+                          <tr className="font-bold border-t border-black">
+                            <td colSpan={9} className="p-1 border-r border-black text-right">CGST ({cgstRate.toFixed(2)}%):</td>
+                            <td className="p-1 text-right font-mono">{rs(cgst)}</td>
+                          </tr>
+                          <tr className="font-bold border-t border-black">
+                            <td colSpan={9} className="p-1 border-r border-black text-right">SGST ({sgstRate.toFixed(2)}%):</td>
+                            <td className="p-1 text-right font-mono">{rs(sgst)}</td>
+                          </tr>
+                          <tr className="font-black border-t border-black text-[10px]">
+                            <td colSpan={9} className="p-1 border-r border-black text-right">Net Total Invoice Value:</td>
+                            <td className="p-1 text-right font-mono font-bold">{rs(grandTotal)}</td>
+                          </tr>
+                        </>
+                      )}
                     </tbody>
                   </table>
                 </div>
@@ -3111,8 +3395,12 @@ export default function BillingSystem() {
                   {/* Signatory follows the text, not the cell foot — see the note above (AUDIT G7). */}
                   <div className="p-2 border-r-2 border-black flex flex-col text-[9px]">
                     <div>
-                      <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold">{grandTotal.toFixed(2)}</span></p>
-                      <p className="font-semibold italic text-[8.5px] text-slate-800">{numberToIndianWords(grandTotal)}</p>
+                      {/* A receipt line for an amount that was never computed would be the
+                          most misleading figure on the page. */}
+                      <p><strong className="font-bold">Received Payment of Rs.</strong> <span className="font-mono font-bold">{rs(grandTotal)}</span></p>
+                      <p className="font-semibold italic text-[8.5px] text-slate-800">
+                        {grandTotal === null ? 'Amount withheld - this bill cannot be issued' : numberToIndianWords(grandTotal)}
+                      </p>
                       <p className="mt-1 text-[8.5px]">In full settlement of Bill no <strong className="font-bold font-mono">{billNo}</strong> Dated <strong className="font-bold font-mono">{formatDDMMYYYY(billDate)}</strong></p>
                       {(activeAgency?.bankName || activeAgency?.accountNumber) && (
                         <div className="mt-1 pt-1 border-t border-dashed border-slate-300 text-[8.5px]">
@@ -3397,10 +3685,19 @@ export default function BillingSystem() {
                   <p className="text-blue-700">Division: {mrGroups[sendTargetMr]?.[0]?.division || 'SABARMATI'}</p>
                 </div>
                 <div className="text-right">
+                  {/* PRE-ISSUE preview: if the MR carries an unpriceable job, the send is
+                      refused on confirm, so the dialog must not show a confident figure here
+                      that the next click will reject. */}
                   <p className="text-[10px] uppercase font-bold text-blue-700">Net Bill Value</p>
-                  <p className="text-base font-bold text-blue-900 font-mono tabular-nums">
-                    ₹{calculateMrBillSummary(sendTargetMr).grandTotal.toLocaleString('en-IN')}
-                  </p>
+                  {calculateMrBillSummary(sendTargetMr).blockedCount > 0 ? (
+                    <p className="text-sm font-bold text-red-800">
+                      Withheld - {calculateMrBillSummary(sendTargetMr).blockedCount} job(s) cannot be priced
+                    </p>
+                  ) : (
+                    <p className="text-base font-bold text-blue-900 font-mono tabular-nums">
+                      ₹{calculateMrBillSummary(sendTargetMr).grandTotal.toLocaleString('en-IN')}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -3511,7 +3808,7 @@ export default function BillingSystem() {
                 <div className="text-right">
                   <p className="text-[10px] uppercase font-bold text-emerald-700">Total Billed</p>
                   <p className="text-base font-bold text-emerald-900 font-mono tabular-nums">
-                    ₹{calculateMrBillSummary(paidTargetMr).grandTotal.toLocaleString('en-IN')}
+                    ₹{issuedMrTotal(paidTargetMr).grandTotal.toLocaleString('en-IN')}
                   </p>
                 </div>
               </div>

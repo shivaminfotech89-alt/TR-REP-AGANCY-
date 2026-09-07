@@ -6259,6 +6259,48 @@ it by matching message text would extend the coupling O36 exists to remove.
 
 ---
 
+### O38. Two definitions of scrap — one in the bill's filter, one in the builder
+
+**A job can be scrap for pricing and repairable for filing, at the same time.** The two tests
+do not read the same fields:
+
+| | test |
+|---|---|
+| `BillingSystem.jobsForBillType` | `j.status === 'Scrap' \|\| j.condition === 'Scrap'` |
+| `buildSingleJobEstimateData` | `job.status === 'Scrap' \|\| job.condition === 'Scrap' \|\| internalData?.condition === 'Scrap'` |
+
+The builder also honours the **internal inspection's** verdict; the filter does not. So a
+transformer declared scrap on the bench, with nothing written back to the job, passes the
+*repair* filter and is then priced by the builder's scrap short-circuit at the Rs 500 flat
+inspection-and-dismantling charge.
+
+**It is live.** `ASU-2` (10 kVA Amorphous, MR 1234) is scrap by internal inspection only:
+`status: 'Dispatched'`, `condition` empty. It therefore appears on the **repair** bill, at
+Rs 500, and it is the only dispatched job in its MR — so it constitutes that MR's entire
+repair bill. The scrap bill for MR 1234, meanwhile, contains nothing.
+
+**Why this is not merely cosmetic.** The two bill types are separate documents with separate
+numbering and separate send state (`isBillSentForType`), and the scrap bill additionally
+requires the unit to have been returned to the division on a challan. Pricing a job as scrap
+while filing it as a repair defeats both: the Rs 500 lands on a document whose covering
+letter describes repair work, and the return-to-store check that guards the scrap bill is
+never applied to it.
+
+**Which side is wrong is not obvious and is not decided here.** Either the filter should read
+the inspection too — in which case `jobsForBillType` needs the inspection maps, which it does
+not currently take — or the internal inspection's verdict should be written back to
+`job.condition` when it is saved, making the job the single record of its own condition. The
+second is the better shape and the larger change; it is the same "identity in a mutable
+field" question as F5.
+
+**Found while scoping the `rateErrors` gate on `calculateJobTotal`, not by it.** Nothing in
+this change touches it, and the gate does not fire on ASU-2: a scrap charge that resolves
+cleanly produces no `rateErrors`, so the wrong-document problem passes the new block exactly
+as it passed the old one. **A bill can now be refused for being unpriceable and still be the
+wrong bill.**
+
+---
+
 ## DELIBERATE — reviewed and kept, not defects
 
 ### D0. Job numbers are DERIVED, and typing over one does not persist
