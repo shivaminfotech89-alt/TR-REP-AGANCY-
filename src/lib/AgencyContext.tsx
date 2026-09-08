@@ -345,10 +345,16 @@ export interface AtMaster {
  * on documents holding every agency's numbering state. This has no owner, no agency and no
  * counters: it is rates and a version, and nothing else.
  *
- * It SUPERSEDES publishing to `public_config`. Two publish paths writing to different
- * layers is how a baseline and the things derived from it drift apart - `public_config`
- * already holds two 100-KVA rates that no agency has. `public_config` stays as the
- * resolution fallback for agencies with no AT rates, and nothing new writes to it.
+ * It SUPERSEDES publishing to `public_config`, which is now READ-ONLY FROM THE APP. Two
+ * publish paths writing to different layers is how a baseline and the things derived from it
+ * drift apart, and that had already happened: `public_config` held two 100-KVA rates that
+ * matched no tender and no agency. Those were corrected, then both controls that could write
+ * the document - "publish to the shared baseline" and "Reload Global Rates" - were removed,
+ * in that order, so it was never both wrong and unwritable.
+ *
+ * `public_config` remains rung 3 of the resolution chain, for agencies with no AT rates and
+ * no rates of their own. Nothing writes to it, and new agencies seed from the shipped
+ * constants rather than from it.
  */
 /** The five sections, in one place, so no caller enumerates them by hand. */
 export const ESTIMATE_SECTION_FIELDS = [
@@ -1541,14 +1547,27 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       //    empty stored section was used instead of falling through to the shipped
       //    default. Everywhere else in this file the test is `arr && arr.length > 0`; here
       //    it was not, which is a plausible route by which empty sections spread.
-      const seed = <T,>(published: T[] | undefined, shipped: T[]): T[] =>
-        (published && published.length > 0) ? published : shipped;
-
-      const defaultCRGO = seed(globalDefaultEstimateMaster?.estimateMasterCRGO, defaultEstimateData);
-      const defaultAmorphous = seed(globalDefaultEstimateMaster?.estimateMasterAmorphous, defaultAmorphousEstimateData);
-      const defaultWoundCore = seed(globalDefaultEstimateMaster?.estimateMasterWoundCore, defaultWoundCoreEstimateData);
-      const defaultOverhauling = seed(globalDefaultEstimateMaster?.estimateMasterOverhauling, defaultOverhaulingEstimateData);
-      const defaultCircleLimits = seed(globalDefaultEstimateMaster?.estimateMasterCircleLimits, defaultCircleLimitsEstimateData);
+      // 3. AND THE SEED IS NOW THE SHIPPED CONSTANTS, NOT `public_config`.
+      //
+      //    It used to prefer the published baseline and fall back to the shipped data. That
+      //    made every new agency inherit `public_config`'s 17 filled CRGO cells at 100 KVA,
+      //    two of which were wrong (1f 230 and 11B 148.99, against the tender's 229 and 149)
+      //    - and inherit them AS THE AGENCY'S OWN, where the copy test cannot dismiss them.
+      //    A cell equal to the schedule is recognised as a migrated copy; a cell that differs
+      //    is an override and beats the tender. So the seeding propagated exactly the two
+      //    figures that were wrong and nothing that was right.
+      //
+      //    Both cells have since been corrected, but the shape of the defect outlives them:
+      //    seeding from a mutable document means one bad write there is copied into every
+      //    agency created afterwards, permanently, with no trace of where it came from. The
+      //    shipped constants are in version control, reviewable, and the same for everyone.
+      //    They are the baseline now, and the two writers that could change `public_config`
+      //    from inside the app have been removed.
+      const defaultCRGO = defaultEstimateData;
+      const defaultAmorphous = defaultAmorphousEstimateData;
+      const defaultWoundCore = defaultWoundCoreEstimateData;
+      const defaultOverhauling = defaultOverhaulingEstimateData;
+      const defaultCircleLimits = defaultCircleLimitsEstimateData;
 
       const newAgency = { 
         estimateMasterCRGO: defaultCRGO,

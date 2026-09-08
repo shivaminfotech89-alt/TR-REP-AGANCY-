@@ -426,7 +426,7 @@ export default function EstimateMaster() {
   // the wider blast radius. Publishing seeds the baseline every future agency inherits and
   // cannot be undone by the actor on anyone else's behalf; that is a thing to choose, not
   // a thing to arrive at by pressing Save without reading the modal.
-  const [saveScope, setSaveScope] = useState<'ALL' | 'SINGLE'>('SINGLE');
+
 
   // Full Sync Modal
   const [showApplyModal, setShowApplyModal] = useState(false);
@@ -842,46 +842,20 @@ export default function EstimateMaster() {
     setTimeout(() => setSyncSuccessMsg(null), 6000);
   };
 
-  const handleRestoreFromGlobalDefaults = () => {
-    markEdited(...['CRGO', 'AMORPHOUS', 'WOUND_CORE', 'OVERHAULING', 'CIRCLE_LIMITS']);
-    if (globalDefaultEstimateMaster) {
-      if (globalDefaultEstimateMaster.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
-      } else {
-        setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
-      }
-      if (globalDefaultEstimateMaster.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
-        setAmorphousData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData));
-      } else {
-        setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
-      }
-      if (globalDefaultEstimateMaster.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0) {
-        setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, defaultWoundCoreEstimateData));
-      } else {
-        setWoundCoreData(JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)));
-      }
-      if (globalDefaultEstimateMaster.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
-        setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
-      } else {
-        setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
-      }
-      if (globalDefaultEstimateMaster.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
-        setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
-      } else {
-        setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
-      }
-      setSyncSuccessMsg('✓ Reloaded rates from Global Master! You can edit them as per your own preference or save.');
-      setTimeout(() => setSyncSuccessMsg(null), 5000);
-    } else {
-      setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
-      setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
-      setWoundCoreData(JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)));
-      setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
-      setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
-      setSyncSuccessMsg('✓ Reset to standard system defaults.');
-      setTimeout(() => setSyncSuccessMsg(null), 5000);
-    }
-  };
+  /**
+   * ⚠ `handleRestoreFromGlobalDefaults` WAS HERE AND IS NOT COMING BACK.
+   *
+   * It loaded `public_config/estimate_master` into all five editors, from when that document
+   * was the shared baseline. After F73 put rates on the tender and the copy test landed, what
+   * it did inverted. Of its 17 filled CRGO cells at 100 KVA, the 15 that MATCHED the 2020
+   * schedule were inert - the copy test resolves a master cell equal to its schedule to the
+   * schedule regardless - and the 2 that DIFFERED read as deliberate overrides and beat the
+   * tender. Everything right in it did nothing; only its two errors took effect. Both were
+   * corrected by scripts/admin/fix-public-config-artefacts.js before this was removed, so
+   * nothing was ever both wrong and unwritable.
+   *
+   * The shipped constants are the baseline now, and new agencies seed from them directly.
+   */
 
   /**
    * Copy the SCRAP CHARGE from Amorphous to Wound Core.
@@ -1228,9 +1202,7 @@ export default function EstimateMaster() {
       // Regular user: directly save to current agency without affecting any other user
       handleSaveSectionToActiveAgency(section);
     } else {
-      // Super Admin: allow choice between saving for active agency or publishing globally
       setPendingSaveSection(section);
-      setSaveScope('SINGLE');
     }
   };
 
@@ -2685,15 +2657,14 @@ export default function EstimateMaster() {
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
-          <button 
-            type="button"
-            onClick={handleRestoreFromGlobalDefaults}
-            className="flex items-center px-3 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg border border-slate-300 transition-colors shadow-2xs"
-            title="Reload rates from the central Global Master into the editor"
-          >
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-            Reload Global Rates
-          </button>
+          {/* ⚠ THERE IS NO "RELOAD GLOBAL RATES" BUTTON, AND THERE MUST NOT BE.
+              It loaded `public_config` into the editor, from when that document was the
+              shared baseline and rates lived on the agency. After F73 moved rates onto the
+              tender and the copy test landed, its arithmetic inverted: every cell it carried
+              that MATCHED the 2020 schedule became inert - the copy test resolves those to
+              the schedule anyway - while the two that DIFFERED were read as genuine
+              overrides and won. Its whole remaining effect was importing two wrong rates.
+              Everything correct in it did nothing; only the errors took. */}
           <button 
             type="button"
             onClick={handleSaveAllToCurrentAgency}
@@ -2850,114 +2821,45 @@ export default function EstimateMaster() {
               Choose how you want to save your entered price rates for <strong className="text-slate-800">{activeAgency.name}</strong>.
             </p>
 
-            {/* Scope Selection Cards */}
+            {/* ⚠ ONE SCOPE, SO IT IS STATED RATHER THAN CHOSEN. This was two radio cards; a
+                radio with a single option is a control that cannot be operated, and one
+                pre-selected and unchangeable reads as though something else were available.
+                Says what the save does instead. */}
             <div className="space-y-2.5">
-              {/* Option 1: Single Agency (Default & Isolated) */}
-              <div 
-                onClick={() => setSaveScope('SINGLE')}
-                className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
-                  saveScope === 'SINGLE' 
-                    ? 'border-emerald-600 bg-emerald-50/50 shadow-xs' 
-                    : 'border-slate-200 hover:border-slate-300 bg-white'
-                }`}
-              >
+              <div className="p-4 rounded-lg border-2 border-emerald-600 bg-emerald-50/50 shadow-xs">
                 <div className="flex items-start gap-2.5">
-                  <input 
-                    type="radio" 
-                    name="saveScope" 
-                    checked={saveScope === 'SINGLE'} 
-                    onChange={() => setSaveScope('SINGLE')}
-                    className="w-4 h-4 text-emerald-600 focus:ring-emerald-500 border-slate-300 mt-0.5"
-                  />
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-900">Save for Current Agency Only ({activeAgency.name})</span>
-                      <span className="text-[10px] uppercase font-bold bg-emerald-600 text-white px-2 py-0.5 rounded-full">Recommended</span>
+                      <span className="text-sm font-bold text-slate-900">Saves for {activeAgency.name} only</span>
                     </div>
                     <p className="text-xs text-slate-600 mt-1">
-                      Saves your custom {pendingSaveSection} rates <strong>exclusively for this agency</strong>. Other users and other agencies will <strong>NOT</strong> be affected and will keep their own rates.
+                      Your {pendingSaveSection} rates are stored <strong>exclusively for this agency</strong>. Other users and other agencies are <strong>NOT</strong> affected and keep their own rates.
                     </p>
                   </div>
                 </div>
               </div>
 
-              {/* Option 2: the shared baseline.
-                  GATED, and shown DISABLED rather than hidden for a non-admin. It used to
-                  render for everyone, `saveScope` defaults to 'ALL' so it was even
-                  pre-selected, and handleConfirmSaveSection silently redirected a
-                  non-admin to the agency-only save. The operator picked "publish", pressed
-                  a button reading "Save as Default for All Users", and got an agency save
-                  with nothing to say the choice had been overridden - a control that
-                  accepts a choice and quietly does something else. Disabled-and-explained
-                  beats hidden: it answers "why can't I publish" instead of raising it. */}
-              <div 
-                onClick={() => { if (isSuperAdmin) setSaveScope('ALL'); }}
-                className={`p-4 rounded-lg border-2 transition-all ${
-                  !isSuperAdmin
-                    ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
-                    : saveScope === 'ALL'
-                      ? 'border-blue-600 bg-blue-50/50 shadow-xs cursor-pointer'
-                      : 'border-slate-200 hover:border-slate-300 bg-white cursor-pointer'
-                }`}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <input 
-                      type="radio" 
-                      name="saveScope" 
-                      checked={isSuperAdmin && saveScope === 'ALL'} 
-                      disabled={!isSuperAdmin}
-                      onChange={() => setSaveScope('ALL')}
-                      className="w-4 h-4 text-blue-600 focus:ring-blue-500 border-slate-300 disabled:opacity-50"
-                    />
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold text-slate-900">Publish to the shared baseline</span>
-                        <span className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded-full ${
-                          isSuperAdmin ? 'bg-blue-100 text-blue-800' : 'bg-slate-200 text-slate-600'
-                        }`}>{isSuperAdmin ? 'New agencies' : 'Administrator only'}</span>
-                      </div>
-                      <p className="text-xs text-slate-500 mt-1">
-                        Updates the central default that <strong>newly created agencies</strong> inherit, and that any agency with no {pendingSaveSection} rates of its own resolves through. <strong>Existing agencies keep their own rates</strong> - this does not change them.
-                      </p>
-                      {/* Names WHAT is being sent, in rows. The screen shows normalised data -
-                          default rows merged in, order and units rewritten - so "publish this
-                          section" is ambiguous without saying which version. An operator who
-                          cannot tell the difference gains nothing from the distinction. */}
-                      {pendingSaveSection && (
-                        <div className={`mt-2 p-2 rounded border text-[11px] leading-relaxed ${
-                          publishPlanFor(pendingSaveSection).useStored
-                            ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
-                            : 'bg-amber-50 border-amber-300 text-amber-900'
-                        }`}>
-                          <strong className="font-bold block">{publishSummary(pendingSaveSection)}</strong>
-                          <span>
-                            {publishPlanFor(pendingSaveSection).useStored
-                              ? 'You have not edited this section, so the stored rows are published as they are. Rows the screen adds for display are not sent.'
-                              : 'This section has unsaved edits, so what you see is what will be published - to every agency and to the shared default.'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
+              {/* ⚠ THERE IS NO "PUBLISH TO THE SHARED BASELINE" OPTION, AND THERE MUST NOT BE.
+                  A super-admin radio stood here writing `public_config` - the third and last
+                  such writer, after two were deleted for causing the divergence that put two
+                  wrong rates into that document (1f@100 = 230 against a tender saying 229,
+                  11B@100 = 148.99 against 149).
 
-                {/* Agency Chips */}
-                <div className="mt-3 flex flex-wrap gap-1.5 pl-6">
-                  {agencies.map(ag => (
-                    <span 
-                      key={ag.id} 
-                      className={`text-[10px] font-medium px-2 py-0.5 rounded-md border ${
-                        ag.id === activeAgency.id 
-                          ? 'bg-blue-100 text-blue-800 border-blue-300 font-bold' 
-                          : 'bg-slate-100 text-slate-700 border-slate-200'
-                      }`}
-                    >
-                      {ag.name} {ag.id === activeAgency.id ? '(Active)' : ''}
-                    </span>
-                  ))}
-                </div>
-              </div>
+                  Removed because the layer it wrote no longer governs anything worth writing
+                  to. Rates live on the tender, adoption copies them from a published
+                  template, and the schedule itself is in code. `public_config` survives only
+                  as pricing rung 3 for an agency with no sections and no AT - one of eleven -
+                  and it no longer seeds new agencies either; addAgency takes the shipped
+                  constants directly.
+
+                  ⚠ ORDERING MATTERED. Its two wrong cells were corrected to the tender
+                  figures FIRST (scripts/admin/fix-public-config-artefacts.js, four cells
+                  including the legacy mirror), so the document is frozen CORRECT rather than
+                  frozen wrong. Removing the writer before fixing them would have left them
+                  permanently unwritable from inside the app.
+
+                  A capability in the rules exists whatever the UI offers (AUDIT G1), so the
+                  `isSuperAdmin()` grant on public_config goes with this control. */}
             </div>
 
             {/* Modal Actions */}
@@ -2984,7 +2886,7 @@ export default function EstimateMaster() {
                 ) : (
                   <>
                     <Check className="w-4 h-4 mr-1.5" />
-                    {isSuperAdmin && saveScope === 'ALL' ? `Publish to shared baseline` : `Save for ${activeAgency.name}`}
+                    {`Save for ${activeAgency.name}`}
                   </>
                 )}
               </button>
