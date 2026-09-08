@@ -997,7 +997,18 @@ export default function EstimateGenerate() {
 
       return (
         <PrintableA4Page key={pageIdx} agency={activeAgency} documentTitle="FORWARDING LETTER">
-          <div className="flex flex-col justify-between h-full text-black">
+          {/* ⚠ NO `justify-between h-full` HERE, AND IT MUST NOT COME BACK.
+              It stretched this container to the full A4 body and pushed the signature block
+              to the floor, so the gap between the closing paragraph and the signatures was
+              WHATEVER WAS LEFT OVER - large on a short MR, small on a long one, never twice
+              the same. The tax invoice had the identical defect (AUDIT), which makes this
+              the second instance: a footer positioned by leftover space rather than by a
+              stated one.
+
+              Costs nothing to fix. The space was already inside the page; this only stops it
+              being dumped in one place. The page footer is a SIBLING of this div
+              (a4-page-footer), so nothing depended on the stretch. */}
+          <div className="text-black">
             <div>
               {isFirst && (
                 <>
@@ -1057,16 +1068,14 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                         <td className="p-1 border-r border-black">{job.coreType || 'CRGO'}</td>
                         <td className="p-1 border-r border-black">{job.repairType || 'OGP'}</td>
                         <td className="p-1 border-r border-black text-right font-mono font-bold">{finalAmt}</td>
+                        {/* ⚠ "(> CIRCLE LIMIT)" IS NOT IN THIS CELL ANY MORE - see the block
+                            below the table. It was a 7.5px sub-line inside a nowrap column:
+                            the most consequential fact on the sheet, set in the smallest type
+                            on the page, forcing that one row taller than every other. The
+                            figures behind it lived only in a `title` tooltip, which does not
+                            exist on paper. */}
                         <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
-                          {isScrapJob ? (
-                            'SCRAP'
-                          ) : check.exceeds ? (
-                            <span className="text-rose-900 font-bold" title={`Exceeds SE Circle Limit ₹${check.limit.toFixed(0)} by ₹${check.diff.toFixed(0)}`}>
-                              REPAIRABLE <span className="text-[7.5px] block text-rose-700 font-black">(&gt; CIRCLE LIMIT)</span>
-                            </span>
-                          ) : (
-                            'REPAIRABLE'
-                          )}
+                          {isScrapJob ? 'SCRAP' : 'REPAIRABLE'}
                         </td>
                       </tr>
                     );
@@ -1081,7 +1090,43 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 </tbody>
               </table>
 
-              {isLast && <p className="text-xs mb-4 whitespace-pre-wrap">{closingText}</p>}
+              {/* EXCEEDS THE CLAUSE 4.0 LIMIT - FULL WIDTH, BORDERED, DIRECTLY UNDER THE
+                  TOTALS, WHERE THE EYE ALREADY IS.
+                  ⚠ AND IT REPORTS THE RIGHT FIGURE NOW. `check.finalAmt` is comparisonTotal
+                  since the Clause 4.0 exclusion landed - labour and material, with tank,
+                  conservator and radiator taken out. The old in-cell marker predated that and
+                  would have been asserting the FULL estimate against a limit those three
+                  items are explicitly excluded from, on a sheet addressed to the officer
+                  whose sanction power it describes. Moving it corrected a wrong number as
+                  well as a layout. */}
+              {isLast && (() => {
+                const over = rows
+                  .map(({ job }) => ({ job, check: checkJobCircleLimit(job) }))
+                  .filter(({ job, check }) =>
+                    check.exceeds && !(job.status === 'Scrap' || job.condition === 'Scrap'));
+                if (!over.length) return null;
+                return (
+                  <div className="mt-3 border-2 border-black p-2 text-xs">
+                    <p className="font-black tracking-wide">EXCEEDS CLAUSE 4.0 CIRCLE LIMIT</p>
+                    {over.map(({ job, check }) => (
+                      <p key={job.id} className="mt-0.5">
+                        <span className="font-mono font-bold">{job.jobNo}</span>
+                        {' \u2014 Clause 4.0 amount Rs '}{check.finalAmt.toFixed(2)}
+                        {' against a sanction limit of Rs '}{check.limit.toFixed(2)}
+                        {' ('}{check.diffPct >= 0 ? '+' : ''}{check.diffPct.toFixed(1)}{'%).'}
+                      </p>
+                    ))}
+                    <p className="mt-1">
+                      Tank, conservator tank and radiator charges are excluded from this
+                      computation, as provided in Clause 4.0.
+                    </p>
+                  </div>
+                );
+              })()}
+
+              {/* mt-3 SEPARATES THIS FROM THE TABLE. It had none - the paragraph touched the
+                  last row, which is the thing that reads as unfinished. */}
+              {isLast && <p className="text-xs mt-3 mb-4 whitespace-pre-wrap">{closingText}</p>}
 
               {!isLast && (
                 <p className="text-right text-xs italic mt-2">Continued on page {pageIdx + 2}…</p>
@@ -1089,8 +1134,9 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
             </div>
 
             {isLast && (
-              <div>
-                <div className="flex justify-between text-xs mb-6">
+              /* mt-3 IS THE GAP, STATED. It used to be whatever `justify-between` left over. */
+              <div className="mt-3">
+                <div className="flex justify-between text-xs mb-4">
                   <p>Thanking you</p>
                   <p>Yours faithfully</p>
                 </div>

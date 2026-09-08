@@ -566,6 +566,33 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: a footer positioned by leftover space rather than by a stated gap
+
+**Second instance, so it is a pattern rather than a bug.** `flex flex-col justify-between`
+on a container with `h-full` stretches to the full page body and pushes the last child to
+the floor. The gap above it is then WHATEVER IS LEFT OVER — large on a short document, small
+on a long one, never twice the same, and never a number anyone chose.
+
+  1. The tax invoice, fixed earlier.
+  2. `EstimateGenerate.tsx:1000`, the forwarding-letter sheet: the signature block for the
+     authority and the agency's representative sat at the bottom of the A4 page instead of
+     under the content it signs.
+
+**It costs nothing to fix, which is the part worth remembering.** The space is already inside
+the page; `justify-between` only decides where to dump it. Removing the stretch and stating
+the gap (`mt-3`) redistributes rather than adds, so a page fitted to A4 with a known margin
+does not lose any of it. That is not obvious from looking at the defect — a bottom-anchored
+footer reads as though something is holding the page open — and it is the reason to fix it
+rather than live with it.
+
+**How to recognise it:** a print container with `h-full` and `justify-between` and exactly
+two children. The tell on paper is that the gap changes between documents of the same kind.
+
+**What to do instead:** let the children stack, and state every gap. A gap nobody chose is a
+gap nobody can review.
+
+---
+
 ## Pattern: a harness that reports "no difference" must contain a case that MUST differ
 
 **The rule, first: a comparator whose whole job is to report an absence cannot detect its
