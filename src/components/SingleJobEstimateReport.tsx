@@ -85,7 +85,13 @@ function windingMaterialError(jobLabel: string, raw: unknown): EstimateRateError
  */
 function scheduleBCandidates(set: ScheduleSet, kvaNum: number, isCopper: boolean): ScheduleBItem[] {
   const wantedWinding: 'Aluminium' | 'Copper' = isCopper ? 'Copper' : 'Aluminium';
-  return set.scheduleB.filter(e => e.kva === kvaNum && e.winding === wantedWinding);
+  // ⚠ `scheduleB` IS OPTIONAL AND tsc WILL NOT TELL YOU. A tender can have no Schedule-B at
+  // all - UGVCL-2026 does not - and with strictNullChecks off, `set.scheduleB.filter` type-
+  // checks perfectly and throws at runtime. Callers must not reach here for such a tender;
+  // this returns empty rather than crashing if one does, and the caller's own missing-rate
+  // path then refuses the job instead of the screen going blank. Fourth time this session a
+  // green typecheck has been worth less than it looked.
+  return (set.scheduleB ?? []).filter(e => e.kva === kvaNum && e.winding === wantedWinding);
 }
 
 /**

@@ -420,7 +420,25 @@ export interface ScheduleSet {
    */
   borrowedFrom: Partial<Record<'scheduleB' | 'circleLimits', ScheduleId>>;
   scheduleA: ScheduleAItem[];
-  scheduleB: ScheduleBItem[];
+  /**
+   * ⚠ OPTIONAL, AND ITS ABSENCE IS THE PRICING MODEL - see `pricingModelForJob`.
+   *
+   * A Schedule-B is a table of FIXED repair rates for Amorphous and CRGO Wound Core: one
+   * charge per capacity and winding material, instead of the itemised walk CRGO gets. The
+   * 2020 tender has one. THE 2026 TENDER DOES NOT - its Schedule-A heading widened from
+   * "CRGO (STACK/DRY/PAT/SDT)" to "CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous Core", and
+   * all three core types are priced itemised by work done and labour.
+   *
+   * So this is `undefined` for 2026 rather than borrowed from 2020. The distinction is not
+   * cosmetic: a BORROW says "the right pages have not arrived yet", and the app tells the
+   * operator so and waits. ABSENCE says "there are no such pages", which is permanent and
+   * correct. Borrowing here would have been the wrong model quietly working - fixed rates
+   * applied under a tender that does not have any - and every 1819 Amorphous estimate would
+   * have carried 2020 figures with nothing saying so.
+   *
+   * `circleLimits` stays borrowed. That one IS a genuine "not yet supplied".
+   */
+  scheduleB?: ScheduleBItem[];
   /** Radiator replacement above 100 KVA, priced per capacity rather than by band. */
   radiatorAbove100: Record<number, number>;
   extras: typeof SCHEDULE_B_EXTRAS;
@@ -449,29 +467,30 @@ export const SCHEDULES: Record<ScheduleId, ScheduleSet> = {
    *
    * Schedule-A is transcribed and diffed: 255 of 306 cells moved, five rows unchanged.
    *
-   * ⚠ SCHEDULE-B AND THE CIRCLE LIMITS ARE 2020'S, PENDING THEIR OWN PAGES - see
-   * `borrowedFrom`. The alternative was leaving the whole schedule unselectable, which
-   * blocks the tender the agency is actually working under. The mixture is temporary,
-   * declared, and shown on screen wherever rates are displayed.
+   * ⚠ THERE IS NO SCHEDULE-B, AND THAT IS THE ANSWER RATHER THAN A GAP. The heading
+   * widened from "CRGO (STACK/DRY/PAT/SDT)" to "CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous
+   * Core", and the tender confirms it: under 2026 all three core types are priced ITEMISED,
+   * by work done and labour, the same way CRGO always was. The fixed-rate branch must not
+   * run for 1819 jobs at all.
    *
-   * ⚠ AND IT MAY BE THE WRONG MIXTURE. The 2026 heading widened from "CRGO
-   * (STACK/DRY/PAT/SDT)" to "CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous Core". If that
-   * means Amorphous and Wound Core are ITEMISED under Schedule-A in this tender rather
-   * than carrying a separate fixed rate, then borrowing 2020's Schedule-B is not a
-   * placeholder for the right answer - it is the wrong model, and the fixed-rate branch in
-   * buildSingleJobEstimateData should not run for 1819 jobs at all. Which branch prices a
-   * core type is currently decided by `coreClass` alone; it would have to become
-   * schedule-dependent. AUDIT records this as the open question the Schedule-B pages must
-   * settle first. DO NOT let the fallback quietly become the answer because it works.
+   * This was carried for a while as a BORROW of 2020's Schedule-B, which was the wrong
+   * model working well enough not to be noticed - exactly what the borrow mechanism was
+   * built to prevent. It is now absent, and `pricingModelForJob` reads that absence.
+   *
+   * THE CIRCLE LIMITS ARE STILL BORROWED, and that borrow now carries weight it did not
+   * before: under 2026 an Amorphous job is circle-limit checked for the FIRST time, against
+   * 2020's Clause 4.0 figures. If 2026 raised them, those jobs flag over-limit slightly
+   * early - on a sheet that goes to the circle office.
    */
   'UGVCL-2026': {
     id: 'UGVCL-2026',
     label: 'UGVCL 2026-28 (AT/1819)',
     complete: true,
     incompleteReason: '',
-    borrowedFrom: { scheduleB: 'UGVCL-2020', circleLimits: 'UGVCL-2020' },
+    // NO scheduleB KEY AT ALL. Confirmed against the tender: 2026 has no Schedule-B, and
+    // `borrowedFrom` no longer claims one either. Absence is the fact being recorded.
+    borrowedFrom: { circleLimits: 'UGVCL-2020' },
     scheduleA: SCHEDULE_A_2026,
-    scheduleB: SCHEDULE_B,
     radiatorAbove100: RADIATOR_ABOVE_100_2026,
     extras: SCHEDULE_B_EXTRAS,
     notes: SCHEDULE_NOTES,
@@ -577,4 +596,56 @@ export function scheduleProvenance(at: any, atMasters: any[]): string {
   }
   if (source === 'default') return `${set.label}, applied because this was the agency's first tender and there was none to carry over from.`;
   return `${set.label}, recorded before this app tracked where a schedule came from.`;
+}
+
+/**
+ * HOW ONE JOB IS PRICED. THE ONLY PLACE THAT DECIDES.
+ *
+ * Eight sites used to decide this independently, each testing `coreClass` alone:
+ *
+ *   SingleJobEstimateReport  the fixed-rate branch, `isFixedRate`, the printed heading
+ *   BillingSystem            which model bills the job
+ *   estimateCalc             whether circle limits apply, and the scrap item code
+ *   ExternalInspection       whether the ADB/1804 supply-order question is asked
+ *   AgencyContext            which estimate-master section is read
+ *
+ * That was correct while every tender had a Schedule-B. It stopped being correct the
+ * moment one did not: under UGVCL-2026 an Amorphous transformer is itemised, so a
+ * coreClass test sends it down the fixed-rate path, into a 13-row Schedule-B table its
+ * tender does not have. Eight independent copies of a rule is also how the scrap charge
+ * came to sit under four different codes across six agencies.
+ *
+ * ⚠ DERIVED FROM THE SCHEDULE'S SHAPE, NOT FROM ITS ID. `set.scheduleB` present means this
+ * tender prices Amorphous and Wound Core at a fixed rate; absent means everything is
+ * itemised. A future schedule needs no edit here - it declares whether it has a Schedule-B
+ * and this follows. Testing `id === 'UGVCL-2026'` would have to be revisited for every
+ * tender after it, which is the same trap as hardcoding a rate.
+ *
+ * OH is its own model in both tenders and is decided by core type alone.
+ */
+export type PricingModel = 'ITEMISED' | 'FIXED_RATE' | 'OH';
+
+export function pricingModelForSchedule(
+  set: ScheduleSet,
+  coreClass: 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE'
+): PricingModel {
+  if (coreClass === 'OH') return 'OH';
+  if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+    // The tender decides, not the core type. No Schedule-B, no fixed rate.
+    return set.scheduleB && set.scheduleB.length > 0 ? 'FIXED_RATE' : 'ITEMISED';
+  }
+  return 'ITEMISED';
+}
+
+/** Convenience for callers holding an AT rather than a resolved set. */
+export function pricingModelForJob(
+  at: { scheduleId?: string } | null | undefined,
+  coreClass: 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE'
+): PricingModel {
+  return pricingModelForSchedule(scheduleSetForAt(at as any), coreClass);
+}
+
+/** Does this tender price any core type at a fixed rate? Drives what the rate screens show. */
+export function hasScheduleB(set: ScheduleSet): boolean {
+  return Boolean(set.scheduleB && set.scheduleB.length > 0);
 }
