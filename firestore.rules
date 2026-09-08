@@ -468,12 +468,15 @@ service cloud.firestore {
     // effect was propagating its own errors. Those were corrected first, then the writers
     // went, then this grant - so it was never both wrong and unwritable.
     //
-    // The admin SDK bypasses rules, so scripts/admin can still repair it if it ever needs
-    // repairing. That is deliberate: a correction should require a reviewed script and the
-    // service account, not a click.
+    // NO DELETE EITHER. Deleting the document is worse than writing it badly: it removes
+    // rung 3 outright for any agency pricing through it. Nothing in the app deletes it, so
+    // the grant was a capability used by nothing, on a document stamped frozen.
+    //
+    // The admin SDK bypasses rules, so a genuine need is still met - by a scripted, dry-run
+    // repair or removal. That is the right level of friction for altering a baseline an
+    // agency prices from: a reviewed script and the service account, not a click.
     match /public_config/{configId} {
       allow get, list: if isSignedIn() || true;
-      allow delete: if isSuperAdmin();
     }
 
     match /system_config/{configId} {
