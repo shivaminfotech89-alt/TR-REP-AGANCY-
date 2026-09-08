@@ -556,10 +556,53 @@ export default function BillingSystem() {
   const jobPricingErrors = (job: any): EstimateRateError[] => {
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
 
-    /* ⚠ NO CIRCLE-LIMIT GATE HERE, AND IT MUST NOT COME BACK. Consent is recorded before
-       the estimate is SENT, because the estimate is what the division approves and the
-       approval that returns is FOR the consented amount. A gate here asked the operator to
-       make the same decision a second time, after the division had already ruled on it. */
+    /* ⚠ NO CIRCLE-LIMIT *DECISION* HERE, AND IT MUST NOT COME BACK. Consent is recorded
+       before the estimate is SENT, because the estimate is what the division approves and
+       the approval that returns is FOR the consented amount. A gate that asked the operator
+       to CONSENT here made them decide a second time, after the division had already ruled.
+
+       What follows is not that. It refuses to CLAIM, and asks for no decision at all. */
+
+    /**
+     * ⚠ CONSENTED BUT NOT YET APPROVED - REFUSE, DO NOT CLAIM.
+     *
+     * A job carrying an active consent has a recorded agreement by the agency to accept a
+     * REDUCED figure. Until the division approves, `approvedAmount` is empty and
+     * calculateJobTotal falls through to a full recomputation - so the bill claimed the
+     * ASSESSED amount on a job whose owner had already agreed to less, silently, with
+     * nothing on screen or on paper indicating a consent existed. SU-5 billed 9,077.15
+     * against a consented 8,716.00: an overclaim of 361.15 to UGVCL, against the agency's
+     * own stated position.
+     *
+     * The alternative considered was claiming the consented figure provisionally. Rejected:
+     * a tax invoice cannot be provisional - once sent it is a claim - and it would put the
+     * bill back in the business of choosing a number, which is what moving consent to the
+     * estimate stage removed. It would also let a bill PRECEDE the approval it purports to
+     * follow.
+     *
+     * So this refuses, in the same shape as the rateErrors refusal beside it: not a number
+     * the app got wrong, a number it has no authority to assert yet. The message names the
+     * missing STEP, because that is what is actually absent.
+     *
+     * ⚠ SCOPED TO JOBS WITH A CONSENT. A job with no consent and no approval - the ordinary
+     * case, 63 of 64 in live data - is untouched and bills at its assessed figure as before.
+     * There is no general requirement in this app that an estimate be sent or approved
+     * before billing, and this is not the place to introduce one.
+     */
+    if (!isScrapJob) {
+      const consent = activeConsent(job);
+      const approvedFig = Number(job.approvedAmount);
+      if (consent && !(Number.isFinite(approvedFig) && approvedFig > 0)) {
+        const sent = job.estimateStatus === 'Sent' || Boolean(job.estimateSentDate);
+        return [{ kind: 'missing-rate', message:
+          `${job.jobNo || 'This job'}: consent is recorded to repair within Rs `
+          + `${Number(consent.limitAtConsent).toFixed(2)}, and the bill claims the amount the `
+          + `division approved. `
+          + (sent
+              ? `The estimate has been sent and is awaiting approval - record the approval before billing.`
+              : `The estimate has not been sent yet - send it, then record the division's approval.`) }];
+      }
+    }
 
     if (isScrapJob) {
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
