@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
 import { selectableSchedules, DEFAULT_SCHEDULE_ID, SCHEDULES, ScheduleId, isScheduleId } from '../lib/ugvclSchedules';
@@ -437,6 +437,40 @@ export function AtSettings() {
   };
 
   /**
+   * CREATE A TENDER, FROM THE SECTION HEADER.
+   *
+   * The only way in used to be a button at the BOTTOM of the expanded body, below every
+   * existing AT - so creating one meant knowing to click "Expand & Manage" on a section
+   * that is collapsed on arrival, then scrolling past the whole list to find the trigger.
+   * Users reported not being able to find where to create a tender, which is what that
+   * costs. The form itself was never the problem: it already opens on demand.
+   *
+   * Expands the section if it is closed, since the form renders inside that body.
+   *
+   * The nonce, rather than an effect on `showAddForm`: the bottom trigger sets the same
+   * flag, and it does not need scrolling - it is already next to the form. Keying on the
+   * nonce means only this button scrolls, and it still scrolls when the form is ALREADY
+   * open, where `showAddForm` would not change and an effect on it would never fire.
+   */
+  const addFormRef = useRef<HTMLFormElement>(null);
+  const [addFormNonce, setAddFormNonce] = useState(0);
+
+  const openAddFormFromHeader = () => {
+    setIsExpanded(true);
+    openAddForm();
+    setAddFormNonce(n => n + 1);
+  };
+
+  useEffect(() => {
+    if (!addFormNonce) return;
+    // One frame, so the form has mounted when the section was collapsed a moment ago.
+    const id = requestAnimationFrame(() => {
+      addFormRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    return () => cancelAnimationFrame(id);
+  }, [addFormNonce]);
+
+  /**
    * Choose a template, and carry across what it knows.
    *
    * Shared by the select and by `openAddForm`, which opens on the newest template - a
@@ -675,10 +709,21 @@ export function AtSettings() {
           </div>
         </div>
 
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+        <button
+          type="button"
+          onClick={openAddFormFromHeader}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700 transition-colors shadow-2xs"
+          title="Create a new AT / tender period for this agency."
+        >
+          <Plus className="w-3.5 h-3.5" />
+          <span>Add AT</span>
+        </button>
+
         <button
           type="button"
           onClick={() => setIsExpanded(!isExpanded)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all self-end sm:self-auto ${
+          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
             isExpanded 
               ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300' 
               : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 shadow-2xs'
@@ -696,6 +741,7 @@ export function AtSettings() {
             </>
           )}
         </button>
+        </div>
       </div>
 
       {/* Minimized Summary View */}
@@ -1135,7 +1181,7 @@ export function AtSettings() {
           {seedPanel}
 
       {showAddForm && (
-            <form onSubmit={handleAdd} className="space-y-4 bg-slate-50 p-4 border border-indigo-200 rounded-xl">
+            <form ref={addFormRef} onSubmit={handleAdd} className="space-y-4 bg-slate-50 p-4 border border-indigo-200 rounded-xl">
               <div className="flex items-center justify-between border-b border-slate-200 pb-2">
                 <h4 className="text-xs font-bold uppercase text-indigo-900">Create New AT / Tender Period</h4>
                 <button type="button" onClick={() => setShowAddForm(false)} className="text-slate-400 hover:text-slate-600">
