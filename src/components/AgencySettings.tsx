@@ -1,7 +1,7 @@
 import EstimateMaster from './EstimateMaster';
 import AtMasters from './AtMasters';
 import React, { useState, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, type PublishedAt } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { gstinScopeError } from '../lib/utils';
@@ -247,7 +247,23 @@ export default function AgencySettings() {
    */
   const ratesSummary = (() => {
     if (!activeAtMaster) {
-      return { tone: 'blocking' as const, label: 'No AT selected', detail: 'Rates belong to a tender. Create or select one above.' };
+      // A LINK, NOT AN INSTRUCTION. A new agency meets this state before any other - the
+      // nav has no Tenders entry and AT creation sits inside this page - so "create one
+      // above" is the sentence that leaves them looking for it. Rescued from the
+      // ratesSource banner that used to carry it (EstimateMaster, removed).
+      return {
+        tone: 'blocking' as const,
+        label: 'No AT selected',
+        detail: (
+          <>
+            Rates belong to a tender.{' '}
+            <Link to="/agency-settings?section=at" className="font-bold underline hover:text-rose-950">
+              Create or select one
+            </Link>{' '}
+            before setting them.
+          </>
+        ),
+      };
     }
     const src = String((activeAtMaster as any).ratesSource || '').trim();
     if (!src) {

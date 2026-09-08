@@ -2396,121 +2396,27 @@ export default function EstimateMaster() {
         </div>
       )}
 
-      {/* WHERE THESE RATES COME FROM — stated, never implied.
-          `ratesSource` absent means an AT has no rates of its own, and that must not look
-          the same as having them. A silent fallthrough to the agency's is the 'JOB'
-          sentinel shape (F71): a plausible value standing in for a missing one, with
-          nothing saying which it was. */}
-      {(() => {
-        if (ratesState.kind === 'no-at') {
-          // TWO DIFFERENT PROBLEMS, and telling them apart is the whole value of the
-          // message. "None selected" is a click away; "none exists" is a setup step the
-          // app never asked for - the nav has no Tenders entry and AT creation sits below
-          // the agency form in Settings, so a new agency reaches THIS screen first and
-          // meets a wall. Saying "cannot save" without saying "create a tender" leaves
-          // them at the wall.
-          const agencyHasAnyAt = atMasters.some(t => t.agencyId === activeAgency.id);
-          return (
-            <div className="bg-rose-50 border border-rose-300 rounded-lg p-4 text-sm text-rose-900 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">
-                  {agencyHasAnyAt
-                    ? 'No AT is selected, so there is nowhere to save rates.'
-                    : `${activeAgency.name} has no AT (tender) yet, so it has no rates to set.`}
-                </p>
-                <p className="text-xs mt-1">
-                  {agencyHasAnyAt
-                    ? <>Rates belong to a tender. Select which AT you are editing, then come back.</>
-                    : <>Rates are part of a tender, not of the agency &mdash; each AT carries the schedule it
-                       was awarded under. <strong>Create the AT first</strong>, then set its rates here. The
-                       figures below are the shipped defaults and are shown for reference only.</>}
-                </p>
-                <Link
-                  to="/agency-settings?section=at"
-                  className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold"
-                >
-                  {agencyHasAnyAt ? 'Choose an AT' : 'Create an AT for this agency'}
-                </Link>
-              </div>
-            </div>
-          );
-        }
-        if (ratesState.kind === 'none') {
-          return (
-            <div className="bg-rose-50 border border-rose-300 rounded-lg p-4 text-sm text-rose-900 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">
-                  AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo; has no rates of its own.
-                </p>
-                <p className="text-xs mt-1">
-                  The figures below are <strong>not this AT&rsquo;s rates</strong> until you save them.
-                </p>
-              </div>
-            </div>
-          );
-        }
-        if (ratesState.kind === 'inherited') {
-          return (
-            <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-sm text-amber-900 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">
-                  These rates were inherited from {activeAgency.name}, not entered for this tender.
-                </p>
-                <p className="text-xs mt-1">
-                  They were copied onto AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo; when rates
-                  moved from agencies onto tenders, so they are the figures this agency was using &mdash; but nobody
-                  has confirmed them against <strong>this</strong> tender&rsquo;s schedule. Saving any section makes
-                  them this AT&rsquo;s own.
-                </p>
-              </div>
-            </div>
-          );
-        }
-        if (ratesState.kind === 'published') {
-          const tpl = publishedAts.find(t => t.id === (ratesState as any).id);
-          const usedVersion = Number((selectedAt as any)?.publishedAtVersion ?? 0);
-          const currentVersion = Number(tpl?.version ?? 0);
-          const drifted = tpl && currentVersion > usedVersion;
-          return (
-            <div className={`${drifted ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-300 text-emerald-900'} border rounded-lg p-4 text-sm flex items-start gap-3`}>
-              {drifted ? <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" /> : <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />}
-              <div>
-                <p className="font-bold">
-                  Copied from published template &ldquo;{tpl?.name || (ratesState as any).id}&rdquo; v{usedVersion || '?'}
-                </p>
-                {/* THE DRIFT CASE, said where someone editing rates would look - not only in
-                    the data. A copy does not follow the template, which is the point: a live
-                    estimate must not change because an admin revised a template. But the
-                    operator has to be able to SEE that it has moved on. */}
-                <p className="text-xs mt-1">
-                  {drifted
-                    ? <>The template is now at <strong>v{currentVersion}</strong>. Your rates did not change and will
-                       not &mdash; a copy never follows the template, or a live estimate could move under you. Review
-                       the differences and re-copy if this tender should adopt them.</>
-                    : <>This is the current version of that template. Your rates are a copy and will not change if the
-                       template is revised.</>}
-                </p>
-              </div>
-            </div>
-          );
-        }
-        return (
-          <div className="bg-emerald-50 border border-emerald-300 rounded-lg p-4 text-sm text-emerald-900 flex items-start gap-3">
-            <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">
-                Rates entered for AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo;.
-              </p>
-              <p className="text-xs mt-1">
-                They price only jobs booked under this tender. No other AT, agency or user is affected.
-              </p>
-            </div>
-          </div>
-        );
-      })()}
+      {/* ⚠ THE ratesSource BANNER WAS HERE. ALL FIVE BRANCHES ARE GONE, AND MUST NOT COME
+          BACK AS A BANNER. It restated, in a full-width coloured slab, what the section
+          header three lines above it already said - and it could not do otherwise, because
+          this component has no route of its own. AppLayout:117 renders it in exactly one
+          place, inside the Agency Settings section whose header carries `ratesSummary`
+          (AgencySettings:248). So the header and the banner were always on screen together,
+          always about the same AT. There was no view in which the banner was the only
+          statement, and about 251 words went on saying it twice.
+
+          THE STATE IS STILL STATED, ONCE EACH, in AgencySettings' section header: no AT,
+          no rates, inherited, copied-from-template (with the version and whether a newer
+          one exists), and entered-for-this-tender. That header is visible whether the
+          section is open or closed, which this banner never was.
+
+          Three things the banner said that the header did not, kept and moved to where
+          they can be acted on:
+            - why a drifted copy did not follow the template -> the template card row,
+              beside its "Update to v..." button
+            - the "create an AT" link -> the header's detail line (AgencySettings)
+            - "the figures below are not this AT's rates yet" -> the line below, because it
+              describes the GRID and belongs with the grid */}
 
       {/* ADOPT A PUBLISHED TEMPLATE. Shown to everyone: this is the second of the two ways
           a user gets rates - enter them, or take a published AT. It sits above the tables
@@ -2584,6 +2490,17 @@ export default function EstimateMaster() {
                       )}
                     </div>
                     {t.notes && <div className="text-[11px] text-slate-600 mt-0.5 line-clamp-2">{t.notes}</div>}
+                    {/* WHY YOUR RATES DID NOT FOLLOW, said beside the button that changes
+                        that. The section header reports "Template v2 - v3 available" but
+                        never why v2 stayed - and that is the fact that matters, because it
+                        is the reason this is a decision and not a fault to be repaired. */}
+                    {isSource && usedVersion < Number(t.version) && (
+                      <div className="text-[11px] text-amber-800 mt-1 leading-relaxed">
+                        Your rates did not change and will not &mdash; a copy never follows the
+                        template, or a live estimate could move under you. Re-copy only if this
+                        tender should adopt v{t.version}.
+                      </div>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -2718,6 +2635,14 @@ export default function EstimateMaster() {
               </span>
             )}
           </div>
+          {/* THE ONE THING THE SECTION HEADER CANNOT SAY, because it is about the GRID.
+              `ratesSummary` in AgencySettings reports that this tender has no rates; only
+              here is there a table of figures that an operator could mistake for them. */}
+          {ratesState.kind === 'none' && (
+            <p className="mt-1.5 text-[11px] font-bold text-rose-800 bg-rose-50 border border-rose-200 rounded px-2 py-1 inline-block">
+              The figures below are not this AT&rsquo;s rates until you save them.
+            </p>
+          )}
           {/* When the rates last changed. Shown beside the master itself, because the
               question it answers - "could this estimate predate the current rates" - is
               asked while looking at the master, not while looking at the agency record. */}
