@@ -837,7 +837,7 @@ export default function InternalInspection() {
       );
     }
 
-    const finalRs = Math.round(check.finalAmt).toLocaleString('en-IN');
+    const finalRs = Math.round(check.comparisonAmt).toLocaleString('en-IN');
     const limitRs = Math.round(check.limit).toLocaleString('en-IN');
     const diffRs = Math.round(Math.abs(check.diff)).toLocaleString('en-IN');
     const isRed = check.exceeds;

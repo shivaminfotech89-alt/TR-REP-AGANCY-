@@ -1053,9 +1053,13 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 <tbody>
                   {rows.map(({ job, idx }) => {
                     const est = getJobFullEstimate(job);
+                    // The ESTIMATE TOTAL, which is what the Amount column shows. Not the
+                    // Clause 4.0 figure - nothing on this sheet reads that.
                     const finalAmt = est.finalAmount.toFixed(2);
                     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-                    const check = checkJobCircleLimit(job);
+                    // NO checkJobCircleLimit HERE ANY MORE. Nothing on the printed sheet
+                    // reads the circle limit, so computing it per row would price every job
+                    // twice to render nothing. See the note below the table.
 
                     return (
                       <tr key={job.id} className="border-b border-black">
@@ -1090,40 +1094,17 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 </tbody>
               </table>
 
-              {/* EXCEEDS THE CLAUSE 4.0 LIMIT - FULL WIDTH, BORDERED, DIRECTLY UNDER THE
-                  TOTALS, WHERE THE EYE ALREADY IS.
-                  ⚠ AND IT REPORTS THE RIGHT FIGURE NOW. `check.finalAmt` is comparisonTotal
-                  since the Clause 4.0 exclusion landed - labour and material, with tank,
-                  conservator and radiator taken out. The old in-cell marker predated that and
-                  would have been asserting the FULL estimate against a limit those three
-                  items are explicitly excluded from, on a sheet addressed to the officer
-                  whose sanction power it describes. Moving it corrected a wrong number as
-                  well as a layout. */}
-              {isLast && (() => {
-                const over = rows
-                  .map(({ job }) => ({ job, check: checkJobCircleLimit(job) }))
-                  .filter(({ job, check }) =>
-                    check.exceeds && !(job.status === 'Scrap' || job.condition === 'Scrap'));
-                if (!over.length) return null;
-                return (
-                  <div className="mt-3 border-2 border-black p-2 text-xs">
-                    <p className="font-black tracking-wide">EXCEEDS CLAUSE 4.0 CIRCLE LIMIT</p>
-                    {over.map(({ job, check }) => (
-                      <p key={job.id} className="mt-0.5">
-                        <span className="font-mono font-bold">{job.jobNo}</span>
-                        {' \u2014 Clause 4.0 amount Rs '}{check.finalAmt.toFixed(2)}
-                        {' against a sanction limit of Rs '}{check.limit.toFixed(2)}
-                        {' ('}{check.diffPct >= 0 ? '+' : ''}{check.diffPct.toFixed(1)}{'%).'}
-                      </p>
-                    ))}
-                    <p className="mt-1">
-                      Tank, conservator tank and radiator charges are excluded from this
-                      computation, as provided in Clause 4.0.
-                    </p>
-                  </div>
-                );
-              })()}
+              {/* ⚠ THE PRINTED SHEET SAYS NOTHING ABOUT THE CIRCLE LIMIT, DELIBERATELY.
+                  An "EXCEEDS CLAUSE 4.0 CIRCLE LIMIT" block stood here briefly and was
+                  removed: the sanction routing is UGVCL's internal business and does not
+                  belong on the document the agency submits to the division. The operator
+                  already learns it before printing - the on-screen warning card names every
+                  affected job with both figures, and the MR list badges flag it earlier
+                  still. Nothing is lost by the sheet being silent; the fact simply lives
+                  where it is acted on.
 
+                  The "(> CIRCLE LIMIT)" text that used to sit inside the Condition column is
+                  gone for the same reason and must not return there either. */}
               {/* mt-3 SEPARATES THIS FROM THE TABLE. It had none - the paragraph touched the
                   last row, which is the thing that reads as unfinished. */}
               {isLast && <p className="text-xs mt-3 mb-4 whitespace-pre-wrap">{closingText}</p>}
@@ -1599,8 +1580,19 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       {exceedingJobsInSelectedMr.length} Transformer(s) Over Limit
                     </span>
                   </div>
+                  {/* ⚠ "THE ESTIMATED REPAIR COST" WAS THE WRONG NAME FOR WHAT EXCEEDS.
+                      Clause 4.0 excludes tank, conservator tank and radiator from the
+                      computation, so the figure over the limit is the Clause 4.0 amount and
+                      not the estimate total - which is larger whenever any of those three
+                      is on the job. An operator reading "estimated repair cost" here and
+                      then reading the Final Amount on the estimate would find two different
+                      numbers for the thing this card names. */}
                   <p className="text-xs text-rose-800 mt-1 leading-relaxed">
-                    The estimated repair cost for the transformer(s) listed below exceeds the 25% financial sanction power of the Superintending Engineer (Circle Office). These estimates will require special sanction from higher corporate authority (Chief Engineer / Corporate Office).
+                    The <strong>Clause 4.0 amount</strong> &mdash; labour and material, with tank,
+                    conservator tank and radiator excluded &mdash; exceeds the 25% financial sanction power
+                    of the Superintending Engineer (Circle Office) for the transformer(s) below. These
+                    estimates require special sanction from higher corporate authority (Chief Engineer /
+                    Corporate Office). The estimate itself still shows the full assessed amount.
                   </p>
                 </div>
               </div>
@@ -1617,11 +1609,14 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                       </div>
                     </div>
                     <div className="text-right">
+                      {/* LABELLED, because it is NOT the estimate total. Unlabelled beside
+                          "Circle Limit" it read as the amount of the estimate, which it has
+                          not been since the Clause 4.0 exclusion. */}
                       <div className="font-mono tabular-nums font-bold text-rose-700 text-xs">
-                        ₹{check.finalAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        ₹{check.comparisonAmt.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </div>
                       <div className="text-[9px] text-slate-500 font-medium">
-                        Circle Limit: ₹{check.limit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                        Clause 4.0 amount &bull; Limit: ₹{check.limit.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                       </div>
                       <div className="text-[9px] font-bold text-rose-600">
                         +₹{check.diff.toFixed(0)} (+{check.diffPct.toFixed(1)}%)

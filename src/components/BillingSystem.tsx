@@ -153,7 +153,7 @@ export default function BillingSystem() {
         consentedBy: auth.currentUser?.email || auth.currentUser?.uid || 'unknown',
         consentedAt: Date.now(),
         limitAtConsent: Number(check.limit),
-        comparisonTotalAtConsent: Number(check.finalAmt),
+        comparisonTotalAtConsent: Number(check.comparisonAmt),
       };
       const note = consentAuthorisedBy.trim();
       if (note) consent.authorisedBy = note;
@@ -640,7 +640,7 @@ export default function BillingSystem() {
       }
       if (eligibility === 'OFFER' && !consent) {
         return [{ kind: 'missing-rate', message:
-          `${job.jobNo || 'This job'}: the Clause 4.0 amount (Rs ${check.finalAmt.toFixed(2)}) exceeds the `
+          `${job.jobNo || 'This job'}: the Clause 4.0 amount (Rs ${check.comparisonAmt.toFixed(2)}) exceeds the `
           + `circle limit (Rs ${check.limit.toFixed(2)}). Record the agency's consent to repair within the `
           + `limit before billing - the bill would otherwise claim above an unsanctioned figure.` }];
       }
@@ -3017,7 +3017,7 @@ export default function BillingSystem() {
                       </tr>
                       <tr className="border-b border-slate-100">
                         <td className="p-1.5 text-slate-600">Clause 4.0 amount (labour + material)</td>
-                        <td className="p-1.5 text-right font-mono">{st.check.finalAmt.toFixed(2)}</td>
+                        <td className="p-1.5 text-right font-mono">{st.check.comparisonAmt.toFixed(2)}</td>
                       </tr>
                       <tr className="border-b border-slate-100">
                         <td className="p-1.5 text-slate-600">Sanction limit</td>
@@ -3534,7 +3534,7 @@ export default function BillingSystem() {
                         const consentRec = (job.repairWithinLimitConsent ?? null) as RepairWithinLimitConsent | null;
                         const agreedAgainst = consentRec ? Number(consentRec.comparisonTotalAtConsent) : null;
                         const consentDrifted = consentRec != null && agreedAgainst != null
-                          && Math.abs(agreedAgainst - jobConsentState(job).check.finalAmt) >= 0.01;
+                          && Math.abs(agreedAgainst - jobConsentState(job).check.comparisonAmt) >= 0.01;
                         return (
                           <React.Fragment key={job.id}>
                           <tr className="border-b border-black">
@@ -3581,7 +3581,7 @@ export default function BillingSystem() {
                                   <span>
                                     {' '}Consent was agreed against a Clause 4.0 amount of
                                     Rs {Number(agreedAgainst).toFixed(2)}; the estimate now assesses
-                                    Rs {jobConsentState(job).check.finalAmt.toFixed(2)}.
+                                    Rs {jobConsentState(job).check.comparisonAmt.toFixed(2)}.
                                   </span>
                                 )}
                               </td>

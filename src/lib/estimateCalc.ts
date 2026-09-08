@@ -155,7 +155,14 @@ export function resolveScrapCharge(
 }
 
 export interface CircleLimitCheck {
-  finalAmt: number;
+  /**
+   * ⚠ THE CLAUSE 4.0 FIGURE, NOT THE ESTIMATE TOTAL. Renamed from `comparisonAmt`, which stopped
+   * being true the moment the tank / conservator / radiator exclusion landed: it carries
+   * `comparisonTotal`, and a reader comparing it against the estimate's Final Amount would
+   * find two different numbers with nothing saying why. A name that no longer describes its
+   * value is the defect this codebase keeps finding; it was not left in place.
+   */
+  comparisonAmt: number;
   limit: number;
   ratingLabel: string;
   ratingCode: string;
@@ -277,7 +284,7 @@ export function consentRefusalReason(e: ConsentEligibility): string | null {
 export function consentEligibility(check: CircleLimitCheck): ConsentEligibility {
   if (!check.hasLimit || !(check.limit > 0)) return 'NO_LIMIT';
   if (!check.exceeds) return 'NOT_NEEDED';
-  return check.finalAmt <= check.limit * CONSENT_BAND_MULTIPLIER ? 'OFFER' : 'SCRAP';
+  return check.comparisonAmt <= check.limit * CONSENT_BAND_MULTIPLIER ? 'OFFER' : 'SCRAP';
 }
 
 /**
@@ -352,7 +359,7 @@ export function checkJobCircleLimit(
    * Falls back to `finalAmount` where the path does not compute a comparison figure - the
    * scrap, fixed-rate and OH branches, none of which can carry a tank or radiator line.
    */
-  const finalAmt = typeof est.comparisonTotal === 'number' ? est.comparisonTotal : est.finalAmount;
+  const comparisonAmt = typeof est.comparisonTotal === 'number' ? est.comparisonTotal : est.finalAmount;
   const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
 
   // THE GUARD LIVES HERE, NOT AT THE CALL SITES.
@@ -375,7 +382,7 @@ export function checkJobCircleLimit(
   if (!coreTypeHasCircleLimit(job?.coreType, atMaster)) {
     const rating = getCircleLimitForJob(job.capacityKva, ratingKey, circleLimitsData);
     return {
-      finalAmt,
+      comparisonAmt,
       limit: 0,
       ratingLabel: rating.ratingLabel,
       ratingCode: rating.ratingCode,
@@ -387,11 +394,11 @@ export function checkJobCircleLimit(
   }
 
   const limitInfo = getCircleLimitForJob(job.capacityKva, ratingKey, circleLimitsData);
-  const exceeds = limitInfo.hasLimit && finalAmt > limitInfo.limit;
-  const diff = finalAmt - limitInfo.limit;
+  const exceeds = limitInfo.hasLimit && comparisonAmt > limitInfo.limit;
+  const diff = comparisonAmt - limitInfo.limit;
   const diffPct = limitInfo.limit > 0 ? ((diff / limitInfo.limit) * 100) : 0;
   return {
-    finalAmt,
+    comparisonAmt,
     limit: limitInfo.limit,
     ratingLabel: limitInfo.ratingLabel,
     ratingCode: limitInfo.ratingCode,
