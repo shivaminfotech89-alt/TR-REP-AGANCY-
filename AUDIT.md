@@ -5624,7 +5624,40 @@ but it is a change to a printed sheet and has not been proposed.
 
 ---
 
-### O29. The DISCOM's approved amount is captured, displayed, and never read by the bill
+### O29. CLOSED — the approved amount now decides what the bill claims
+
+**Closed by the consent work.** `approvedAmount` had been written at the approval stage and
+read by nothing since it was built: the bill recomputed from the master every time, so a
+figure the division had actually sanctioned sat in the database beside a claim derived
+independently of it.
+
+It is now the claim. `BillingSystem.calculateJobTotal` returns `job.approvedAmount` where one
+exists, and the chain runs end to end: the agency consents at the estimate stage → the
+consent is printed on the sheet → the division approves that figure → the bill claims it.
+
+**Two things had to change before the field was usable, and both are recorded here because
+the field looked usable and was not:**
+
+1. **It was an MR-LEVEL TOTAL written onto every job in the MR.** One `apprAmount` input,
+   pre-filled from `calculateMrEstimateTotal(mr)`, copied into each job's `approvedAmount`.
+   Reading that per job would have claimed the whole MR's approval for each transformer.
+   The approval stage now captures one amount PER JOB, pre-filled from that job's consented
+   claim where consent exists and from its own assessed amount otherwise, editable because
+   the division may approve something different. The MR total became a computed sum shown
+   for reconciliation against the division's letter.
+
+2. **A GUARD REFUSES A PRE-CHANGE RECORD.** The signature is more than one job in the MR all
+   carrying the identical value; such a record falls through to recomputation rather than
+   being billed. ⚠ TODAY IT MATCHES NOTHING — the single live record, MSBT-12 at 5661, is
+   alone in its MR, so its figure is already correct per job. That is luck rather than
+   design, and the guard is what makes the luck running out a refusal instead of an
+   overclaim. No migration was needed and none was written.
+
+**The original entry follows, for the reasoning that led here.**
+
+---
+
+### O29 (original). The DISCOM's approved amount is captured, displayed, and never read by the bill
 
 > **RESOLVED BY DOMAIN ANSWER, NOT BY A CODE CHANGE (2026-09-07).** The operator confirms:
 > **UGVCL approves the same amount that was submitted. The approved figure always equals the

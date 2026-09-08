@@ -616,10 +616,31 @@ export default function BillingSystem() {
   const calculateJobTotal = (job: any): number | null => {
     if (jobPricingErrors(job).length > 0) return null;
 
-    /* THE CLAIM IS NOT CAPPED HERE. Consent to repair within the sanction limit is taken
-       at the ESTIMATE stage and approved by the division; the bill follows `approvedAmount`.
-       Capping here made billing the place the decision was recorded, which is AFTER the
-       document that carries it has gone out. See EstimateGenerate's send flow. */
+    /**
+     * THE BILL CLAIMS WHAT THE DIVISION APPROVED. It does not decide and does not cap.
+     *
+     * Consent to repair within the sanction limit is recorded at the ESTIMATE stage, printed
+     * on the sheet the division approves, and the approval that comes back is FOR that
+     * figure. `approvedAmount` is that figure, per job. This closes AUDIT O29: the field has
+     * been written and read by nothing since it was built, and it now decides what is
+     * claimed.
+     *
+     * ⚠ THE GUARD REFUSES A PRE-CHANGE RECORD. `approvedAmount` used to be ONE MR-LEVEL
+     * TOTAL written onto every job in the MR. Billing such a record per job would claim the
+     * whole MR's approval for each transformer in it. The signature is: more than one job in
+     * the MR, all carrying the identical value. Today nothing matches - the one live record,
+     * MSBT-12 at 5661, is alone in its MR so its figure is already per-job - and that is
+     * luck, not design. The guard exists so the luck running out is a refusal rather than an
+     * overclaim.
+     */
+    const approved = Number(job.approvedAmount);
+    if (Number.isFinite(approved) && approved > 0) {
+      const siblings = jobs.filter(j => j.mrNo === job.mrNo && j.id !== job.id);
+      const looksMrLevel = siblings.length > 0
+        && siblings.every(j => Number(j.approvedAmount) === approved);
+      if (!looksMrLevel) return approved;
+      // Falls through to a recomputation below rather than claiming the MR total per job.
+    }
 
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
@@ -3072,10 +3093,16 @@ export default function BillingSystem() {
               documentTitle=""
               className={activeDocTab === 'all' || activeDocTab === 'forwarding' ? 'block' : 'hidden print:block'}
             >
-              <div className="flex flex-col justify-between h-full">
+              {/* ⚠ NO `justify-between h-full` - THIRD INSTANCE OF THE SAME DEFECT (AUDIT G7).
+                  It stretched this letter to the full A4 body and pushed the signature block
+                  to the floor, so the gap above it was leftover page height rather than a
+                  stated one. The tax invoice below was fixed first, the estimate sheet
+                  second, and this letter beside the invoice was missed both times.
+                  Costs nothing: the space is already inside the page. */}
+              <div className="text-black">
                 <div>
                   {/* Recipient */}
-                  <div className="mb-4 text-xs text-black whitespace-pre-wrap font-medium">
+                  <div className="mb-4 text-[13px] text-black whitespace-pre-wrap font-medium">
                     {forwardingTo || `To\n${activeAgency?.divisionAuthority || ''}\n${activeAgency?.discomName || ''}\nDivision Office : ${currentDivision}`}
                     {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
                   </div>
@@ -3088,7 +3115,7 @@ export default function BillingSystem() {
                   </div>
 
                   {/* Salutation & Body */}
-                  <div className="text-xs text-black space-y-3 leading-relaxed mb-4">
+                  <div className="text-[13px] text-black space-y-3 leading-relaxed mb-4">
                     <p>Dear Sir,</p>
                     <div className="pl-4 space-y-1">
                       <p>
@@ -3116,12 +3143,13 @@ export default function BillingSystem() {
                   </div>
                 </div>
 
-                <div>
+                {/* mt-6 IS THE GAP, STATED. It used to be whatever justify-between left. */}
+                <div className="mt-6">
                   {/* Enclosures & Signatures */}
-                  <div className="flex justify-between items-end text-xs text-black pt-4">
+                  <div className="flex justify-between items-end text-[13px] text-black pt-4">
                     <div className="space-y-1">
                       <p className="font-bold">Encl :-</p>
-                      <ol className="list-decimal list-inside space-y-0.5 text-[11px]">
+                      <ol className="list-decimal list-inside space-y-0.5 text-xs">
                         <li>Bill Copy - 2 with Advance Stamp receipt.</li>
                         <li>Bill Oil Account - 2.</li>
                         <li>Delivery Challan - 1.</li>
@@ -3134,12 +3162,12 @@ export default function BillingSystem() {
                     <div className="text-center">
                       <p className="font-bold mb-8">Yours Faithfully,</p>
                       <p className="font-bold">For, {activeAgency?.name || ''}</p>
-                      <p className="text-[10px] text-slate-500 mt-1">(Auth Sign.)</p>
+                      <p className="text-[11px] text-slate-500 mt-1">(Auth Sign.)</p>
                     </div>
                   </div>
 
                   {forwardingCc && (
-                    <div className="mt-4 text-[10px] font-bold text-slate-800 border-t pt-2">
+                    <div className="mt-4 text-[11px] font-bold text-slate-800 border-t pt-2">
                       <p>C . C. to :</p>
                       <p className="whitespace-pre-wrap font-normal mt-0.5">{forwardingCc}</p>
                     </div>

@@ -90,7 +90,13 @@ export default function EstimateGenerate() {
   const [apprTargetMr, setApprTargetMr] = useState<string>('');
   const [apprNo, setApprNo] = useState('');
   const [apprDate, setApprDate] = useState(new Date().toISOString().split('T')[0]);
-  const [apprAmount, setApprAmount] = useState<number | string>('');
+  /**
+   * APPROVED AMOUNTS, PER JOB. Was one MR-level figure written onto every job in the MR,
+   * which is right only when the MR holds one job and wrong the moment it holds two - and
+   * apportioning an MR total across jobs would invent a split the division never made.
+   * Keyed by job id.
+   */
+  const [apprAmounts, setApprAmounts] = useState<Record<string, string>>({});
 
   /** Optional name of whoever authorised repairing within the limit, for this send. */
   const [consentAuthorisedBy, setConsentAuthorisedBy] = useState('');
@@ -856,7 +862,19 @@ export default function EstimateGenerate() {
     const totalEstAmt = calculateMrEstimateTotal(mr);
     setApprNo(sample.approvalNo || `UGVCL/SE-TR/APPR/${new Date().getFullYear()}/${mr}`);
     setApprDate(sample.approvalDate || new Date().toISOString().split('T')[0]);
-    setApprAmount(sample.approvedAmount || totalEstAmt);
+    /**
+     * PRE-FILLED FROM WHAT WAS ASKED FOR, PER JOB: the consented claim where consent exists,
+     * otherwise the job's own assessed amount. Editable, because the division may approve
+     * something different - and what it approves is what the bill claims.
+     */
+    setApprAmounts(Object.fromEntries(mrJobs.map((j: any) => {
+      const stored = Number(j.approvedAmount);
+      if (Number.isFinite(stored) && stored > 0) return [j.id, String(stored)];
+      const est = getJobFullEstimate(j);
+      const rec = j.repairWithinLimitConsent;
+      const asked = rec ? claimedAmountForJob(est, rec) : Number(est.finalAmount);
+      return [j.id, asked.toFixed(2)];
+    })));
     setApprRemarks(sample.approvalRemarks || '');
     setShowApprModal(true);
   };
@@ -877,7 +895,7 @@ export default function EstimateGenerate() {
         batch.update(jobRef, {
           approvalNo: apprNo.trim(),
           approvalDate: apprDate,
-          approvedAmount: Number(apprAmount) || 0,
+          approvedAmount: Number(apprAmounts[job.id]) || 0,
           estimateApprovalStatus: 'Approved',
           approvalRemarks: apprRemarks || '',
           updatedAt: new Date().toISOString()
@@ -893,7 +911,7 @@ export default function EstimateGenerate() {
             ...j,
             approvalNo: apprNo.trim(),
             approvalDate: apprDate,
-            approvedAmount: Number(apprAmount) || 0,
+            approvedAmount: Number(apprAmounts[j.id]) || 0,
             estimateApprovalStatus: 'Approved',
             approvalRemarks: apprRemarks || ''
           };
@@ -2474,17 +2492,44 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     required
                   />
                 </div>
-                <div>
+                {/* ONE AMOUNT PER JOB. The MR total below is a SUM SHOWN FOR RECONCILIATION,
+                    not the thing stored - it exists so an operator can check the figures
+                    against the division's letter, which is written per MR. */}
+                <div className="sm:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                    Approved Amount (₹)
+                    Approved Amount (₹) &mdash; per transformer
                   </label>
-                  <input
-                    type="number"
-                    value={apprAmount}
-                    onChange={(e) => setApprAmount(e.target.value)}
-                    placeholder="Approved Amt"
-                    className="w-full px-3 py-2 text-xs font-mono tabular-nums font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white"
-                  />
+                  <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-56 overflow-y-auto">
+                    {(mrGroups[apprTargetMr] || []).map((j: any) => {
+                      const est = getJobFullEstimate(j);
+                      const rec = j.repairWithinLimitConsent;
+                      return (
+                        <div key={j.id} className="flex items-center gap-2 px-2.5 py-1.5">
+                          <span className="font-mono font-bold text-xs w-24 shrink-0">{j.jobNo}</span>
+                          <span className="text-[11px] text-slate-500 flex-1 truncate">
+                            {j.capacityKva} KVA
+                            {rec
+                              ? ` \u00b7 consented claim ${claimedAmountForJob(est, rec).toFixed(2)} (assessed ${Number(est.finalAmount).toFixed(2)})`
+                              : ` \u00b7 assessed ${Number(est.finalAmount).toFixed(2)}`}
+                          </span>
+                          <input
+                            type="number"
+                            value={apprAmounts[j.id] ?? ''}
+                            onChange={(e) => setApprAmounts(prev => ({ ...prev, [j.id]: e.target.value }))}
+                            className="w-28 px-2 py-1 text-xs font-mono tabular-nums font-bold border border-slate-300 rounded focus:ring-2 focus:ring-emerald-500 bg-white"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-600 text-right">
+                    MR total (for reconciliation):{' '}
+                    <span className="font-mono font-bold tabular-nums">
+                      {(mrGroups[apprTargetMr] || [])
+                        .reduce((sum: number, j: any) => sum + (Number(apprAmounts[j.id]) || 0), 0)
+                        .toFixed(2)}
+                    </span>
+                  </p>
                 </div>
               </div>
 
