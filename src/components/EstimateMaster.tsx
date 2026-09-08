@@ -1912,23 +1912,14 @@ export default function EstimateMaster() {
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                   Clause 4.0 sanction limits - the tender&rsquo;s figures, read-only
                 </p>
-                <p className="mt-1">
-                  These are the Superintending Engineer&rsquo;s approval powers, set by the UGVCL
-                  tender at 25% of the cost of a new transformer. They are not an agency setting, so
-                  they cannot be edited here &mdash; the same reason the MR&rsquo;s division and the
-                  Schedule-B rates are fixed: they record someone else&rsquo;s decision.
-                </p>
-                <p className="mt-1.5">
-                  <strong className="font-bold">They are live.</strong> Every CRGO and Overhauling
-                  estimate is checked against them, and one that exceeds its limit prints
-                  &ldquo;&gt; CIRCLE LIMIT&rdquo; on the sheet sent to the circle office. Amorphous and
-                  Wound Core are fixed-rate and are not checked.
-                </p>
-                <p className="mt-1.5 text-rose-800">
-                  If the tender reissues these figures, they are corrected in the app rather than here
-                  &mdash; use <strong>Restore Clause 4.0 Standard</strong> above to return to the
-                  shipped schedule.
-                </p>
+                {/* ⚠ THE EXPLANATION IS GONE AND THE LOCK IS NOT. Three paragraphs stood
+                    here: whose authority these figures are, what they are checked against,
+                    and how to correct them. All three explained WHY the values cannot be
+                    edited, to an operator who cannot edit them either way. The line above
+                    states that they are read-only, which is the part that changes what
+                    someone does. The lock itself is untouched - isRowEditable,
+                    REFERENCE_SECTIONS, the delete guard and the Matrix View gate all stand
+                    exactly as they were. */}
                 {/* THE BORROWED-SCHEDULE NOTICE. A schedule can be usable without being
                     finished, and a mixture that nothing announces is the failure that would
                     never be reported - see borrowedFrom in ugvclSchedules.ts. Shown here
@@ -1949,27 +1940,19 @@ export default function EstimateMaster() {
               <div className={`m-3 mb-0 p-3 ${cardTone('info')} bg-sky-50 text-sky-900 text-[11px] leading-relaxed`}>
                 <p className="font-bold text-sky-950 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                  These are the tender rates, shown for reference - the estimate does not read them
+                  These are the tender rates, shown for reference - the estimate does not read them.
+                  Read-only, and rows cannot be added or removed.
                 </p>
-                <p className="mt-1">
-                  {sectionTitle} transformers are priced from UGVCL Schedule-B, which is held in the
-                  app and applied directly. Rows <strong className="font-mono font-bold">1a</strong>-
-                  <strong className="font-mono font-bold">1f</strong> and{' '}
-                  <strong className="font-mono font-bold">2</strong>-
-                  <strong className="font-mono font-bold">6</strong> are shown so the schedule can be
-                  checked against the tender document, and they are <strong>read-only</strong>: the
-                  estimate would ignore any change made here, so editing them could only mislead.
-                </p>
+                {/* ⚠ SAME TEST, SAME CUT. This paragraph explained why the rows are
+                    read-only - that Schedule-B is applied directly and an edit here would
+                    be ignored. True, and it does not change what the operator can do. The
+                    heading line above states the lock; the row-0 note below stays, because
+                    it says the OPPOSITE of what the rows around it imply. */}
                 <p className="mt-1.5 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900">
                   <strong className="font-bold">Row {SCRAP_ROW_CODE} is the exception and IS editable.</strong>{' '}
                   The scrap inspection-and-dismantling charge is read by the estimate, the bill and
                   Reports, so what is set here is what a scrap {sectionTitle.toLowerCase()} transformer
                   is actually charged. Change it only against the tender.
-                </p>
-                <p className="mt-1.5 text-sky-800">
-                  The rows themselves cannot be added or removed: the exported estimate spreadsheet
-                  uses this list as its structure, so a row taken out here disappears from that
-                  document too.
                 </p>
                 {/* See the matching notice on Circle Limits. */}
                 {gridSchedule.borrowedFrom.scheduleB && (
