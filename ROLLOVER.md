@@ -35,21 +35,27 @@ correctness one.
 
 ## A NEW tender started
 
-### 1. Finish estimating last tender's jobs FIRST — before you create the new AT
+### 1. Book last tender's transformers under last tender's AT
 
-Produce and send the estimates for any jobs already booked under the old
-tender **before** creating the new AT.
+A job is priced by **the AT it was booked under**, permanently — not by whichever
+AT is selected when you produce the estimate. So estimating can wait; **booking
+cannot**.
 
-**If you skip it: the estimate prints the wrong amount, and nothing warns
-you.** Estimates use whichever AT is currently selected, not the AT the job
-was booked under. Create the new AT first and a job from last tender is priced
-at the new tender's percentage. The estimate looks completely normal.
+This matters at the boundary. Clause 39.0 of the tender says a transformer
+**delivered before the old order expired, and jointly inspected**, is repaired at
+the **old rate**. But creating a new AT switches you to it immediately, so a
+transformer that arrived in the old period and gets booked after you create the
+new AT lands on the new AT and is priced at the new tender's rates.
 
-Nothing can be done afterwards except reissuing the document, so this is the
-one step that has to happen in order.
+**The app does not check this for you.** It has both dates and uses neither —
+rate selection keys on the AT alone. So before booking anything at the boundary,
+ask when the transformer was delivered, not when you are typing.
 
-*Already created the new AT? Switch back to the old one in the bar at the top
-of Agency Settings, do the estimating, then switch forward again.*
+**If you skip it:** the job carries the wrong rates for its whole life and the
+estimate looks completely normal. Re-booking it under the correct AT is the only
+fix, and that is easier before any document goes out.
+
+*Estimates and bills already produced keep the amounts they were sent with.*
 
 ### 2. Enter the AT percentages — all three, from your bid
 
