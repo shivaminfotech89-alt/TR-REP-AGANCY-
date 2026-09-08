@@ -556,7 +556,7 @@ export default function BillingSystem() {
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     if (isScrapJob) {
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
-      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
+      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
       return error ? [{ kind: 'missing-rate', message: error }] : [];
     }
     return getJobFullEstimate(
@@ -619,7 +619,7 @@ export default function BillingSystem() {
     // itemCode '1a' priced CRGO scrap off Labour Charge (Rs 2,061 at 25 KVA) instead.
     // An unresolvable rate contributes nothing and is reported - never a hardcoded 500.
     if (isScrapJob) {
-      const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData);
+      const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData, atForJob(job, atMasters) ?? activeAtMaster);
       // Unreachable now - `jobPricingErrors` returns the same resolution's error above and
       // this function has already returned null. Kept as null rather than 0 so the two
       // agree if they are ever separated: an unresolved charge is not a charge of nothing.
@@ -697,7 +697,7 @@ export default function BillingSystem() {
       const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
       if (!isScrapJob) return;
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
-      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
+      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
       if (error && !seen.has(error)) {
         seen.add(error);
         errors.push(error);
@@ -1432,7 +1432,7 @@ export default function BillingSystem() {
     jobsForBillType(sendTargetMr).forEach(job => {
       if (!(job.status === 'Scrap' || job.condition === 'Scrap')) return;
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
-      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
+      const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
       if (error && !unresolvedScrap.includes(error)) unresolvedScrap.push(error);
     });
     if (unresolvedScrap.length > 0) {

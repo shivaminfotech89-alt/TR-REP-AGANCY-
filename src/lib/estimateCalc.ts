@@ -55,9 +55,46 @@ export const SCRAP_ITEM_CODE_BY_CORE_CLASS: Record<string, string> = {
   WOUND_CORE: '0',
 };
 
-/** Mapped scrap item code for a job's core type, or null if none is defined. */
-export function getScrapItemCodeForCore(coreType: string): string | null {
-  return SCRAP_ITEM_CODE_BY_CORE_CLASS[classifyCoreType(coreType || 'CRGO')] ?? null;
+/**
+ * THE SCRAP CODE FOLLOWS THE MASTER THE JOB READS, WHICH IS THE PRICING MODEL.
+ *
+ * Rs 500 is the charge under both tenders - that is settled and is not what varies. What
+ * varies is the ITEM CODE, because the code is a lookup key into a specific master section
+ * and the sections hold different rows: '0' exists in the Amorphous and Wound Core masters,
+ * '22' in the CRGO master, and neither holds the other.
+ *
+ * Under an itemised tender an Amorphous job reads the CRGO master (see
+ * getEstimateMasterForCore), where '0' is absent - so it must resolve through '22'.
+ *
+ * ⚠ KEYED ON THE PRICING MODEL, NOT ON THE SCHEDULE ID. "'0' under 2020, '22' under 2026"
+ * is true today and is the wrong rule: it would need editing for every tender after 2026,
+ * and a future tender that restores a Schedule-B would silently get the wrong code. The
+ * real reason is that the job reads the CRGO master, and the predicate that CHOSE that
+ * master is the one that should choose the code - then the two cannot disagree.
+ *
+ * OH IS DELIBERATELY ABSENT AND STAYS ABSENT. The Overhauling master holds codes 7, 3, 4,
+ * 5 and 6 - there is NO scrap row in it, and 6 is "sealing of uneconomical unit", which is
+ * a different thing (see AUDIT O45). Mapping OH to '22' would send it to a row in a section
+ * it does not read; mapping it to '0' would do the same. So a scrapped OH job returns null
+ * and blocks with "no scrap charge item code is mapped", which is the honest answer until
+ * the tender says what a scrapped OH unit is charged. AUDIT O48.
+ */
+export function scrapItemCodeForJob(coreType: string | undefined, at?: any): string | null {
+  const cls = classifyCoreType(coreType || 'CRGO');
+  if (cls === 'OH') return null;                       // no scrap row in the OH master
+  return pricingModelForJob(at, cls) === 'ITEMISED'
+    ? SCRAP_ITEM_CODE_BY_CORE_CLASS.CRGO               // reads the CRGO master -> '22'
+    : SCRAP_ITEM_CODE_BY_CORE_CLASS[cls] ?? null;      // reads its own section -> '0'
+}
+
+/**
+ * Mapped scrap item code for a job's core type.
+ *
+ * ⚠ PASS THE AT. Without it the job resolves against the DEFAULT schedule, which is 2020 -
+ * right for existing records and wrong for anything under a tender with no Schedule-B.
+ */
+export function getScrapItemCodeForCore(coreType: string, at?: any): string | null {
+  return scrapItemCodeForJob(coreType, at);
 }
 
 export interface ScrapChargeResolution {
@@ -72,10 +109,11 @@ export interface ScrapChargeResolution {
 export function resolveScrapCharge(
   coreType: string,
   capacityKva: string | number,
-  masterList: EstimateItem[] | undefined
+  masterList: EstimateItem[] | undefined,
+  at?: any
 ): ScrapChargeResolution {
   const coreClass = classifyCoreType(coreType || 'CRGO');
-  const code = SCRAP_ITEM_CODE_BY_CORE_CLASS[coreClass] ?? null;
+  const code = scrapItemCodeForJob(coreType, at);
 
   if (!code) {
     return {

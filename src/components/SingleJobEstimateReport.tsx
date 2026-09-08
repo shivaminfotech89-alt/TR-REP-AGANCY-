@@ -371,7 +371,7 @@ export function buildSingleJobEstimateData(
   // so a scrap Amorphous unit billed the full Schedule-B repair rate and no scrap
   // charge at all.
   if (isScrap) {
-    const scrapCharge = resolveScrapCharge(coreType, kva, masterList);
+    const scrapCharge = resolveScrapCharge(coreType, kva, masterList, atMaster);
     if (scrapCharge.error) rateErrors.push({ kind: 'missing-rate', message: scrapCharge.error });
 
     const scrapAmt = scrapCharge.rate ?? 0;

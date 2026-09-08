@@ -130,7 +130,7 @@ export default function Reports() {
       // resolution the estimate and the bill use, so these three can't drift apart.
       // An unresolvable rate reports 0 rather than a guessed figure.
       if (isScrapJob) {
-        const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData);
+        const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData, atForJob(job, atMasters) ?? activeAtMaster);
         return Math.round(scrapCharge.rate ?? 0);
       }
 

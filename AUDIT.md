@@ -6731,6 +6731,36 @@ for pricing, which is what they should be.**
 
 ---
 
+### O48. A scrapped Overhauling job has no item code, because the OH master has no scrap row
+
+**Found while making the scrap code follow the pricing model, and deliberately not guessed.**
+
+`SCRAP_ITEM_CODE_BY_CORE_CLASS` maps CRGO to '22' and Amorphous / Wound Core to '0'. It has
+no OH entry, so `scrapItemCodeForJob` returns null for an Overhauling job and
+`resolveScrapCharge` blocks with "No scrap charge item code is mapped for core type…".
+
+**That is not an oversight in the map — the row does not exist.** The Overhauling master
+holds five codes: `7, 3, 4, 5, 6`. There is no inspection-and-dismantling row in it. Code
+'6' is "Rate for sealing of uneconomical unit by welding at six places", which is a
+different charge for a different situation (see O45).
+
+**Why it was not given a code anyway.** Mapping OH to '22' or '0' would point it at a row in
+a section it does not read — `getEstimateMasterForCore` sends OH to the Overhauling master —
+so the lookup would fail exactly as it does now, but with a message naming the wrong
+section. A blocking refusal that says "nothing is mapped" is more useful than one that says
+"'22' is missing", because the first is true and the second sends someone to add a row to
+the wrong screen.
+
+**Latent, not live.** One OH job exists (`OH21 IS-1`) and it is not scrap. Seven scrap jobs
+exist and none is OH. So nothing is blocked today.
+
+**What settles it:** whether the tender pays anything for a scrapped Overhauling unit at
+all. Clause 35.0 says "for uneconomical units, no repair charges are payable" and pays
+Rs 500 for the inspection; whether a scrapped OH unit is that case, the E.E.(TR) scrap case
+that codes '22' and '0' describe, or neither, is not settled by A/T 1819. Related to O45.
+
+---
+
 ### O47. The 5% oil filtration loss is credited on guarantee-period jobs, which the tender disallows
 
 **A wrong number, not a silence — which is why it is separate from O46.**
