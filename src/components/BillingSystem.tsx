@@ -5,6 +5,7 @@ import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, 
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate } from '../lib/estimateCalc';
 import { classifyCoreType, EstimateRateError } from './SingleJobEstimateReport';
+import { pricingModelForJob } from '../lib/ugvclSchedules';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
@@ -631,7 +632,9 @@ export default function BillingSystem() {
     // baseTotal is pre-AT; the AT uplift is applied by the caller exactly as on the
     // itemised path below, so the two branches remain comparable.
     const coreClass = classifyCoreType(job.coreType || 'CRGO');
-    if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+    // Schedule-dependent, matching buildSingleJobEstimateData. Under a tender with no
+    // Schedule-B this job is itemised and the fixed-rate delegation would price nothing.
+    if (pricingModelForJob(atForJob(job, atMasters) ?? activeAtMaster, coreClass) === 'FIXED_RATE') {
       const est = getJobFullEstimate(
         job,
         externalInspMap[job.id],

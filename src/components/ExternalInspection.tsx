@@ -1,7 +1,8 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency } from '../lib/AgencyContext';
-import { SUPPLY_ORDER_OPTIONS, SUPPLY_ORDER_ADB_1804 } from '../lib/ugvclSchedules';
+import { SUPPLY_ORDER_OPTIONS, SUPPLY_ORDER_ADB_1804, pricingModelForJob } from '../lib/ugvclSchedules';
+import { classifyCoreType } from './SingleJobEstimateReport';
 import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { matchesAtScope } from '../lib/AgencyContext';
 import { OtherTenderNote } from './OtherTenderNote';
@@ -89,7 +90,7 @@ export const getStandardOilCapacity = (kva: number | string): number => {
 };
 
 export default function ExternalInspection() {
-  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
+  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
 
@@ -722,9 +723,14 @@ export default function ExternalInspection() {
    * consults the answer, because copper has one row.
    */
   const supplyOrderApplies = (job: any) => {
-    const core = (formsData[job.id]?.transType || job.coreType || 'CRGO').trim().toUpperCase();
-    const isFixedRate = core.includes('AMORPHOUS') || core.includes('AM') || core.includes('WOUND') || core.includes('WC');
-    return isFixedRate && Number(String(job.capacityKva ?? '').trim()) === 63;
+    const core = (formsData[job.id]?.transType || job.coreType || 'CRGO').trim();
+    // ONLY ASK IT WHERE IT IS ANSWERABLE. The ADB/1804 fork chooses between Schedule-B rows
+    // 1d-1 and 1d-2, which are Rs 3,000 apart. A tender with no Schedule-B has no such fork,
+    // so under UGVCL-2026 this question has no consequence, and asking it would collect an
+    // answer nothing reads - the shape that makes a field look meaningful when it is not.
+    const at = atMasters.find((a: any) => a.id === job.atId) || activeAtMaster;
+    if (pricingModelForJob(at, classifyCoreType(core)) !== 'FIXED_RATE') return false;
+    return Number(String(job.capacityKva ?? '').trim()) === 63;
   };
 
   const renderSelectField = (jobId: string, field: keyof ExternalData, options: string[], widthClass = 'w-14') => (

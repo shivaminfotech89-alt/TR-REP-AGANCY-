@@ -4,7 +4,7 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
-import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT, ScheduleSet, scheduleSetForAt, scheduleReadiness, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
+import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT, ScheduleSet, scheduleSetForAt, scheduleReadiness, SCHEDULES, ScheduleId, pricingModelForSchedule } from '../lib/ugvclSchedules';
 
 /**
  * THE SCHEDULE THE AGENCY MASTERS WERE COPIED FROM.
@@ -411,7 +411,11 @@ export function buildSingleJobEstimateData(
   // and Wound Core jobs in the database carry one, and this branch DEPENDS on it twice over:
   // the winding material selects the Schedule-B row, and the damaged phase count is the
   // quantity on the per-coil rows.
-  if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+  // THE TENDER DECIDES THIS, NOT THE CORE TYPE. Under UGVCL-2026 there is no Schedule-B
+  // and an Amorphous transformer is itemised exactly like a CRGO one, so this branch must
+  // not run for an 1819 job. Clause 19.0 of A/T 1819 puts CRGO and amorphous core damage
+  // on the same Schedule-A rows (18a, 18b, 20).
+  if (pricingModelForSchedule(scheduleSet, coreClass) === 'FIXED_RATE') {
     const supplyOrderRef = String(job.supplyOrderRef ?? '').trim();
     const entry = findScheduleBEntry(scheduleSet, kvaNum, isCopper, supplyOrderRef);
     const fixedItems: SingleEstimateLineItem[] = [];
@@ -1359,7 +1363,9 @@ export default function SingleJobEstimateReport({
     : 0;
 
   const coreClass = classifyCoreType(job.coreType || 'CRGO');
-  const isFixedRate = coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE';
+  // Schedule-dependent: the clause text and its overflow check belong to the fixed-rate
+  // sheet, which a 2026 Amorphous job does not produce.
+  const isFixedRate = pricingModelForSchedule(scheduleSetForAt(atMaster), coreClass) === 'FIXED_RATE';
 
   // Hoisted above the fixed-rate branch because the overflow effect below depends on them,
   // and a hook cannot be declared after a conditional return.
@@ -1462,7 +1468,13 @@ export default function SingleJobEstimateReport({
    *                                        it would scale with any row this branch gained.
    *     TABLE_HEAD_MM = 9.1  slightly light  `p-1` -> `p-1.5` and 13px text here.
    */
-  if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
+  // THE LAYOUT IS SCHEDULE-DEPENDENT; THE HEADING IS NOT. A 2026 Amorphous job prints the
+  // ITEMISED body - it has no Schedule-B rows to show - but it is still an Amorphous
+  // transformer, and this sheet goes to UGVCL. "ESTIMATION REPORT OF CRGO TRANSFORMER" over
+  // an Amorphous unit would be a false statement about the machine on a document to the
+  // DISCOM. Core type is a fact about the transformer; pricing model is a fact about the
+  // tender. The heading follows the first, the body the second.
+  if (pricingModelForSchedule(scheduleSetForAt(atMaster), coreClass) === 'FIXED_RATE') {
     const isAmorphous = coreClass === 'AMORPHOUS';
     const titleText = isAmorphous
       ? 'ESTIMATION REPORT OF AMORPHOUS TRANSFORMER'

@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from './firebase';
+import { pricingModelForJob } from './ugvclSchedules';
 import { sectionsDiffer } from './compareSections';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { 
@@ -821,7 +822,20 @@ export function getEstimateMasterForCore(
     return defaultOverhaulingEstimateData;
   }
 
-  if (type.includes('AMORPHOUS') || type.includes('AM')) {
+  /**
+   * ⚠ ITEMISED TENDERS READ THE CRGO SECTION, WHATEVER THE CORE TYPE.
+   *
+   * Under UGVCL-2026 there is no Schedule-B: Clause 19.0 puts CRGO and amorphous core
+   * damage on the same Schedule-A rows, and all three core types are priced itemised. The
+   * Amorphous section holds the 13 Schedule-B rows, so pricing a 2026 Amorphous job from it
+   * would walk a table its tender does not have and produce almost nothing - the quiet
+   * failure, not a loud one. It falls through to the CRGO branch below instead.
+   *
+   * This is the site that would have gone wrong even with the pricing branch fixed.
+   */
+  const itemisedTender = pricingModelForJob(at, 'AMORPHOUS') === 'ITEMISED';
+
+  if (!itemisedTender && (type.includes('AMORPHOUS') || type.includes('AM'))) {
     if (at?.estimateMasterAmorphous && at.estimateMasterAmorphous.length > 0) {
       return withMissingDefaults(normalizeUnits(at.estimateMasterAmorphous), defaultAmorphousEstimateData);
     }
@@ -834,7 +848,7 @@ export function getEstimateMasterForCore(
     return defaultAmorphousEstimateData;
   }
 
-  if (type.includes('WOUND') || type.includes('WC')) {
+  if (!itemisedTender && (type.includes('WOUND') || type.includes('WC'))) {
     // Was a blacklist of four item-name substrings. Now a POSITIVE identity test: do this
     // section's item codes belong to the CRGO card rather than to Schedule-B? The
     // blacklist produced a confident verdict from an incomplete test - a CRGO card

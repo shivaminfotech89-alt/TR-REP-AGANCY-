@@ -2,6 +2,7 @@
 // circle-limit standing needs to be known - not just EstimateGenerate.tsx. Everything
 // needed is passed in as an argument; no component state, no hooks, no context reads.
 import { buildSingleJobEstimateData, classifyCoreType } from '../components/SingleJobEstimateReport';
+import { pricingModelForJob } from './ugvclSchedules';
 import { getCircleLimitForJob, EstimateItem, EstimateRates } from './estimateData';
 
 export function getJobFullEstimate(job: any, externalData: any, internalData: any, agency: any, atMaster: any) {
@@ -35,6 +36,19 @@ export function isGpJob(job: any): boolean {
 // again. Never match on itemName substrings - "dismental"/"scrap" matching pulled
 // in CRGO's '1a' Labour Charge (Rs 2,061) as though it were the scrap item - and
 // never fall back to a hardcoded 500: an unresolved rate blocks with a named error.
+/**
+ * THE SCRAP ITEM CODE, BY CORE CLASS - AND NOW BY PRICING MODEL.
+ *
+ * Row '0' lives in the Amorphous/Wound Core master; row '22' lives in the CRGO master. The
+ * code has to match the LIST that will be searched, and under UGVCL-2026 an itemised
+ * Amorphous job reads the CRGO master, which has no row '0'.
+ *
+ * ⚠ '0' IS LEFT IN PLACE FOR ITEMISED TENDERS DELIBERATELY, PENDING THE TENDER'S ANSWER.
+ * Looking up '0' in the CRGO list finds nothing and returns a NAMED REFUSAL - the estimate
+ * withholds its total and the bill refuses to issue. It blocks; it cannot misprice. Nothing
+ * happens at all until someone scraps an Amorphous unit under an 1819 AT, and if the answer
+ * turns out to be '22' this is one line.
+ */
 export const SCRAP_ITEM_CODE_BY_CORE_CLASS: Record<string, string> = {
   CRGO: '22',
   AMORPHOUS: '0',
@@ -77,7 +91,10 @@ export function resolveScrapCharge(
     return {
       code,
       rate: null,
-      error: `Scrap charge item code "${code}" is missing from the ${coreClass} estimate master. Add item "${code}" (inspection & dismantling charges of damaged transformer declared as scrap by E.E. (TR), Rs 500 flat for all capacities) to the ${coreClass} master before billing scrap.`,
+      // NAMES THE LIST ACTUALLY SEARCHED, not the core class. Under an itemised tender an
+      // Amorphous job reads the CRGO master, and saying "missing from the AMORPHOUS estimate
+      // master" sends someone to a screen where the row is present and correct.
+      error: `Scrap charge item code "${code}" is missing from the estimate master section this job prices from (core type ${coreClass}, ${(masterList || []).length} rows). Add item "${code}" (inspection & dismantling charges of damaged transformer declared as scrap by E.E. (TR), Rs 500 flat for all capacities) to that section before billing scrap.`,
     };
   }
 
@@ -92,7 +109,7 @@ export function resolveScrapCharge(
     return {
       code,
       rate: null,
-      error: `Scrap charge item "${code}" in the ${coreClass} estimate master has no rate for ${kvaStr || 'this'} KVA. Set its rate (Rs 500) before billing scrap.`,
+      error: `Scrap charge item "${code}" (core type ${coreClass}) has no rate for ${kvaStr || 'this'} KVA in the section this job prices from. Set its rate (Rs 500) before billing scrap.`,
     };
   }
 
@@ -136,9 +153,27 @@ export interface CircleLimitCheck {
  * observation, and the data supports it (the one OH job uses 17.9% of its limit). It is
  * not the same claim as "no limit applies", and only the second belongs in `hasLimit`.
  */
-export function coreTypeHasCircleLimit(coreType: string | undefined): boolean {
-  const cls = classifyCoreType(coreType || 'CRGO');
-  return cls !== 'AMORPHOUS' && cls !== 'WOUND_CORE';
+/**
+ * WHETHER A SANCTION LIMIT APPLIES. SCHEDULE-DEPENDENT SINCE A/T 1819.
+ *
+ * The exclusion was never about the core type. It was that a FIXED-RATE job has no itemised
+ * estimate for Clause 4.0 to measure - the 25% figure is a proportion of a new transformer's
+ * cost, computed from repair work, and a flat Schedule-B charge is not that. Under a tender
+ * with a Schedule-B that reads as "Amorphous and Wound Core are excluded"; under one without,
+ * it does not.
+ *
+ * So UNDER UGVCL-2026 AN AMORPHOUS JOB IS CIRCLE-LIMIT CHECKED FOR THE FIRST TIME - it is
+ * itemised, and Clause 4.0 applies to it exactly as to CRGO. That reaches paper: the printed
+ * estimate's Condition column can now say "> CIRCLE LIMIT" on an Amorphous sheet sent to the
+ * circle office. And the figures it is checked against are 2020's, borrowed - if 2026 raised
+ * the limits, those jobs flag over-limit slightly early.
+ *
+ * Passing the AT is required, not optional. A caller with no AT gets the DEFAULT schedule,
+ * which is 2020 - the right answer for existing records, and the reason the parameter is not
+ * silently defaulted here.
+ */
+export function coreTypeHasCircleLimit(coreType: string | undefined, at?: any): boolean {
+  return pricingModelForJob(at, classifyCoreType(coreType || 'CRGO')) !== 'FIXED_RATE';
 }
 
 export function checkJobCircleLimit(
@@ -170,7 +205,7 @@ export function checkJobCircleLimit(
   //
   // `limit` is 0 rather than the CRGO figure on purpose: returning a number that does not
   // apply, next to `hasLimit: false`, invites exactly the reading this fix removes.
-  if (!coreTypeHasCircleLimit(job?.coreType)) {
+  if (!coreTypeHasCircleLimit(job?.coreType, atMaster)) {
     const rating = getCircleLimitForJob(job.capacityKva, ratingKey, circleLimitsData);
     return {
       finalAmt,

@@ -737,10 +737,10 @@ export default function InternalInspection() {
     // One predicate, in the same function that does the check - see
     // `coreTypeHasCircleLimit`. This screen's guard was the only one that existed, and
     // keeping a second copy of the rule here is how the two would drift.
-    if (!coreTypeHasCircleLimit(job.coreType)) {
+    if (!coreTypeHasCircleLimit(job.coreType, atForJob(job, atMasters) ?? activeAtMaster)) {
       return (
         <span className="block text-[9px] font-semibold text-slate-400 italic"
-              title="Amorphous and CRGO Wound Core are priced at a fixed rate per capacity from UGVCL Schedule-B, so the circle approval limit is not checked here.">
+              title="This tender prices Amorphous and CRGO Wound Core at a fixed rate per capacity from UGVCL Schedule-B, so the circle approval limit is not checked. A tender with no Schedule-B prices them itemised and DOES check.">
           Fixed rate - no limit check
         </span>
       );
