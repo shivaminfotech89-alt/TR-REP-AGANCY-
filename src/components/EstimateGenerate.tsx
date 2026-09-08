@@ -13,7 +13,8 @@ import {
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
-import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, isGpJob } from '../lib/estimateCalc';
+import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, isGpJob,
+         consentEligibility, consentRefusalReason, claimedAmountForJob, RepairWithinLimitConsent } from '../lib/estimateCalc';
 import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
@@ -90,6 +91,9 @@ export default function EstimateGenerate() {
   const [apprNo, setApprNo] = useState('');
   const [apprDate, setApprDate] = useState(new Date().toISOString().split('T')[0]);
   const [apprAmount, setApprAmount] = useState<number | string>('');
+
+  /** Optional name of whoever authorised repairing within the limit, for this send. */
+  const [consentAuthorisedBy, setConsentAuthorisedBy] = useState('');
   const [apprRemarks, setApprRemarks] = useState('');
   const [submittingAppr, setSubmittingAppr] = useState(false);
 
@@ -628,6 +632,24 @@ export default function EstimateGenerate() {
     }
   };
 
+  /**
+   * JOBS IN AN MR THAT NEED A CIRCLE-LIMIT DECISION BEFORE THE ESTIMATE CAN BE SENT.
+   *
+   * ⚠ THIS IS THE ESTIMATE STAGE, AND THAT IS THE WHOLE POINT. The estimate is the document
+   * the division approves, and the approval that comes back is FOR the consented amount. So
+   * the consent has to exist BEFORE the sheet leaves - recorded with the send, in the same
+   * batch, not as a separate click that can be forgotten between deciding and sending.
+   *
+   * It was briefly gated at BILLING instead, which put the decision after the document that
+   * carries it had already gone out and asked the operator to make it a second time, once
+   * the division had ruled. See the note in BillingSystem's jobPricingErrors.
+   */
+  const consentPendingInMr = (mr: string) => estimableJobs(mr)
+    .filter(j => !isGpJob(j) && !(j.status === 'Scrap' || j.condition === 'Scrap'))
+    .map(job => ({ job, check: checkJobCircleLimit(job) }))
+    .map(x => ({ ...x, eligibility: consentEligibility(x.check) }))
+    .filter(x => (x.eligibility === 'OFFER' && !x.job.repairWithinLimitConsent) || x.eligibility === 'SCRAP');
+
   const exceedingJobsInSelectedMr = useMemo(() => {
     return selectedJobsData
       .map(job => ({ job, check: checkJobCircleLimit(job) }))
@@ -686,9 +708,50 @@ export default function EstimateGenerate() {
     }
   };
 
+  /**
+   * The consent record to stamp on a job as the estimate is sent, or null if it needs none.
+   *
+   * `limitAtConsent` is a SNAPSHOT. The circle-limit master is editable and per-tender, and
+   * the division approves against the figure printed on the sheet - not whatever the table
+   * says when someone reprints it later.
+   */
+  const consentPayloadFor = (job: any): RepairWithinLimitConsent | null => {
+    if (isGpJob(job) || job.status === 'Scrap' || job.condition === 'Scrap') return null;
+    if (job.repairWithinLimitConsent) return null;          // already recorded, keep it
+    const check = checkJobCircleLimit(job);
+    if (consentEligibility(check) !== 'OFFER') return null;
+    const rec: RepairWithinLimitConsent & { authorisedBy?: string } = {
+      consentedBy: auth.currentUser?.email || auth.currentUser?.uid || 'unknown',
+      consentedAt: Date.now(),
+      limitAtConsent: Number(check.limit),
+      comparisonTotalAtConsent: Number(check.comparisonAmt),
+    };
+    const who = consentAuthorisedBy.trim();
+    if (who) rec.authorisedBy = who;
+    return rec;
+  };
+
   const handleConfirmSendEstimate = async () => {
     if (!sendTargetMr || !sendRefNo.trim() || !sendDate || !auth.currentUser) {
       alert('Please enter both Reference No and Send Date');
+      return;
+    }
+
+    /**
+     * ⚠ A JOB THE TENDER ROUTES TO SCRAP CANNOT BE SENT AS A REPAIR ESTIMATE.
+     *
+     * Consent is offered only between the 25% and 30% bands. Past that, Clause 4.0's answer
+     * is scrap, and no consent an operator records can make the estimate approvable.
+     */
+    const scrapBound = consentPendingInMr(sendTargetMr).filter(x => x.eligibility === 'SCRAP');
+    if (scrapBound.length > 0) {
+      alert(
+        `Cannot send: ${scrapBound.map(x => x.job.jobNo).join(', ')} ` +
+        `${scrapBound.length === 1 ? 'is' : 'are'} past the consent band.
+
+` +
+        consentRefusalReason('SCRAP')
+      );
       return;
     }
 
@@ -743,6 +806,9 @@ export default function EstimateGenerate() {
           estimateStatus: 'Sent',
           estimateApprovalStatus: job.approvalNo ? 'Approved' : (job.estimateApprovalStatus || 'Pending'),
           estimateRemarks: sendRemarks || '',
+          // CONSENT TRAVELS WITH THE SEND, in the same batch that stamps the estimate as
+          // Sent. Two writes would allow a sheet to go out without the decision it states.
+          ...(consentPayloadFor(job) ? { repairWithinLimitConsent: consentPayloadFor(job) } : {}),
           updatedAt: new Date().toISOString()
         });
       });
@@ -1094,7 +1160,50 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 </tbody>
               </table>
 
-              {/* ⚠ THE PRINTED SHEET SAYS NOTHING ABOUT THE CIRCLE LIMIT, DELIBERATELY.
+              {/* ⚠ THE CONSENT STATEMENT IS ON THIS SHEET DELIBERATELY, AND THIS REVERSES AN
+                  EARLIER DECISION. BOTH INSTRUCTIONS ARE NAMED SO NOBODY RESTORES THE SILENCE
+                  BY READING ONLY ONE OF THEM.
+
+                  FIRST: the circle-limit WARNING was removed from this sheet - sanction
+                  routing under Clause 4.0 is UGVCL's internal business, and the operator
+                  already meets it on screen before printing.
+
+                  SECOND, WHICH GOVERNS HERE: the CONSENT must be printed, because it is what
+                  the division is being asked to approve. An approval returned against a sheet
+                  that does not state the consented figure approves the wrong amount.
+
+                  THEY ARE NOT THE SAME STATEMENT AND MUST NOT BE MERGED. The warning says
+                  "this job is over the limit" - internal, off the sheet. The consent says
+                  "the agency agrees to repair it for the limit" - a commercial term of the
+                  estimate, on the sheet. Deleting this block because "the sheet is silent on
+                  the circle limit" would remove an agreed term from the document that
+                  carries it. */}
+              {isLast && (() => {
+                const consented = rows
+                  .map(({ job }) => ({ job, rec: job.repairWithinLimitConsent }))
+                  .filter(x => x.rec);
+                if (!consented.length) return null;
+                return (
+                  <div className="mt-3 border-2 border-black p-2 text-xs">
+                    <p className="font-black tracking-wide">REPAIR WITHIN SANCTION LIMIT &mdash; CONSENTED</p>
+                    {consented.map(({ job, rec }) => {
+                      const est = getJobFullEstimate(job);
+                      const claim = claimedAmountForJob(est, rec);
+                      return (
+                        <p key={job.id} className="mt-0.5">
+                          <span className="font-mono font-bold">{job.jobNo}</span>
+                          {': assessed Rs '}{Number(est.finalAmount).toFixed(2)}
+                          {'. The agency consents to repair within the sanction limit of Rs '}
+                          {Number(rec.limitAtConsent).toFixed(2)}
+                          {'. Amount claimed: Rs '}{claim.toFixed(2)}{'.'}
+                        </p>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
+
+              {/* ⚠ THE CIRCLE-LIMIT WARNING STAYS OFF THIS SHEET, DELIBERATELY.
                   An "EXCEEDS CLAUSE 4.0 CIRCLE LIMIT" block stood here briefly and was
                   removed: the sanction routing is UGVCL's internal business and does not
                   belong on the document the agency submits to the division. The operator
@@ -2234,6 +2343,45 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 />
               </div>
             </div>
+
+            {/* CONSENT IS TAKEN HERE, WITH THE SEND. The figures are shown before the
+                operator confirms: the claim is what the division will be approving. */}
+            {sendTargetMr && consentPendingInMr(sendTargetMr).length > 0 && (
+              <div className="mb-3 p-3 rounded-lg border-2 border-rose-400 bg-rose-50 text-rose-900 text-xs">
+                <p className="font-black uppercase tracking-wide">Repair within the sanction limit?</p>
+                <p className="mt-1">
+                  These transformers exceed the Clause 4.0 circle limit. Sending the estimate records the
+                  agency&rsquo;s consent to repair within the limit, and the statement is printed on the sheet
+                  the division approves.
+                </p>
+                <table className="w-full mt-2 bg-white border border-rose-200">
+                  <tbody>
+                    {consentPendingInMr(sendTargetMr).map(({ job, check }) => (
+                      <tr key={job.id} className="border-b border-rose-100">
+                        <td className="p-1.5 font-mono font-bold">{job.jobNo}</td>
+                        <td className="p-1.5 text-right">assessed {getJobFullEstimate(job).finalAmount.toFixed(2)}</td>
+                        <td className="p-1.5 text-right">limit {check.limit.toFixed(2)}</td>
+                        <td className="p-1.5 text-right font-bold">
+                          claim {claimedAmountForJob(getJobFullEstimate(job) as any, {
+                            consentedBy: '', consentedAt: 0, limitAtConsent: check.limit,
+                            comparisonTotalAtConsent: check.comparisonAmt }).toFixed(2)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <label className="block mt-2">
+                  <span className="font-bold">Recorded by {auth.currentUser?.email || 'you'}. Who authorised this?</span>
+                  <input
+                    type="text"
+                    value={consentAuthorisedBy}
+                    onChange={e => setConsentAuthorisedBy(e.target.value)}
+                    placeholder="Optional - leave blank if that is you"
+                    className="mt-1 w-full px-2.5 py-1.5 text-xs border border-rose-300 rounded-lg"
+                  />
+                </label>
+              </div>
+            )}
 
             <div className="flex items-center justify-end space-x-2.5 pt-4 border-t border-slate-100">
               <button
