@@ -6791,6 +6791,56 @@ for pricing, which is what they should be.**
 
 ---
 
+### O49. Any job can be billed, whatever stage its estimate reached — a contractual gap
+
+**`BillingSystem` never reads `estimateStatus` or `estimateApprovalStatus`.** Confirmed by
+grep: neither field appears anywhere in the file. `billableJobs` filters GP jobs and nothing
+else. So a job whose estimate was **never generated, never sent and never approved** reaches
+a bill and prices normally, and there is no point in the flow at which that is questioned.
+
+**THIS IS A CONTRACTUAL GAP, NOT ONLY A WORKFLOW ONE.** Clause 4.0 of A/T 1819 is explicit:
+the transformer must not be opened before UGVCL's representative attends, and **work starts
+only after estimate approval**. A bill for a job whose estimate was never approved is
+therefore claiming for work that, under the tender, should not have begun. The document is
+not merely out of order — it asserts something the contract forbids.
+
+Clause 11.0 compounds it: payment follows a bill "submitted on completion of each work",
+with a test certificate, and the repairer certifies on that bill that the materials billed
+were actually fitted. A bill raised ahead of approval carries that certification about work
+the tender had not authorised.
+
+**How it surfaced.** SU-5 was found billing 9,077.15 against a recorded consent of 8,716.00.
+The immediate cause was that its estimate had never been sent or approved, so
+`approvedAmount` was empty and `calculateJobTotal` fell through to a recomputation. Fixing
+that case revealed the general one: **SU-5 could reach a bill at all only because nothing
+checks the stage.** The consent made it visible; the gap was always there.
+
+**THE CONSENT FIX IS SCOPED DELIBERATELY AND DOES NOT CLOSE THIS.** It refuses only a job
+carrying an ACTIVE CONSENT with no `approvedAmount` — 1 job in live data. The ordinary case,
+55 of 64, bills exactly as before. Closing the general case would refuse every job whose
+estimate is not approved, which changes how every MR is worked: it would block bills that
+are raised today, and it presumes the app's approval record is complete enough to gate on,
+which has never been tested. **That needs its own decision, not a side effect of a
+consent bug.**
+
+**What settling it requires, in the order the questions arise:**
+
+1. Is `estimateApprovalStatus === 'Approved'` reliably recorded in practice, or is it a
+   field operators skip? One live job carries an `approvedAmount`; that is not enough to
+   judge from.
+2. Does the gate refuse, or warn? A refusal on an unapproved job is the honest reading of
+   Clause 4.0. A warning is what a yard with a backlog of unrecorded approvals can actually
+   work with.
+3. Whichever it is, existing jobs need a position — grandfathered by date, or blocked
+   until their approvals are entered retrospectively.
+
+**Related.** O29, now closed, made `approvedAmount` load-bearing for the first time; this is
+the question of whether its ABSENCE should mean anything. Also G-series on the billing gate
+for `rateErrors`, which is the same shape of refusal already accepted here: the bill declines
+to assert what it has no authority to assert.
+
+---
+
 ### O48. A scrapped Overhauling job has no item code, because the OH master has no scrap row
 
 **Found while making the scrap code follow the pricing model, and deliberately not guessed.**
