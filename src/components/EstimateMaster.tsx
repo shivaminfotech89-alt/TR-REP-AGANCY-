@@ -20,7 +20,7 @@ import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
 import { CARD, LABEL, NUM, TABLE, TABLE_WRAP, TH, TD, TH_STICKY, TD_STICKY, cardTone } from '../lib/ui';
 import { checkMasterSection, storedSection, storedSectionForRates, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
-import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt, SCHEDULES } from '../lib/ugvclSchedules';
+import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt, SCHEDULES, hasScheduleB } from '../lib/ugvclSchedules';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
@@ -520,6 +520,15 @@ export default function EstimateMaster() {
    */
   const selectedAtClosed = String(selectedAt?.status || '').toLowerCase() === 'closed';
   const canSaveRates = Boolean(selectedAt) && !selectedAtClosed;
+
+  /**
+   * DOES THIS TENDER PRICE ANYTHING AT A FIXED RATE?
+   *
+   * Drives whether the Amorphous and Wound Core sections are rendered at all. A tender with
+   * no Schedule-B prices every core type itemised from the CRGO section, so those two hold
+   * rows nothing on this tender reads. Storage is untouched - this is what is SHOWN.
+   */
+  const tenderHasFixedRates = hasScheduleB(scheduleSetForAt(selectedAt));
 
   /** `?at=<id>` selects a tender on arrival - see the AT creation flow in AtSettings. */
   const [emParams] = useSearchParams();
@@ -1928,6 +1937,7 @@ export default function EstimateMaster() {
                   <p className={`mt-1.5 p-2 ${cardTone('warn')} bg-amber-50 text-amber-900`}>
                     <strong className="font-bold">{SCHEDULES[gridSchedule.borrowedFrom.circleLimits].label} figures</strong>
                     {' '}&mdash; Clause 4.0 for {gridSchedule.label} not yet supplied.
+                    {!tenderHasFixedRates && ' Amorphous and Wound Core are checked against them on this tender.'}
                   </p>
                 )}
               </div>
@@ -2678,7 +2688,17 @@ export default function EstimateMaster() {
           'bg-blue-600'
         )}
 
-        {renderSectionTable(
+        {/* ⚠ THE FIXED-RATE SECTIONS EXIST ONLY WHERE THE TENDER HAS A SCHEDULE-B.
+            Under UGVCL-2026 there is none: Amorphous and Wound Core are priced itemised from
+            Schedule-A, from the CRGO section, and these two sections hold 13 rows nothing on
+            such a tender reads. Shown, they would be reference rows for a schedule that does
+            not exist - a screenful of authoritative-looking figures with no bearing on any
+            estimate, which is the shape the read-only lock was put there to prevent in the
+            first place.
+
+            HIDDEN, NOT EMPTIED. The rows are untouched in storage. Point the AT selector at a
+            2020 tender and they are all still there - 17 live jobs price from them. */}
+        {tenderHasFixedRates && renderSectionTable(
           'AMORPHOUS',
           'Amorphous Estimate Master',
           '',
@@ -2688,7 +2708,7 @@ export default function EstimateMaster() {
           'bg-amber-500'
         )}
 
-        {renderSectionTable(
+        {tenderHasFixedRates && renderSectionTable(
           'WOUND_CORE',
           'Wound Core Estimate Master',
           '',
