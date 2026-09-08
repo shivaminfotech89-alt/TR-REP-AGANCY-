@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
 import { selectableSchedules, DEFAULT_SCHEDULE_ID, SCHEDULES, ScheduleId, isScheduleId } from '../lib/ugvclSchedules';
-import { CARD, CARD_PAD } from '../lib/ui';
+import { CARD, CARD_PAD, LABEL } from '../lib/ui';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
@@ -220,14 +220,39 @@ export function AtSettings() {
   const deepLinkAtId = searchParams.get('atId');
   const deepLinkSection = searchParams.get('section');
 
+  /**
+   * WHICH AT THIS SCREEN HAS OPEN. SCREEN-LOCAL, AND NOT THE ACTIVE AT.
+   *
+   * ⚠ THIS USED TO BE `activeAtMaster`, AND THAT WAS A READ THAT MUTATED. The card's
+   * onClick called `setActiveAtMasterId`, because the Divisions & Allotments panel rendered
+   * for the active AT and making it active was the only way to see it. So opening a tender
+   * to check its allotments repointed the whole app: `activeAtMaster` is read by twenty
+   * components, New Job, Billing, Dashboard, Reports, Dispatch and the inspection screens
+   * among them. An operator mid-job who opened a different card to look something up had
+   * their New Job form change underneath them, with nothing on screen saying it had.
+   *
+   * Opening is now inert. Changing what the app books against is a separate, labelled act -
+   * see "Book jobs against this AT" in the detail panel.
+   *
+   * DECLARED ABOVE THE DEEP-LINK EFFECT THAT USES IT. It is safe either way - an effect
+   * callback runs after the whole body - but two temporal-dead-zone bugs this session got
+   * past a green typecheck, and neither cost anything to avoid by ordering a declaration
+   * before its users.
+   */
+  const [openAtId, setOpenAtId] = useState<string | null>(null);
+
   useEffect(() => {
     if (!deepLinkAtId && deepLinkSection !== 'allotments' && deepLinkSection !== 'divisions' && deepLinkSection !== 'at') return;
     setIsExpanded(true);                       // open the AT Masters section
     if (deepLinkSection === 'allotments') setActiveAtTab('allotments');
     if (deepLinkSection === 'divisions') setActiveAtTab('divisions');
-    // The allotments panel renders for the ACTIVE AT, so make the named one active.
+    // OPENS THE NAMED AT WITHOUT MAKING IT ACTIVE. This used to call
+    // setActiveAtMasterId, because the allotments panel followed the active AT - so
+    // following a link from the Allotment widget silently repointed New Job and everything
+    // else that reads activeAtMaster. A link that shows you something must not change what
+    // the app is doing.
     if (deepLinkAtId && atMasters.some(a => a.id === deepLinkAtId)) {
-      setActiveAtMasterId(deepLinkAtId);
+      setOpenAtId(deepLinkAtId);
     }
   }, [deepLinkAtId, deepLinkSection, atMasters]);
   
@@ -608,7 +633,11 @@ export function AtSettings() {
         }
       }
 
-      if (created?.id) setActiveAtMasterId(created.id);
+      // OPEN IT AND MAKE IT ACTIVE. Activation is deliberate here in a way it never was on
+      // a card click: creating a tender is the operator saying this is the one they are
+      // moving to, and it is their own explicit act. Opening it as well means the new AT is
+      // on screen rather than collapsed into a row that looks like all the others.
+      if (created?.id) { setActiveAtMasterId(created.id); setOpenAtId(created.id); }
       if (adoptionFailed) {
         alert(
           `AT ${newAt.atNumber} was created, but the published rates were NOT copied onto it.
@@ -745,6 +774,35 @@ export function AtSettings() {
       </div>
 
       {/* Minimized Summary View */}
+      {/* MORE THAN ONE TENDER MARKED ACTIVE (AUDIT F83), SAID ONCE AND ABOVE THE LIST.
+          isIntakeOpen handles it safely by taking the one with the latest start date, so
+          nothing breaks - but a data fault the app can see and does not mention is one
+          nobody fixes. UPENDRA has exactly this in live data.
+
+          ⚠ IT LIVES HERE, NOT ON THE ROWS, BECAUSE OF ONE-AT-A-TIME. It used to be computed
+          per row, so it appeared on every offending tender and the clash was visible at a
+          glance down the list. Once only one AT is open, a per-row warning would show only
+          on whichever one you happened to open - a real check made quieter as a side effect
+          of a layout change. Here it does not depend on what is open, or on whether the
+          section is expanded at all. */}
+      {(() => {
+        const clashing = agencyAts.filter(a => otherActiveAts(a, agencyAts).length > 0);
+        if (clashing.length === 0) return null;
+        return (
+          <div className="mt-3 p-2.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-[11px] leading-relaxed flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <span>
+              <strong className="font-bold">
+                {clashing.length} tenders are marked Active: {clashing.map(a => a.atNumber || a.name).join(', ')}.
+              </strong>{' '}
+              Only one should be. Nothing is broken - new work goes to whichever started
+              latest - but until one is marked Closed, which tender a job lands under is
+              decided by a date rather than by you.
+            </span>
+          </div>
+        );
+      })()}
+
       {!isExpanded && (
         <div className="pt-3">
           {activeAtMaster ? (
@@ -911,43 +969,101 @@ export function AtSettings() {
                 const amVal = at.atPercentageAmorphous ?? at.atPercentage ?? 4;
                 const wcVal = at.atPercentageWoundCore ?? at.atPercentage ?? 4;
                 const isEditing = editingAtId === at.id;
+                const isOpen = openAtId === at.id;
+                const isActiveAt = activeAtMaster?.id === at.id;
+                // WHETHER THIS TENDER CAN PRICE ANYTHING, on the row, without opening it.
+                // `ratesSource` was never shown in this list, so an AT with no rates looked
+                // exactly like a configured one - and estimates and bills under it are
+                // blocked until rates exist. Two live ATs are in that state.
+                const hasRates = Boolean((at as any).ratesSource);
 
                 return (
                   <div key={at.id} className="space-y-2">
-                    <div 
-                      className={`p-3 border rounded-lg flex flex-col md:flex-row md:items-center justify-between cursor-pointer transition-colors gap-3 ${
-                        activeAtMaster?.id === at.id ? 'border-indigo-500 bg-indigo-50/40 ring-1 ring-indigo-500/20' : 'border-slate-200 hover:border-indigo-300 bg-slate-50/30'
-                      }`}
-                      onClick={() => setActiveAtMasterId(at.id)}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setOpenAtId(isOpen ? null : at.id); if (!isOpen) setEditingAtId(null); } }}
+                      className={`p-3 border flex flex-col md:flex-row md:items-center justify-between cursor-pointer transition-colors gap-3 ${
+                        isOpen ? 'rounded-t-lg border-indigo-300 bg-indigo-50/50' : 'rounded-lg border-slate-200 hover:border-indigo-300 bg-slate-50/30'
+                      } ${isActiveAt ? 'ring-1 ring-indigo-500/30' : ''}`}
+                      /* OPENING IS INERT. It sets a screen-local id and nothing else - see
+                         openAtId. Opening a second AT closes the first, and closes any edit
+                         in progress on it so the form cannot outlive the row it belongs to. */
+                      onClick={() => { setOpenAtId(isOpen ? null : at.id); if (!isOpen) setEditingAtId(null); }}
                     >
-                      {!isEditing ? (
-                        <>
                           <div className="space-y-1">
                             <div className="flex items-center flex-wrap gap-2">
+                              {isOpen ? <ChevronUp className="w-4 h-4 text-indigo-500 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
                               <h3 className="font-bold text-slate-900">{at.atNumber}</h3>
                               {at.name && <span className="text-slate-500 font-normal">- {at.name}</span>}
-                              {activeAtMaster?.id === at.id ? (
+                              {isActiveAt && (
                                 <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full flex items-center">
-                                  <Check className="w-3 h-3 mr-1"/> Active AT
+                                  <Check className="w-3 h-3 mr-1"/> Booking jobs
                                 </span>
-                              ) : (
-                                /* The Divisions & Allotments panel renders only for the
-                                   ACTIVE AT, and the only way in was an unlabelled click
-                                   on a card that does not look clickable. Say so. */
-                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-600 bg-slate-100 border border-slate-300 px-2 py-0.5 rounded-full flex items-center">
-                                  Select to configure divisions &amp; allotments
+                              )}
+                              {!hasRates && (
+                                <span
+                                  title="This tender has no rates, so estimates and bills under it are blocked until they are entered or copied in Estimate Master."
+                                  className="text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-full flex items-center"
+                                >
+                                  <AlertTriangle className="w-3 h-3 mr-1" /> No rates
                                 </span>
                               )}
                             </div>
-                            <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1">
+                            <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 ml-6">
                               <span className="flex items-center"><Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" /> {formatDDMMYYYY(at.startDate)} to {formatDDMMYYYY(at.endDate)}</span>
                               <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${at.status === 'Active' ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}`}>
                                 {at.status}
                               </span>
                             </div>
-                            
-                            {/* Core Type Percentages Breakdown */}
-                            <div className="flex flex-wrap gap-2 pt-2 text-xs">
+                          </div>
+                    </div>
+
+                    {/* ⚠ ONE AT OPEN AT A TIME, AND ITS NUMBER NEVER LEAVES THE SCREEN.
+                        Every AT used to render its full card at once - percentages, oil
+                        carry, three action buttons - so an operator part-way through a
+                        change could not tell which tender they were changing. The identity
+                        line below is outside the edit branch on purpose: it is still there
+                        while the form is open.
+
+                        This panel follows `openAtId`, NOT `activeAtMaster`. See openAtId. */}
+                    {isOpen && (
+                      <div className="border border-t-0 border-indigo-300 bg-white rounded-b-lg">
+                        <div className={`px-3 py-2 border-b flex flex-wrap items-center gap-2 ${
+                          isActiveAt ? 'bg-indigo-50/60 border-indigo-200' : 'bg-amber-50 border-amber-300'
+                        }`}>
+                          <span className={LABEL}>Editing</span>
+                          <span className="text-xs font-bold text-slate-900">AT {at.atNumber}</span>
+                          {at.name && <span className="text-[11px] text-slate-500">- {at.name}</span>}
+                          {/* THE DIVERGENCE, STATED. Same rule as the Estimate Master
+                              selector: this screen shows what you opened, the app books
+                              against something else, and neither is implied. */}
+                          {isActiveAt ? (
+                            <span className="text-[11px] font-bold text-indigo-800">
+                              This is the AT the app is booking jobs against.
+                            </span>
+                          ) : (
+                            <>
+                              <span className="text-[11px] font-bold text-amber-900">
+                                Looking at this one only &mdash; New Job is still booking against{' '}
+                                {activeAtMaster ? `AT ${activeAtMaster.atNumber || activeAtMaster.name}` : 'no AT'}.
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); setActiveAtMasterId(at.id); }}
+                                title="Point New Job, Billing, Reports and the inspection screens at this tender. Changes what the whole app books against."
+                                className="ml-auto shrink-0 flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg"
+                              >
+                                <Check className="w-3 h-3" /> Book jobs against this AT
+                              </button>
+                            </>
+                          )}
+                        </div>
+
+                        <div className="p-3 space-y-3">
+                      {!isEditing ? (
+                        <>
+                          <div className="flex flex-wrap gap-2 text-xs">
                               <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
                                 <strong className="text-blue-700">CRGO:</strong> {crgoVal >= 0 ? `+${crgoVal}` : crgoVal}%
                               </span>
@@ -957,10 +1073,9 @@ export function AtSettings() {
                               <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
                                 <strong className="text-emerald-700">Wound Core:</strong> {wcVal >= 0 ? `+${wcVal}` : wcVal}%
                               </span>
-                            </div>
                           </div>
 
-                          <div className="flex items-center space-x-2.5 self-end md:self-center">
+                          <div className="flex items-center flex-wrap gap-2.5">
                             <button 
                               onClick={(e) => handleStartEdit(at, e)}
                               className="flex items-center text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 px-2.5 py-1.5 rounded-lg shadow-2xs transition-colors"
@@ -983,24 +1098,14 @@ export function AtSettings() {
                                 behind `emptyAtIds` is stale the moment another tab saves an
                                 intake. This decides what to show; the function decides what
                                 happens. */}
-                            {/* MORE THAN ONE TENDER MARKED ACTIVE (AUDIT F83).
-                                isIntakeOpen handles it safely by taking the one with the
-                                latest start date, so nothing breaks - but a data fault the
-                                app can see and does not mention is one nobody fixes. UPENDRA
-                                has exactly this in live data. */}
-                            {(() => {
-                              const others = otherActiveAts(at, agencyAts);
-                              if (others.length === 0) return null;
-                              return (
-                                <span
-                                  title="Only one tender should be Active at a time"
-                                  className="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 px-2.5 py-1.5 rounded-lg max-w-xs"
-                                >
-                                  Also Active: {others.map(o => o.atNumber || o.name).join(', ')} &mdash;
-                                  new work goes to whichever started latest
-                                </span>
-                              );
-                            })()}
+                            {/* ⚠ THE "ALSO ACTIVE" WARNING IS NOT HERE ANY MORE - IT IS ON
+                                THE SECTION HEADER (AUDIT F83). It was computed per row, so
+                                it appeared on both offending tenders and the clash was
+                                visible at a glance down the list. With one AT open at a
+                                time it would only ever show on whichever one you happened
+                                to open, which makes a real data fault quieter as a side
+                                effect of a layout change. It now renders once, above the
+                                list, where it does not depend on what is open. */}
                             {/* THE CARRIED OPENING BALANCE — a fact about the tender, with no
                                 control attached (AUDIT F96).
 
@@ -1108,11 +1213,9 @@ export function AtSettings() {
                           </div>
                         </form>
                       )}
-                    </div>
-                    
-                    {/* Combined Details (Divisions & Prefixes + Allotment Quotas) for this active AT */}
-                    {activeAtMaster?.id === at.id && !isEditing && (
-                      <div className="border border-t-0 border-indigo-300 bg-white p-3 rounded-b-lg space-y-3">
+
+                      {!isEditing && (
+                        <>
                         {/* Sub-tabs to seamlessly switch between Divisions & Prefixes and Allotment Quotas */}
                         <div className="flex border-b border-slate-200">
                           <button
@@ -1149,6 +1252,9 @@ export function AtSettings() {
                           ) : (
                             <AtAllotments at={at} />
                           )}
+                        </div>
+                        </>
+                      )}
                         </div>
                       </div>
                     )}
