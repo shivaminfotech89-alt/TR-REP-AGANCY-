@@ -458,9 +458,21 @@ service cloud.firestore {
       allow create, update: if isSuperAdmin() && isValidPublishedAt(incoming());
     }
 
+    // ⚠ READ-ONLY. NO CLIENT WRITES THIS DOCUMENT, INCLUDING A SUPER ADMIN'S.
+    //
+    // `public_config/estimate_master` is rung 3 of the rate chain - the fallback for an
+    // agency with neither AT rates nor its own - and it is now a fixed baseline rather than
+    // a published one. Both app controls that wrote it were removed: after F73 put rates on
+    // the tender, the copy test made every cell it carried that MATCHED the schedule inert,
+    // while the two that DIFFERED read as overrides and beat the tender. Its only remaining
+    // effect was propagating its own errors. Those were corrected first, then the writers
+    // went, then this grant - so it was never both wrong and unwritable.
+    //
+    // The admin SDK bypasses rules, so scripts/admin can still repair it if it ever needs
+    // repairing. That is deliberate: a correction should require a reviewed script and the
+    // service account, not a click.
     match /public_config/{configId} {
       allow get, list: if isSignedIn() || true;
-      allow create, update: if isSuperAdmin() && isValidSystemConfig(incoming());
       allow delete: if isSuperAdmin();
     }
 
