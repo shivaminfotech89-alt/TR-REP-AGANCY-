@@ -185,7 +185,26 @@ export function checkJobCircleLimit(
   circleLimitsData: EstimateItem[] | undefined
 ): CircleLimitCheck {
   const est = getJobFullEstimate(job, externalData, internalData, agency, atMaster);
-  const finalAmt = est.finalAmount;
+
+  /**
+   * ⚠ THE COMPARISON IS NOT THE ESTIMATE TOTAL, AND NEVER WAS.
+   *
+   * Clause 4.0: "Tank, conservator tank and radiator damage charges are excluded from the
+   * 25% / 30% computation." This measured `finalAmount` - the whole estimate - so a job over
+   * its limit only because of tank or radiator work was reported over limit when the circle
+   * office's own arithmetic puts it inside. That assertion reaches paper, in the Condition
+   * column of the printed estimate, addressed to the officer whose sanction power it is
+   * describing.
+   *
+   * NOT SCHEDULE-DEPENDENT, unlike the pricing model. This is how Clause 4.0 has always
+   * worked, in both tenders, so it changes results for existing CRGO jobs - and that
+   * movement is the fix rather than a regression. See the baseline note in
+   * scripts/admin/pricing-model-regression.js.
+   *
+   * Falls back to `finalAmount` where the path does not compute a comparison figure - the
+   * scrap, fixed-rate and OH branches, none of which can carry a tank or radiator line.
+   */
+  const finalAmt = typeof est.comparisonTotal === 'number' ? est.comparisonTotal : est.finalAmount;
   const ratingKey = job.starRating || job.ratingLevel || '3 Star & other';
 
   // THE GUARD LIVES HERE, NOT AT THE CALL SITES.
