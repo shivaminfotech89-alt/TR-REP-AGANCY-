@@ -305,6 +305,54 @@ export interface RepairWithinLimitConsent {
   limitAtConsent: number;
   /** The assessed Clause 4.0 figure at that moment, for reconciliation. */
   comparisonTotalAtConsent: number;
+  /** Optional name of whoever authorised the decision, if not the person who clicked. */
+  authorisedBy?: string;
+
+  /**
+   * WITHDRAWAL — RECORDED, NEVER DELETED, ONCE THE ESTIMATE HAS BEEN SENT.
+   *
+   * Before sending, a consent is a draft decision and is removed outright: nothing has left
+   * the building and a deletion misrepresents nothing. After sending, the division holds a
+   * sheet stating the consented figure, so deleting the record would make the app disagree
+   * with the paper AND hide that it ever agreed - the disagreement would be invisible from
+   * both sides. So the record stays and is marked withdrawn.
+   *
+   * The reason is required because it is the only thing that later explains why a sent
+   * document and the app disagree.
+   */
+  withdrawnAt?: number;
+  withdrawnBy?: string;
+  withdrawnReason?: string;
+}
+
+/**
+ * The consent in force on a job, or null. A withdrawn record is not in force.
+ *
+ * ⚠ EVERY READER MUST GO THROUGH THIS. Testing `job.repairWithinLimitConsent` directly
+ * treats a withdrawn consent as live, which would cap a claim the agency has retracted.
+ */
+export function activeConsent(job: any): RepairWithinLimitConsent | null {
+  const rec = job?.repairWithinLimitConsent as RepairWithinLimitConsent | undefined;
+  if (!rec || rec.withdrawnAt) return null;
+  return rec;
+}
+
+/**
+ * Whether a consent on this job can still be taken back, and how.
+ *
+ *   'REMOVE'    not sent yet - delete it outright, no reason needed
+ *   'WITHDRAW'  sent - keep the record, mark it withdrawn, require a reason, re-issue
+ *   'REFUSED'   the division has approved a figure; unpicking it is correspondence
+ *   'NONE'      no consent in force
+ */
+export type ConsentRemoval = 'REMOVE' | 'WITHDRAW' | 'REFUSED' | 'NONE';
+
+export function consentRemovalMode(job: any): ConsentRemoval {
+  if (!activeConsent(job)) return 'NONE';
+  const approved = Number(job?.approvedAmount);
+  if (Number.isFinite(approved) && approved > 0) return 'REFUSED';
+  const sent = job?.estimateStatus === 'Sent' || Boolean(job?.estimateSentDate);
+  return sent ? 'WITHDRAW' : 'REMOVE';
 }
 
 /**
@@ -327,8 +375,22 @@ export function claimedAmountForJob(
   consent: RepairWithinLimitConsent | null | undefined
 ): number {
   if (!consent) return Number(est.finalAmount);
-  const excludedWithPct = Number(est.excludedBase || 0) * (1 + Number(est.atPercentage || 0) / 100);
-  return Number((consent.limitAtConsent + excludedWithPct).toFixed(2));
+  return Number((consent.limitAtConsent + excludedWithPct(est)).toFixed(2));
+}
+
+/**
+ * Tank / conservator / radiator, with the AT percentage applied — the amount claimed ON TOP
+ * of the capped figure.
+ *
+ * ⚠ EXPORTED SO THE DOCUMENT CAN PRINT THE ADDITION. A statement reading "limit Rs 8,716,
+ * amount claimed Rs 12,659" with nothing between them is a Rs 3,943 gap the division cannot
+ * account for, and reads as an overclaim. Every surface that shows a consented claim must
+ * show limit + excluded = claim, not just the two ends of it.
+ */
+export function excludedWithPct(
+  est: { excludedBase?: number; atPercentage: number }
+): number {
+  return Number((Number(est.excludedBase || 0) * (1 + Number(est.atPercentage || 0) / 100)).toFixed(2));
 }
 
 export function checkJobCircleLimit(

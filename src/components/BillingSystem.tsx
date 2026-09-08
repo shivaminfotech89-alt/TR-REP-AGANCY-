@@ -4,8 +4,7 @@ import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
-         
-         RepairWithinLimitConsent } from '../lib/estimateCalc';
+         RepairWithinLimitConsent, activeConsent } from '../lib/estimateCalc';
 import { classifyCoreType, EstimateRateError } from './SingleJobEstimateReport';
 import { pricingModelForJob } from '../lib/ugvclSchedules';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
@@ -3372,7 +3371,11 @@ export default function BillingSystem() {
                         // when the estimate has moved since. It goes in a note row under
                         // the job rather than a column: it applies to a handful of jobs,
                         // and a column would add width to every bill for it.
-                        const consentRec = (job.repairWithinLimitConsent ?? null) as RepairWithinLimitConsent | null;
+                        // ⚠ activeConsent, NOT THE RAW FIELD. A withdrawn consent is still
+                        // stored - it is kept rather than deleted so a sent document and the
+                        // app can be reconciled - and reading the field directly would print
+                        // it on the bill as though it were in force.
+                        const consentRec = activeConsent(job);
                         const agreedAgainst = consentRec ? Number(consentRec.comparisonTotalAtConsent) : null;
                         const consentDrifted = consentRec != null && agreedAgainst != null
                           && Math.abs(agreedAgainst - estAmount) >= 0.01;

@@ -4,7 +4,7 @@ import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, writeBatch, updateDoc } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileSpreadsheet, Edit3, Check, Save, FileText, X,
   Lock, Unlock, AlertTriangle, RotateCcw, Calendar, Send, CheckCircle2, Clock, CheckSquare,
@@ -14,7 +14,8 @@ import {
 import * as XLSX from 'xlsx';
 import { defaultEstimateData, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as checkJobCircleLimitPure, isGpJob,
-         consentEligibility, consentRefusalReason, claimedAmountForJob, RepairWithinLimitConsent } from '../lib/estimateCalc';
+         consentEligibility, consentRefusalReason, claimedAmountForJob, RepairWithinLimitConsent,
+         activeConsent, consentRemovalMode, excludedWithPct } from '../lib/estimateCalc';
 import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
@@ -98,8 +99,8 @@ export default function EstimateGenerate() {
    */
   const [apprAmounts, setApprAmounts] = useState<Record<string, string>>({});
 
-  /** Optional name of whoever authorised repairing within the limit, for this send. */
-  const [consentAuthorisedBy, setConsentAuthorisedBy] = useState('');
+  /** Per-job authoriser text in the rose warning card, keyed by job id. */
+  const [consentAuthorisedBy, setConsentAuthorisedBy] = useState<Record<string, string>>({});
   const [apprRemarks, setApprRemarks] = useState('');
   const [submittingAppr, setSubmittingAppr] = useState(false);
 
@@ -654,7 +655,7 @@ export default function EstimateGenerate() {
     .filter(j => !isGpJob(j) && !(j.status === 'Scrap' || j.condition === 'Scrap'))
     .map(job => ({ job, check: checkJobCircleLimit(job) }))
     .map(x => ({ ...x, eligibility: consentEligibility(x.check) }))
-    .filter(x => (x.eligibility === 'OFFER' && !x.job.repairWithinLimitConsent) || x.eligibility === 'SCRAP');
+    .filter(x => (x.eligibility === 'OFFER' && !activeConsent(x.job)) || x.eligibility === 'SCRAP');
 
   const exceedingJobsInSelectedMr = useMemo(() => {
     return selectedJobsData
@@ -721,21 +722,48 @@ export default function EstimateGenerate() {
    * the division approves against the figure printed on the sheet - not whatever the table
    * says when someone reprints it later.
    */
-  const consentPayloadFor = (job: any): RepairWithinLimitConsent | null => {
-    if (isGpJob(job) || job.status === 'Scrap' || job.condition === 'Scrap') return null;
-    if (job.repairWithinLimitConsent) return null;          // already recorded, keep it
+  /** Record consent on ONE job, from the rose warning card, before the estimate is sent. */
+  const recordConsentForJob = async (job: any, authorisedBy: string) => {
     const check = checkJobCircleLimit(job);
-    if (consentEligibility(check) !== 'OFFER') return null;
-    const rec: RepairWithinLimitConsent & { authorisedBy?: string } = {
+    if (consentEligibility(check) !== 'OFFER') return;
+    const rec: RepairWithinLimitConsent = {
       consentedBy: auth.currentUser?.email || auth.currentUser?.uid || 'unknown',
       consentedAt: Date.now(),
       limitAtConsent: Number(check.limit),
       comparisonTotalAtConsent: Number(check.comparisonAmt),
+      ...(authorisedBy.trim() ? { authorisedBy: authorisedBy.trim() } : {}),
     };
-    const who = consentAuthorisedBy.trim();
-    if (who) rec.authorisedBy = who;
-    return rec;
+    try {
+      await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: rec } as any);
+      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, repairWithinLimitConsent: rec } : j));
+    } catch (err) { handleFirestoreError(err, OperationType.WRITE, 'jobs'); }
   };
+
+  /**
+   * Take a consent back. THREE OUTCOMES, and they are not the same act - see
+   * consentRemovalMode.
+   */
+  const removeConsentForJob = async (job: any, reason: string) => {
+    const mode = consentRemovalMode(job);
+    if (mode === 'NONE' || mode === 'REFUSED') return;
+    try {
+      if (mode === 'REMOVE') {
+        // Nothing has left the building. Delete it outright; there is nothing to explain.
+        await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: null } as any);
+        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, repairWithinLimitConsent: null } : j));
+      } else {
+        // The division holds a sheet stating this figure. Keep the record and mark it.
+        const rec = { ...activeConsent(job)!, withdrawnAt: Date.now(),
+          withdrawnBy: auth.currentUser?.email || auth.currentUser?.uid || 'unknown',
+          withdrawnReason: reason.trim() };
+        await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: rec } as any);
+        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, repairWithinLimitConsent: rec } : j));
+      }
+    } catch (err) { handleFirestoreError(err, OperationType.WRITE, 'jobs'); }
+  };
+
+  /* consentPayloadFor is gone. Consent is recorded in the rose warning card, not created
+     by the send - see recordConsentForJob. The send only refuses when one is missing. */
 
   const handleConfirmSendEstimate = async () => {
     if (!sendTargetMr || !sendRefNo.trim() || !sendDate || !auth.currentUser) {
@@ -749,15 +777,28 @@ export default function EstimateGenerate() {
      * Consent is offered only between the 25% and 30% bands. Past that, Clause 4.0's answer
      * is scrap, and no consent an operator records can make the estimate approvable.
      */
-    const scrapBound = consentPendingInMr(sendTargetMr).filter(x => x.eligibility === 'SCRAP');
+    const pending = consentPendingInMr(sendTargetMr);
+    const scrapBound = pending.filter(x => x.eligibility === 'SCRAP');
     if (scrapBound.length > 0) {
-      alert(
-        `Cannot send: ${scrapBound.map(x => x.job.jobNo).join(', ')} ` +
-        `${scrapBound.length === 1 ? 'is' : 'are'} past the consent band.
+      alert('Cannot send: ' + scrapBound.map(x => x.job.jobNo).join(', ')
+        + (scrapBound.length === 1 ? ' is' : ' are') + ' past the consent band. '
+        + consentRefusalReason('SCRAP'));
+      return;
+    }
 
-` +
-        consentRefusalReason('SCRAP')
-      );
+    /**
+     * THE GATE IS THE GUARANTEE. Consent is recorded in the rose warning card, so it is a
+     * separate and earlier write than this one - which is what lets a decision be taken back
+     * before the estimate goes out. THIS is what still makes it impossible for a sheet to
+     * LEAVE without one.
+     */
+    const undecided = pending.filter(x => x.eligibility === 'OFFER');
+    if (undecided.length > 0) {
+      alert('Cannot send: ' + undecided.map(x => x.job.jobNo).join(', ')
+        + ' exceed' + (undecided.length === 1 ? 's' : '') + ' the Clause 4.0 circle limit and '
+        + (undecided.length === 1 ? 'has' : 'have') + ' no consent recorded. '
+        + 'Record it on the "Estimate amount is more than circle limit" panel above, so the '
+        + 'statement is printed on the sheet the division approves.');
       return;
     }
 
@@ -812,9 +853,7 @@ export default function EstimateGenerate() {
           estimateStatus: 'Sent',
           estimateApprovalStatus: job.approvalNo ? 'Approved' : (job.estimateApprovalStatus || 'Pending'),
           estimateRemarks: sendRemarks || '',
-          // CONSENT TRAVELS WITH THE SEND, in the same batch that stamps the estimate as
-          // Sent. Two writes would allow a sheet to go out without the decision it states.
-          ...(consentPayloadFor(job) ? { repairWithinLimitConsent: consentPayloadFor(job) } : {}),
+          // Consent is already on the job by now - the send gate refuses without it.
           updatedAt: new Date().toISOString()
         });
       });
@@ -871,7 +910,7 @@ export default function EstimateGenerate() {
       const stored = Number(j.approvedAmount);
       if (Number.isFinite(stored) && stored > 0) return [j.id, String(stored)];
       const est = getJobFullEstimate(j);
-      const rec = j.repairWithinLimitConsent;
+      const rec = activeConsent(j);
       const asked = rec ? claimedAmountForJob(est, rec) : Number(est.finalAmount);
       return [j.id, asked.toFixed(2)];
     })));
@@ -1198,7 +1237,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   carries it. */}
               {isLast && (() => {
                 const consented = rows
-                  .map(({ job }) => ({ job, rec: job.repairWithinLimitConsent }))
+                  .map(({ job }) => ({ job, rec: activeConsent(job) }))
                   .filter(x => x.rec);
                 if (!consented.length) return null;
                 return (
@@ -1207,13 +1246,26 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     {consented.map(({ job, rec }) => {
                       const est = getJobFullEstimate(job);
                       const claim = claimedAmountForJob(est, rec);
+                      const excl = excludedWithPct(est);
                       return (
                         <p key={job.id} className="mt-0.5">
                           <span className="font-mono font-bold">{job.jobNo}</span>
                           {': assessed Rs '}{Number(est.finalAmount).toFixed(2)}
                           {'. The agency consents to repair within the sanction limit of Rs '}
-                          {Number(rec.limitAtConsent).toFixed(2)}
-                          {'. Amount claimed: Rs '}{claim.toFixed(2)}{'.'}
+                          {Number(rec.limitAtConsent).toFixed(2)}{'.'}
+                          {/* ⚠ THE ADDITION IS PRINTED, NOT JUST ITS TWO ENDS. Tank,
+                              conservator and radiator are excluded from the Clause 4.0
+                              computation and are claimed ON TOP of the capped figure, so a
+                              statement reading "limit 8,716 ... claimed 12,659" leaves a
+                              3,943 gap the division cannot account for and which reads as an
+                              overclaim. Shown only when there is something to add. */}
+                          {excl > 0 && <>
+                            {' Tank / conservator / radiator charges, excluded from that computation: Rs '}
+                            {excl.toFixed(2)}{'.'}
+                            {' Amount claimed: Rs '}{Number(rec.limitAtConsent).toFixed(2)}
+                            {' + Rs '}{excl.toFixed(2)}{' = Rs '}{claim.toFixed(2)}{'.'}
+                          </>}
+                          {!(excl > 0) && <>{' Amount claimed: Rs '}{claim.toFixed(2)}{'.'}</>}
                         </p>
                       );
                     })}
@@ -1751,6 +1803,101 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     </div>
                   </div>
                 ))}
+              </div>
+
+              {/* ⚠ THE ACTION LIVES WITH THE WARNING, AND NOWHERE ELSE ON THIS SCREEN.
+                  The card already names every over-limit job with its figures; making the
+                  operator find a control somewhere else to resolve what they are looking at
+                  is how a warning becomes something to scroll past. Consent is written on
+                  click, before the estimate is sent - the send still refuses if any job here
+                  is undecided, so a sheet cannot leave without one. */}
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-2.5 pt-1">
+                {exceedingJobsInSelectedMr.map(({ job, check }) => {
+                  const el = consentEligibility(check);
+                  const rec = activeConsent(job);
+                  const mode = consentRemovalMode(job);
+                  const est = getJobFullEstimate(job);
+                  const excl = excludedWithPct(est);
+                  const claim = claimedAmountForJob(est, rec ?? {
+                    consentedBy: '', consentedAt: 0, limitAtConsent: check.limit,
+                    comparisonTotalAtConsent: check.comparisonAmt });
+                  if (el === 'SCRAP') {
+                    return (
+                      <div key={job.id} className="bg-white border border-rose-400 rounded-lg p-3 text-[11px]">
+                        <span className="font-mono font-bold">{job.jobNo}</span>
+                        <span className="font-bold"> &mdash; consent is not available.</span>
+                        <p className="mt-1 text-rose-800">{consentRefusalReason('SCRAP')}</p>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div key={job.id} className="bg-white border border-rose-300 rounded-lg p-3 text-[11px]">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono font-bold text-slate-900">{job.jobNo}</span>
+                        {rec
+                          ? <span className="text-[10px] font-bold text-emerald-700">Consent recorded</span>
+                          : <span className="text-[10px] font-bold text-rose-700">Decision needed</span>}
+                      </div>
+                      {/* THE ADDITION, SHOWN. limit + excluded = claim, never just the ends. */}
+                      <p className="mt-1 text-slate-700">
+                        Repair within the limit of <span className="font-mono">₹{check.limit.toFixed(2)}</span>
+                        {excl > 0 && <> + tank/conservator/radiator <span className="font-mono">₹{excl.toFixed(2)}</span></>}
+                        {' = claim '}<span className="font-mono font-bold">₹{claim.toFixed(2)}</span>
+                        {' (assessed ₹'}{Number(est.finalAmount).toFixed(2)}{')'}
+                      </p>
+                      {!rec ? (
+                        <div className="mt-2 flex items-center gap-2">
+                          <input
+                            type="text"
+                            value={consentAuthorisedBy[job.id] ?? ''}
+                            onChange={e => setConsentAuthorisedBy(prev => ({ ...prev, [job.id]: e.target.value }))}
+                            placeholder={`Recorded by ${auth.currentUser?.email || 'you'} — who authorised? (optional)`}
+                            className="flex-1 px-2 py-1 text-[11px] border border-rose-300 rounded"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => recordConsentForJob(job, consentAuthorisedBy[job.id] ?? '')}
+                            className="shrink-0 px-3 py-1 text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-700 rounded"
+                          >
+                            Record consent
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-2 flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-slate-500">
+                            by {rec.consentedBy}{rec.authorisedBy ? `, authorised by ${rec.authorisedBy}` : ''}
+                          </span>
+                          {mode === 'REFUSED' ? (
+                            <span className="text-[10px] font-bold text-slate-500"
+                                  title="The division has approved a figure against this consent. Changing it now is correspondence, not a click.">
+                              Approved &mdash; cannot be withdrawn
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (mode === 'REMOVE') {
+                                  if (confirm(`Remove the consent on ${job.jobNo}? The estimate has not been sent, so nothing is affected.`)) {
+                                    removeConsentForJob(job, '');
+                                  }
+                                  return;
+                                }
+                                const why = prompt(
+                                  `${job.jobNo}'s estimate has already been sent stating a consented amount of ₹${Number(rec.limitAtConsent).toFixed(2)}.\n\n` +
+                                  `Withdrawing it means the division holds a superseded document — the estimate must be re-issued.\n\n` +
+                                  `Reason for withdrawal (required):`);
+                                if (why && why.trim()) removeConsentForJob(job, why);
+                              }}
+                              className="shrink-0 px-2.5 py-1 text-[10px] font-bold text-rose-700 bg-rose-50 border border-rose-300 rounded hover:bg-rose-100"
+                            >
+                              {mode === 'REMOVE' ? 'Remove' : 'Withdraw'}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}
@@ -2362,45 +2509,6 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               </div>
             </div>
 
-            {/* CONSENT IS TAKEN HERE, WITH THE SEND. The figures are shown before the
-                operator confirms: the claim is what the division will be approving. */}
-            {sendTargetMr && consentPendingInMr(sendTargetMr).length > 0 && (
-              <div className="mb-3 p-3 rounded-lg border-2 border-rose-400 bg-rose-50 text-rose-900 text-xs">
-                <p className="font-black uppercase tracking-wide">Repair within the sanction limit?</p>
-                <p className="mt-1">
-                  These transformers exceed the Clause 4.0 circle limit. Sending the estimate records the
-                  agency&rsquo;s consent to repair within the limit, and the statement is printed on the sheet
-                  the division approves.
-                </p>
-                <table className="w-full mt-2 bg-white border border-rose-200">
-                  <tbody>
-                    {consentPendingInMr(sendTargetMr).map(({ job, check }) => (
-                      <tr key={job.id} className="border-b border-rose-100">
-                        <td className="p-1.5 font-mono font-bold">{job.jobNo}</td>
-                        <td className="p-1.5 text-right">assessed {getJobFullEstimate(job).finalAmount.toFixed(2)}</td>
-                        <td className="p-1.5 text-right">limit {check.limit.toFixed(2)}</td>
-                        <td className="p-1.5 text-right font-bold">
-                          claim {claimedAmountForJob(getJobFullEstimate(job) as any, {
-                            consentedBy: '', consentedAt: 0, limitAtConsent: check.limit,
-                            comparisonTotalAtConsent: check.comparisonAmt }).toFixed(2)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <label className="block mt-2">
-                  <span className="font-bold">Recorded by {auth.currentUser?.email || 'you'}. Who authorised this?</span>
-                  <input
-                    type="text"
-                    value={consentAuthorisedBy}
-                    onChange={e => setConsentAuthorisedBy(e.target.value)}
-                    placeholder="Optional - leave blank if that is you"
-                    className="mt-1 w-full px-2.5 py-1.5 text-xs border border-rose-300 rounded-lg"
-                  />
-                </label>
-              </div>
-            )}
-
             <div className="flex items-center justify-end space-x-2.5 pt-4 border-t border-slate-100">
               <button
                 type="button"
@@ -2502,7 +2610,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   <div className="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-56 overflow-y-auto">
                     {(mrGroups[apprTargetMr] || []).map((j: any) => {
                       const est = getJobFullEstimate(j);
-                      const rec = j.repairWithinLimitConsent;
+                      const rec = activeConsent(j);
                       return (
                         <div key={j.id} className="flex items-center gap-2 px-2.5 py-1.5">
                           <span className="font-mono font-bold text-xs w-24 shrink-0">{j.jobNo}</span>
