@@ -566,6 +566,64 @@ general-purpose safety posture.
 
 ---
 
+## Pattern: a harness that reports "no difference" must contain a case that MUST differ
+
+**The rule, first: a comparator whose whole job is to report an absence cannot detect its
+own blindness.** If it reads the wrong field, calls the wrong function, or is fed the wrong
+shape, it finds nothing — which is exactly what a pass looks like. So any harness whose
+success condition is "nothing changed" must also assert, in the same run, at least one thing
+that changes. That case is not a bonus test of a second behaviour; it is the only evidence
+that the comparator can see anything at all.
+
+**It earned itself twice in one file, both times in
+`scripts/admin/pricing-model-regression.js`, and both times it was the differing case that
+caught the bug rather than any review of the method.**
+
+**First: the wrong field name.** Part A fingerprinted each job on `est.items`. The builder
+returns `physicalItems`, `internalItems` and `labourItems` — there is no `items`. Every job
+fingerprinted to an empty line list and an identical code string, so all 64 compared equal
+and Part A reported a clean pass. What exposed it was Part B, which prices one Amorphous job
+under 2020 and again under 2026 and asserts the two DIFFER. Two estimates that are 2 lines
+and 28 lines respectively came back "identical", and the assertion failed. Nothing about
+Part A looked wrong at any point.
+
+**Second: the wrong shape.** Inspections store their fields under `data`, and the builder
+reads `externalData.damRadNo`, `internalData.damR` and so on directly. The harness passed
+the inspection DOCUMENT, so every damage field was undefined: no radiator, no coils, no
+dry-out. Every job priced down to its unconditional lines. SU-5 came out at Rs 3,238.61
+instead of Rs 9,077.15.
+
+⚠ **AND THIS ONE SHIPPED.** The commit-4 harness carried it, and its reported "64 jobs,
+0 moved" is not the check it appeared to be. It was *technically valid* — the same
+impoverishment applied to both sides, so like was compared with like — but the estimates
+being compared could not see most of what the change under test touched. A result that is
+true for a reason unrelated to the thing it is asserting is worth less than it reads, and
+the earlier entry should not be left standing as though it had been the full check. It was
+re-captured and re-run against real data afterwards, and 0-moved held. **The re-run is the
+evidence; the original result was not.**
+
+Again it was a differing case that found it — the Clause 4.0 impact measurement reported
+zero jobs over the circle limit when SU-5 was known to be over. A number contradicting
+something already known is the cheapest detector available, and it only exists if the
+harness is asked to produce one.
+
+**Practical form.** Every "nothing moved" harness in this repo should carry:
+
+- at least one **positive control** — a case constructed so the answer MUST be non-zero,
+  failing loudly if it is not;
+- **one known value checked against reality outside the harness** — SU-5 being over limit,
+  a total someone has read off a real document — because a self-consistent harness can be
+  uniformly wrong;
+- fingerprints that include a **shape** as well as a total. The item-code string was what
+  would have exposed the first bug immediately, had it been populated.
+
+**Related.** This is the measurement-side twin of *"never assert what you cannot derive"*:
+there the code stated something it had not established, here the harness established
+nothing and reported it as a fact. Both produce confident output with no evidence behind it,
+and neither is visible from reading the confident part.
+
+---
+
 ## Pattern: a check can only see what its model anticipated, and reports confidently outside it
 
 Three instances in this audit, and the third is the clearest because the code was RIGHT.

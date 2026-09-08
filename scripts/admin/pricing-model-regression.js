@@ -16,6 +16,21 @@
 //   its own 2020 AT, once under a synthetic AT carrying scheduleId 'UGVCL-2026'. Asserts the
 //   model flips, the line items change shape, and the circle-limit check switches on.
 //
+// ⚠ PART B IS NOT OPTIONAL, AND IT IS NOT ONLY A TEST OF THE NEW BRANCH. It is the POSITIVE
+// CONTROL for Part A. A comparator whose success condition is "nothing changed" cannot
+// detect its own blindness: read the wrong field and it finds nothing, which is what a pass
+// looks like. Part B asserts that two estimates MUST differ, so a comparator that cannot see
+// fails loudly here instead of passing quietly there.
+//
+// It has earned that role twice. The first version read `est.items`, which does not exist -
+// the builder returns physicalItems/internalItems/labourItems - and Part A cheerfully
+// reported 64 jobs identical. Part B caught it by claiming a 2-line and a 28-line estimate
+// were the same. The second version passed the inspection DOCUMENT where the builder reads
+// `.data`, so every damage field was undefined and every job priced down to its
+// unconditional lines; that shipped in the commit-4 run, whose "0 moved" was true but not
+// the check it appeared to be. See AUDIT, "a harness that reports no difference must contain
+// a case that MUST differ". Do not remove Part B to make this script faster.
+//
 // ⚠ IT BUNDLES AND RUNS THE APP'S OWN CODE. A second implementation of the rules here would
 // prove only that the copy agrees with itself - the mistake this codebase has made before
 // (four scrap codes across six agencies). esbuild compiles the real modules; nothing is
