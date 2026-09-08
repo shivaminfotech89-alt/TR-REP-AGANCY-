@@ -430,6 +430,13 @@ export default function EstimateMaster() {
   const [openOverhauling, setOpenOverhauling] = useState(false);
   const [openCircleLimits, setOpenCircleLimits] = useState(false);
 
+  /**
+   * THE TEMPLATE PICKER'S OWN DISCLOSURE. See the card below for why it opens itself.
+   * `null` means "the operator has not decided", so the automatic rule still applies;
+   * once they click, their choice wins for the rest of the visit.
+   */
+  const [openTemplates, setOpenTemplates] = useState<boolean | null>(null);
+
   // Circle limits view toggle: Standard KVA Columns Grid vs Official Document Matrix View
   const [circleLimitsViewMode, setCircleLimitsViewMode] = useState<'standard' | 'matrix'>('standard');
 
@@ -2508,15 +2515,56 @@ export default function EstimateMaster() {
       {/* ADOPT A PUBLISHED TEMPLATE. Shown to everyone: this is the second of the two ways
           a user gets rates - enter them, or take a published AT. It sits above the tables
           because for an AT with none, it is the fastest correct action on the screen. */}
-      {selectedAt && publishedAts.length > 0 && (
+      {selectedAt && publishedAts.length > 0 && (() => {
+        /* ⚠ DEMOTED, NOT REMOVED - AND IT MUST NOT BE REMOVED.
+           `adoptPublishedAt` has exactly two callers: AtSettings:570, which runs inside AT
+           CREATION and is unreachable afterwards, and handleAdoptTemplate, which is reached
+           only from here. So for an AT that already exists this card is the ONLY route to a
+           published template. Two live ATs depend on it right now - ZENITH's
+           .../2026-28/01/AT/1819 and GUJARAT ENERGY's 2020-21/01/1049 - both Active, both
+           ratesSource=null with 0 of 5 sections, both blocked from estimates until rates
+           arrive. Deleting this card would strand them with no way back.
+
+           But it was the second thing on the page for everyone, including the eight ATs
+           that already have rates and will never touch it again. So it opens ITSELF in the
+           two cases where it is the right next action and stays one line otherwise:
+
+             kind === 'none'  the AT has no rates, and this is the fastest correct fix
+             drifted          the template this AT copied has moved on, and re-copying is
+                              the action the amber banner above is telling them to consider
+
+           An explicit click always wins over the rule - `openTemplates` is null until the
+           operator decides. */
+        const drifted = publishedAts.some(t => {
+          if (!(ratesState.kind === 'published' && (ratesState as any).id === t.id)) return false;
+          return Number(t.version ?? 0) > Number((selectedAt as any)?.publishedAtVersion ?? 0);
+        });
+        const shouldOpen = ratesState.kind === 'none' || drifted;
+        const isOpen = openTemplates ?? shouldOpen;
+        return (
         <div className={`${CARD} p-3`}>
-          <div className="flex items-center gap-2 mb-2">
-            <Database className="w-4 h-4 text-indigo-600" />
+          <button
+            type="button"
+            onClick={() => setOpenTemplates(!isOpen)}
+            className={`w-full flex items-center gap-2 text-left ${isOpen ? 'mb-2' : ''}`}
+          >
+            <Database className="w-4 h-4 text-indigo-600 shrink-0" />
             <h3 className="text-sm font-bold text-slate-900">Published AT templates</h3>
             <span className="text-[11px] text-slate-500">
-              copy one onto AT {selectedAt.atNumber || selectedAt.name}
+              {isOpen
+                ? `copy one onto AT ${selectedAt.atNumber || selectedAt.name}`
+                : `${publishedAts.length} available${drifted ? ' - a newer version of yours exists' : ''}`}
             </span>
-          </div>
+            {!isOpen && ratesState.kind === 'none' && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 border border-rose-200">
+                this AT has no rates
+              </span>
+            )}
+            <span className="ml-auto shrink-0 text-slate-400">
+              {isOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </span>
+          </button>
+          {isOpen && (
           <div className="grid gap-2 sm:grid-cols-2">
             {publishedAts.map(t => {
               const isSource = ratesState.kind === 'published' && (ratesState as any).id === t.id;
@@ -2549,8 +2597,10 @@ export default function EstimateMaster() {
               );
             })}
           </div>
+          )}
         </div>
-      )}
+        );
+      })()}
 
       {/* PUBLISH AS A TEMPLATE — admin only. */}
       {showPublishTplModal && (
