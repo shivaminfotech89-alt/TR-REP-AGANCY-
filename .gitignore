@@ -11,3 +11,4 @@ coverage/
 .secrets/
 *serviceAccount*.json
 *-firebase-adminsdk-*.json
+.tmp-pricing/
