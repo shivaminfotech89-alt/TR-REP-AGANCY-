@@ -2367,11 +2367,6 @@ export default function EstimateMaster() {
               You are viewing AT {selectedAt?.atNumber || selectedAt?.name}. New Job is booking
               against AT {globalActiveAtMaster?.atNumber || globalActiveAtMaster?.name}.
             </p>
-            <p className="mt-0.5">
-              Choosing a tender here changes only what this screen shows and saves. It does not
-              change which tender intake, job numbering or allotment use &mdash; that is set in
-              Agency Settings.
-            </p>
           </div>
         </div>
       )}
@@ -2446,9 +2441,7 @@ export default function EstimateMaster() {
                   AT &ldquo;{selectedAt?.atNumber || selectedAt?.name}&rdquo; has no rates of its own.
                 </p>
                 <p className="text-xs mt-1">
-                  A new tender starts with no schedule. The figures below are a starting point drawn from
-                  {' '}<strong>{activeAgency.name}</strong> and the shipped defaults &mdash; they are
-                  {' '}<strong>not this AT&rsquo;s rates</strong> until you save them.
+                  The figures below are <strong>not this AT&rsquo;s rates</strong> until you save them.
                 </p>
               </div>
             </div>
@@ -2570,9 +2563,6 @@ export default function EstimateMaster() {
               <div className="bg-purple-100 p-2.5 rounded-lg shrink-0"><Crown className="w-6 h-6" /></div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">Publish this AT as a template</h3>
-                <p className="text-xs text-purple-700 font-medium">
-                  Any user can copy it onto their own tender. Nobody&rsquo;s existing rates change.
-                </p>
               </div>
             </div>
 
@@ -2680,17 +2670,6 @@ export default function EstimateMaster() {
                 No AT exists for this agency
               </span>
             )}
-            {isSuperAdmin ? (
-              <span className="px-2.5 py-0.5 text-xs font-bold bg-purple-50 text-purple-700 border border-purple-200 rounded-full flex items-center gap-1">
-                <Crown className="w-3.5 h-3.5 text-purple-600" />
-                Admin: Global Rate Publishing Enabled
-              </span>
-            ) : (
-              <span className="px-2.5 py-0.5 text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-full flex items-center gap-1">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                Agency-Isolated Custom Pricing
-              </span>
-            )}
           </div>
           {/* When the rates last changed. Shown beside the master itself, because the
               question it answers - "could this estimate predate the current rates" - is
@@ -2703,11 +2682,6 @@ export default function EstimateMaster() {
               . Estimates produced before that date were priced from different rates.
             </p>
           )}
-          <p className="text-xs sm:text-sm text-slate-500 mt-1.5">
-            {isSuperAdmin 
-              ? 'Administrator Mode: Standard tender rate master for CRGO, Amorphous, Wound Core, Overhauling & Circle Limits. You can edit for your agency or publish system-wide defaults.'
-              : 'Standard tender repair and material rates for your agency. Any rates you customize here are strictly saved for your agency and will not affect any other user.'}
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full lg:w-auto justify-end">
