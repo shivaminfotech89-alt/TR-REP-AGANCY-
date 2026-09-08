@@ -17,7 +17,7 @@ import { auth } from '../lib/firebase';
 import { formatDDMMYYYY } from '../lib/utils';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useAgency, type AtMaster, type Agency } from '../lib/AgencyContext';
-import { CARD } from '../lib/ui';
+import { CARD, LABEL, NUM, TABLE, TABLE_WRAP, TH, TD, TH_STICKY, TD_STICKY, cardTone } from '../lib/ui';
 import { checkMasterSection, storedSection, storedSectionForRates, MasterSection } from '../lib/estimateMasterHealth';
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
 import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt, SCHEDULES } from '../lib/ugvclSchedules';
@@ -1740,7 +1740,7 @@ export default function EstimateMaster() {
                       ? 'bg-red-50 border-red-300 text-red-800'
                       : 'bg-amber-50 border-amber-300 text-amber-900'
                   }`}>
-                    <span className="block text-[9px] uppercase font-bold tracking-wider opacity-70 mb-0.5">Stored in the database</span>
+                    <span className={`block ${LABEL} opacity-70 mb-0.5`}>Stored in the database</span>
                     <strong className="font-bold flex items-center gap-1">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
                       {health.blocking
@@ -1883,7 +1883,7 @@ export default function EstimateMaster() {
 
         {/* Accordion Content Table */}
         {isOpen && (
-          <div className="overflow-x-auto">
+          <div className={TABLE_WRAP}>
             {/* ⚠ THIS NOTE MUST KEEP NAMING WHICH ROW IS WHICH.
                 A blanket "these are reference rates" over a section containing row "0" would
                 be the same defect as the one the lock fixes, pointing the other way: row "0"
@@ -1896,8 +1896,14 @@ export default function EstimateMaster() {
                 Clause 4.0 and not the agency's to set. Reusing the fixed-rate wording would
                 tell an operator these figures are inert, and they decide whether an estimate
                 prints "> CIRCLE LIMIT" on a document addressed to that same officer. */}
+            {/* ⚠ THE LOUDEST NOTICE ON THE SCREEN, AND DELIBERATELY NOT cardTone().
+                Every other notice here describes REFERENCE figures the estimate does not read.
+                This one describes rates that are LIVE on every CRGO and Overhauling estimate.
+                It keeps a full border while the others take a single left edge, so the
+                distinction survives the restyle rather than being flattened into one
+                vocabulary. */}
             {sectionKey === 'CIRCLE_LIMITS' && (
-              <div className="m-3 mb-0 p-3 rounded-lg border border-rose-300 bg-rose-50 text-rose-900 text-[11px] leading-relaxed">
+              <div className="m-3 mb-0 p-3 rounded-lg border-2 border-rose-400 bg-rose-50 text-rose-900 text-[11px] leading-relaxed">
                 <p className="font-bold text-rose-950 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                   Clause 4.0 sanction limits - the tender&rsquo;s figures, read-only
@@ -1926,7 +1932,7 @@ export default function EstimateMaster() {
                     the printed sheet, which is a document to a DISCOM rather than a report
                     on this app's transcription state. */}
                 {gridSchedule.borrowedFrom.circleLimits && (
-                  <p className="mt-1.5 p-2 rounded border border-amber-400 bg-amber-50 text-amber-900">
+                  <p className={`mt-1.5 p-2 ${cardTone('warn')} bg-amber-50 text-amber-900`}>
                     <strong className="font-bold">These are {SCHEDULES[gridSchedule.borrowedFrom.circleLimits].label} figures.</strong>{' '}
                     The Clause 4.0 pages for {gridSchedule.label} have not been supplied, so this tender is
                     checked against the previous tender&rsquo;s sanction limits. If the new tender raised
@@ -1936,7 +1942,7 @@ export default function EstimateMaster() {
               </div>
             )}
             {isReference && sectionKey !== 'CIRCLE_LIMITS' && (
-              <div className="m-3 mb-0 p-3 rounded-lg border border-sky-300 bg-sky-50 text-sky-900 text-[11px] leading-relaxed">
+              <div className={`m-3 mb-0 p-3 ${cardTone('info')} bg-sky-50 text-sky-900 text-[11px] leading-relaxed`}>
                 <p className="font-bold text-sky-950 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
                   These are the tender rates, shown for reference - the estimate does not read them
@@ -1963,7 +1969,7 @@ export default function EstimateMaster() {
                 </p>
                 {/* See the matching notice on Circle Limits. */}
                 {gridSchedule.borrowedFrom.scheduleB && (
-                  <p className="mt-1.5 p-2 rounded border border-amber-400 bg-amber-50 text-amber-900">
+                  <p className={`mt-1.5 p-2 ${cardTone('warn')} bg-amber-50 text-amber-900`}>
                     <strong className="font-bold">
                       This tender prices {sectionTitle} from {SCHEDULES[gridSchedule.borrowedFrom.scheduleB].label}.
                     </strong>{' '}
@@ -1976,17 +1982,17 @@ export default function EstimateMaster() {
             )}
             {sectionKey === 'CIRCLE_LIMITS' && circleLimitsViewMode === 'matrix' ? (
               /* Transposed Matrix View (Capacity Rows x Level Columns) matching scanned circular */
-              <table className="w-full text-left text-sm text-slate-600 min-w-max">
-                <thead className="bg-rose-50/80 text-[11px] uppercase text-rose-950 font-bold border-b border-rose-200">
+              <table className={`${TABLE} min-w-max`}>
+                <thead className="bg-rose-50/80 border-b border-rose-200">
                   <tr>
-                    <th className="px-3.5 py-3 whitespace-nowrap sticky left-0 bg-rose-50 z-10 border-r border-rose-200 w-24">
+                    <th className={`${TH_STICKY} left-0 bg-rose-50 border-r border-rose-200 w-24`}>
                       Sr. No
                     </th>
-                    <th className="px-3.5 py-3 text-left sticky left-[96px] bg-rose-50 z-10 border-r border-rose-200 min-w-[140px] w-40">
+                    <th className={`${TH_STICKY} left-[96px] bg-rose-50 border-r border-rose-200 min-w-[140px] w-40`}>
                       Capacity (KVA)
                     </th>
                     {data.map((item, idx) => (
-                      <th key={idx} className="px-3.5 py-3 text-right border-r border-rose-200 min-w-[170px] whitespace-normal">
+                      <th key={idx} className={`${TH} text-right border-r border-rose-200 min-w-[170px] whitespace-normal`}>
                         <div className="font-bold text-rose-900 leading-snug">{item.itemName}</div>
                         <div className="text-[10px] text-rose-700 font-mono tabular-nums font-normal">Level Code: {item.itemCode}</div>
                       </th>
@@ -1996,10 +2002,10 @@ export default function EstimateMaster() {
                 <tbody className="divide-y divide-slate-100">
                   {kvaColumns.map((kva, kvaIdx) => (
                     <tr key={kva} className="hover:bg-rose-50/40 transition-colors">
-                      <td className="px-3.5 py-2.5 font-bold text-slate-700 whitespace-nowrap sticky left-0 bg-white border-r border-slate-100 text-center w-24 font-mono tabular-nums">
+                      <td className={`${TD_STICKY} left-0 ${NUM} font-bold text-slate-700 border-r border-slate-100 text-center w-24`}>
                         {kvaIdx + 1}
                       </td>
-                      <td className="px-3.5 py-2.5 font-bold text-slate-900 sticky left-[96px] bg-white border-r border-slate-100 min-w-[140px] w-40">
+                      <td className={`${TD_STICKY} left-[96px] font-bold text-slate-900 border-r border-slate-100 min-w-[140px] w-40`}>
                         <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-mono tabular-nums text-xs">
                           {kva} / 11 KVA
                         </span>
@@ -2007,7 +2013,7 @@ export default function EstimateMaster() {
                       {data.map((item, itemIdx) => {
                         const rateVal = item.rates?.[kva];
                         return (
-                          <td key={itemIdx} className="px-3 py-2.5 text-right font-mono tabular-nums text-slate-700 border-r border-slate-100">
+                          <td key={itemIdx} className={`${TD} text-right ${NUM} text-slate-700 border-r border-slate-100`}>
                             {/* ⚠ THE MATRIX VIEW HAS ITS OWN INPUT AND ITS OWN GATE. The row
                                 map further down is where every other section is locked, and
                                 this table is not part of it - so gating only there would have
@@ -2040,24 +2046,24 @@ export default function EstimateMaster() {
               </table>
             ) : (
               /* Standard Table View (Top Row = Capacities, Left Column = Levels/Items) */
-              <table className="w-full text-left text-sm text-slate-600 min-w-max">
-                <thead className="bg-slate-50 text-[11px] uppercase text-slate-600 font-bold border-b border-slate-200">
+              <table className={`${TABLE} min-w-max`}>
+                <thead className="border-b border-slate-200">
                   <tr>
-                    <th className="px-3.5 py-3 whitespace-nowrap sticky left-0 bg-slate-50 z-10 border-r border-slate-200 w-16">
+                    <th className={`${TH_STICKY} left-0 border-r border-slate-200 w-16`}>
                       Sr.
                     </th>
-                    <th className="px-3.5 py-3 text-left sticky left-[64px] bg-slate-50 z-10 border-r border-slate-200 min-w-[280px] max-w-md">
+                    <th className={`${TH_STICKY} left-[64px] border-r border-slate-200 min-w-[280px] max-w-md`}>
                       {sectionKey === 'CIRCLE_LIMITS' ? 'Transformer Level / Rating' : 'Item Description'}
                     </th>
-                    <th className="px-3.5 py-3 text-left border-r border-slate-200 min-w-[130px] w-36">
+                    <th className={`${TH} border-r border-slate-200 min-w-[130px] w-36`}>
                       Unit
                     </th>
                     {kvaColumns.map(kva => (
-                      <th key={kva} className="px-3 py-3 text-right bg-blue-50/50 text-blue-900 whitespace-nowrap font-mono tabular-nums">
+                      <th key={kva} className={`${TH} text-right bg-blue-50/50 text-blue-900 ${NUM}`}>
                         {kva} / 11 KVA
                       </th>
                     ))}
-                    {sectionKey !== 'CIRCLE_LIMITS' && <th className="px-2.5 py-3 text-center w-16">Action</th>}
+                    {sectionKey !== 'CIRCLE_LIMITS' && <th className={`${TH} text-center w-16`}>Action</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -2068,7 +2074,7 @@ export default function EstimateMaster() {
                   const rowEditable = isEditing && isRowEditable(sectionKey, item);
                   return (
                     <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                      <td className="px-3.5 py-2.5 font-bold text-slate-900 whitespace-nowrap sticky left-0 bg-white group-hover:bg-slate-50 border-r border-slate-100 align-top w-16">
+                      <td className={`${TD_STICKY} left-0 group-hover:bg-slate-50 font-bold text-slate-900 border-r border-slate-100 align-top w-16`}>
                         {rowEditable ? (
                           <input 
                             type="text" 
@@ -2096,7 +2102,7 @@ export default function EstimateMaster() {
                           <span className="font-mono tabular-nums font-bold">{item.itemCode}</span>
                         )}
                       </td>
-                      <td className="px-3.5 py-2.5 sticky left-[64px] bg-white group-hover:bg-slate-50 border-r border-slate-100 min-w-[280px] max-w-md whitespace-normal break-words align-top">
+                      <td className={`${TD_STICKY} left-[64px] group-hover:bg-slate-50 border-r border-slate-100 min-w-[280px] max-w-md whitespace-normal break-words align-top`}>
                         {rowEditable ? (
                           <textarea 
                             rows={item.itemName.length > 80 ? 4 : item.itemName.length > 30 ? 2 : 1}
@@ -2111,7 +2117,7 @@ export default function EstimateMaster() {
                           </div>
                         )}
                       </td>
-                      <td className="px-3.5 py-2.5 border-r border-slate-100 min-w-[130px] w-36 whitespace-normal break-words align-top">
+                      <td className={`${TD} border-r border-slate-100 min-w-[130px] w-36 whitespace-normal break-words align-top`}>
                         {rowEditable ? (
                           <input 
                             type="text" 
@@ -2129,7 +2135,7 @@ export default function EstimateMaster() {
                       {kvaColumns.map(kva => {
                         const rateVal = item.rates?.[kva];
                         return (
-                          <td key={kva} className="px-2.5 py-2.5 text-right font-mono tabular-nums text-slate-700 align-top">
+                          <td key={kva} className={`${TD} text-right ${NUM} text-slate-700 align-top`}>
                             {(() => {
                               const stored = rateVal !== null && rateVal !== undefined
                                 && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
@@ -2264,7 +2270,7 @@ export default function EstimateMaster() {
                           them - the control was not missing, it was invisible. Disabled
                           outside edit mode, with the reason in the tooltip. */}
                       {sectionKey !== 'CIRCLE_LIMITS' && (
-                        <td className="px-2 py-2.5 text-center align-top w-16">
+                        <td className={`${TD} text-center align-top w-16`}>
                           <button
                             type="button"
                             disabled={!rowEditable}
@@ -2303,7 +2309,7 @@ export default function EstimateMaster() {
     <div className="space-y-6 pb-12">
       {/* Top Banner / Success Notification */}
       {syncSuccessMsg && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 rounded-xl flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2">
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-4 rounded-lg flex items-center justify-between shadow-xs animate-in fade-in slide-in-from-top-2">
           <div className="flex items-center gap-2.5">
             <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
             <span className="text-sm font-bold">{syncSuccessMsg}</span>
@@ -2319,7 +2325,7 @@ export default function EstimateMaster() {
 
       {/* Global Config Failure Warning Banner */}
       {globalConfigError && (
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 shadow-xs flex items-start justify-between gap-3 text-amber-900 animate-in fade-in">
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 shadow-xs flex items-start justify-between gap-3 text-amber-900 animate-in fade-in">
           <div className="flex items-start gap-3">
             <div className="p-2 bg-amber-100 border border-amber-300 rounded-lg text-amber-700 shrink-0 mt-0.5">
               <AlertTriangle className="w-5 h-5" />
@@ -2354,7 +2360,7 @@ export default function EstimateMaster() {
           state to be in and a terrible one to be in WITHOUT KNOWING, so it is stated -
           divergence named is not confusion; divergence unstated is (AUDIT F79). */}
       {divergedFromActive && (
-        <div className="bg-indigo-50 border border-indigo-300 rounded-xl p-3 text-xs text-indigo-900 flex items-start gap-2">
+        <div className="bg-indigo-50 border border-indigo-300 rounded-lg p-3 text-xs text-indigo-900 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-bold">
@@ -2372,7 +2378,7 @@ export default function EstimateMaster() {
 
       {/* A CLOSED TENDER IS SHOWN BUT NOT EDITABLE. */}
       {selectedAtClosed && (
-        <div className="bg-slate-100 border border-slate-400 rounded-xl p-3 text-xs text-slate-800 flex items-start gap-2">
+        <div className="bg-slate-100 border border-slate-400 rounded-lg p-3 text-xs text-slate-800 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
           <div>
             <p className="font-bold">
@@ -2406,7 +2412,7 @@ export default function EstimateMaster() {
           // them at the wall.
           const agencyHasAnyAt = atMasters.some(t => t.agencyId === activeAgency.id);
           return (
-            <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 text-sm text-rose-900 flex items-start gap-3">
+            <div className="bg-rose-50 border border-rose-300 rounded-lg p-4 text-sm text-rose-900 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">
@@ -2433,7 +2439,7 @@ export default function EstimateMaster() {
         }
         if (ratesState.kind === 'none') {
           return (
-            <div className="bg-rose-50 border border-rose-300 rounded-xl p-4 text-sm text-rose-900 flex items-start gap-3">
+            <div className="bg-rose-50 border border-rose-300 rounded-lg p-4 text-sm text-rose-900 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">
@@ -2450,7 +2456,7 @@ export default function EstimateMaster() {
         }
         if (ratesState.kind === 'inherited') {
           return (
-            <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 text-sm text-amber-900 flex items-start gap-3">
+            <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 text-sm text-amber-900 flex items-start gap-3">
               <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
               <div>
                 <p className="font-bold">
@@ -2472,7 +2478,7 @@ export default function EstimateMaster() {
           const currentVersion = Number(tpl?.version ?? 0);
           const drifted = tpl && currentVersion > usedVersion;
           return (
-            <div className={`${drifted ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-300 text-emerald-900'} border rounded-xl p-4 text-sm flex items-start gap-3`}>
+            <div className={`${drifted ? 'bg-amber-50 border-amber-300 text-amber-900' : 'bg-emerald-50 border-emerald-300 text-emerald-900'} border rounded-lg p-4 text-sm flex items-start gap-3`}>
               {drifted ? <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" /> : <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />}
               <div>
                 <p className="font-bold">
@@ -2495,7 +2501,7 @@ export default function EstimateMaster() {
           );
         }
         return (
-          <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-4 text-sm text-emerald-900 flex items-start gap-3">
+          <div className="bg-emerald-50 border border-emerald-300 rounded-lg p-4 text-sm text-emerald-900 flex items-start gap-3">
             <ShieldCheck className="w-5 h-5 shrink-0 mt-0.5" />
             <div>
               <p className="font-bold">
@@ -2561,7 +2567,7 @@ export default function EstimateMaster() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-lg shadow-2xl p-5 sm:p-6 max-w-lg w-full border border-purple-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center gap-3 mb-3 text-purple-700">
-              <div className="bg-purple-100 p-2.5 rounded-xl shrink-0"><Crown className="w-6 h-6" /></div>
+              <div className="bg-purple-100 p-2.5 rounded-lg shrink-0"><Crown className="w-6 h-6" /></div>
               <div>
                 <h3 className="text-base font-bold text-slate-900">Publish this AT as a template</h3>
                 <p className="text-xs text-purple-700 font-medium">
@@ -2633,7 +2639,7 @@ export default function EstimateMaster() {
       )}
 
       {/* Page Header */}
-      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-5 sm:p-6 rounded-xl shadow-xs border border-slate-200 gap-4">
+      <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center bg-white p-5 sm:p-6 rounded-lg shadow-xs border border-slate-200 gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2.5">
             <h1 className="text-xl font-bold text-slate-900 flex items-center">
@@ -2845,7 +2851,7 @@ export default function EstimateMaster() {
           <div className="bg-white rounded-lg shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-5 animate-in zoom-in-95">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl border border-blue-100">
+                <div className="p-2.5 bg-blue-50 text-blue-600 rounded-lg border border-blue-100">
                   <Sparkles className="w-6 h-6" />
                 </div>
                 <div>
@@ -2875,7 +2881,7 @@ export default function EstimateMaster() {
               {/* Option 1: Single Agency (Default & Isolated) */}
               <div 
                 onClick={() => setSaveScope('SINGLE')}
-                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+                className={`p-4 rounded-lg border-2 cursor-pointer transition-all ${
                   saveScope === 'SINGLE' 
                     ? 'border-emerald-600 bg-emerald-50/50 shadow-xs' 
                     : 'border-slate-200 hover:border-slate-300 bg-white'
@@ -2912,7 +2918,7 @@ export default function EstimateMaster() {
                   beats hidden: it answers "why can't I publish" instead of raising it. */}
               <div 
                 onClick={() => { if (isSuperAdmin) setSaveScope('ALL'); }}
-                className={`p-4 rounded-xl border-2 transition-all ${
+                className={`p-4 rounded-lg border-2 transition-all ${
                   !isSuperAdmin
                     ? 'border-slate-200 bg-slate-50 opacity-60 cursor-not-allowed'
                     : saveScope === 'ALL'
@@ -3019,7 +3025,7 @@ export default function EstimateMaster() {
           <div className="bg-white rounded-lg shadow-2xl border border-slate-200 max-w-lg w-full p-6 space-y-4 animate-in zoom-in-95">
             <div className="flex items-start justify-between">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 bg-sky-50 text-sky-600 rounded-xl border border-sky-100">
+                <div className="p-2.5 bg-sky-50 text-sky-600 rounded-lg border border-sky-100">
                   <Building2 className="w-6 h-6" />
                 </div>
                 <div>
@@ -3046,7 +3052,7 @@ export default function EstimateMaster() {
                 countOverridesForApply. A confirmation is a claim, and a claim that was true
                 at page load and false at click time is worse than no claim at all. */}
             {!countingOverrides && applyCounts && (
-              <div className="border border-slate-300 rounded-xl divide-y divide-slate-200 bg-white max-h-64 overflow-y-auto">
+              <div className="border border-slate-300 rounded-lg divide-y divide-slate-200 bg-white max-h-64 overflow-y-auto">
                 {applyCounts.map(c => {
                   const checked = applyTargets.includes(c.id);
                   return (

@@ -207,6 +207,22 @@ export const TH = 'px-2 py-1.5 text-[10px] font-bold uppercase tracking-wider te
 export const TD = 'px-2 py-1.5 text-xs text-slate-800 border-b border-slate-100 whitespace-nowrap';
 
 /**
+ * A COLUMN FROZEN WHILE THE TABLE SCROLLS SIDEWAYS.
+ *
+ * ⚠ ONE CONSUMER, AND THAT IS NOT AN OVERSIGHT. Only the Estimate Master rate grid has a
+ * frozen column, because only it has a row whose identity (Sr., item description, unit) must
+ * stay on screen while the reader scrolls ten capacity columns sideways to find a figure. A
+ * rate detached from the item it prices is not a smaller table, it is an unreadable one -
+ * the same argument TABLE_WRAP makes against hiding columns on a phone.
+ *
+ * They live here rather than in that screen so the next grid that needs a frozen column
+ * inherits the decision instead of re-deciding it. The caller supplies the `left` offset,
+ * which is geometry rather than style and genuinely varies per column.
+ */
+export const TH_STICKY = `${TH} sticky z-10`;
+export const TD_STICKY = `${TD} sticky bg-white z-10`;
+
+/**
  * THE APP MARK - ONE FILE, SHARED BY THE TAB ICON, THE MANIFEST AND ALL 8 UI SITES (AUDIT G25).
  *
  * ⚠ NOT AN IMPORTED ASSET, AND DELIBERATELY SO. `public/favicon.svg` is already referenced by
