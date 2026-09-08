@@ -2762,38 +2762,11 @@ export default function EstimateMaster() {
               )}
             </span>
           </button>
-          {/* TWO BUTTONS, TWO BLAST RADII.
-              One control used to do both: write public_config AND loop the caller's own
-              agencies. Applying rates to agencies you own is reversible by you; seeding
-              public_config changes the default every future agency inherits, for every
-              user, and cannot be undone by you on their behalf. Naming one of those two
-              is how someone publishes a baseline meaning to update their own agencies. */}
-          {/* Gated on ATs, not on how many AGENCIES exist. One agency with two tenders is
-              exactly the case this is for, and it used to be hidden. */}
-          {applyCandidateAts.length > 0 && (
-            <button
-              type="button"
-              onClick={openApplyToMyAgencies}
-              disabled={isSaving || !selectedAt}
-              className="flex items-center px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 shadow-2xs transition-colors disabled:opacity-50"
-              title={`Copy these rates onto your other ATs. You will see what it replaces before anything is written.`}
-            >
-              <Building2 className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
-              Apply to my other ATs
-            </button>
-          )}
-          {isSuperAdmin && (
-            <button
-              type="button"
-              onClick={() => { setPublishTplName(selectedAt?.atNumber ? `UGVCL ${selectedAt.atNumber}` : ''); setShowPublishTplModal(true); }}
-              disabled={!selectedAt}
-              className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors disabled:opacity-50"
-              title="Admin only: publish these rates as a named AT template that any user can copy onto their own tender. Does not change anyone's existing rates."
-            >
-              <Crown className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
-              Publish this AT as a template
-            </button>
-          )}
+          {/* ⚠ "Apply to my other ATs" AND "Publish as a template" ARE NOT HERE ANY MORE.
+              Both are things you do AFTER settling these rates - they send them somewhere
+              else - so they read in the wrong order above the tables, and they occupied the
+              header beside the one control that is used on most visits. They now sit in a
+              footer below the five sections. See the note there. */}
           <div className="flex items-center space-x-1.5 border-l border-slate-200 pl-2">
             <button 
               onClick={handleExpandAll}
@@ -2864,6 +2837,50 @@ export default function EstimateMaster() {
           'bg-rose-600'
         )}
       </div>
+
+      {/* WHAT TO DO WITH THESE RATES ONCE THEY ARE RIGHT.
+          Both of these send this AT's rates somewhere else, so they belong after the rates
+          and not above them. Each is used about once per tender - "Publish" rarer still,
+          being admin-only - and between them they were taking half the header.
+
+          TWO BUTTONS, TWO BLAST RADII, and that is why they stay separate controls. One
+          control used to do both: write public_config AND loop the caller's own agencies.
+          Copying onto ATs you own is reversible by you; seeding a shared baseline changed
+          what every future agency inherited, for every user, and could not be undone by you
+          on their behalf. Naming one of those two is how someone publishes a baseline
+          meaning to update their own tenders. (public_config is read-only now, but the
+          reason the two are not one button is unchanged.) */}
+      {(applyCandidateAts.length > 0 || isSuperAdmin) && (
+        <div className={`${CARD} p-3 flex flex-wrap items-center gap-2`}>
+          <span className={`${LABEL} mr-1`}>Use these rates elsewhere</span>
+          {/* Gated on ATs, not on how many AGENCIES exist. One agency with two tenders is
+              exactly the case this is for, and it used to be hidden. */}
+          {applyCandidateAts.length > 0 && (
+            <button
+              type="button"
+              onClick={openApplyToMyAgencies}
+              disabled={isSaving || !selectedAt}
+              className="flex items-center px-3.5 py-2 text-xs font-bold text-sky-700 bg-sky-50 hover:bg-sky-100 rounded-lg border border-sky-200 shadow-2xs transition-colors disabled:opacity-50"
+              title={`Copy these rates onto your other ATs. You will see what it replaces before anything is written.`}
+            >
+              <Building2 className="w-3.5 h-3.5 mr-1.5 text-sky-600" />
+              Apply to my other ATs
+            </button>
+          )}
+          {isSuperAdmin && (
+            <button
+              type="button"
+              onClick={() => { setPublishTplName(selectedAt?.atNumber ? `UGVCL ${selectedAt.atNumber}` : ''); setShowPublishTplModal(true); }}
+              disabled={!selectedAt}
+              className="flex items-center px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg border border-purple-200 shadow-2xs transition-colors disabled:opacity-50"
+              title="Admin only: publish these rates as a named AT template that any user can copy onto their own tender. Does not change anyone's existing rates."
+            >
+              <Crown className="w-3.5 h-3.5 mr-1.5 text-purple-600" />
+              Publish this AT as a template
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Section Save Scope Confirmation Dialog */}
       {pendingSaveSection && (
