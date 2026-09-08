@@ -3,7 +3,9 @@ import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate } from '../lib/estimateCalc';
+import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
+         checkJobCircleLimit, consentEligibility, consentRefusalReason, claimedAmountForJob,
+         RepairWithinLimitConsent } from '../lib/estimateCalc';
 import { classifyCoreType, EstimateRateError } from './SingleJobEstimateReport';
 import { pricingModelForJob } from '../lib/ugvclSchedules';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
@@ -13,7 +15,7 @@ import { mrStageSummary } from '../lib/inspectionStage';
 import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
-import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, writeBatch, updateDoc } from 'firebase/firestore';
 import { 
   Loader2, Printer, Search, FileText, ArrowLeft, CheckCircle2, ShieldCheck, FileSpreadsheet, 
   Droplets, AlertTriangle, AlertCircle, X, Calendar, Save, Edit3, Check, Send,
@@ -124,6 +126,47 @@ export default function BillingSystem() {
   const [forwardingCc, setForwardingCc] = useState('');
   const [certMonthsText, setCertMonthsText] = useState('Twelve/Eighteen');
   const [showEditLetterModal, setShowEditLetterModal] = useState(false);
+
+  /** The job whose circle-limit consent is being recorded, and the optional authoriser. */
+  const [consentJob, setConsentJob] = useState<any | null>(null);
+  const [consentAuthorisedBy, setConsentAuthorisedBy] = useState('');
+  const [savingConsent, setSavingConsent] = useState(false);
+
+  /**
+   * RECORD THE AGENCY'S CONSENT TO REPAIR WITHIN THE SANCTION LIMIT.
+   *
+   * ⚠ TWO NAMES, BECAUSE THEY ARE TWO FACTS. `consentedBy` is the signed-in user - honest
+   * about who clicked, captured automatically, never typed. `authorisedBy` is optional and
+   * asked for - honest about who DECIDED, which in an agency where the operator is not the
+   * decision-maker is somebody else entirely. Choosing one would have recorded a half-truth
+   * either way; an operator who is themselves the decision-maker leaves it blank truthfully.
+   *
+   * `limitAtConsent` and `comparisonTotalAtConsent` are snapshots, not references. The bill
+   * claims the limit AGREED, not whatever the master says when it is reprinted.
+   */
+  const recordCircleLimitConsent = async (job: any) => {
+    if (!job) return;
+    setSavingConsent(true);
+    try {
+      const { check } = jobConsentState(job);
+      const consent: RepairWithinLimitConsent & { authorisedBy?: string } = {
+        consentedBy: auth.currentUser?.email || auth.currentUser?.uid || 'unknown',
+        consentedAt: Date.now(),
+        limitAtConsent: Number(check.limit),
+        comparisonTotalAtConsent: Number(check.finalAmt),
+      };
+      const note = consentAuthorisedBy.trim();
+      if (note) consent.authorisedBy = note;
+      await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: consent } as any);
+      job.repairWithinLimitConsent = consent;   // so the open bill reflects it without a reload
+      setConsentJob(null);
+      setConsentAuthorisedBy('');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, 'jobs');
+    } finally {
+      setSavingConsent(false);
+    }
+  };
   const [saveAsDefaultAgency, setSaveAsDefaultAgency] = useState(false);
 
   // Which MR rows have their per-job chip list expanded. Per MR, and deliberately
@@ -552,8 +595,57 @@ export default function BillingSystem() {
    * Branches the same way `calculateJobTotal` does, because scrap resolves its flat charge
    * without the builder and would otherwise report no errors at all.
    */
+  /**
+   * THE CIRCLE-LIMIT CONSENT STATE OF ONE JOB.
+   *
+   * Clause 4.0 measures `comparisonTotal` - labour and material, with tank, conservator and
+   * radiator excluded - against the sanction limit. Over it, the estimate cannot simply be
+   * billed: either the agency consents to repair within the limit, or the tender routes the
+   * job to scrap. Neither is a decision this app can make, so it refuses to bill until one
+   * has been recorded.
+   */
+  const jobConsentState = (job: any) => {
+    const at = atForJob(job, atMasters) ?? activeAtMaster;
+    const cm = getEstimateMasterForCore({ at, agency: activeAgency }, 'CIRCLE_LIMITS' as any);
+    const check = checkJobCircleLimit(
+      job, externalInspMap[job.id], internalInspMap[job.id], activeAgency, at,
+      (at as any)?.estimateMasterCircleLimits || (activeAgency as any)?.estimateMasterCircleLimits || cm
+    );
+    const eligibility = consentEligibility(check);
+    const consent = (job.repairWithinLimitConsent ?? null) as RepairWithinLimitConsent | null;
+    return { check, eligibility, consent };
+  };
+
   const jobPricingErrors = (job: any): EstimateRateError[] => {
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+
+    /**
+     * ⚠ OVER THE CLAUSE 4.0 LIMIT AND UNDECIDED - REFUSE, DO NOT CLAIM.
+     *
+     * Billing the full amount would ask UGVCL for money above a sanction the estimate never
+     * received. It is the same class as the rateErrors refusal beside it: not a number the
+     * app got wrong, a number it has no authority to assert yet.
+     *
+     * SCRAP GETS ITS OWN MESSAGE AND NOT A CONSENT PROMPT. Offering consent on a job the
+     * tender routes to scrap would be worse than offering nothing - it invites the operator
+     * to record a decision that is not theirs to make. See CONSENT_BAND_MULTIPLIER for why
+     * that boundary is approximate and why an approximate boundary is acceptable HERE
+     * specifically: it decides which question is asked, never what is charged.
+     */
+    if (!isScrapJob && !isGpJob(job)) {
+      const { check, eligibility, consent } = jobConsentState(job);
+      if (eligibility === 'SCRAP') {
+        return [{ kind: 'missing-rate', message:
+          `${job.jobNo || 'This job'}: ${consentRefusalReason('SCRAP')}` }];
+      }
+      if (eligibility === 'OFFER' && !consent) {
+        return [{ kind: 'missing-rate', message:
+          `${job.jobNo || 'This job'}: the Clause 4.0 amount (Rs ${check.finalAmt.toFixed(2)}) exceeds the `
+          + `circle limit (Rs ${check.limit.toFixed(2)}). Record the agency's consent to repair within the `
+          + `limit before billing - the bill would otherwise claim above an unsanctioned figure.` }];
+      }
+    }
+
     if (isScrapJob) {
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
       const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
@@ -607,6 +699,28 @@ export default function BillingSystem() {
    */
   const calculateJobTotal = (job: any): number | null => {
     if (jobPricingErrors(job).length > 0) return null;
+
+    /**
+     * CONSENT CAPS THE CLAIM, AND ONLY THE CLAIM.
+     *
+     * The estimate keeps showing the assessed amount in full; this is the figure asked for.
+     * `claimedAmountForJob` returns `limitAtConsent + excluded x (1 + AT%)` - the excluded
+     * items are claimed at their own rates ON TOP of the cap, because Clause 4.0 kept them
+     * out of the computation the cap derives from.
+     *
+     * ⚠ `limitAtConsent`, NOT A RECOMPUTED LIMIT. The circle-limit master is editable and
+     * per-tender; a bill reissued after it changes must still claim what was agreed.
+     */
+    if (!isGpJob(job) && !(job.status === 'Scrap' || job.condition === 'Scrap')) {
+      const { consent } = jobConsentState(job);
+      if (consent) {
+        const est = getJobFullEstimate(
+          job, externalInspMap[job.id], internalInspMap[job.id], activeAgency,
+          atForJob(job, atMasters) ?? activeAtMaster
+        );
+        return claimedAmountForJob(est as any, consent);
+      }
+    }
 
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
@@ -2851,17 +2965,103 @@ export default function BillingSystem() {
                   computed without them.
                 </p>
                 <ul className="mt-1 space-y-1 text-xs text-rose-800 list-disc list-inside">
-                  {blockedBillJobs.map(({ job, errors }) => (
-                    <li key={job.id}>
-                      <span className="font-mono font-bold">{job.jobNo || job.id}</span>
-                      {' - '}
-                      {errors.map(e => e.message.replace(/^[^:]+:\s*/, '')).join(' ')}
-                    </li>
-                  ))}
+                  {blockedBillJobs.map(({ job, errors }) => {
+                    // A CONSENT BLOCK IS THE ONE AN OPERATOR CAN CLEAR HERE. Every other
+                    // reason on this list is a rate to fix on another screen; this one is a
+                    // decision to record, so it gets the control beside it rather than an
+                    // instruction to go elsewhere. SCRAP is deliberately not offered one -
+                    // that decision is not the operator's to record.
+                    const st = (!isGpJob(job) && !(job.status === 'Scrap' || job.condition === 'Scrap'))
+                      ? jobConsentState(job) : null;
+                    const canConsent = st?.eligibility === 'OFFER' && !st?.consent;
+                    return (
+                      <li key={job.id}>
+                        <span className="font-mono font-bold">{job.jobNo || job.id}</span>
+                        {' - '}
+                        {errors.map(e => e.message.replace(/^[^:]+:\s*/, '')).join(' ')}
+                        {canConsent && (
+                          <button
+                            type="button"
+                            onClick={() => { setConsentJob(job); setConsentAuthorisedBy(''); }}
+                            className="ml-2 px-2 py-0.5 text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-700 rounded"
+                          >
+                            Record consent
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               </div>
             </div>
           )}
+
+          {/* RECORD CONSENT TO REPAIR WITHIN THE SANCTION LIMIT. */}
+          {consentJob && (() => {
+            const st = jobConsentState(consentJob);
+            const est = getJobFullEstimate(consentJob, externalInspMap[consentJob.id],
+              internalInspMap[consentJob.id], activeAgency,
+              atForJob(consentJob, atMasters) ?? activeAtMaster);
+            const excl = Number((est as any).excludedBase || 0) * (1 + Number(est.atPercentage || 0) / 100);
+            return (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs print:hidden">
+                <div className="bg-white rounded-lg shadow-2xl p-5 max-w-lg w-full border border-rose-200">
+                  <h3 className="text-base font-bold text-slate-900">
+                    Repair AT {consentJob.jobNo} within the circle limit?
+                  </h3>
+                  <table className="w-full text-xs mt-3 border border-slate-200">
+                    <tbody>
+                      <tr className="border-b border-slate-100">
+                        <td className="p-1.5 text-slate-600">Assessed amount (estimate shows this in full)</td>
+                        <td className="p-1.5 text-right font-mono">{Number(est.finalAmount).toFixed(2)}</td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="p-1.5 text-slate-600">Clause 4.0 amount (labour + material)</td>
+                        <td className="p-1.5 text-right font-mono">{st.check.finalAmt.toFixed(2)}</td>
+                      </tr>
+                      <tr className="border-b border-slate-100">
+                        <td className="p-1.5 text-slate-600">Sanction limit</td>
+                        <td className="p-1.5 text-right font-mono">{st.check.limit.toFixed(2)}</td>
+                      </tr>
+                      {excl > 0 && (
+                        <tr className="border-b border-slate-100">
+                          <td className="p-1.5 text-slate-600">Tank / conservator / radiator, claimed on top</td>
+                          <td className="p-1.5 text-right font-mono">{excl.toFixed(2)}</td>
+                        </tr>
+                      )}
+                      <tr className="bg-rose-50 font-bold">
+                        <td className="p-1.5">The bill would claim</td>
+                        <td className="p-1.5 text-right font-mono">{(st.check.limit + excl).toFixed(2)}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                  <label className="block mt-3">
+                    <span className="text-[11px] font-bold text-slate-700">
+                      Recorded by {auth.currentUser?.email || 'you'}. Who authorised this?
+                    </span>
+                    <input
+                      type="text"
+                      value={consentAuthorisedBy}
+                      onChange={e => setConsentAuthorisedBy(e.target.value)}
+                      placeholder="Optional - leave blank if that is you"
+                      className="mt-1 w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg"
+                    />
+                  </label>
+                  <div className="flex justify-end gap-2 mt-4">
+                    <button type="button" onClick={() => setConsentJob(null)}
+                            className="px-3 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg">
+                      Cancel
+                    </button>
+                    <button type="button" disabled={savingConsent}
+                            onClick={() => recordCircleLimitConsent(consentJob)}
+                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50">
+                      {savingConsent ? 'Recording…' : 'Record consent'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Pending Delivery Warning Banner inside Editor */}
           {selectedMrPendingCount > 0 && (
@@ -3323,8 +3523,21 @@ export default function BillingSystem() {
                           activeAgency,
                           atForJob(job, atMasters) ?? activeAtMaster
                         ).finalAmount;
+                        // THE CONSENT NOTE, PRINTED. Both figures already have columns -
+                        // "Est. Amount" recomputes finalAmount and "Amount (Rs)" is the
+                        // claim - so a capped claim is visible against its assessment
+                        // without any new line. What has NO column is the figure consent
+                        // was agreed against, and that is the one a division office needs
+                        // when the estimate has moved since. It goes in a note row under
+                        // the job rather than a column: it applies to a handful of jobs,
+                        // and a column would add width to every bill for it.
+                        const consentRec = (job.repairWithinLimitConsent ?? null) as RepairWithinLimitConsent | null;
+                        const agreedAgainst = consentRec ? Number(consentRec.comparisonTotalAtConsent) : null;
+                        const consentDrifted = consentRec != null && agreedAgainst != null
+                          && Math.abs(agreedAgainst - jobConsentState(job).check.finalAmt) >= 0.01;
                         return (
-                          <tr key={job.id} className="border-b border-black">
+                          <React.Fragment key={job.id}>
+                          <tr className="border-b border-black">
                             <td className="p-1 border-r border-black">{idx + 1}</td>
                             <td className="p-1 border-r border-black font-bold font-mono">{job.jobNo}</td>
                             <td className="p-1 border-r border-black font-mono">{job.challanNo || ''}</td>
@@ -3351,6 +3564,30 @@ export default function BillingSystem() {
                               </>
                             )}
                           </tr>
+                          {consentRec && (
+                            <tr className="border-b border-black text-[8.5px]">
+                              <td className="p-1 border-r border-black"></td>
+                              <td className="p-1" colSpan={9}>
+                                <span className="font-bold">Repaired within circle limit by consent.</span>{' '}
+                                Sanction limit Rs {Number(consentRec.limitAtConsent).toFixed(2)}; assessed amount
+                                Rs {estAmount.toFixed(2)}; claimed Rs {jobTotal === null ? '-' : jobTotal.toFixed(2)}.
+                                {' '}Consent recorded {formatDDMMYYYY(consentRec.consentedAt)} by {consentRec.consentedBy}
+                                {(consentRec as any).authorisedBy ? `, authorised by ${(consentRec as any).authorisedBy}` : ''}.
+                                {/* BOTH FIGURES, NOT A WARNING THAT THEY DIFFER. The office
+                                    reconciling this bill needs the number consent was agreed
+                                    against as well as the current one - a flag the operator
+                                    can dismiss never reaches them. */}
+                                {consentDrifted && (
+                                  <span>
+                                    {' '}Consent was agreed against a Clause 4.0 amount of
+                                    Rs {Number(agreedAgainst).toFixed(2)}; the estimate now assesses
+                                    Rs {jobConsentState(job).check.finalAmt.toFixed(2)}.
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          )}
+                          </React.Fragment>
                         );
                       })}
                       {/* Financial Calculations
