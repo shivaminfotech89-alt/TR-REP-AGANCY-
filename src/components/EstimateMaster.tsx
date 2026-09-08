@@ -406,12 +406,29 @@ export default function EstimateMaster() {
   const [editingSection, setEditingSection] = useState<'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS' | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Accordion minimize / expand state
-  const [openCrgo, setOpenCrgo] = useState(true);
-  const [openAmorphous, setOpenAmorphous] = useState(true);
-  const [openWoundCore, setOpenWoundCore] = useState(true);
-  const [openOverhauling, setOpenOverhauling] = useState(true);
-  const [openCircleLimits, setOpenCircleLimits] = useState(true);
+  /**
+   * ACCORDION STATE. CLOSED ON ARRIVAL, DELIBERATELY.
+   *
+   * All five opened on mount, so the page began at roughly 4,200px - about five screens -
+   * and the first table row sat below the fold. Reading one rate in Amorphous meant
+   * scrolling past CRGO's 32 rows to reach it. The frequent case on this screen is looking
+   * up a rate in ONE section; entering all five is once per tender.
+   *
+   * ⚠ THIS HIDES TABLES, NOT WARNINGS. The section health band - the check that caught a
+   * CRGO card sitting in AARATI's Wound Core section - renders in the accordion HEADER,
+   * outside the `isOpen` gate, and is still the first thing visible for every section. The
+   * same is true of the row count and the stored-vs-showing band. Only the grid is behind
+   * the click.
+   *
+   * "Expand" in the header restores the old view in one click, and the once-per-tender
+   * paths that need a specific section open still open it themselves (Restore Clause 4.0,
+   * and the Amorphous-to-Wound-Core scrap copy).
+   */
+  const [openCrgo, setOpenCrgo] = useState(false);
+  const [openAmorphous, setOpenAmorphous] = useState(false);
+  const [openWoundCore, setOpenWoundCore] = useState(false);
+  const [openOverhauling, setOpenOverhauling] = useState(false);
+  const [openCircleLimits, setOpenCircleLimits] = useState(false);
 
   // Circle limits view toggle: Standard KVA Columns Grid vs Official Document Matrix View
   const [circleLimitsViewMode, setCircleLimitsViewMode] = useState<'standard' | 'matrix'>('standard');
