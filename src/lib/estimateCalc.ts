@@ -214,6 +214,116 @@ export function coreTypeHasCircleLimit(coreType: string | undefined, at?: any): 
   return pricingModelForJob(at, classifyCoreType(coreType || 'CRGO')) !== 'FIXED_RATE';
 }
 
+/**
+ * THE 25%-TO-30% BAND, AS A BOUNDARY ON ASKING A QUESTION - NOT AS A FIGURE.
+ *
+ * Clause 4.0 routes an estimate three ways by its proportion of a new transformer's cost:
+ * up to 25% to SE (O&M), over 25% and up to 30% to CE (OP), and OVER 30% TO SCRAP. Consent
+ * to repair within the limit belongs to the middle band. Offering it on a job the tender
+ * says must be scrapped would be worse than offering nothing.
+ *
+ * The app holds ONE figure per rating and capacity - the 25% threshold - so it cannot see
+ * where 30% falls. This constant is the stand-in, and the reason it is defensible here and
+ * would not be elsewhere is worth being exact about:
+ *
+ *   ⚠ NOTHING IS CHARGED FROM THIS NUMBER AND NOTHING IS APPROVED BY IT. It decides only
+ *   whether a QUESTION IS ASKED. The claim is capped at the stored 25% limit, never at
+ *   limit x 1.2; the excluded items are claimed at their own rates; no document prints it.
+ *   Used as a boundary on offering consent it is a weak claim - at worst it declines to
+ *   offer consent slightly early, or offers it slightly late, and in both cases a person
+ *   decides. Used to price or to approve, it would be a fabricated threshold.
+ *
+ *   ⚠ AND THE 25% FIGURES ARE DEMONSTRABLY COPIED, NOT DERIVED. In the shipped table,
+ *   11 KV "3 Star & other" prices 10 KVA at 8716 and 16 KVA at 8696 - the larger unit
+ *   cheaper than the smaller - and 4 Star prices 10 KVA at 7707 against 3 Star's 8716, a
+ *   higher-rated unit cheaper than a lower one. Neither can come from applying 25% to a
+ *   coherent cost basis. They are transcriptions of UGVCL's own table, artefacts included
+ *   (see AUDIT O43). Multiplying an artefact by 1.2 does not correct it; it propagates it
+ *   into a second threshold AND LENDS IT THE APPEARANCE OF CORROBORATION, which is the
+ *   specific harm. That is the reason this is a gate on a question rather than a computed
+ *   30% limit presented as one.
+ *
+ * A PUBLISHED 30% TABLE REPLACES THIS ENTIRELY, and is five more rows in a master that
+ * already has the shape - one per rating, priced per capacity, exactly like the 25% rows.
+ * If that table is found, delete this constant rather than keeping both.
+ */
+export const CONSENT_BAND_MULTIPLIER = 1.2;   // 30% / 25%, exact only if both are clean
+
+export type ConsentEligibility =
+  /** At or under the 25% threshold. No consent is needed and none should be offered. */
+  | 'NOT_NEEDED'
+  /** Over 25%, within the stand-in 30% boundary. Consent to repair within the limit applies. */
+  | 'OFFER'
+  /** Past the boundary. Clause 4.0 routes this to scrap; consent must NOT be offered. */
+  | 'SCRAP'
+  /** No sanction limit applies to this job at all - fixed-rate core, or no published figure. */
+  | 'NO_LIMIT';
+
+/** Why consent is not on offer, in the words to show the operator. Null when it is. */
+export function consentRefusalReason(e: ConsentEligibility): string | null {
+  if (e === 'SCRAP') {
+    return 'This exceeds the 25% threshold by more than the 30% band allows; Clause 4.0 routes it to scrap. '
+         + 'The app holds only the 25% figure, so the 30% point is approximated - if the estimate is genuinely '
+         + 'within the CE (OP) band, the published 30% table has to be entered before consent can be offered.';
+  }
+  return null;
+}
+
+/**
+ * Whether consent to repair within the limit is available for this job.
+ *
+ * Measured on `comparisonTotal` - the Clause 4.0 figure - never on the estimate total.
+ */
+export function consentEligibility(check: CircleLimitCheck): ConsentEligibility {
+  if (!check.hasLimit || !(check.limit > 0)) return 'NO_LIMIT';
+  if (!check.exceeds) return 'NOT_NEEDED';
+  return check.finalAmt <= check.limit * CONSENT_BAND_MULTIPLIER ? 'OFFER' : 'SCRAP';
+}
+
+/**
+ * A RECORDED DECISION, NOT A COMPUTED ONE.
+ *
+ * ⚠ `limitAtConsent` IS STORED RATHER THAN RECOMPUTED. The circle-limit figures live in an
+ * editable master and are versioned per tender. A bill reissued from an old consent must
+ * reproduce the amount that was actually agreed, not whatever the table says today - the
+ * same reasoning as the oil carry-forward, and the same failure if it is skipped: a
+ * document that silently disagrees with the one it replaces.
+ */
+export interface RepairWithinLimitConsent {
+  /** Who accepted repairing within the sanction limit. */
+  consentedBy: string;
+  /** When, epoch ms. */
+  consentedAt: number;
+  /** The 25% figure at that moment. The claim is capped at THIS, not at a recomputed one. */
+  limitAtConsent: number;
+  /** The assessed Clause 4.0 figure at that moment, for reconciliation. */
+  comparisonTotalAtConsent: number;
+}
+
+/**
+ * WHAT THE BILL CLAIMS - three figures, and only the third is money asked for.
+ *
+ *   finalAmount      what the work is assessed at. Shown on the estimate IN FULL.
+ *   comparisonTotal  labour + material, the figure Clause 4.0 measures against the limit.
+ *   claimedAmount    the capped claim: the limit, PLUS the excluded items at their own rates.
+ *
+ * ⚠ THE EXCLUDED ITEMS ARE CLAIMED IN FULL ON TOP, NOT CAPPED WITH THE REST. Clause 4.0
+ * excludes tank, conservator tank and radiator from the computation, so they were never part
+ * of what the limit measured. Applying the ceiling to them would impose a cap derived from a
+ * figure they were explicitly kept out of.
+ *
+ * The cap can only ever REDUCE the claim: consent arises only when comparisonTotal exceeds
+ * the limit, so limit + excluded is necessarily below finalAmount.
+ */
+export function claimedAmountForJob(
+  est: { finalAmount: number; excludedBase?: number; atPercentage: number; comparisonTotal?: number },
+  consent: RepairWithinLimitConsent | null | undefined
+): number {
+  if (!consent) return Number(est.finalAmount);
+  const excludedWithPct = Number(est.excludedBase || 0) * (1 + Number(est.atPercentage || 0) / 100);
+  return Number((consent.limitAtConsent + excludedWithPct).toFixed(2));
+}
+
 export function checkJobCircleLimit(
   job: any,
   externalData: any,
