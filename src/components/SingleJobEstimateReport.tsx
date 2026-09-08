@@ -20,7 +20,7 @@ interface ScheduleLookup {
   current: number | undefined;
   baseline: number | undefined;
 }
-import { scheduleSrForMasterCode } from '../lib/scheduleItemMap';
+import { scheduleSrForMasterCode, isClause4Excluded } from '../lib/scheduleItemMap';
 import { resolveScrapCharge } from '../lib/estimateCalc';
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
@@ -278,6 +278,10 @@ export interface SingleJobEstimateData {
   amountWithPercentage: number;
   lessAmount: number;
   finalAmount: number;
+  /** Tank + conservator + radiator, pre-percentage. Optional: only the itemised path has them. */
+  excludedBase?: number;
+  /** What Clause 4.0 measures - finalAmount less those three. Falls back to finalAmount. */
+  comparisonTotal?: number;
   /** Messages for applicable items whose rate couldn't be resolved. Non-empty means
    *  the total must not be shown/trusted - see rateErrors handling in the renderer. */
   rateErrors: EstimateRateError[];
@@ -1252,6 +1256,29 @@ export function buildSingleJobEstimateData(
   const lessAmount = 0.00;
   const finalAmount = Number((amountWithPercentage - lessAmount).toFixed(2));
 
+  /**
+   * WHAT CLAUSE 4.0 ACTUALLY MEASURES — and it is not `finalAmount`.
+   *
+   * "Tank, conservator tank and radiator damage charges are excluded from the 25% / 30%
+   * computation." So a job can be over its sanction limit on the estimate total and inside
+   * it on the figure the circle office computes. The check measured the whole estimate and
+   * therefore reported some jobs over limit that are not - on the printed Condition column,
+   * which goes to the very officer whose sanction power is being described.
+   *
+   * ⚠ COMPUTED HERE, ONCE, WHERE THE LINES ARE. Every caller that needs it takes it off the
+   * estimate rather than re-deriving it from the item arrays, because a second derivation is
+   * a second place for the master/schedule numbering to be got wrong - and getting it wrong
+   * silently produces a plausible number. See CLAUSE_4_EXCLUDED_MASTER_CODES.
+   *
+   * The AT percentage applies to the excluded figure exactly as it does to the total: the
+   * percentage is the agency's bid on the whole schedule, not on a subset of it.
+   */
+  const excludedBase = [...physicalItems, ...internalItems, ...labourItems]
+    .filter(i => isClause4Excluded(i.itemCode))
+    .reduce((sum, i) => sum + (Number(i.amt) || 0), 0);
+  const comparisonBase = Number((baseTotal - excludedBase).toFixed(2));
+  const comparisonTotal = Number((comparisonBase * (1 + atPercentage / 100)).toFixed(2));
+
   return {
     job,
     externalData,
@@ -1265,6 +1292,10 @@ export function buildSingleJobEstimateData(
     amountWithPercentage,
     lessAmount,
     finalAmount,
+    /** Tank + conservator + radiator, pre-percentage. Shown on the sheet so the split reads. */
+    excludedBase: Number(excludedBase.toFixed(2)),
+    /** finalAmount minus those three, with the AT percentage applied. Clause 4.0 measures THIS. */
+    comparisonTotal,
     rateErrors
   };
 }
@@ -1915,6 +1946,36 @@ export default function SingleJobEstimateReport({
                           <td className="p-1.5 border-r border-black">Final Amount:</td>
                           <td className="p-1.5 font-mono">{formatCurrency(estimate.finalAmount)}</td>
                         </tr>
+                        {/* ⚠ THE CLAUSE 4.0 SPLIT, SO THE DIVISION CAN REPRODUCE THE CHECK.
+                            "Tank, conservator tank and radiator damage charges are excluded
+                            from the 25% / 30% computation", so the figure that decides which
+                            officer sanctions this estimate is NOT the Final Amount above it.
+                            Printing only the total left the office to work out the exclusion
+                            from the line items and hope it read the same numbering the app
+                            did - and the app's item codes are not the schedule's.
+
+                            Shown only when something is actually excluded. On the great
+                            majority of estimates the two figures are equal, and two identical
+                            rows invite the reader to look for a difference that is not
+                            there. */}
+                        {Number(estimate.excludedBase) > 0 && (
+                          <>
+                            <tr className="border-t-2 border-black">
+                              <td className="p-1 font-bold border-r border-black">
+                                Less tank / conservator / radiator (Sch-A 18a, 18b, 20):
+                              </td>
+                              <td className="p-1 font-mono">
+                                {formatCurrency(Number(estimate.excludedBase) * (1 + estimate.atPercentage / 100))}
+                              </td>
+                            </tr>
+                            <tr className="font-black">
+                              <td className="p-1.5 border-r border-black">
+                                Amount for Clause 4.0 limit:
+                              </td>
+                              <td className="p-1.5 font-mono">{formatCurrency(estimate.comparisonTotal)}</td>
+                            </tr>
+                          </>
+                        )}
                       </tbody>
                     </table>
                   </div>

@@ -179,3 +179,39 @@ export function variantAxisForMasterCode(masterCode: string): ScheduleItemMappin
   const hit = SCHEDULE_ITEM_MAP.find(m => m.masterCode.toLowerCase() === String(masterCode).trim().toLowerCase());
   return hit?.variants ?? null;
 }
+
+
+/**
+ * CLAUSE 4.0 EXCLUSIONS — tank, conservator tank and radiator.
+ *
+ * "Tank, conservator tank and radiator damage charges are excluded from the 25% / 30%
+ * computation." So the figure a circle office measures against the sanction limit is NOT
+ * the estimate total: it is the estimate minus these three.
+ *
+ * ⚠ MASTER CODES, DERIVED FROM THE MAPPING ABOVE, NOT SCHEDULE NUMBERS. The clause names
+ * Schedule-A sr 18a, 18b and 20; the estimate's line items carry the app's MASTER codes,
+ * and the two numbering systems do not agree - schedule '20' is the app's '21', and the
+ * app's '20' is schedule '19' (Testing), which is NOT excluded. Matching the clause's
+ * numbers against line-item codes would exclude Testing and keep the radiator: the exact
+ * inversion. See SCHEDULE_ITEM_MAP.
+ *
+ * ⚠ AND IT IS NOT A CODE LIST FOR THE RADIATOR. Above 100 KVA the radiator resolves through
+ * RADIATOR_ABOVE_100 rather than a schedule band, because 200 and 500 differ and the band
+ * cannot express that. It is still master code '21' on the line item either way, which is
+ * why this keys on the LINE ITEM's code rather than on how the rate was found.
+ *
+ * '18' (main tank) is here although NOTHING EMITS IT TODAY - the tank line is unpriced, no
+ * field captures a tank weight (AUDIT O22). Excluding it now is a no-op that costs nothing
+ * and means the exclusion is already correct on the day the tank becomes priceable, rather
+ * than being a second thing someone has to remember then.
+ */
+export const CLAUSE_4_EXCLUDED_MASTER_CODES: ReadonlySet<string> = new Set([
+  '18',  // Repl. Of Tank            -> Schedule-A 18a  (not emitted today; see O22)
+  '4',   // Conservator Tank Repl.   -> Schedule-A 18b
+  '21',  // Repl. Of Rediator        -> Schedule-A 20  (and RADIATOR_ABOVE_100 above 100 KVA)
+]);
+
+/** Is this line item excluded from the Clause 4.0 sanction-limit computation? */
+export function isClause4Excluded(itemCode: unknown): boolean {
+  return CLAUSE_4_EXCLUDED_MASTER_CODES.has(String(itemCode ?? '').trim());
+}

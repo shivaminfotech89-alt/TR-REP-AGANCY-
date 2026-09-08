@@ -1,45 +1,45 @@
 {
-  "capturedAt": "2026-09-08T16:55:29.016Z",
+  "capturedAt": "2026-09-08T17:22:28.187Z",
   "jobCount": 64,
   "jobs": {
     "ex4ShPViZ9fCnw44qXHZ": {
-      "baseTotal": 3114.05,
-      "amountWithPercentage": 3238.61,
+      "baseTotal": 4312.8,
+      "amountWithPercentage": 4485.31,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3238.61,
+      "rateErrors": 1,
+      "finalAmount": 4485.31,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "Q2Ucsl2KrmoJ2gNpd0bK": {
-      "baseTotal": 2345,
-      "amountWithPercentage": 2438.8,
+      "baseTotal": 32789,
+      "amountWithPercentage": 34100.56,
       "lineCount": 2,
-      "rateErrors": 2,
-      "finalAmount": 2438.8,
+      "rateErrors": 0,
+      "finalAmount": 34100.56,
       "codes": "1f|1f"
     },
     "U2Mo4NHz5mrX9sML2SUQ": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8541.2,
+      "amountWithPercentage": 8882.85,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8882.85,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "BxVxraTszbqkpZprmhwp": {
-      "baseTotal": 3614.8,
-      "amountWithPercentage": 3759.39,
+      "baseTotal": 7162.2,
+      "amountWithPercentage": 7448.69,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3759.39,
+      "rateErrors": 0,
+      "finalAmount": 7448.69,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "ZXXdIUohhW0dQ7O2vUlN": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 7753.2,
+      "amountWithPercentage": 8063.33,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8063.33,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "i9CVl3ihiN1NYvjtywF7": {
@@ -51,27 +51,27 @@
       "codes": "22"
     },
     "BShPQhnu11n0s5yrkIQ5": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 8628,
+      "amountWithPercentage": 8973.12,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 8973.12,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "eRClsrfssLQDPae2H3Nq": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 7753.2,
+      "amountWithPercentage": 8063.33,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8063.33,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "A3wf1hv1Ihuoq5sjFwOZ": {
-      "baseTotal": 3114.05,
-      "amountWithPercentage": 3238.61,
+      "baseTotal": 6569.4,
+      "amountWithPercentage": 6832.18,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3238.61,
+      "rateErrors": 0,
+      "finalAmount": 6832.18,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "RoubYA553hkFCshqLxTg": {
@@ -86,7 +86,7 @@
       "baseTotal": 13746,
       "amountWithPercentage": 14845.68,
       "lineCount": 2,
-      "rateErrors": 2,
+      "rateErrors": 1,
       "finalAmount": 14845.68,
       "codes": "1d-1|1d-1"
     },
@@ -99,66 +99,66 @@
       "codes": "0"
     },
     "jvdvtP3QLGX90oEwfhgE": {
-      "baseTotal": 3114.05,
-      "amountWithPercentage": 3238.61,
+      "baseTotal": 8728.03,
+      "amountWithPercentage": 9077.15,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3238.61,
+      "rateErrors": 0,
+      "finalAmount": 9077.15,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "TiFXT1sCUw2uE5OuPb5t": {
-      "baseTotal": 3614.8,
-      "amountWithPercentage": 3759.39,
+      "baseTotal": 4916.6,
+      "amountWithPercentage": 5113.26,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3759.39,
+      "rateErrors": 1,
+      "finalAmount": 5113.26,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "DfLga5UJcnp4oVdLT7uc": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 4399,
+      "amountWithPercentage": 4574.96,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 4574.96,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "drIm8L5uHbX2OVRdbVeP": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 12549.1,
+      "amountWithPercentage": 13051.06,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 13051.06,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "2sPmnhH4CxqTKdhJhWX5": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 5448,
+      "amountWithPercentage": 5665.92,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 1,
+      "finalAmount": 5665.92,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "IP4acepDCgDZMoPGM0RM": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8310.2,
+      "amountWithPercentage": 8642.61,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8642.61,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "pKvY01nOMhDn8FTiO7ER": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8541.2,
+      "amountWithPercentage": 8882.85,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8882.85,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "ZoW5Lb44M3ls8kBC47md": {
       "baseTotal": 3506,
       "amountWithPercentage": 3646.24,
       "lineCount": 5,
-      "rateErrors": 3,
+      "rateErrors": 2,
       "finalAmount": 3646.24,
       "codes": "7|3|4|5|6"
     },
@@ -166,16 +166,16 @@
       "baseTotal": 17970,
       "amountWithPercentage": 19407.6,
       "lineCount": 2,
-      "rateErrors": 1,
+      "rateErrors": 0,
       "finalAmount": 19407.6,
       "codes": "1e|1e"
     },
     "MIuy9mEuoHrjiurr5K48": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 9574.2,
+      "amountWithPercentage": 9957.17,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 9957.17,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "0HIziDlP3or3Iyz7H7qM": {
@@ -187,19 +187,19 @@
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "VeRmciVu7glEU2jIL9Ux": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 4399,
+      "amountWithPercentage": 4574.96,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 4574.96,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "9VBriU7iishiWiV8ALER": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 6805.6,
+      "amountWithPercentage": 7077.82,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 7077.82,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "yTej5rIJuJprlhebSCaU": {
@@ -211,66 +211,66 @@
       "codes": "0"
     },
     "2FMIQwSdO4pF17GVUrBG": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8152.35,
+      "amountWithPercentage": 8478.44,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8478.44,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "HBpSaB32oNmHzrQPTjBB": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 6113.2,
+      "amountWithPercentage": 6357.73,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 1,
+      "finalAmount": 6357.73,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "oZFNXII0UhSAa26aPdqD": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8026.18,
+      "amountWithPercentage": 8347.23,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8347.23,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "4tFa49M1GZPXA7GsAbiS": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8048.7,
+      "amountWithPercentage": 8370.65,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8370.65,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "cPvlhTgnjlo3CFNhlKbi": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 12875.2,
+      "amountWithPercentage": 13390.21,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 13390.21,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "JK3yvIaXWvYZtqNFO1mn": {
       "baseTotal": 16746,
       "amountWithPercentage": 17415.84,
       "lineCount": 2,
-      "rateErrors": 1,
+      "rateErrors": 0,
       "finalAmount": 17415.84,
       "codes": "1d-2|1d-2"
     },
     "tKP7KMh4S45h875tWUPE": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8344.2,
+      "amountWithPercentage": 8677.97,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8677.97,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "cUhKizqPH5GpRxcRvfYM": {
       "baseTotal": 8395,
       "amountWithPercentage": 8730.8,
       "lineCount": 2,
-      "rateErrors": 1,
+      "rateErrors": 0,
       "finalAmount": 8730.8,
       "codes": "1c|1c"
     },
@@ -283,84 +283,84 @@
       "codes": "0"
     },
     "PoQsAep2FnJ6oHFloEqR": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 43482.89,
+      "amountWithPercentage": 45222.21,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 45222.21,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "WfguqL90jzUChiR1YNHP": {
-      "baseTotal": 17970,
-      "amountWithPercentage": 19407.6,
+      "baseTotal": 59228,
+      "amountWithPercentage": 63966.24,
       "lineCount": 2,
-      "rateErrors": 1,
-      "finalAmount": 19407.6,
-      "codes": "1e|1e"
+      "rateErrors": 0,
+      "finalAmount": 63966.24,
+      "codes": "2c|2c"
     },
     "8azjDRpjwdvgnYmYG5Cj": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 7624.78,
+      "amountWithPercentage": 7929.77,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 7929.77,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "u3D7FMcXHl6L2acgDTjE": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 10117.2,
+      "amountWithPercentage": 10521.89,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 10521.89,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "DHW0lZRnfLrjQIkLsh2c": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 9917,
+      "amountWithPercentage": 10313.68,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 10313.68,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "DbvXF8PbFvuSDAkVvMhI": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 45302.9,
+      "amountWithPercentage": 47115.02,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 47115.02,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "ScUE3NkHxAKW6T9C9623": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 6571.2,
+      "amountWithPercentage": 6834.05,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 6834.05,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "oVcBbPxsWsmzF9dvz6TO": {
       "baseTotal": 13746,
       "amountWithPercentage": 14845.68,
       "lineCount": 2,
-      "rateErrors": 2,
+      "rateErrors": 1,
       "finalAmount": 14845.68,
       "codes": "1d-1|1d-1"
     },
     "hivHkvhFHJsTAYfhxrQT": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8428.95,
+      "amountWithPercentage": 8766.11,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8766.11,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "YlfIOscHi17cuf7Jnexj": {
-      "baseTotal": 4927,
-      "amountWithPercentage": 5124.08,
-      "lineCount": 2,
-      "rateErrors": 1,
-      "finalAmount": 5124.08,
-      "codes": "1a|1a"
+      "baseTotal": 500,
+      "amountWithPercentage": 520,
+      "lineCount": 1,
+      "rateErrors": 0,
+      "finalAmount": 520,
+      "codes": "0"
     },
     "raIePQjurbNCoIYi9BsW": {
       "baseTotal": 500,
@@ -374,7 +374,7 @@
       "baseTotal": 5202,
       "amountWithPercentage": 4993.92,
       "lineCount": 2,
-      "rateErrors": 1,
+      "rateErrors": 0,
       "finalAmount": 4993.92,
       "codes": "1b|1b"
     },
@@ -387,42 +387,42 @@
       "codes": "0"
     },
     "AmoePqEKMCEJ8n9X8j92": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 40594.69,
+      "amountWithPercentage": 42218.48,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 42218.48,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "V0tCF2McKXjJKT97O16s": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 4930.6,
+      "amountWithPercentage": 5127.82,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 1,
+      "finalAmount": 5127.82,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "6F5dWOietfS0nQDtvUaI": {
       "baseTotal": 17970,
       "amountWithPercentage": 18688.8,
       "lineCount": 2,
-      "rateErrors": 1,
+      "rateErrors": 0,
       "finalAmount": 18688.8,
       "codes": "1e|1e"
     },
     "208aisEDlZ0EzGLW15mj": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 5361.4,
+      "amountWithPercentage": 5575.86,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 1,
+      "finalAmount": 5575.86,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "7S5jKmyO59o2cjo4wBsd": {
       "baseTotal": 13746,
       "amountWithPercentage": 14845.68,
       "lineCount": 2,
-      "rateErrors": 2,
+      "rateErrors": 1,
       "finalAmount": 14845.68,
       "codes": "1d-1|1d-1"
     },
@@ -430,32 +430,32 @@
       "baseTotal": 5202,
       "amountWithPercentage": 4785.84,
       "lineCount": 2,
-      "rateErrors": 1,
+      "rateErrors": 0,
       "finalAmount": 4785.84,
       "codes": "1b|1b"
     },
     "nF9rcuERFeffB0580Z6V": {
-      "baseTotal": 3114.05,
-      "amountWithPercentage": 3238.61,
+      "baseTotal": 4875.8,
+      "amountWithPercentage": 5070.83,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3238.61,
+      "rateErrors": 1,
+      "finalAmount": 5070.83,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "1o7qngBdnYrK7GyHQld7": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8147.2,
+      "amountWithPercentage": 8473.09,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8473.09,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "z74ioZ79nXW2DEtCzaMa": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 44637.2,
+      "amountWithPercentage": 46422.69,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 46422.69,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "ogsqw5RJW7RpfLvzetqH": {
@@ -467,51 +467,51 @@
       "codes": "22"
     },
     "oN6TM1YUth1cUWjAxd9y": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 6979.65,
+      "amountWithPercentage": 7258.84,
       "lineCount": 28,
-      "rateErrors": 3,
-      "finalAmount": 3855.07,
+      "rateErrors": 2,
+      "finalAmount": 7258.84,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "7Mqofe1bkBtFcFTEf8Iz": {
       "baseTotal": 13746,
       "amountWithPercentage": 12646.32,
       "lineCount": 2,
-      "rateErrors": 2,
+      "rateErrors": 1,
       "finalAmount": 12646.32,
       "codes": "1d-1|1d-1"
     },
     "SRQfQP3eStgWr91SGbpU": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 8555.2,
+      "amountWithPercentage": 8897.41,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 8897.41,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "Uwz2VbZAs3DhIU5bRULg": {
-      "baseTotal": 3706.8,
-      "amountWithPercentage": 3855.07,
+      "baseTotal": 11935.75,
+      "amountWithPercentage": 12413.18,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3855.07,
+      "rateErrors": 0,
+      "finalAmount": 12413.18,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "VH1VncomNtupPfwWoahB": {
-      "baseTotal": 3614.8,
-      "amountWithPercentage": 3759.39,
+      "baseTotal": 8344.2,
+      "amountWithPercentage": 8677.97,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 3759.39,
+      "rateErrors": 0,
+      "finalAmount": 8677.97,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "sKuhLqaVvWbIKuGL5IAP": {
-      "baseTotal": 4438,
-      "amountWithPercentage": 4615.52,
+      "baseTotal": 43157.06,
+      "amountWithPercentage": 44883.34,
       "lineCount": 28,
-      "rateErrors": 2,
-      "finalAmount": 4615.52,
+      "rateErrors": 0,
+      "finalAmount": 44883.34,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     }
   }

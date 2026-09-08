@@ -113,9 +113,16 @@ const agencyById = new Map(agencies.map(a => [a.id, a]));
 const atById = new Map(ats.map(a => [a.id, a]));
 const extByJob = new Map();
 const intByJob = new Map();
+// ⚠ `.data`, NOT THE DOCUMENT. An inspection stores its fields under `data`, and the
+// builder reads `externalData.damRadNo`, `internalData.damR` and so on directly. Passing
+// the wrapper made every damage field undefined: no radiator, no coils, no dry-out - so
+// every job priced down to its unconditional lines and the fingerprints were all but
+// identical. The Part A comparison still held (the same impoverishment on both sides), but
+// it was comparing estimates that could not see most of what the change touches, which is
+// the "comparator that cannot see" trap for the second time in this file.
 for (const i of inspections) {
   const m = String(i.type || '').toLowerCase().includes('ext') ? extByJob : intByJob;
-  if (i.jobId) m.set(i.jobId, i);
+  if (i.jobId) m.set(i.jobId, i.data ?? i);
 }
 
 function priceJob(job, atOverride) {
