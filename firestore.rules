@@ -69,10 +69,6 @@ service cloud.firestore {
       return 'atId' in data && data.atId is string && data.atId.size() >= 1 && data.atId.size() <= 128;
     }
 
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
-    }
-
     // --- Entity Validation Helpers ---
 
     function isValidJob(data) {
