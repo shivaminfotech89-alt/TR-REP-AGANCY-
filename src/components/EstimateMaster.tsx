@@ -10,7 +10,7 @@ import {
 } from '../lib/estimateData';
 import { 
   Edit2, Save, FileSpreadsheet, Loader2, X, ChevronDown, ChevronUp, Plus, Trash2, 
-  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, Globe2, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown, Database
+  Layers, Building2, CheckCircle2, RefreshCw, AlertCircle, AlertTriangle, Sparkles, Check, ShieldCheck, Wrench, Scale, LayoutGrid, FileText, Crown, Database
 } from 'lucide-react';
 import { serverTimestamp } from 'firebase/firestore';
 import { auth } from '../lib/firebase';
@@ -1573,21 +1573,29 @@ export default function EstimateMaster() {
                 <span className="text-xs px-2 py-0.5 rounded-full font-semibold bg-slate-100 text-slate-600 border border-slate-200">
                   {data.length} Items
                 </span>
-                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                  <Globe2 className="w-3 h-3" /> Default for all users
-                </span>
+                {/* ⚠ NO "DEFAULT FOR ALL USERS" CHIP. It rendered on all five sections and
+                    was false on every one: since F73 a save writes the SELECTED AT and
+                    nothing else, which the save button two blocks above states outright.
+                    The chip asserted the pre-F73 model beside a control that contradicts
+                    it. */}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
-              <p className="text-[11px] text-slate-500 mt-1">
-                <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono tabular-nums">tinted</span> = the UGVCL tender rate,
-                used while the cell is blank - nothing is stored. Type to override for this agency;
-                <strong> clear a cell to go back to the tender rate</strong>. Once a cell holds a value,
-                a future change to the tender schedule no longer reaches it.
-                {' '}A cell showing <span className="font-mono tabular-nums">AL</span> and{' '}
-                <span className="font-mono tabular-nums">CU</span> has two tender rates; the estimate picks one
-                from the Winding Type on the internal inspection, and typing a rate here replaces
-                both.
-              </p>
+              {/* ⚠ ONE LINE, AND ONLY WHERE TYPING IS POSSIBLE.
+                  This was a four-line paragraph rendered on all five sections. It said "Type
+                  to override for this agency", which is wrong twice: rates go to the TENDER
+                  since F73, and Amorphous, Wound Core and Circle Limits are read-only, so on
+                  three of the five sections it described an action the screen refuses.
+                  Roughly a fifth of the page's height was spent saying it five times.
+                  The detail it carried - what tinted means, that clearing restores the
+                  schedule rate, and how an AL/CU pair resolves - is already on each cell as a
+                  `title`, where it is read at the moment of the question rather than five
+                  screens above it. See the inherited-cell and pair branches below. */}
+              {!isReference && (
+                <p className="text-[11px] text-slate-500 mt-1">
+                  <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono tabular-nums">Tinted</span> cells are
+                  this tender&rsquo;s schedule rate, with nothing stored. Type to override for this AT; clear to go back.
+                </p>
+              )}
 
               {/*
                 SECTION HEALTH LINE. Both checks that would have caught the misfiled
