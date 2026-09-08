@@ -6673,6 +6673,147 @@ for pricing, which is what they should be.**
 
 ---
 
+### O47. The 5% oil filtration loss is credited on guarantee-period jobs, which the tender disallows
+
+**A wrong number, not a silence — which is why it is separate from O46.**
+
+Clause 27.0 of A/T 1819 allows a maximum **5% loss** towards filtration, impregnation and
+wastage for oil filled into failed transformers, and then disallows it in **two** cases:
+
+> No filtration or impregnation loss allowed for transformers failed in guarantee period,
+> or where fresh oil is given.
+
+**The app handles the fresh-oil case and not the GP case.** `OilInward.tsx:356` and `:371`
+set `filtrationLossPercent: formData.oilType === "Fresh" ? 0 : 5`, which is the second
+exception correctly applied. Three other sites apply 5% unconditionally, with no test of
+either exception:
+
+```
+oilBalance.ts:165   return lessOil + oilRecd * 0.05;
+OilInward.tsx:314   return gross - gross * 0.05;
+OilInward.tsx:476   const filterLoss = oilRecd * 0.05;
+```
+
+`isGpJob()` has existed in `estimateCalc.ts:22` since the GP billing work and is called
+from nowhere in the oil path.
+
+**MEASURED EXPOSURE, not estimated.** Of 64 live jobs, 6 are GP. Three of those carry a
+STORED `netShortage` on the inspection, and `jobOilShortage` returns a stored value
+untouched — so the 5% is never applied to them. The other three fall through to the
+computed branch:
+
+```
+MSBT-10    MEGHA   200 KVA   cap 323  less 0    16.15 L
+MSBT-6     MEGHA    63 KVA   cap 240  less 0    12.00 L
+MSBT-112   MEGHA    63 KVA   cap 240  less 0    12.00 L
+                                       total    40.15 L
+```
+
+**40.15 litres credited across three jobs that the tender says get none.** All three are
+MEGHA, all under a 2020 AT. The `oilTransactions` collection holds one document and it is
+not linked to a job, so the transaction path contributes nothing today — the whole exposure
+is through `jobOilShortage`.
+
+⚠ **THE STORED-VALUE BRANCH IS WHY THIS IS SMALL AND WHY IT WILL GROW.** Half the GP jobs
+escape only because someone typed a `netShortage` on the inspection, not because of any
+rule. Every GP job whose inspection omits that field takes the 5%, so the exposure tracks
+how consistently a field gets filled in.
+
+**Fix shape when it is built:** `jobOilShortage` and both `OilInward` computations take the
+job and consult `isGpJob`, in one predicate rather than three copies of the rule. The fresh-oil
+test already in `OilInward` should move into the same predicate so the two exceptions are
+stated once — they are one rule in the tender and are currently one-and-a-half rules in
+three places.
+
+---
+
+### O46. The A/T's contractual obligations the app is silent on — seven, recorded together
+
+**One entry, not seven, because they share a shape.** These are not defects in what the
+app does; they are parts of the tender it does not model at all. A defect produces a wrong
+number. Silence produces no number, and the operator is left to satisfy the clause by hand
+without the app either helping or hindering. Splitting them into seven entries would make
+the app look seven times more broken than it is, and would hide the one fact that matters
+about the group: none of them has ever been attempted.
+
+Read from A/T 1819 (`1819AT.md`), but almost all of these are standing UGVCL terms rather
+than 2026 novelties, so they apply to the 2020 tender's jobs too.
+
+1. **Guarantee months are free text on a signed certificate.** `BillingSystem.tsx:125`
+   holds `certMonthsText` as `useState('Twelve/Eighteen')`, printed at `:3159` into "the
+   above Transformers are guaranteed by ___ months". Clause 38.2 is determinate: 18 months
+   for 11 KV CRGO and for 11/22 KV amorphous, 12 for 22 KV CRGO, 6 for SDT/PAT. The app
+   holds voltage class and core type and could compute it. A bill mixing 11 KV and 22 KV
+   jobs cannot be right with one figure either way. Clause 14.0 adds that the OUTAGE period
+   extends the guarantee, and clause 20.0 that it runs from the DISPATCH date — neither is
+   computed.
+
+2. **Repair count is not stored anywhere.** No `repairCount` field exists. Clause 20.0
+   requires it on the welded nameplate (item 9) and as a painted colour strip (1st yellow,
+   2nd white, 3rd red, 4th blue); clause 31(a) makes it change the loss tolerance — no
+   tolerance on a first repair of 5-100 KVA, +10% on second and subsequent. ⚠ IT CANNOT BE
+   DERIVED FROM THIS APP'S DATA: it counts repairs across the transformer's whole life,
+   including repairs by other agencies under earlier tenders. It has to be entered.
+
+3. **Penalties are not modelled.** Clause 37.0: 30 days from estimate approval (OGP) or
+   receipt (GP), a 15-day notice, then 1/2% per week on the repairing cost — 45 days
+   effective. The load-bearing qualifier is "for transformers with no oil pending to issue
+   to the agency": THE CLOCK DOES NOT RUN WHILE THE DIVISION OWES OIL. The app already
+   tracks oil per division, so it holds half the input. The same clause requires the
+   estimate within 2 DAYS of joint inspection; the app has both dates and never compares
+   them.
+
+4. **Clause 46.0 has no validation.** "No transformer shall be converted from copper
+   winding to aluminium winding." Internal inspection records winding type; nothing compares
+   received against delivered. The consequence in the tender is contract cancellation.
+
+5. **Clause 45.0's three recoveries.** A GP failure scrapped for core damage recovers the
+   FULL last repairing bill; after six months from installation, NOTHING; if UGVCL finds the
+   core or coils disturbed by the agency, 50% of the cost of a new transformer. Three
+   different amounts selected by two facts. None is modelled.
+
+6. **The Rs 275 GP transport recovery** (clauses 10.0 / 36.0), a lump sum per transformer
+   recovered against to-and-fro transport on guarantee-period failures.
+
+7. **The test certificate is not a precondition on the bill.** Clause 11.0: "No payment
+   without test certificate", and the repairer must certify on the bill that the materials
+   billed were actually fitted. No such gate exists in `BillingSystem`.
+
+**What these have in common, and why it is worth one entry.** Every one is an obligation
+with a consequence attached — cancellation, recovery, or non-payment — and every one is
+currently carried entirely in somebody's head. The app's existing gates (rate errors, the
+allotment refusal, the circle-limit check) all guard against producing a WRONG DOCUMENT.
+None of these seven is about a document being wrong; they are about the contract being
+breached while every document looks perfect. That is a different class of risk and the app
+has not been built for it at all.
+
+**Not proposed for building.** Recorded so the gap is a known one rather than a discovery.
+
+---
+
+### O45. Uneconomical units and scrap may be two different Rs 500 payments
+
+Clause 35.0 pays **Rs 500 for inspection of uneconomical units**, and says that for such
+units **no repair charges are payable** — the repairer reseals by tack welding at six
+places and reassembles the internals in position first.
+
+The app has one Rs 500 flat charge: the scrap "inspection & dismantling charges of damaged
+transformer declared as scrap by E.E. (TR)", item code `22` for CRGO and `0` for the
+fixed-rate sections (`estimateCalc.ts:38-42`). That one cites E.E.(TR) declaring scrap,
+which is clause 4.0's ">30% of new cost" route.
+
+**Uneconomical and scrap are not obviously the same state.** Schedule-A also prices item 6,
+"sealing of uneconomical", at 312 — so an uneconomical unit does attract at least one
+payable line, which sits oddly beside "no repair charges are payable". Whether an
+uneconomical unit should bill Rs 500 + 312, or Rs 500 only, or the same single scrap line
+the app already has, is not settled by the document.
+
+**Not a defect yet — an unanswered question.** Recorded because the app currently cannot
+express the difference, so if they ARE two states, no existing job is recorded as the
+second one and the distinction cannot be recovered later from the data.
+
+---
+
 ### O44. A deleted rate template leaves an AT pointing at nothing, and three screens absorb it
 
 **Not reachable today, and recorded before it is.** `firestore.rules:456-459` grants
