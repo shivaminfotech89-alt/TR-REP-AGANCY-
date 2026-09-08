@@ -1603,7 +1603,9 @@ export default function EstimateMaster() {
                     The chip asserted the pre-F73 model beside a control that contradicts
                     it. */}
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>
+              {/* ⚠ NO SECTION SUBTITLE. All five described what the section contained, which
+                  the title already names. Description is not state. */}
+              {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
               {/* ⚠ ONE LINE, AND ONLY WHERE TYPING IS POSSIBLE.
                   This was a four-line paragraph rendered on all five sections. It said "Type
                   to override for this agency", which is wrong twice: rates go to the TENDER
@@ -1616,8 +1618,8 @@ export default function EstimateMaster() {
                   screens above it. See the inherited-cell and pair branches below. */}
               {!isReference && (
                 <p className="text-[11px] text-slate-500 mt-1">
-                  <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono tabular-nums">Tinted</span> cells are
-                  this tender&rsquo;s schedule rate, with nothing stored. Type to override for this AT; clear to go back.
+                  <span className="px-1 rounded bg-sky-50 text-slate-600 font-mono tabular-nums">Tinted</span> = tender rate,
+                  not stored. Type to override; clear to revert.
                 </p>
               )}
 
@@ -1694,17 +1696,17 @@ export default function EstimateMaster() {
                           ? `Showing ${showing.itemCount} row(s) from a FALLBACK section`
                           : `Showing ${showing.itemCount} row(s) - stored ${health.itemCount}, the rest filled in for display`}
                     </strong>
-                    <p className="mt-0.5">
-                      {cause === 'edited'
-                        ? 'These are your unsaved edits. Nothing is written until you click Save.'
-                        : cause === 'fallback'
-                          ? `Nothing usable is stored for ${health.label}, so this content came from another section. Saving would write it into the stored section as though it had been configured here.`
-                          : `The stored ${health.label} section holds ${health.itemCount} row(s) and is used as-is for pricing. The display merges in default rows and rewrites units and order; that is presentation, not storage.`}
-                    </p>
+                    {cause !== 'normalised' && (
+                      <p className="mt-0.5">
+                        {cause === 'edited'
+                          ? 'Nothing is written until you click Save.'
+                          : `Saving would write this into the stored ${health.label} section.`}
+                      </p>
+                    )}
                     {cause === 'normalised' && addedRows.length > 0 && (
                       <p className="mt-1">
                         <strong>Not in storage:</strong> {addedRows.map(r => `"${r.itemCode}"`).join(', ')}
-                        {' '}- shown from the default list. Saving would make {addedRows.length === 1 ? 'it' : 'them'} real.
+                        {' '}&mdash; saving would make {addedRows.length === 1 ? 'it' : 'them'} real.
                       </p>
                     )}
                     {showing.problems.length > 0 && (
@@ -1725,7 +1727,7 @@ export default function EstimateMaster() {
                         <ShieldCheck className="w-3 h-3 shrink-0" />
                         <span>
                           {health.emptyIsNormalHere && health.isEmpty
-                            ? 'Nothing stored - which is correct. Overhauling holds optional per-item overrides of UGVCL Schedule-A; with none stored, OH jobs price straight from Schedule-A.'
+                            ? 'Nothing stored - correct for Overhauling.'
                             : <>
                                 Stored {health.label} section: {health.itemCount} items
                                 {health.requiredScrapCode !== null ? `, scrap code "${health.requiredScrapCode}" present` : ''}
@@ -1755,11 +1757,7 @@ export default function EstimateMaster() {
                       {health.problems.map((prob, i) => <li key={i}>{prob}</li>)}
                     </ul>
                     {health.blocking && (
-                      <p className="mt-1">
-                        What is shown below comes from a fallback section, so prices are not
-                        wrong - the STORED master is. Correct it by hand; nothing is repaired
-                        automatically.
-                      </p>
+                      <p className="mt-1">Correct the stored master by hand; nothing is repaired automatically.</p>
                     )}
                   </div>
                   {pendingBand}
@@ -1928,10 +1926,8 @@ export default function EstimateMaster() {
                     on this app's transcription state. */}
                 {gridSchedule.borrowedFrom.circleLimits && (
                   <p className={`mt-1.5 p-2 ${cardTone('warn')} bg-amber-50 text-amber-900`}>
-                    <strong className="font-bold">These are {SCHEDULES[gridSchedule.borrowedFrom.circleLimits].label} figures.</strong>{' '}
-                    The Clause 4.0 pages for {gridSchedule.label} have not been supplied, so this tender is
-                    checked against the previous tender&rsquo;s sanction limits. If the new tender raised
-                    them, jobs will flag as over-limit slightly early.
+                    <strong className="font-bold">{SCHEDULES[gridSchedule.borrowedFrom.circleLimits].label} figures</strong>
+                    {' '}&mdash; Clause 4.0 for {gridSchedule.label} not yet supplied.
                   </p>
                 )}
               </div>
@@ -1940,8 +1936,7 @@ export default function EstimateMaster() {
               <div className={`m-3 mb-0 p-3 ${cardTone('info')} bg-sky-50 text-sky-900 text-[11px] leading-relaxed`}>
                 <p className="font-bold text-sky-950 flex items-center gap-1.5">
                   <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
-                  These are the tender rates, shown for reference - the estimate does not read them.
-                  Read-only, and rows cannot be added or removed.
+                  Tender reference rates &mdash; read-only. Rows cannot be added or removed.
                 </p>
                 {/* ⚠ SAME TEST, SAME CUT. This paragraph explained why the rows are
                     read-only - that Schedule-B is applied directly and an edit here would
@@ -1949,20 +1944,14 @@ export default function EstimateMaster() {
                     heading line above states the lock; the row-0 note below stays, because
                     it says the OPPOSITE of what the rows around it imply. */}
                 <p className="mt-1.5 p-2 rounded border border-amber-300 bg-amber-50 text-amber-900">
-                  <strong className="font-bold">Row {SCRAP_ROW_CODE} is the exception and IS editable.</strong>{' '}
-                  The scrap inspection-and-dismantling charge is read by the estimate, the bill and
-                  Reports, so what is set here is what a scrap {sectionTitle.toLowerCase()} transformer
-                  is actually charged. Change it only against the tender.
+                  <strong className="font-bold">Row {SCRAP_ROW_CODE} IS editable</strong> &mdash; the scrap charge, live on estimates and bills.
                 </p>
                 {/* See the matching notice on Circle Limits. */}
                 {gridSchedule.borrowedFrom.scheduleB && (
                   <p className={`mt-1.5 p-2 ${cardTone('warn')} bg-amber-50 text-amber-900`}>
                     <strong className="font-bold">
-                      This tender prices {sectionTitle} from {SCHEDULES[gridSchedule.borrowedFrom.scheduleB].label}.
-                    </strong>{' '}
-                    Schedule-B has not been supplied for {gridSchedule.label}, so the fixed rates come from the
-                    previous tender while the itemised CRGO rows on this AT come from the new one. Temporary,
-                    and it is why this line exists rather than the two sitting side by side unannounced.
+                      {sectionTitle} priced from {SCHEDULES[gridSchedule.borrowedFrom.scheduleB].label}
+                    </strong>{' '}&mdash; Schedule-B for {gridSchedule.label} not yet supplied.
                   </p>
                 )}
               </div>
@@ -2325,9 +2314,6 @@ export default function EstimateMaster() {
               <p className="text-xs text-amber-800 leading-relaxed font-medium">
                 {globalConfigError}
               </p>
-              <p className="text-[11px] text-amber-700 leading-relaxed">
-                Rates below are currently sourced from your local agency workspace cache or offline standard presets. You may continue editing and saving rates for your agency.
-              </p>
             </div>
           </div>
           <button 
@@ -2367,13 +2353,7 @@ export default function EstimateMaster() {
               AT {selectedAt?.atNumber || selectedAt?.name} is CLOSED. These rates are read-only.
             </p>
             <p className="mt-0.5">
-              They priced jobs that are already estimated, billed and paid, and the printed
-              estimate recomputes rather than reading stored figures &mdash; so changing them
-              would silently re-price work that has already left the building.
-            </p>
-            <p className="mt-0.5">
-              If they genuinely need correcting, reopen the tender first: Agency Settings &rarr;
-              Tenders &rarr; <strong>Mark as Active</strong>.
+              To edit: Agency Settings &rarr; Tenders &rarr; <strong>Mark as Active</strong>.
             </p>
           </div>
         </div>
@@ -2478,10 +2458,8 @@ export default function EstimateMaster() {
                         never why v2 stayed - and that is the fact that matters, because it
                         is the reason this is a decision and not a fault to be repaired. */}
                     {isSource && usedVersion < Number(t.version) && (
-                      <div className="text-[11px] text-amber-800 mt-1 leading-relaxed">
-                        Your rates did not change and will not &mdash; a copy never follows the
-                        template, or a live estimate could move under you. Re-copy only if this
-                        tender should adopt v{t.version}.
+                      <div className="text-[11px] font-bold text-amber-800 mt-1">
+                        Your rates stay at v{usedVersion} unless you re-copy.
                       </div>
                     )}
                   </div>
@@ -2554,11 +2532,7 @@ export default function EstimateMaster() {
                 v3's rates and is shown that the template has moved on; replacing the
                 document would leave their publishedAtVersion pointing at nothing. */}
             <p className="text-xs text-slate-700 bg-purple-50 border border-purple-200 rounded-lg p-3 mt-3">
-              Revising a template <strong>bumps its version only if the rates change</strong>. Correcting a name,
-              a tender number or these notes leaves the version where it is, so nobody is prompted to take an
-              update that would change nothing. When rates DO change, anyone who already copied it keeps the
-              rates they copied &mdash; a copy never follows the template, or a live estimate would move under
-              them &mdash; and their Estimate Master screen tells them a newer version exists.
+              Version bumps <strong>only if the rates change</strong>. Existing copies keep their rates.
             </p>
 
             <div className="flex flex-col sm:flex-row justify-end gap-2 mt-4">
@@ -2634,7 +2608,7 @@ export default function EstimateMaster() {
               Rates last edited {formatDDMMYYYY((activeAgency as any).estimateMasterEditedAt)}
               {(activeAgency as any).estimateMasterEditedBy
                 ? ` by ${(activeAgency as any).estimateMasterEditedBy}` : ''}
-              . Estimates produced before that date were priced from different rates.
+
             </p>
           )}
         </div>
@@ -2697,7 +2671,7 @@ export default function EstimateMaster() {
         {renderSectionTable(
           'CRGO',
           'CRGO Estimate Master',
-          'Standard repair and material rates for CRGO core transformers',
+          '',
           openCrgo,
           setOpenCrgo,
           crgoData,
@@ -2707,7 +2681,7 @@ export default function EstimateMaster() {
         {renderSectionTable(
           'AMORPHOUS',
           'Amorphous Estimate Master',
-          'Fixed capacity & OGP repair rate master for Amorphous core transformers',
+          '',
           openAmorphous,
           setOpenAmorphous,
           amorphousData,
@@ -2717,7 +2691,7 @@ export default function EstimateMaster() {
         {renderSectionTable(
           'WOUND_CORE',
           'Wound Core Estimate Master',
-          'Standard repair and material rates for Wound Core transformers (same rate schedule as Amorphous)',
+          '',
           openWoundCore,
           setOpenWoundCore,
           woundCoreData,
@@ -2727,7 +2701,7 @@ export default function EstimateMaster() {
         {renderSectionTable(
           'OVERHAULING',
           'Overhauling (OH) Estimate Master',
-          'Official tender rate schedule for complete overhauling, servicing & testing of transformers',
+          '',
           openOverhauling,
           setOpenOverhauling,
           overhaulingData,
@@ -2738,7 +2712,7 @@ export default function EstimateMaster() {
         {renderSectionTable(
           'CIRCLE_LIMITS',
           'Circle Authority Estimate Approval Power Limits (Clause 4.0 - 25% Limit)',
-          'Capacity and Rating/Star level wise financial limit of SE (O&M) Circle. The system automatically raises an alert if an estimate exceeds these values.',
+          '',
           openCircleLimits,
           setOpenCircleLimits,
           circleLimitsData,
@@ -2832,9 +2806,6 @@ export default function EstimateMaster() {
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-bold text-slate-900">Saves for {activeAgency.name} only</span>
                     </div>
-                    <p className="text-xs text-slate-600 mt-1">
-                      Your {pendingSaveSection} rates are stored <strong>exclusively for this agency</strong>. Other users and other agencies are <strong>NOT</strong> affected and keep their own rates.
-                    </p>
                   </div>
                 </div>
               </div>
