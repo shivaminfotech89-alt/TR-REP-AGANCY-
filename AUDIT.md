@@ -621,6 +621,42 @@ refusal has none. The message says what to do rather than only what is wrong:
 with the dirty paths listed beneath it. `--no-guard` exists for a caller that has already
 made the tree clean and is driving the checkouts deliberately.
 
+### Second and third instance, same tool: an ADDED document, and line endings
+
+**The checkout workflow could not report an addition.** `git checkout <old> -- src/` restores
+files the old commit had; it cannot REMOVE one it did not have. So a change that ADDS a
+printed document left the new file sitting in the working tree during the "before" pass,
+which counted it in the old set and reported a spurious **CHANGED** against a document that
+had never existed. The multi-job estimate's first verification printed "13 before, 13 after,
+1 CHANGED" - a confident wrong answer, the same class as the destructive restore.
+
+**And hashing raw file content compared line endings, not documents.** The working tree is
+CRLF on Windows; `git show` returns what git stored, which is LF. Comparing HEAD against HEAD
+on a CLEAN tree reported **13 changed**. Caught only because that control case was run at all.
+
+**Both are fixed by not checking anything out.** `--compare <ref>` reads the old revision with
+`git show ref:path`, which never writes to the working tree, and classifies by DOCUMENT
+IDENTITY - file plus subtree index - so:
+
+  - nothing is restored, so nothing can be lost;
+  - a file the ref does not list simply is not in the old set, so an addition is **NEW** by
+    construction rather than by anyone remembering to move it aside;
+  - CRLF is folded to LF before hashing, on both sides, so the comparison is about content.
+
+Verified on the control case it previously failed: **HEAD against HEAD, clean tree, 13
+byte-identical and 0 changed.**
+
+⚠ **THE PUBLISHED HASHES CHANGED.** Normalising line endings alters every value, so a subtree
+quoted as `1e742ace…` in an earlier entry will not reproduce. The comparison is what those
+figures were ever for; the absolute values were never identity with anything external.
+
+**Three failure modes in one tool, all of the same shape:** the mechanism disagreed with the
+purpose, and the output looked like a result either way. Two of the three were found by a
+control run rather than by reading the code - which is the argument for always comparing a
+commit against ITSELF before trusting a comparison against another one.
+
+---
+
 **The general shape, which is why this is a pattern and not an incident.** The discipline
 belongs in the tool, not in remembering — the same reason every admin script in this
 directory ships with `MODE = 'dry-run'` rather than trusting whoever runs it to check first.
