@@ -820,9 +820,17 @@ export function AtSettings() {
                 <div className="text-slate-500 text-[11px] flex items-center gap-2">
                   <span>{formatDDMMYYYY(activeAtMaster.startDate)} - {formatDDMMYYYY(activeAtMaster.endDate)}</span>
                   <span>•</span>
-                  <span>CRGO: {activeAtMaster.atPercentage ?? activeAtMaster.atPercentage ?? 4}%</span>
-                  <span>•</span>
-                  <span>•</span>
+                  {/* SIGNED, ALWAYS. "7%" and "-7%" differ by fourteen points on every line
+                      of every estimate, and a reader who cannot see the base figure cannot
+                      tell them apart from the effect. The sign is the whole meaning.
+                      Also: no `?? 4` here any more - an AT with no percentage says so
+                      rather than borrowing a plausible one. */}
+                  <span>
+                    AT %:{' '}
+                    {typeof activeAtMaster.atPercentage === 'number'
+                      ? `${activeAtMaster.atPercentage >= 0 ? '+' : ''}${activeAtMaster.atPercentage}% ${activeAtMaster.atPercentage >= 0 ? 'above' : 'below'} schedule`
+                      : 'not set'}
+                  </span>
                 </div>
               </div>
               <span className="text-[11px] text-indigo-600 font-semibold self-end sm:self-center">
@@ -1065,7 +1073,7 @@ export function AtSettings() {
                               behind them were test data - see getAtPercentage. */}
                           <div className="flex flex-wrap gap-2 text-xs">
                               <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
-                                <strong className="text-blue-700">AT percentage:</strong> {crgoVal >= 0 ? `+${crgoVal}` : crgoVal}%
+                                <strong className="text-blue-700">AT percentage:</strong> {crgoVal >= 0 ? `+${crgoVal}` : crgoVal}% {crgoVal >= 0 ? 'above' : 'below'} schedule
                               </span>
                           </div>
 
@@ -1176,7 +1184,9 @@ export function AtSettings() {
                             <label className="block text-[10px] uppercase font-bold text-slate-600 mb-1.5">Estimate % Above (+) or Below (-) per Core Type</label>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                                <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">AT percentage %</label>
+                                <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">
+                                  Accepted percentage &mdash; positive for ABOVE the tender schedule, negative for below
+                                </label>
                                 <input required type="number" step="0.01" value={editFormData?.atPercentage ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentage: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
                                 {editFormData && atPercentageHint(editFormData.atPercentage) && (
                                   <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentage)}</span>
@@ -1390,7 +1400,8 @@ export function AtSettings() {
                 {chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentage)) && (
                   <div className="sm:col-span-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-[11px] text-emerald-900 leading-relaxed">
                     <strong className="font-bold">
-                      {Number(chosenTemplate.atPercentage)}% from the tender
+                      {Number(chosenTemplate.atPercentage) >= 0 ? '+' : ''}{Number(chosenTemplate.atPercentage)}%
+                      {Number(chosenTemplate.atPercentage) >= 0 ? ' above' : ' below'} the tender schedule, from the tender
                       {chosenTemplate.atNumber ? ` (${chosenTemplate.atNumber})` : ` (${chosenTemplate.name})`}.
                     </strong>{' '}
                     This tender sets one accepted percentage for every agency, so it is filled in below.
@@ -1428,7 +1439,14 @@ export function AtSettings() {
                 <label className="block text-xs font-bold uppercase text-slate-600 mb-2">Estimate % Above (+) or Below (-) per Core Type</label>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">AT percentage % &mdash; one figure, every core type</label>
+                    {/* WHAT TO TYPE, NOT WHY. The field took a bare number and nothing said which
+                        direction a positive one meant - and the app computes
+                        amount x (1 + pct/100), so the sign is a 14-point swing between 7
+                        and -7 on every line of every estimate. */}
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Accepted percentage &mdash; enter a positive number for ABOVE the tender schedule,
+                      negative for below. A/T 1819 accepts 7.00% above, so enter 7.
+                    </label>
                     <input required type="number" step="0.01" value={newAt.atPercentage} onChange={e => setNewAt({...newAt, atPercentage: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
                     {atPercentageHint(newAt.atPercentage) && (
                       <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentage)}</span>

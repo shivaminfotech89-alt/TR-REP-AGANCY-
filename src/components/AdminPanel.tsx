@@ -611,7 +611,7 @@ export default function AdminPanel() {
                     different object. Both hold. */}
                 <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                    Accepted percentage &mdash; optional, one figure for every core type
+                    Accepted percentage &mdash; optional
                   </label>
                   <input
                     type="number"
@@ -622,7 +622,10 @@ export default function AdminPanel() {
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono tabular-nums"
                   />
                   <p className="mt-1 text-[11px] text-slate-600">
-                    Fill these only if the tender sets one rate for every agency. Leave blank when
+                    Positive for ABOVE the tender schedule, negative for below &mdash; A/T 1819 accepts
+                    7.00% above, so enter 7. One figure, every core type.
+                    <br />
+                    Fill this only if the tender sets one rate for every agency. Leave blank when
                     agencies bid separately &mdash; each will then answer from its own acceptance letter.
                   </p>
                 </div>
