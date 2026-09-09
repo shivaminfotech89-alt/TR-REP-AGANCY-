@@ -1145,7 +1145,7 @@ ${intakeGate.reason}`);
       // rather than reached by accident when the prefix check happens to fail: with a
       // usable agency-level prefix the save previously went through AT-less, and three
       // things degraded silently -
-      //   - getAtPercentageForCore(null) returns 4, so the AT percentage multiplying
+      //   - getAtPercentage(null) returns 4, so the AT percentage multiplying
       //     every estimate and bill for the job is an assumed default, with nothing on
       //     the document saying so (the same shape as the capacity defaults, F1/F2);
       //   - the allotment check is gated on activeAtMaster, so it never ran - the job

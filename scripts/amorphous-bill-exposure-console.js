@@ -27,7 +27,7 @@
   const user = auth?.currentUser;
   if (!user) { console.error('Not signed in.'); return; }
 
-  const { getEstimateMasterForCore, getAtPercentageForCore } = await import('/src/lib/AgencyContext.tsx');
+  const { getEstimateMasterForCore, getAtPercentage } = await import('/src/lib/AgencyContext.tsx');
   const { resolveScrapCharge, getScrapItemCodeForCore } = await import('/src/lib/estimateCalc.ts');
   const { classifyCoreType } = await import('/src/components/SingleJobEstimateReport.tsx');
 
@@ -73,7 +73,7 @@
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     const master = getEstimateMasterForCore(agency, job.coreType, globalDefault);
-    const atPct = getAtPercentageForCore(atMaster, job.coreType);
+    const atPct = getAtPercentage(atMaster);
 
     if (isScrapJob) {
       const sc = resolveScrapCharge(job.coreType, kva, master);

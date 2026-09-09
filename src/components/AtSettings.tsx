@@ -562,7 +562,7 @@ export function AtSettings() {
      * THE THREE PERCENTAGES ARE ANSWERED OR THE AT IS NOT CREATED.
      *
      * ⚠ A BLANK MUST NOT BECOME A NUMBER. This wrote `Number(field) || 0`, so an empty box
-     * stored 0 - and `getAtPercentageForCore` returns 0 faithfully, because 0 is not NaN.
+     * stored 0 - and `getAtPercentage` returns 0 faithfully, because 0 is not NaN.
      * The tender then priced at exactly the schedule rate, for ever, and nothing said so.
      *
      * That is worse than the 4% it was assumed to be. 4 is a suspicious round number and
@@ -1062,7 +1062,7 @@ export function AtSettings() {
                       {!isEditing ? (
                         <>
                           {/* ONE CHIP. There were three, one per core type, and the values
-                              behind them were test data - see getAtPercentageForCore. */}
+                              behind them were test data - see getAtPercentage. */}
                           <div className="flex flex-wrap gap-2 text-xs">
                               <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
                                 <strong className="text-blue-700">AT percentage:</strong> {crgoVal >= 0 ? `+${crgoVal}` : crgoVal}%

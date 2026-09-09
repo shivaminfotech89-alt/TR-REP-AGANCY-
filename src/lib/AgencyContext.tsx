@@ -217,7 +217,7 @@ export interface AtMaster {
    *
    * Was three fields, on the strength of live data that turned out to be test values. A/T
    * 1819 clause 2.0 quotes one accepted percentage for CRGO / Amorphous alike, which is what
-   * a tender does. See getAtPercentageForCore.
+   * a tender does. See getAtPercentage.
    */
   atPercentage?: number;
   allotments?: Record<string, Record<string, number>>;
@@ -779,7 +779,7 @@ export function atForJob(
   return atResolutionForJob(job, atMasters).at;
 }
 
-export function getAtPercentageForCore(at: AtMaster | null | undefined, _coreType?: string): number | null {
+export function getAtPercentage(at: AtMaster | null | undefined): number | null {
   /**
    * ONE PERCENTAGE PER TENDER. THE CORE TYPE IS NOT CONSULTED.
    *
@@ -797,9 +797,12 @@ export function getAtPercentageForCore(at: AtMaster | null | undefined, _coreTyp
    * percentage by ACCIDENT OF BRANCH ORDERING rather than by any decision. With one field
    * there is nothing for a core type to be missing from. See AUDIT.
    *
-   * `_coreType` is kept so the sixteen call sites did not all have to change in the same
-   * commit as the pricing collapse. It is unread. Remove it and the parameter at those
-   * sites in a follow-up, when nothing else is in flight.
+   * ⚠ THERE IS NO coreType PARAMETER, AND ONE MUST NOT BE ADDED BACK. It survived the
+   * collapse briefly, accepted and unread, so that sixteen call sites did not have to change
+   * in the same commit as a pricing change. An argument that is accepted and ignored reads
+   * as meaningful to whoever finds it next - the same shape as a column header that means
+   * four things, a validator that guards nothing, or a chip asserting what the code
+   * contradicts. It is gone, and the name says what the function does.
    *
    * ⚠ RETURNS null FOR A MISSING AT, AND NEVER A DEFAULT. It used to return 4. A silent 4%
    * on a job whose tender could not be found is the sentinel shape this codebase keeps

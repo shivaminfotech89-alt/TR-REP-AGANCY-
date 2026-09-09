@@ -1,5 +1,5 @@
 
-import { useAgency, getAtPercentageForCore, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
+import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
 import React, { useState, useEffect, useMemo } from 'react';
@@ -450,7 +450,7 @@ export default function EstimateGenerate() {
 
     const riseTotalsRow = ['-', 'AT % RISE / FALL TOTAL'];
     selectedJobsData.forEach(job => {
-      const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+      const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
       const baseTot = calculateJobTotal(job);
       const riseAmt = baseTot * (atPct / 100);
       riseTotalsRow.push(riseAmt.toFixed(2));
@@ -459,7 +459,7 @@ export default function EstimateGenerate() {
 
     const grandTotalsRow = ['-', 'GRAND TOTAL'];
     selectedJobsData.forEach(job => {
-      const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+      const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
       const baseTot = calculateJobTotal(job);
       const grandTot = baseTot * (1 + atPct / 100);
       grandTotalsRow.push(grandTot.toFixed(2));
@@ -482,7 +482,7 @@ export default function EstimateGenerate() {
 
       selectedJobsData.forEach(job => {
         const baseTot = calculateJobTotal(job);
-        const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+        const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
         const grandTot = Math.round(baseTot * (1 + atPct / 100));
 
         const jobRef = doc(db, 'jobs', job.id);
@@ -512,7 +512,7 @@ export default function EstimateGenerate() {
       setJobs(prev => prev.map(j => {
         if (j.mrNo === selectedMrNo) {
           const baseTot = calculateJobTotal(j);
-          const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
+          const atPct = getAtPercentage(atForJob(j, atMasters) ?? activeAtMaster);
           const grandTot = Math.round(baseTot * (1 + atPct / 100));
           return {
             ...j,

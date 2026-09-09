@@ -32,7 +32,7 @@ const MODE = 'dry-run';   // 'dry-run' | 'write'
   }
 
   const { resolveScrapCharge } = await import('/src/lib/estimateCalc.ts');
-  const { getEstimateMasterForCore, getAtPercentageForCore } = await import('/src/lib/AgencyContext.tsx');
+  const { getEstimateMasterForCore, getAtPercentage } = await import('/src/lib/AgencyContext.tsx');
 
   const uid = auth?.currentUser?.uid;
   if (!uid) { console.error('Not signed in.'); return; }
@@ -208,7 +208,7 @@ const MODE = 'dry-run';   // 'dry-run' | 'write'
     const job = jobs.find(j => j.id === r.id);
     const master = getEstimateMasterForCore(agency, job.coreType);
     const { rate, error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master);
-    const atPct = getAtPercentageForCore(atMaster, job.coreType);
+    const atPct = getAtPercentage(atMaster);
 
     // What a correct scrap bill would charge for this unit, GST inclusive.
     const correctTaxed = rate === null ? null

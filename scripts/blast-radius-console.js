@@ -29,7 +29,7 @@
   const { collection, query, where, getDocs } = fs;
 
   const { buildSingleJobEstimateData, classifyCoreType } = await import('/src/components/SingleJobEstimateReport.tsx');
-  const { getCircleLimitsEstimateMaster, getEstimateMasterForCore, getAtPercentageForCore } = await import('/src/lib/AgencyContext.tsx');
+  const { getCircleLimitsEstimateMaster, getEstimateMasterForCore, getAtPercentage } = await import('/src/lib/AgencyContext.tsx');
   const { getCircleLimitForJob } = await import('/src/lib/estimateData.ts');
   const { bandForKva, SCHEDULE_A } = await import('/src/lib/ugvclSchedule2020.ts');
 
@@ -74,7 +74,7 @@
     const band = bandForKva(kvaNum);
     const coreType = (job.coreType || 'CRGO').trim().toUpperCase();
     const masterList = getEstimateMasterForCore(agency, coreType);
-    const atPercentage = getAtPercentageForCore(atMaster, coreType);
+    const atPercentage = getAtPercentage(atMaster);
     // internalData?.condition was undefined, so only the job's own fields decided this
     const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
 

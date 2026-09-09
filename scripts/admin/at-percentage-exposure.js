@@ -3,7 +3,7 @@
 //   node scripts/admin/at-percentage-exposure.js
 //
 // Every pricing path today passes `activeAtMaster` - the AT the SESSION has selected - to
-// getAtPercentageForCore. Ten call sites, none reading job.atId. So switching the active AT
+// getAtPercentage. Ten call sites, none reading job.atId. So switching the active AT
 // re-prices historical jobs at the new tender's percentage.
 //
 // This is the baseline for that fix. It compares, per job:
@@ -22,12 +22,12 @@ const [agencies, ats, jobs] = await Promise.all([all('agencies'), all('atMasters
 const agName = id => agencies.find(a => a.id === id)?.name || id || '(none)';
 const atLabel = t => t ? (t.atNumber || t.name || t.id) : '(none)';
 
-// Mirrors getAtPercentageForCore in AgencyContext.tsx - default 4 when no AT.
+// Mirrors getAtPercentage in AgencyContext.tsx - default 4 when no AT.
 const pctFor = (at, coreType) => {
   if (!at) return 4;
   const t = String(coreType || 'CRGO').trim().toUpperCase();
   // ONE PERCENTAGE PER TENDER, and null rather than a default when there is none - mirrors
-  // getAtPercentageForCore since the three per-core-type fields were collapsed.
+  // getAtPercentage since the three per-core-type fields were collapsed.
   return at.atPercentage ?? null;
 };
 

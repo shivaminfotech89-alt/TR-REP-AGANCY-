@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
-import { useAgency, getAtPercentageForCore, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
+import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
          RepairWithinLimitConsent, activeConsent } from '../lib/estimateCalc';
@@ -687,7 +687,7 @@ export default function BillingSystem() {
     const kva = String(job.capacityKva);
     const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
     const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
-    const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+    const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
 
     // A scrap transformer is ONE flat charge, resolved by the mapped scrap item code
     // for its core type (shared helper - see lib/estimateCalc.ts). It never walks the
@@ -1295,7 +1295,7 @@ export default function BillingSystem() {
       const priced = calculateJobTotal(job);
       if (priced === null) return;
       const atInclusiveAmt = priced;
-      const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+      const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
       // BASE COST is a pre-AT column, so it is back-derived rather than relabelled: the
       // file must satisfy its own arithmetic, BASE COST x (1 + AT%) = TOTAL AMOUNT. It
       // previously printed the AT-inclusive figure under a heading that says base.
@@ -1357,7 +1357,7 @@ export default function BillingSystem() {
         // billAmount, so it skips the job rather than storing a fabricated figure.
         const atInclusiveAmt = calculateJobTotal(job);
         if (atInclusiveAmt === null) return;
-        const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+        const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
         const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -1392,7 +1392,7 @@ export default function BillingSystem() {
           // not appear updated in memory either.
           const atInclusiveAmt = calculateJobTotal(j);
           if (atInclusiveAmt === null) return j;
-          const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
+          const atPct = getAtPercentage(atForJob(j, atMasters) ?? activeAtMaster);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
           const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -1545,7 +1545,7 @@ export default function BillingSystem() {
         // billAmount, so it skips the job rather than storing a fabricated figure.
         const atInclusiveAmt = calculateJobTotal(job);
         if (atInclusiveAmt === null) return;
-        const atPct = getAtPercentageForCore(atForJob(job, atMasters) ?? activeAtMaster, job.coreType);
+        const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
         const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
         const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
         const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
@@ -1585,7 +1585,7 @@ export default function BillingSystem() {
           // not appear updated in memory either.
           const atInclusiveAmt = calculateJobTotal(j);
           if (atInclusiveAmt === null) return j;
-          const atPct = getAtPercentageForCore(atForJob(j, atMasters) ?? activeAtMaster, j.coreType);
+          const atPct = getAtPercentage(atForJob(j, atMasters) ?? activeAtMaster);
           const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
           const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
           const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));

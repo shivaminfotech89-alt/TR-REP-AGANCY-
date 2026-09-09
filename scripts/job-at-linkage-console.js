@@ -60,7 +60,7 @@
 
     console.log('');
     console.log('WHAT AN EMPTY atId COSTS THIS JOB:');
-    console.log('  - AT percentage falls back to the 4% default (getAtPercentageForCore)');
+    console.log('  - AT percentage falls back to the 4% default (getAtPercentage)');
     console.log('  - the allotment check never ran (gated on activeAtMaster being present)');
     console.log('  - it is invisible to any per-AT quota or allotment report');
     console.log('');

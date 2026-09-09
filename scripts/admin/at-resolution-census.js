@@ -25,12 +25,12 @@ const [agencies, ats, jobs] = await Promise.all([all('agencies'), all('atMasters
 const agName = id => agencies.find(a => a.id === id)?.name || id || '(none)';
 const atLabel = t => t ? (t.atNumber || t.name || t.id) : null;
 
-// Mirrors getAtPercentageForCore in AgencyContext.tsx.
+// Mirrors getAtPercentage in AgencyContext.tsx.
 const pctFor = (at, coreType) => {
   if (!at) return 4;
   const t = String(coreType || 'CRGO').trim().toUpperCase();
   // ONE PERCENTAGE PER TENDER, and null rather than a default when there is none - mirrors
-  // getAtPercentageForCore since the three per-core-type fields were collapsed.
+  // getAtPercentage since the three per-core-type fields were collapsed.
   return at.atPercentage ?? null;
 };
 

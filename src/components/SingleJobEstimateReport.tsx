@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
-import { getAtPercentageForCore, getEstimateMasterForCore } from '../lib/AgencyContext';
+import { getAtPercentage, getEstimateMasterForCore } from '../lib/AgencyContext';
 import { EstimateItem } from '../lib/estimateData';
 import { bandForKva, SCHEDULE_A, RADIATOR_ABOVE_100, SCHEDULE_B, ScheduleBItem, AMORPHOUS_ESTIMATE_TEXT, ScheduleSet, scheduleSetForAt, scheduleReadiness, SCHEDULES, ScheduleId, pricingModelForSchedule } from '../lib/ugvclSchedules';
 
@@ -30,7 +30,7 @@ const SECTION_LABELS: Record<EstimateSection, string> = {
   labour: 'Labour Charge',
 };
 
-// Same classification convention as getAtPercentageForCore / getEstimateMasterForCore
+// Same classification convention as getAtPercentage / getEstimateMasterForCore
 // in AgencyContext.tsx - kept consistent so a job classifies identically everywhere.
 export type CoreClass = 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE';
 export function classifyCoreType(coreType: string): CoreClass {
@@ -313,7 +313,7 @@ export function buildSingleJobEstimateData(
   /**
    * ⚠ NULL MEANS NO TENDER, AND IT IS A REFUSAL - NOT 4%.
    *
-   * getAtPercentageForCore used to return a hardcoded 4 when the AT was missing. That is the
+   * getAtPercentage used to return a hardcoded 4 when the AT was missing. That is the
    * sentinel shape this codebase keeps removing: a plausible figure standing in for an
    * absent one, multiplying EVERY line of the estimate, on a document that never names which
    * percentage it used. A job whose tender cannot be found is unpriceable, and says so.
@@ -322,7 +322,7 @@ export function buildSingleJobEstimateData(
    * the arithmetic and renders as NaN or 0 depending on the operator. The guard is manual
    * and the rateError is what makes the refusal visible.
    */
-  const atPercentageRaw = getAtPercentageForCore(atMaster);
+  const atPercentageRaw = getAtPercentage(atMaster);
   const atPercentage = atPercentageRaw ?? 0;
 
   const isScrap = job.status === 'Scrap' || job.condition === 'Scrap' || internalData?.condition === 'Scrap';

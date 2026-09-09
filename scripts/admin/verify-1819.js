@@ -18,7 +18,7 @@ writeFileSync(join(OUT, 'e.ts'), [
   "export { buildSingleJobEstimateData, classifyCoreType } from '../src/components/SingleJobEstimateReport';",
   "export { checkJobCircleLimit, coreTypeHasCircleLimit, scrapItemCodeForJob } from '../src/lib/estimateCalc';",
   "export { scheduleSetForAt, pricingModelForJob, hasScheduleB, SCHEDULES, scheduleProvenance } from '../src/lib/ugvclSchedules';",
-  "export { getEstimateMasterForCore, getAtPercentageForCore } from '../src/lib/AgencyContext';",
+  "export { getEstimateMasterForCore, getAtPercentage } from '../src/lib/AgencyContext';",
 ].join('\n'));
 
 const stub = { name: 'stub', setup(b) {
@@ -118,7 +118,7 @@ for (const at of targets) {
 
   // ---- 6. the AT percentage ---------------------------------------------------------------
   console.log('\n  AT PERCENTAGE (clause 2.0 says 7.00% for CRGO / Amorphous core)');
-  const v = app.getAtPercentageForCore(at);
+  const v = app.getAtPercentage(at);
   console.log(`    one figure, every core type: ${v}%   (stored atPercentage=${at.atPercentage ?? '-'})`);
   check('AT percentage is 7', Number(v) === 7, `got ${v}`);
 
