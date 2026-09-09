@@ -564,6 +564,17 @@ export default function AdminPanel() {
                         // A template published before this field existed has none. Left
                         // empty so the admin must choose rather than inherit a blank.
                         setTplScheduleId(t.scheduleId ?? '');
+                        // ⚠ THE PERCENTAGES MUST BE PREFILLED OR REVISING WIPES THEM.
+                        // publishAtTemplate writes with `merge: false`, so a field left out
+                        // of the payload is DELETED. Loading a template to correct its name
+                        // and publishing would silently strip the tender's accepted
+                        // percentage from every future adopter - a data loss with no error
+                        // and nothing on screen to notice.
+                        const pv = (v: unknown) =>
+                          v === undefined || v === null || !Number.isFinite(Number(v)) ? '' : String(v);
+                        setTplPctCrgo(pv((t as any).atPercentageCRGO));
+                        setTplPctAm(pv((t as any).atPercentageAmorphous));
+                        setTplPctWc(pv((t as any).atPercentageWoundCore));
                       }
                     }}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"

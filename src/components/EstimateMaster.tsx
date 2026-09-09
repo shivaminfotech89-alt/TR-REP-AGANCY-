@@ -1461,8 +1461,39 @@ export default function EstimateMaster() {
     if (blockPublishIfFallbackResolved(touchedSections().length ? touchedSections() : (['CRGO','AMORPHOUS','WOUND_CORE','OVERHAULING','CIRCLE_LIMITS'] as const).slice() as any)) return;
     setIsSaving(true);
     try {
+      /**
+       * ⚠ REVISING FROM HERE MUST CARRY THE TEMPLATE'S OWN FIELDS THROUGH, OR IT DELETES
+       * THEM. `publishAtTemplate` writes with `merge: false`, so anything absent from the
+       * payload is removed from the document. This form collects a name and notes; it has
+       * never collected a schedule, a period or the tender's percentages. So every revision
+       * published from this screen was stripping `scheduleId`, `startDate` and `endDate`
+       * from the template - silently, with no error, and invisibly to whoever adopted it
+       * next, who would get a template with no schedule at all.
+       *
+       * No live template lost anything: both were revised through the Admin Panel, which
+       * prefills those fields from the record. That is luck. This closes it by carrying the
+       * EXISTING values forward whenever an id is present, so a revision from here changes
+       * exactly what this form can edit and nothing else.
+       *
+       * The Admin Panel remains the place to CHANGE a schedule, a period or a percentage.
+       * This screen publishes an AT's rates; it does not edit the tender's own facts.
+       */
+      const revising = publishTplTargetId
+        ? publishedAts.find(t => t.id === publishTplTargetId)
+        : undefined;
       const id = await publishAtTemplate(
-        { id: publishTplTargetId || undefined, name: publishTplName.trim(), atNumber: selectedAt?.atNumber, notes: publishTplNotes.trim() },
+        {
+          id: publishTplTargetId || undefined,
+          name: publishTplName.trim(),
+          atNumber: revising?.atNumber ?? selectedAt?.atNumber,
+          notes: publishTplNotes.trim(),
+          scheduleId: revising?.scheduleId ?? (selectedAt as any)?.scheduleId,
+          startDate: revising?.startDate,
+          endDate: revising?.endDate,
+          atPercentageCRGO: revising?.atPercentageCRGO,
+          atPercentageAmorphous: revising?.atPercentageAmorphous,
+          atPercentageWoundCore: revising?.atPercentageWoundCore,
+        },
         // ALL FIVE, not just what was edited - see buildFullTemplatePayload.
         buildFullTemplatePayload(),
       );
