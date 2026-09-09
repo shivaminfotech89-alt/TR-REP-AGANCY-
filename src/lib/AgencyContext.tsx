@@ -1008,14 +1008,6 @@ interface AgencyContextType {
   /** Returns the new agency's id so the caller can select it (F30). */
   addAgency: (agencyData: Omit<Agency, 'id'>) => Promise<string | undefined>;
   updateAgency: (id: string, agencyData: Partial<Agency>) => Promise<void>;
-  updateAllAgenciesEstimateMaster: (payload: {
-    estimateMasterCRGO?: EstimateItem[];
-    estimateMasterAmorphous?: EstimateItem[];
-    estimateMasterWoundCore?: EstimateItem[];
-    estimateMasterOverhauling?: EstimateItem[];
-    estimateMasterCircleLimits?: EstimateItem[];
-    estimateMaster?: EstimateItem[];
-  }) => Promise<void>;
   countOverridesForApply: (
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],
@@ -1025,14 +1017,6 @@ interface AgencyContextType {
     payload: Record<string, EstimateItem[] | undefined>,
     targetAgencyIds: string[],
   ) => Promise<void>;
-  saveGlobalDefaultEstimateMaster: (payload: {
-    estimateMasterCRGO?: EstimateItem[];
-    estimateMasterAmorphous?: EstimateItem[];
-    estimateMasterWoundCore?: EstimateItem[];
-    estimateMasterOverhauling?: EstimateItem[];
-    estimateMasterCircleLimits?: EstimateItem[];
-    estimateMaster?: EstimateItem[];
-  }) => Promise<void>;
   
   atMasters: AtMaster[];
   activeAtMaster: AtMaster | null;
@@ -1386,60 +1370,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
   const isSuperAdmin = auth.currentUser?.email?.toLowerCase().trim() === 'shivaminfotech89@gmail.com';
 
-  const saveGlobalDefaultEstimateMaster = async (payload: {
-    estimateMasterCRGO?: EstimateItem[];
-    estimateMasterAmorphous?: EstimateItem[];
-    estimateMasterWoundCore?: EstimateItem[];
-    estimateMasterOverhauling?: EstimateItem[];
-    estimateMasterCircleLimits?: EstimateItem[];
-    estimateMaster?: EstimateItem[];
-  }) => {
-    if (!isSuperAdmin) {
-      throw new Error('Permission denied: Only system administrators can publish global default estimate rates.');
-    }
-    try {
-      const globalPayload = {
-        ...payload,
-        updatedAt: Date.now(),
-        updatedBy: auth.currentUser?.email || auth.currentUser?.uid || 'superadmin'
-      };
-
-      const publicRef = doc(db, 'public_config', 'estimate_master');
-      await setDoc(publicRef, globalPayload, { merge: true });
-
-      // Also mirror to system_config for backwards compatibility
-      try {
-        const globalRef = doc(db, 'system_config', 'estimate_master');
-        await setDoc(globalRef, globalPayload, { merge: true });
-      } catch (_) {}
-
-      setGlobalDefaultEstimateMaster(prev => ({
-        ...(prev || {}),
-        ...globalPayload
-      }));
-      cachedGlobalDefaultEstimateMaster = {
-        ...(cachedGlobalDefaultEstimateMaster || {}),
-        ...globalPayload
-      };
-      localStorage.setItem('cached_global_estimate_master', JSON.stringify(cachedGlobalDefaultEstimateMaster));
-
-      // NO FAN-OUT HERE ANY MORE - see applyEstimateMasterToOwnAgencies below.
-      //
-      // This used to also loop the caller's agencies and updateDoc each one, which made one
-      // button do two things with very different reach: writing public_config seeds every
-      // future agency for every user and cannot be undone by the actor for anyone else,
-      // while writing your own agencies is owner-scoped and repeatable. Naming one of those
-      // two is how someone publishes a baseline meaning to update their own agencies.
-      //
-      // Splitting them also exposes an effect the bundle hid: `getEstimateMasterForCore`
-      // checks `agency.estimateMasterCRGO` BEFORE `globalDef.estimateMasterCRGO`, so
-      // publishing never changed the prices of an agency that has its own CRGO section. The
-      // fan-out was doing the entire visible half of this button's job.
-    } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, 'public_config');
-      throw err;
-    }
-  };
 
   /**
    * What applying `payload` to the caller's OTHER agencies would destroy, counted from a
@@ -1698,17 +1628,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     }
   };
 
-  const updateAllAgenciesEstimateMaster = async (payload: {
-    estimateMasterCRGO?: EstimateItem[];
-    estimateMasterAmorphous?: EstimateItem[];
-    estimateMasterWoundCore?: EstimateItem[];
-    estimateMasterOverhauling?: EstimateItem[];
-    estimateMasterCircleLimits?: EstimateItem[];
-    estimateMaster?: EstimateItem[];
-  }) => {
-    // Automatically save as global default in system_config too!
-    await saveGlobalDefaultEstimateMaster(payload);
-  };
 
   /** Returns the new AT's id so the caller can activate it (AtSettings does). */
   const addAtMaster = async (atData: Omit<AtMaster, 'id' | 'ownerId'>): Promise<{ id: string; seed: AtSeedReport } | undefined> => {
@@ -2390,8 +2309,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       atMasters, activeAtMaster, viewingAllTenders, setActiveAtMasterId,
       loading, isSuperAdmin, globalDefaultEstimateMaster,
       globalConfigError, globalConfigLoaded, dismissGlobalConfigError,
-      addAgency, updateAgency, updateAllAgenciesEstimateMaster, 
-      saveGlobalDefaultEstimateMaster, countOverridesForApply, applyEstimateMasterToOwnAgencies,
+      addAgency, updateAgency, 
+      countOverridesForApply, applyEstimateMasterToOwnAgencies,
       addAtMaster, updateAtMaster,
       predictNextJobNo, getJobNoPrefix, syncCountersState,
       publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster,
