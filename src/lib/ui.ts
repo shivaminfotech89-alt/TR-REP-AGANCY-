@@ -308,10 +308,33 @@ export const TD_STICKY = `${TD} sticky bg-white z-10`;
  * SVG's own rounded corners, a CSS border traces a box the eye no longer sees, and a CSS shadow
  * falls square behind a rounded shape.
  *
- * ⚠ THE OPAQUE NAVY TILE IS LOad-BEARING - do not make it transparent. Its light-blue strokes
+ * ⚠ THE OPAQUE NAVY TILE IS LOAD-BEARING - do not make it transparent. Its light-blue strokes
  * are only 1.8:1 against a near-white sidebar and would vanish on six of the nine themes; the
  * tile carries them at 5.7:1 and is itself 10.4:1 against those sidebars. On the three
  * near-black themes the tile edge is 1.9:1 and merges into the rail, but the contents still
  * read at 10.9:1 - the silhouette floats, which is cosmetic, not a legibility failure.
  */
 export const APP_MARK = '/favicon.svg';
+
+/**
+ * THE PRODUCT'S ONE-LINE SUBTITLE, SHARED BY THE SIDEBAR AND THE LANDING PAGE.
+ *
+ * ⚠ THIS EXISTS BECAUSE THE TWO SCREENS HAD DRIFTED APART. AppLayout said "Transformer Repair
+ * Portal" and LandingPage said "Transformer Overhaul ERP" - on the two screens a user sees
+ * first. Two literals is how that happened, and one constant is what stops it happening again.
+ *
+ * ⚠ "OVERHAUL" AND "ERP" WERE BOTH WRONG, not merely inconsistent. The A/T, the schedules and
+ * every other screen say REPAIR; "overhaul" appears nowhere else in this app or in the tender.
+ * And "ERP" claims a category this is not - it prices and bills transformer jobs, it does not
+ * do payroll, inventory or ledgers. An overclaim on a login page is a promise the app then
+ * fails to keep.
+ *
+ * ⚠ IT DESCRIBES, IT DOES NOT NAME - which is why it survived the rename to TransRegister
+ * untouched while eleven wordmarks changed. It must not contain the product name: the name is
+ * always directly above it, and a subtitle that repeats it says nothing twice. That also means
+ * "Transformer" is safe here only for as long as the name does not contain it.
+ *
+ * ⚠ SCREEN ONLY, like everything else in this file. A printed document's letterhead carries
+ * the AGENCY's name and address - UGVCL is receiving a contractor's bill, not the software's.
+ */
+export const APP_SUBTITLE = 'Transformer Repair Portal';

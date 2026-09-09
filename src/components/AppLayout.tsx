@@ -47,7 +47,7 @@ import AgencySettings from './AgencySettings';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
-import { APP_MARK } from '../lib/ui';
+import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
@@ -164,8 +164,8 @@ export default function AppLayout({ user }: { user: User }) {
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0">
-              <h1 className={`${currentTheme.sidebarTitleText} text-base tracking-wide leading-none truncate`}>TR REP AGENCY</h1>
-              <p className={`${currentTheme.sidebarSubText} text-[10px] uppercase tracking-wider mt-1 truncate`}>Transformer Repair Portal</p>
+              <h1 className={`${currentTheme.sidebarTitleText} text-base tracking-wide leading-none truncate`}>TransRegister</h1>
+              <p className={`${currentTheme.sidebarSubText} text-[10px] uppercase tracking-wider mt-1 truncate`}>{APP_SUBTITLE}</p>
             </div>
           </Link>
           

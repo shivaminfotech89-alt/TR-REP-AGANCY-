@@ -1,6 +1,7 @@
 {
-  "short_name": "TR Rep Agency",
-  "name": "TR Rep Agency - Transformer Repair Management",
+  "short_name": "TransRegister",
+  "name": "TransRegister — Transformer Repair Management",
+  "description": "Job intake, inspection, tender-rate estimates, billing and oil accounting for transformer repair contractors.",
   "icons": [
     {
       "src": "/favicon.svg",

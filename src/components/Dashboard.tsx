@@ -541,7 +541,11 @@ export default function Dashboard() {
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-sm sm:text-base font-black text-white truncate tracking-tight">
-                  {activeAgency?.name || 'TR REP AGENCY'}
+                  {/* ⚠ NOT THE PRODUCT NAME. This slot means "the agency you are working
+                      in", and falling back to the product's name put a plausible value where
+                      a missing one belongs - the sentinel shape recorded throughout this
+                      audit. With no agency selected the honest answer is that none is. */}
+                  {activeAgency?.name || 'No agency selected'}
                 </h1>
                 <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
                   Circle: {activeAgency?.circleOfficeName || 'SABARMATI'}

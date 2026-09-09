@@ -10378,3 +10378,69 @@ it had passed.** A guard that returns early is a precondition for everything dow
 it, whether or not anything downstream says so. And the risk concentrates exactly where the
 guard has become obviously obsolete: obsolescence is an argument for deleting the *check*,
 never evidence about what came to depend on it.
+
+
+## G26. Eleven wordmarks, one version literal, and two subtitles that disagreed
+
+The site went live at **transregister.com** while the interface still said `TR REP AGENCY v2.5`.
+Renaming it meant finding every place the app names itself, and the count mattered more than
+the rename: a product name is the one string that is *supposed* to be duplicated, so there is
+no compiler and no test that finds the site you missed.
+
+**Eleven sites, in four different registers.** A wordmark on the landing page and another in
+its footer; a `©` line; a Terms of Service clause; three `alt` attributes; the sidebar `<h1>`;
+the `<title>`; and the manifest's `short_name` and `name`. Only the first two look like
+branding. The other nine are the ones a rename misses — an `alt` attribute is read by exactly
+the users who cannot see the mark it describes, and the manifest is what the name on a phone's
+home screen comes from.
+
+**Three of the eleven are outside the bundle.** `index.html` and `manifest.json` are static
+files; no TypeScript constant can reach them. So a `PRODUCT_NAME` export would have covered
+8 of 11 sites while *appearing* to cover all of them — which is worse than none, because the
+next renamer would trust it and ship a stale `<title>`. **A constant is only worth extracting
+when it can cover every instance; a partial one relocates the bug into a false guarantee.**
+The subtitle went into a constant precisely because both its sites are `.tsx` — 2 of 2.
+
+**`v2.5` existed in exactly one place, hardcoded, and no release process updated it.** Not in
+`package.json`, not in the manifest, not derived from anything. It was deleted rather than
+re-sourced. A version number on a login page tells a customer nothing even when it is true —
+they cannot choose a version, and it does not tell them whether the thing works. **A literal
+that only ever gets more wrong is not a fact, and wiring it to a real source would have made
+it accurate without making it useful.**
+
+**`Dashboard:544` fell back to the product name in a slot that means "the agency you are in".**
+`{activeAgency?.name || 'TR REP AGENCY'}` — the sentinel shape this audit keeps finding: a
+plausible value standing where a missing one belongs, so the failure renders as a fact. With
+no agency selected the honest answer is `No agency selected`.
+
+**And the drift.** `AppLayout` said *Transformer Repair Portal*; `LandingPage` said
+*Transformer Overhaul ERP* — on the two screens a user sees first. Both were wrong in ways
+that outlived whoever wrote them: "overhaul" appears nowhere else in this app or in the A/T,
+which say **repair** throughout, and "ERP" claims a category this is not — it prices and bills
+transformer jobs, it does not do payroll, inventory or ledgers.
+
+The rule, and it is the same one G25 drew about the mark: **a string that must be identical in
+two places will not stay identical, and the drift is invisible because no screen shows both.**
+Nobody sees the landing page and the sidebar at the same moment. There was no bug report and
+could not have been one — the app was simply describing itself two different ways to the same
+person, ninety seconds apart.
+
+**What the two descriptions record.** `index.html` had no `<meta name="description">` at all
+and the manifest had no `description`, so a search result and an install prompt were both
+quoting whatever the crawler chose. The meta description was **measured against the ~155
+characters a search result shows** rather than written blind: the first draft ran 172 and would
+have been cut at `…priced from the tend`. Both lead with what the app does rather than what it
+is, because the name is already rendered in bold directly above them.
+
+**The verification is the part worth keeping.** `print-subtree-hashes.js --compare HEAD`
+reported **13 printed subtrees, 13 byte-identical, 0 changed** — proving the rename reached no
+A4 document. That is the invariant at the top of `ui.ts` (*nothing here is imported by a
+printed document*) checked rather than asserted, and it is the right check for a rename
+specifically: UGVCL receives a **contractor's** bill, and the letterhead carries the agency's
+name and address. The software's name has no business on it. A rename that leaked onto a
+printed document would not fail a build, a typecheck or a test — only a hash of the rendered
+subtree catches it, and only if someone runs it.
+
+The app mark was left alone throughout, and that was the point of G25's decision to ship it
+**without a wordmark**: carrying no letters is exactly what let one icon survive a rename of
+every name around it.

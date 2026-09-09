@@ -33,7 +33,7 @@ import {
   Menu
 } from 'lucide-react';
 import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
-import { APP_MARK } from '../lib/ui';
+import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -82,15 +82,22 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
           <div className="flex items-center space-x-2.5 sm:space-x-3">
             <img 
               src={APP_MARK} 
-              alt="TR Rep Agency" 
+              alt="TransRegister" 
               className="w-9 h-9 sm:w-10 sm:h-10 shrink-0" 
               referrerPolicy="no-referrer"
             />
             <div className="min-w-0">
               <span className="font-extrabold text-slate-900 text-sm sm:text-base tracking-tight flex items-center gap-1.5 truncate">
-                TR REP AGENCY <span className="bg-blue-100 text-blue-800 text-[9px] sm:text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">v2.5</span>
+                {/* ⚠ NO VERSION BADGE, AND ONE MUST NOT BE ADDED BACK. It read "v2.5",
+                    hardcoded here and nowhere else - not in package.json, not in the
+                    manifest, not derived from anything, and never touched by a release. A
+                    literal pretending to be a fact, which is the class this codebase keeps
+                    removing. And a version number on a login page tells a customer nothing
+                    even when it IS true: they cannot choose a version, and the number does
+                    not tell them whether the thing they are about to use works. */}
+                TransRegister
               </span>
-              <p className="text-[9px] sm:text-[10px] text-slate-500 font-medium truncate">Transformer Overhaul ERP</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-500 font-medium truncate">{APP_SUBTITLE}</p>
             </div>
           </div>
 
@@ -304,7 +311,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
                   <div className="inline-block relative mb-2 sm:mb-3">
                     <img 
                       src={APP_MARK} 
-                      alt="TR Rep Agency" 
+                      alt="TransRegister" 
                       className="w-14 h-14 sm:w-16 sm:h-16 mx-auto" 
                       referrerPolicy="no-referrer"
                     />
@@ -862,12 +869,12 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             <div className="flex items-center space-x-3 text-center md:text-left">
               <img 
                 src={APP_MARK} 
-                alt="TR Rep Agency" 
+                alt="TransRegister" 
                 className="w-8 h-8 shrink-0" 
                 referrerPolicy="no-referrer"
               />
               <div>
-                <div className="text-white font-extrabold text-xs sm:text-sm">TR REP AGENCY</div>
+                <div className="text-white font-extrabold text-xs sm:text-sm">TransRegister</div>
                 <div className="text-[9px] sm:text-[10px] text-slate-500">Transformer Repair Management ERP System</div>
               </div>
             </div>
@@ -887,7 +894,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             </div>
 
             <div className="text-[9px] sm:text-[10px] text-slate-500 text-center md:text-right">
-              © {new Date().getFullYear()} TR Rep Agency Suite. All rights reserved.
+              © {new Date().getFullYear()} TransRegister. All rights reserved.
             </div>
           </div>
         </div>
@@ -913,7 +920,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             <div className="p-4 sm:p-6 overflow-y-auto space-y-3 sm:space-y-4 text-[11px] sm:text-xs text-slate-600 leading-relaxed">
               <h4 className="font-bold text-slate-900 text-xs sm:text-sm">1. Acceptance of Terms</h4>
               <p>
-                By logging into or accessing the TR Rep Agency Transformer Repair Management Suite ("Software"), you agree to be bound by these Terms of Service. If you do not agree to these terms, you must not access or use the application.
+                By logging into or accessing TransRegister, the transformer repair management software ("Software"), you agree to be bound by these Terms of Service. If you do not agree to these terms, you must not access or use the application.
               </p>
 
               <h4 className="font-bold text-slate-900 text-xs sm:text-sm">2. Authorized Use & Contractor Credentials</h4>
