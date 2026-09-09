@@ -57,24 +57,33 @@ fix, and that is easier before any document goes out.
 
 *Estimates and bills already produced keep the amounts they were sent with.*
 
-### 2. Enter the AT percentages — all three, from your bid
+### 2. Enter the AT percentage — one figure, from your acceptance letter
 
-The three percentage boxes now open **empty** and the form will not create the
-AT until all three are filled. They used to be pre-filled from last year's AT,
-which meant they were usually submitted unread.
+**There is one percentage box, not three.** It applies to every core type. It
+used to be three, one each for CRGO, Amorphous and Wound Core, on the strength
+of stored figures that turned out to be test data.
 
-They are what **your agency quoted above (+) or below (−) the UGVCL schedule**
-in its bid document — not a property of the tender, which is why they differ
-between agencies working the same one. Live examples: +7 across the board on
-one tender, and +4 CRGO with −8 Amorphous and −4 Wound Core on another.
+It is what the tender **accepted above (+) or below (−) the UGVCL schedule** —
+A/T 1819 accepts *7.00% above*, so you type **7**. A negative number is below
+the schedule. The form says so beside the field; the sign is the whole meaning,
+because 7 and −7 are fourteen points apart on every line of every estimate.
 
-There is a **Copy from *(previous AT)*** link if this tender was bid at the
-same percentages. Use it, then check the numbers against the new bid.
+**Two ways it gets filled:**
 
-**If the bid was at the schedule rate exactly, type 0.** A blank is refused; a
-typed zero is accepted. They are not the same thing, and a blank used to be
-stored as zero silently — which read as "bid at par" rather than "nobody
-answered".
+- **The template supplies it.** Where a tender quotes one rate to every agency,
+  the administrator puts it on the template and the box arrives filled, with a
+  green line naming the tender it came from. **Confirm it against your
+  acceptance letter** — it stays editable, and an agency on varied terms should
+  change it.
+- **You type it.** Where agencies bid separately, the template carries nothing
+  and the box opens empty and must be answered.
+
+There is a **Copy from *(previous AT)*** link if this tender was accepted at the
+same figure. Use it, then check against the new letter.
+
+**If the rate was the schedule exactly, type 0.** A blank is refused; a typed
+zero is accepted. They are not the same thing, and a blank used to be stored as
+zero silently — which read as "at par" rather than "nobody answered".
 
 **If you skip it: you cannot** — the form blocks. That is the point. A wrong
 percentage is invisible on the finished document, because no line says which
@@ -154,9 +163,9 @@ estimates.
    statement of fact; you do not choose it.
 2. If a rate template exists for that schedule it is **pre-selected** and its rates are
    copied onto the AT when you save. That is the whole job.
-3. If no template exists, ask the administrator to publish one — Admin Panel → **New tender
-   template** → name it, give the tender number and period, choose the schedule, publish.
-   It takes a minute and every agency on that tender can then adopt it.
+3. If no template exists, ask the administrator to publish one. It takes a minute and every
+   agency on that tender can then adopt it — see **For the administrator** below for what
+   they do.
 
 ### Case B — the tender repriced
 
@@ -187,6 +196,114 @@ wrong tender looks entirely normal on paper.
 **If you skip all this: estimates use the previous tender's rates and look completely
 normal.** There is no warning on the document, because an out-of-date rate is
 indistinguishable from a current one.
+
+## FOR THE ADMINISTRATOR — publishing the tender's rates
+
+Everything above is what an **agency** does. This is what the **administrator**
+does once, when a new tender arrives, so that every agency on it can take the
+rates instead of typing them.
+
+### First: which case are you in?
+
+**The same three cells as above.** Open the new tender's Schedule-A and check
+these against what the app prices today:
+
+| Sr. | item | UGVCL-2020 | UGVCL-2026 |
+|---|---|---|---|
+| **1a** at 25 KVA | Labour charge only | 2061 | **2079** |
+| **17** (any capacity) | Sealed → bolted conversion | 1511 | **1524** |
+| **21** at 63 KVA | Overhauling | 3162 | **3189** |
+
+All three match a schedule the app already has → **Case 1**. Any one differs →
+**Case 2**.
+
+There is a second way to tell, and it is the more reliable one: **open the
+publish form and look at the schedule dropdown.** It lists only schedules that
+are fully in the app. If the tender you are publishing for is not in that list,
+you are in Case 2 whatever the three cells say.
+
+---
+
+### Case 1 — the rates are a schedule the app already has
+
+**Admin Panel → New tender template.** Fill in:
+
+1. **Template name** — what agencies will pick it by, e.g. *UGVCL 2026-28
+   Schedule A*.
+2. **AT number** — the tender number as the DISCOM writes it.
+3. **Tender period** — start and end date. These prefill the dates on an
+   agency's Add AT form; they are a suggestion, not a rule.
+4. **Accepted percentage** — **optional.** Fill it *only* if the tender sets one
+   rate for every agency (A/T 1819 does: 7.00% above, so enter 7). Leave it blank
+   when agencies bid separately — each will then answer from its own acceptance
+   letter. **A wrong percentage here reaches every agency that adopts the
+   template**, which is why it is optional rather than required: a blank each
+   agency answers is better than a guess they all inherit.
+5. **Schedule** — **required.** The publish is refused without one. This decides
+   what every item on every job under those tenders costs.
+
+Then **Publish template**.
+
+**If the schedule you need is not in the dropdown, stop — you are in Case 2.**
+You cannot publish against a schedule that is not in the app, and the form will
+not let you try. That refusal is the feature: a template with no schedule would
+leave every adopting AT falling back to whatever its form happened to default to.
+
+**A template always carries all five rate sections** — CRGO, Amorphous, Wound
+Core, Overhauling and the Clause 4.0 circle limits. There is no partial publish.
+
+**If the schedule is only partly transcribed**, the form says so in amber and
+names which parts are borrowed from an older tender. UGVCL-2026 is in that state
+today: its Clause 4.0 circle limits are 2020's, because the 2026 pages have not
+been supplied. Publishing is still correct — the mixture is declared on screen
+wherever rates are shown — but read the notice so you know what you are sending.
+
+---
+
+### Case 2 — the tender repriced
+
+**The rates cannot be typed in anywhere.** Schedule-A, Schedule-B, the radiator
+table and the Clause 4.0 limits live in the app's code, deliberately: they are
+the tender's figures, not an agency's, so no agency and no administrator can edit
+them from a screen.
+
+1. **Send the schedule pages to whoever maintains the app.** All of them.
+   A partial set produces a tender priced half from the new schedule and half
+   from the old, which is worse than waiting.
+2. They add it to the schedule registry and tell you when it is live.
+3. It then appears in the publish dropdown, and you are in **Case 1**.
+
+---
+
+### Revising a template you have already published
+
+**Admin Panel → New tender template**, then change the dropdown at the top of the
+form from *A NEW template* to **Revise "…" — currently vN**. Everything prefills:
+name, AT number, dates, schedule, percentage. Change what you need and press
+**Publish new version**.
+
+**The version number only moves if the RATES changed.** Correcting a name, a
+tender number, the notes or the percentage leaves it where it is — so nobody who
+already copied the template is prompted to take an update that would change
+nothing. That is intended, and it means:
+
+> **Adding a percentage to a template does not reach agencies that already
+> adopted it.** They keep the percentage they typed. Only agencies creating an AT
+> *after* the revision get it prefilled.
+
+**Do not use the Publish button on the Estimate Master screen for this.** That
+one publishes an AT's own rates and cannot set the schedule, the period or the
+percentage. It is for a different job.
+
+---
+
+### What the agency does after you publish
+
+They pick your template from the **Agency rate master** dropdown when creating
+their AT — or, if the AT already exists, from **Estimate Master → Published AT
+templates → Copy to this AT**.
+
+---
 
 ## After either one — a quick check
 
