@@ -49,7 +49,14 @@ import { join } from 'path';
 import { createHash } from 'crypto';
 import { execSync } from 'child_process';
 
-if (!process.argv.includes('--no-guard')) {
+/**
+ * ⚠ THE GUARD DOES NOT APPLY TO `--compare`, AND THAT IS THE POINT OF `--compare`. It reads
+ * the old revision with `git show` and the new one from the working tree; it checks nothing
+ * out, so there is nothing to destroy. Blanket-guarding it blocked the mode that is SAFE on a
+ * dirty tree - and a dirty tree is exactly when you want to ask "what did I just change on
+ * the printed documents", before committing rather than after.
+ */
+if (!process.argv.includes('--no-guard') && !process.argv.includes('--compare')) {
   let dirty = '';
   try {
     dirty = execSync('git status --porcelain -- src/', { encoding: 'utf8' }).trim();

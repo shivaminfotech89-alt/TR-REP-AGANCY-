@@ -1608,7 +1608,7 @@ export default function SingleJobEstimateReport({
                         </div>
                         <div className="flex">
                           <span className="font-bold w-28">Manufacturer:</span>
-                          <span className="font-bold uppercase truncate">{job.make || '-'}</span>
+                          <span className="font-bold uppercase break-words min-w-0">{job.make || '-'}</span>
                         </div>
                         <div className="flex">
                           <span className="font-bold w-28">Serial No.:</span>
@@ -1628,7 +1628,19 @@ export default function SingleJobEstimateReport({
                         </div>
                         <div className="flex text-xs pt-0.5">
                           <span className="font-bold w-28">Order No.:</span>
-                          <span className="font-mono truncate">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
+                          {/* ⚠ NO `truncate` HERE, AND IT MUST NOT COME BACK. `truncate` is
+                              overflow-hidden + ellipsis + nowrap: on a SCREEN the full text is
+                              a hover away, on PAPER it is gone. This is the tender reference -
+                              UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819 is 41 characters, and
+                              it was being cut mid-string, so a division office could not tell
+                              which tender the estimate belonged to.
+
+                              It wraps instead. `break-all` because the string has no spaces to
+                              break at - a slash-separated reference would otherwise overflow
+                              its box rather than wrap. `min-w-0` so the flex child is allowed
+                              to shrink and wrap at all. Costs one line, ~4.5mm, against the
+                              ~11.7mm this sheet has spare. */}
+                          <span className="font-mono break-all min-w-0">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
                         </div>
                       </div>
 
@@ -1832,7 +1844,7 @@ export default function SingleJobEstimateReport({
                       </div>
                       <div className="flex">
                         <span className="font-bold w-24">Manufacturer:</span>
-                        <span className="font-bold uppercase truncate">{job.make || '-'}</span>
+                        <span className="font-bold uppercase break-words min-w-0">{job.make || '-'}</span>
                       </div>
                       <div className="flex">
                         <span className="font-bold w-24">Serial No.:</span>
@@ -1852,7 +1864,19 @@ export default function SingleJobEstimateReport({
                       </div>
                       <div className="flex text-[9px] pt-0.5">
                         <span className="font-bold w-24">Order No.:</span>
-                        <span className="font-mono truncate">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
+                        {/* ⚠ NO `truncate` HERE, AND IT MUST NOT COME BACK. `truncate` is
+                              overflow-hidden + ellipsis + nowrap: on a SCREEN the full text is
+                              a hover away, on PAPER it is gone. This is the tender reference -
+                              UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819 is 41 characters, and
+                              it was being cut mid-string, so a division office could not tell
+                              which tender the estimate belonged to.
+
+                              It wraps instead. `break-all` because the string has no spaces to
+                              break at - a slash-separated reference would otherwise overflow
+                              its box rather than wrap. `min-w-0` so the flex child is allowed
+                              to shrink and wrap at all. Costs one line, ~4.5mm, against the
+                              ~11.7mm this sheet has spare. */}
+                          <span className="font-mono break-all min-w-0">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
                       </div>
                     </div>
 
