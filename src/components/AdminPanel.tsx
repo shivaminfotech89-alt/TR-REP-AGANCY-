@@ -65,10 +65,8 @@ export default function AdminPanel() {
    * cannot be used - a failure discovered by the adopting agency rather than here.
    */
   const [tplScheduleId, setTplScheduleId] = useState<string>('');
-  /** The tender's accepted percentage, where it sets one for every agency. Optional. */
-  const [tplPctCrgo, setTplPctCrgo] = useState('');
-  const [tplPctAm, setTplPctAm] = useState('');
-  const [tplPctWc, setTplPctWc] = useState('');
+  /** The tender's accepted percentage - ONE figure for every core type. Optional. */
+  const [tplPct, setTplPct] = useState('');
   const [tplEnd, setTplEnd] = useState('');
   const [tplSaving, setTplSaving] = useState(false);
   const [tplMsg, setTplMsg] = useState<string | null>(null);
@@ -107,9 +105,7 @@ export default function AdminPanel() {
           startDate: tplStart ? new Date(tplStart).getTime() : undefined,
           endDate: tplEnd ? new Date(tplEnd).getTime() : undefined,
           scheduleId: tplScheduleId,
-          atPercentageCRGO: tplPctCrgo.trim() === '' ? undefined : Number(tplPctCrgo),
-          atPercentageAmorphous: tplPctAm.trim() === '' ? undefined : Number(tplPctAm),
-          atPercentageWoundCore: tplPctWc.trim() === '' ? undefined : Number(tplPctWc),
+          atPercentage: tplPct.trim() === '' ? undefined : Number(tplPct),
         },
         {
           estimateMasterCRGO: JSON.parse(JSON.stringify(defaultEstimateData)),
@@ -572,9 +568,7 @@ export default function AdminPanel() {
                         // and nothing on screen to notice.
                         const pv = (v: unknown) =>
                           v === undefined || v === null || !Number.isFinite(Number(v)) ? '' : String(v);
-                        setTplPctCrgo(pv((t as any).atPercentageCRGO));
-                        setTplPctAm(pv((t as any).atPercentageAmorphous));
-                        setTplPctWc(pv((t as any).atPercentageWoundCore));
+                        setTplPct(pv((t as any).atPercentage));
                       }
                     }}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
@@ -617,25 +611,16 @@ export default function AdminPanel() {
                     different object. Both hold. */}
                 <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
-                    Accepted percentage &mdash; optional
+                    Accepted percentage &mdash; optional, one figure for every core type
                   </label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {([['CRGO', tplPctCrgo, setTplPctCrgo],
-                       ['Amorphous', tplPctAm, setTplPctAm],
-                       ['Wound Core', tplPctWc, setTplPctWc]] as const).map(([label, val, set]) => (
-                      <label key={label} className="block">
-                        <span className="block text-[10px] font-bold text-slate-600 mb-0.5">{label} %</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          value={val}
-                          onChange={e => (set as any)(e.target.value)}
-                          placeholder="e.g. 7"
-                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono tabular-nums"
-                        />
-                      </label>
-                    ))}
-                  </div>
+                  <input
+                    type="number"
+                    step="0.01"
+                    value={tplPct}
+                    onChange={e => setTplPct(e.target.value)}
+                    placeholder="e.g. 7"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono tabular-nums"
+                  />
                   <p className="mt-1 text-[11px] text-slate-600">
                     Fill these only if the tender sets one rate for every agency. Leave blank when
                     agencies bid separately &mdash; each will then answer from its own acceptance letter.

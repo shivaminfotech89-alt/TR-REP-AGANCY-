@@ -212,10 +212,14 @@ export interface AtMaster {
   agencyId: string;
   lastJobNumbers: Record<string, number>;
   ownerId?: string;
+  /**
+   * THE TENDER'S ACCEPTED PERCENTAGE - ONE FIGURE, EVERY CORE TYPE.
+   *
+   * Was three fields, on the strength of live data that turned out to be test values. A/T
+   * 1819 clause 2.0 quotes one accepted percentage for CRGO / Amorphous alike, which is what
+   * a tender does. See getAtPercentageForCore.
+   */
   atPercentage?: number;
-  atPercentageCRGO?: number;
-  atPercentageAmorphous?: number;
-  atPercentageWoundCore?: number;
   allotments?: Record<string, Record<string, number>>;
   allotmentHistory?: AllotmentRecord[];
   prefixes?: Record<string, string | Record<string, string>>;
@@ -422,9 +426,7 @@ export interface PublishedAt {
    * as it does not write the dates: changing a tender's percentages as a side effect of
    * taking its rates is the shape that made re-adoption on save dangerous.
    */
-  atPercentageCRGO?: number;
-  atPercentageAmorphous?: number;
-  atPercentageWoundCore?: number;
+  atPercentage?: number;
 
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
@@ -777,23 +779,37 @@ export function atForJob(
   return atResolutionForJob(job, atMasters).at;
 }
 
-export function getAtPercentageForCore(at: AtMaster | null | undefined, coreType: string = 'CRGO'): number {
-  if (!at) return 4;
-  const type = (coreType || 'CRGO').trim().toUpperCase();
-  if (type.includes('AMORPHOUS') || type.includes('AM')) {
-    if (at.atPercentageAmorphous !== undefined && !isNaN(Number(at.atPercentageAmorphous))) {
-      return Number(at.atPercentageAmorphous);
-    }
-  } else if (type.includes('WOUND') || type.includes('WC')) {
-    if (at.atPercentageWoundCore !== undefined && !isNaN(Number(at.atPercentageWoundCore))) {
-      return Number(at.atPercentageWoundCore);
-    }
-  } else {
-    if (at.atPercentageCRGO !== undefined && !isNaN(Number(at.atPercentageCRGO))) {
-      return Number(at.atPercentageCRGO);
-    }
-  }
-  return at.atPercentage !== undefined && !isNaN(Number(at.atPercentage)) ? Number(at.atPercentage) : 4;
+export function getAtPercentageForCore(at: AtMaster | null | undefined, _coreType?: string): number | null {
+  /**
+   * ONE PERCENTAGE PER TENDER. THE CORE TYPE IS NOT CONSULTED.
+   *
+   * A/T 1819 clause 2.0 accepts "7.00% above the estimated rate of UGVCL for CRGO /
+   * Amorphous core" - ONE figure, covering every core type. That is what a tender quotes.
+   *
+   * ⚠ THIS USED TO READ THREE FIELDS, AND THE EVIDENCE FOR THEM WAS TEST DATA. Live ATs
+   * carried 4/-8/-4 and 5/-2/4, which looked like proof that tenders price per core type;
+   * they were typed at random to exercise the estimate and billing paths. The real document
+   * gives one figure and the two ATs on it carry 7/7/7.
+   *
+   * ⚠ AND IT CLOSES A GAP NOBODY HAD REPORTED. The old branch chain tested Amorphous, then
+   * Wound Core, then fell to an `else` that returned CRGO's figure. LSTC - a core type this
+   * app knows as a job-number prefix - has no field of its own, so an LSTC job took CRGO's
+   * percentage by ACCIDENT OF BRANCH ORDERING rather than by any decision. With one field
+   * there is nothing for a core type to be missing from. See AUDIT.
+   *
+   * `_coreType` is kept so the sixteen call sites did not all have to change in the same
+   * commit as the pricing collapse. It is unread. Remove it and the parameter at those
+   * sites in a follow-up, when nothing else is in flight.
+   *
+   * ⚠ RETURNS null FOR A MISSING AT, AND NEVER A DEFAULT. It used to return 4. A silent 4%
+   * on a job whose tender could not be found is the sentinel shape this codebase keeps
+   * removing: a plausible figure standing in for an absent one, multiplying every line of
+   * an estimate, with nothing on the finished document naming which percentage was used.
+   * Callers treat null as a missing input and withhold the total.
+   */
+  if (!at) return null;
+  const v = at.atPercentage;
+  return v !== undefined && v !== null && !isNaN(Number(v)) ? Number(v) : null;
 }
 
 /**
@@ -1034,7 +1050,7 @@ interface AgencyContextType {
   /** Admin only. Creates a new template, or bumps an existing one's version. */
   publishAtTemplate: (
     tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
-           atPercentageCRGO?: number; atPercentageAmorphous?: number; atPercentageWoundCore?: number },
+           atPercentage?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ) => Promise<string>;
   /** Copy a template's sections onto an AT, stamping which template and version. */
@@ -2182,7 +2198,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    */
   const publishAtTemplate = async (
     tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
-           atPercentageCRGO?: number; atPercentageAmorphous?: number; atPercentageWoundCore?: number },
+           atPercentage?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ): Promise<string> => {
     if (!isSuperAdmin) throw new Error('Only the administrator can publish a rate template.');
@@ -2261,12 +2277,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     if (String(tpl.scheduleId ?? '').trim()) payload.scheduleId = String(tpl.scheduleId).trim();
     // OMITTED WHEN ABSENT, never written as 0. A stored zero reads as "bid at par", which is
     // a real answer and a different fact from "this tender does not set one".
-    (['atPercentageCRGO', 'atPercentageAmorphous', 'atPercentageWoundCore'] as const).forEach(k => {
-      const v = (tpl as any)[k];
+    {
+      const v = (tpl as any).atPercentage;
       if (v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(Number(v))) {
-        payload[k] = Number(v);
+        payload.atPercentage = Number(v);
       }
-    });
+    }
     Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payload[k] = v; });
 
     const ref = tpl.id ? doc(db, 'published_ats', tpl.id) : doc(collection(db, 'published_ats'));

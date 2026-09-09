@@ -1490,9 +1490,7 @@ export default function EstimateMaster() {
           scheduleId: revising?.scheduleId ?? (selectedAt as any)?.scheduleId,
           startDate: revising?.startDate,
           endDate: revising?.endDate,
-          atPercentageCRGO: revising?.atPercentageCRGO,
-          atPercentageAmorphous: revising?.atPercentageAmorphous,
-          atPercentageWoundCore: revising?.atPercentageWoundCore,
+          atPercentage: revising?.atPercentage,
         },
         // ALL FIVE, not just what was edited - see buildFullTemplatePayload.
         buildFullTemplatePayload(),

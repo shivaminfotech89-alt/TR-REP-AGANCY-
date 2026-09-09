@@ -1,5 +1,5 @@
 {
-  "capturedAt": "2026-09-08T17:22:28.187Z",
+  "capturedAt": "2026-09-09T07:45:34.530Z",
   "jobCount": 64,
   "jobs": {
     "ex4ShPViZ9fCnw44qXHZ": {
@@ -84,18 +84,18 @@
     },
     "CHBUDU5En0N1WvhMA0Bu": {
       "baseTotal": 13746,
-      "amountWithPercentage": 14845.68,
+      "amountWithPercentage": 14295.84,
       "lineCount": 2,
       "rateErrors": 1,
-      "finalAmount": 14845.68,
+      "finalAmount": 14295.84,
       "codes": "1d-1|1d-1"
     },
     "chtc3jRFjxX2rEHDOnJH": {
       "baseTotal": 500,
-      "amountWithPercentage": 460,
+      "amountWithPercentage": 520,
       "lineCount": 1,
       "rateErrors": 0,
-      "finalAmount": 460,
+      "finalAmount": 520,
       "codes": "0"
     },
     "jvdvtP3QLGX90oEwfhgE": {
@@ -124,10 +124,10 @@
     },
     "drIm8L5uHbX2OVRdbVeP": {
       "baseTotal": 12549.1,
-      "amountWithPercentage": 13051.06,
+      "amountWithPercentage": 12549.1,
       "lineCount": 28,
-      "rateErrors": 0,
-      "finalAmount": 13051.06,
+      "rateErrors": 1,
+      "finalAmount": 12549.1,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "2sPmnhH4CxqTKdhJhWX5": {
@@ -164,10 +164,10 @@
     },
     "F6flU0VCpfc4hdx3ykDV": {
       "baseTotal": 17970,
-      "amountWithPercentage": 19407.6,
+      "amountWithPercentage": 18688.8,
       "lineCount": 2,
       "rateErrors": 0,
-      "finalAmount": 19407.6,
+      "finalAmount": 18688.8,
       "codes": "1e|1e"
     },
     "MIuy9mEuoHrjiurr5K48": {
@@ -204,10 +204,10 @@
     },
     "yTej5rIJuJprlhebSCaU": {
       "baseTotal": 500,
-      "amountWithPercentage": 480,
+      "amountWithPercentage": 520,
       "lineCount": 1,
       "rateErrors": 0,
-      "finalAmount": 480,
+      "finalAmount": 520,
       "codes": "0"
     },
     "2FMIQwSdO4pF17GVUrBG": {
@@ -260,10 +260,10 @@
     },
     "tKP7KMh4S45h875tWUPE": {
       "baseTotal": 8344.2,
-      "amountWithPercentage": 8677.97,
+      "amountWithPercentage": 8344.2,
       "lineCount": 28,
-      "rateErrors": 0,
-      "finalAmount": 8677.97,
+      "rateErrors": 1,
+      "finalAmount": 8344.2,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "cUhKizqPH5GpRxcRvfYM": {
@@ -276,10 +276,10 @@
     },
     "lhYSbJi5aACqtjPIbgXF": {
       "baseTotal": 500,
-      "amountWithPercentage": 480,
+      "amountWithPercentage": 520,
       "lineCount": 1,
       "rateErrors": 0,
-      "finalAmount": 480,
+      "finalAmount": 520,
       "codes": "0"
     },
     "PoQsAep2FnJ6oHFloEqR": {
@@ -292,10 +292,10 @@
     },
     "WfguqL90jzUChiR1YNHP": {
       "baseTotal": 59228,
-      "amountWithPercentage": 63966.24,
+      "amountWithPercentage": 61597.12,
       "lineCount": 2,
       "rateErrors": 0,
-      "finalAmount": 63966.24,
+      "finalAmount": 61597.12,
       "codes": "2c|2c"
     },
     "8azjDRpjwdvgnYmYG5Cj": {
@@ -332,18 +332,18 @@
     },
     "ScUE3NkHxAKW6T9C9623": {
       "baseTotal": 6571.2,
-      "amountWithPercentage": 6834.05,
+      "amountWithPercentage": 6571.2,
       "lineCount": 28,
-      "rateErrors": 0,
-      "finalAmount": 6834.05,
+      "rateErrors": 1,
+      "finalAmount": 6571.2,
       "codes": "16|2b|4|21|1c|1e|1b|5|6|8|9A|9B|10|11A|11B|17|3|1d|15|12A|13A|14|1a|2a|1f|20|12C|13C"
     },
     "oVcBbPxsWsmzF9dvz6TO": {
       "baseTotal": 13746,
-      "amountWithPercentage": 14845.68,
+      "amountWithPercentage": 14295.84,
       "lineCount": 2,
       "rateErrors": 1,
-      "finalAmount": 14845.68,
+      "finalAmount": 14295.84,
       "codes": "1d-1|1d-1"
     },
     "hivHkvhFHJsTAYfhxrQT": {
@@ -372,18 +372,18 @@
     },
     "nF8CfoPOxegCxb2vLJcJ": {
       "baseTotal": 5202,
-      "amountWithPercentage": 4993.92,
+      "amountWithPercentage": 5410.08,
       "lineCount": 2,
       "rateErrors": 0,
-      "finalAmount": 4993.92,
+      "finalAmount": 5410.08,
       "codes": "1b|1b"
     },
     "39VUHAPvfticF998FfBn": {
       "baseTotal": 500,
-      "amountWithPercentage": 460,
+      "amountWithPercentage": 520,
       "lineCount": 1,
       "rateErrors": 0,
-      "finalAmount": 460,
+      "finalAmount": 520,
       "codes": "0"
     },
     "AmoePqEKMCEJ8n9X8j92": {
@@ -420,18 +420,18 @@
     },
     "7S5jKmyO59o2cjo4wBsd": {
       "baseTotal": 13746,
-      "amountWithPercentage": 14845.68,
+      "amountWithPercentage": 14295.84,
       "lineCount": 2,
       "rateErrors": 1,
-      "finalAmount": 14845.68,
+      "finalAmount": 14295.84,
       "codes": "1d-1|1d-1"
     },
     "62bsD6rLlxNQoVkkmIuv": {
       "baseTotal": 5202,
-      "amountWithPercentage": 4785.84,
+      "amountWithPercentage": 5410.08,
       "lineCount": 2,
       "rateErrors": 0,
-      "finalAmount": 4785.84,
+      "finalAmount": 5410.08,
       "codes": "1b|1b"
     },
     "nF9rcuERFeffB0580Z6V": {
@@ -476,10 +476,10 @@
     },
     "7Mqofe1bkBtFcFTEf8Iz": {
       "baseTotal": 13746,
-      "amountWithPercentage": 12646.32,
+      "amountWithPercentage": 14295.84,
       "lineCount": 2,
       "rateErrors": 1,
-      "finalAmount": 12646.32,
+      "finalAmount": 14295.84,
       "codes": "1d-1|1d-1"
     },
     "SRQfQP3eStgWr91SGbpU": {

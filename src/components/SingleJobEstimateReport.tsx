@@ -310,7 +310,20 @@ export function buildSingleJobEstimateData(
   // positional form raised no error when the signature changed - seven of the eight
   // call sites errored and this one was silent. Found by counting, not by tsc.
   const masterList = getEstimateMasterForCore({ at: atMaster, agency }, coreType);
-  const atPercentage = getAtPercentageForCore(atMaster, coreType);
+  /**
+   * ⚠ NULL MEANS NO TENDER, AND IT IS A REFUSAL - NOT 4%.
+   *
+   * getAtPercentageForCore used to return a hardcoded 4 when the AT was missing. That is the
+   * sentinel shape this codebase keeps removing: a plausible figure standing in for an
+   * absent one, multiplying EVERY line of the estimate, on a document that never names which
+   * percentage it used. A job whose tender cannot be found is unpriceable, and says so.
+   *
+   * ⚠ tsc WILL NOT CATCH A MISSING CHECK HERE. strictNullChecks is off, so `null` flows into
+   * the arithmetic and renders as NaN or 0 depending on the operator. The guard is manual
+   * and the rateError is what makes the refusal visible.
+   */
+  const atPercentageRaw = getAtPercentageForCore(atMaster);
+  const atPercentage = atPercentageRaw ?? 0;
 
   const isScrap = job.status === 'Scrap' || job.condition === 'Scrap' || internalData?.condition === 'Scrap';
   // Declared here rather than in the CRGO branch: both branches raise blocks that name
@@ -333,6 +346,12 @@ export function buildSingleJobEstimateData(
   const windingSuffix = isCopper ? 'Copper' : 'Aluminium SE';
 
   const rateErrors: EstimateRateError[] = [];
+  if (atPercentageRaw === null) {
+    rateErrors.push({ kind: 'missing-input', message:
+      `${job.jobNo || job.id || 'This job'}: no AT percentage is recorded for this tender, so `
+      + `every line would be priced at the bare schedule rate. Set the tender's accepted `
+      + `percentage on the AT before estimating.` });
+  }
   const coreClass = classifyCoreType(coreType);
 
   /**

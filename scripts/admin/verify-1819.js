@@ -118,15 +118,9 @@ for (const at of targets) {
 
   // ---- 6. the AT percentage ---------------------------------------------------------------
   console.log('\n  AT PERCENTAGE (clause 2.0 says 7.00% for CRGO / Amorphous core)');
-  const pcts = {
-    CRGO: app.getAtPercentageForCore(at, 'CRGO'),
-    Amorphous: app.getAtPercentageForCore(at, 'Amorphous'),
-    'Wound Core': app.getAtPercentageForCore(at, 'Wound Core'),
-  };
-  for (const [k, v] of Object.entries(pcts)) {
-    console.log(`    ${k.padEnd(12)} ${v}%   (stored: CRGO=${at.atPercentageCRGO ?? '-'} AM=${at.atPercentageAmorphous ?? '-'} WC=${at.atPercentageWoundCore ?? '-'})`);
-    check(`${k} is 7`, Number(v) === 7, `got ${v}`);
-  }
+  const v = app.getAtPercentageForCore(at);
+  console.log(`    one figure, every core type: ${v}%   (stored atPercentage=${at.atPercentage ?? '-'})`);
+  check('AT percentage is 7', Number(v) === 7, `got ${v}`);
 
   // ---- 7. rate state ----------------------------------------------------------------------
   console.log('\n  RATE STATE');

@@ -6791,6 +6791,45 @@ for pricing, which is what they should be.**
 
 ---
 
+### O50. FOUND AND DISSOLVED — LSTC took CRGO's percentage by accident of branch ordering
+
+**Recorded although it no longer exists, because of HOW it stopped existing.** Nobody
+reported it, nobody fixed it, and it was closed as a side effect of collapsing three fields
+to one. A gap that dissolves without being noticed is worth a note, or the next one of the
+same shape will not be looked for either.
+
+**What it was.** `getAtPercentageForCore` tested Amorphous, then Wound Core, then fell to an
+`else` returning `atPercentageCRGO`. LSTC is a core type this app knows — `AgencySettings`
+collects a `prefixLSTC`, `AtAllotments` resolves `coreType === 'LSTC'` — but it had **no
+percentage field of its own**. So an LSTC job did not take CRGO's percentage because anyone
+decided it should; it took it because LSTC failed two `includes()` tests and landed in the
+final branch. The value was plausible, the mechanism was accidental, and nothing on the
+finished document would have named which percentage was used.
+
+⚠ **AND `classifyCoreType` DOES NOT RETURN LSTC AT ALL** — it returns only
+`CRGO | OH | AMORPHOUS | WOUND_CORE`. So LSTC is a prefix and an allotment key but not a
+pricing class, which is a second, separate inconsistency in the same area and is NOT closed
+by this. If LSTC work is ever priced differently from CRGO, that is where it will surface.
+
+**How it dissolved.** A/T 1819 clause 2.0 quotes ONE accepted percentage for every core type,
+so the three fields collapsed to one. With one field there is nothing for a core type to be
+missing from, and no branch order to fall through. The fallback chain
+(`per-core-type → atPercentage → 4`) did not merely stop being used — it ceased to exist.
+
+**The hardcoded default went with it.** `getAtPercentageForCore(null)` used to return **4**.
+That is the sentinel shape recorded elsewhere in this file: a plausible figure standing in
+for an absent one, multiplying every line of an estimate. It now returns null and the
+builder raises a missing-input error, so a job whose tender cannot be found withholds its
+total instead of quietly pricing at 4% above. Three live jobs with no AT changed behaviour
+because of this, and that is the intended change.
+
+**The evidence for three fields was test data.** Live ATs carried 4/-8/-4 and 5/-2/4, which
+read as proof that tenders price per core type. They were typed at random to exercise the
+estimate and billing paths. The real document gives one figure, and both ATs on it carried
+7/7/7 — so the collapse was lossless exactly where it mattered.
+
+---
+
 ### O49. Any job can be billed, whatever stage its estimate reached — a contractual gap
 
 **`BillingSystem` never reads `estimateStatus` or `estimateApprovalStatus`.** Confirmed by

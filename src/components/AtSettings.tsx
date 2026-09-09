@@ -262,9 +262,7 @@ export function AtSettings() {
     name: string;
     startDate: string;
     endDate: string;
-    atPercentageCRGO: string;
-    atPercentageAmorphous: string;
-    atPercentageWoundCore: string;
+    atPercentage: string;
   } | null>(null);
 
   const [newAt, setNewAt] = useState({
@@ -274,9 +272,7 @@ export function AtSettings() {
     endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
     // EMPTY, NOT '4'. See the parse guard in handleAdd for why a pre-filled
     // percentage is a figure nobody chose.
-    atPercentageCRGO: '',
-    atPercentageAmorphous: '',
-    atPercentageWoundCore: '',
+    atPercentage: '',
   });
 
   const agencyAts = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -534,16 +530,9 @@ export function AtSettings() {
      * from this tender and names it. A labelled fact with a source can be confirmed; a
      * silent default can only be missed. That distinction is the whole justification.
      */
-    const pct = (v: unknown) =>
-      v === undefined || v === null || !Number.isFinite(Number(v)) ? undefined : String(v);
-    const c = pct(t.atPercentageCRGO), am = pct(t.atPercentageAmorphous), wc = pct(t.atPercentageWoundCore);
-    if (c !== undefined || am !== undefined || wc !== undefined) {
-      setNewAt(prev => ({
-        ...prev,
-        atPercentageCRGO: c ?? prev.atPercentageCRGO,
-        atPercentageAmorphous: am ?? prev.atPercentageAmorphous,
-        atPercentageWoundCore: wc ?? prev.atPercentageWoundCore,
-      }));
+    const v = t.atPercentage;
+    if (v !== undefined && v !== null && Number.isFinite(Number(v))) {
+      setNewAt(prev => ({ ...prev, atPercentage: String(v) }));
     }
   };
 
@@ -552,9 +541,7 @@ export function AtSettings() {
     if (!carryOverSource) return;
     setNewAt(prev => ({
       ...prev,
-      atPercentageCRGO: String(carryOverSource.atPercentageCRGO ?? carryOverSource.atPercentage ?? ''),
-      atPercentageAmorphous: String(carryOverSource.atPercentageAmorphous ?? carryOverSource.atPercentage ?? ''),
-      atPercentageWoundCore: String(carryOverSource.atPercentageWoundCore ?? carryOverSource.atPercentage ?? ''),
+      atPercentage: String(carryOverSource.atPercentage ?? carryOverSource.atPercentage ?? ''),
     }));
   };
 
@@ -591,9 +578,7 @@ export function AtSettings() {
      * them apart.
      */
     const pcts: Array<[string, string]> = [
-      ['CRGO', newAt.atPercentageCRGO],
-      ['Amorphous', newAt.atPercentageAmorphous],
-      ['Wound Core', newAt.atPercentageWoundCore],
+      ['CRGO', newAt.atPercentage],
     ];
     const unanswered = pcts.filter(([, v]) => {
       const t = String(v ?? '').trim();
@@ -627,10 +612,7 @@ export function AtSettings() {
         lastJobNumbers: {},
         // Validated above, so `Number` cannot be NaN here and `|| 0` is gone with it -
         // that fallback is what turned a blank into a bid at par.
-        atPercentage: Number(newAt.atPercentageCRGO),
-        atPercentageCRGO: Number(newAt.atPercentageCRGO),
-        atPercentageAmorphous: Number(newAt.atPercentageAmorphous),
-        atPercentageWoundCore: Number(newAt.atPercentageWoundCore),
+        atPercentage: Number(newAt.atPercentage),
         scheduleId: effectiveSchedule.id,
         scheduleSource: effectiveSchedule.source,
         ...(effectiveSchedule.fromAtId ? { scheduleInheritedFromAtId: effectiveSchedule.fromAtId } : {}),
@@ -685,9 +667,7 @@ export function AtSettings() {
         name: '',
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
-        atPercentageCRGO: '',
-        atPercentageAmorphous: '',
-        atPercentageWoundCore: '',
+        atPercentage: '',
       });
     } catch (err: any) {
       // Surface the real reason - the context throws a named error for an orphan AT.
@@ -705,9 +685,7 @@ export function AtSettings() {
       name: at.name || '',
       startDate: at.startDate ? new Date(at.startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       endDate: at.endDate ? new Date(at.endDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
-      atPercentageCRGO: String(at.atPercentageCRGO ?? at.atPercentage ?? 4),
-      atPercentageAmorphous: String(at.atPercentageAmorphous ?? at.atPercentage ?? 4),
-      atPercentageWoundCore: String(at.atPercentageWoundCore ?? at.atPercentage ?? 4),
+      atPercentage: String(at.atPercentage ?? at.atPercentage ?? 4),
     });
   };
 
@@ -721,10 +699,7 @@ export function AtSettings() {
         name: editFormData.name,
         startDate: editFormData.startDate ? new Date(editFormData.startDate).getTime() : Date.now(),
         endDate: editFormData.endDate ? new Date(editFormData.endDate).getTime() : Date.now(),
-        atPercentage: Number(editFormData.atPercentageCRGO) || 0,
-        atPercentageCRGO: Number(editFormData.atPercentageCRGO) || 0,
-        atPercentageAmorphous: Number(editFormData.atPercentageAmorphous) || 0,
-        atPercentageWoundCore: Number(editFormData.atPercentageWoundCore) || 0,
+        atPercentage: Number(editFormData.atPercentage) || 0,
       });
       setEditingAtId(null);
       setEditFormData(null);
@@ -845,11 +820,9 @@ export function AtSettings() {
                 <div className="text-slate-500 text-[11px] flex items-center gap-2">
                   <span>{formatDDMMYYYY(activeAtMaster.startDate)} - {formatDDMMYYYY(activeAtMaster.endDate)}</span>
                   <span>•</span>
-                  <span>CRGO: {activeAtMaster.atPercentageCRGO ?? activeAtMaster.atPercentage ?? 4}%</span>
+                  <span>CRGO: {activeAtMaster.atPercentage ?? activeAtMaster.atPercentage ?? 4}%</span>
                   <span>•</span>
-                  <span>Amorphous: {activeAtMaster.atPercentageAmorphous ?? activeAtMaster.atPercentage ?? 4}%</span>
                   <span>•</span>
-                  <span>Wound: {activeAtMaster.atPercentageWoundCore ?? activeAtMaster.atPercentage ?? 4}%</span>
                 </div>
               </div>
               <span className="text-[11px] text-indigo-600 font-semibold self-end sm:self-center">
@@ -992,9 +965,7 @@ export function AtSettings() {
           ) : (
             <div className="space-y-3">
               {agencyAts.map(at => {
-                const crgoVal = at.atPercentageCRGO ?? at.atPercentage ?? 4;
-                const amVal = at.atPercentageAmorphous ?? at.atPercentage ?? 4;
-                const wcVal = at.atPercentageWoundCore ?? at.atPercentage ?? 4;
+                const crgoVal = at.atPercentage ?? at.atPercentage ?? 4;
                 const isEditing = editingAtId === at.id;
                 const isOpen = openAtId === at.id;
                 const isActiveAt = activeAtMaster?.id === at.id;
@@ -1090,15 +1061,11 @@ export function AtSettings() {
                         <div className="p-3 space-y-3">
                       {!isEditing ? (
                         <>
+                          {/* ONE CHIP. There were three, one per core type, and the values
+                              behind them were test data - see getAtPercentageForCore. */}
                           <div className="flex flex-wrap gap-2 text-xs">
                               <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
-                                <strong className="text-blue-700">CRGO:</strong> {crgoVal >= 0 ? `+${crgoVal}` : crgoVal}%
-                              </span>
-                              <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
-                                <strong className="text-amber-700">Amorphous:</strong> {amVal >= 0 ? `+${amVal}` : amVal}%
-                              </span>
-                              <span className="bg-white text-slate-800 px-2.5 py-1 rounded border border-slate-200 font-medium shadow-2xs">
-                                <strong className="text-emerald-700">Wound Core:</strong> {wcVal >= 0 ? `+${wcVal}` : wcVal}%
+                                <strong className="text-blue-700">AT percentage:</strong> {crgoVal >= 0 ? `+${crgoVal}` : crgoVal}%
                               </span>
                           </div>
 
@@ -1209,24 +1176,10 @@ export function AtSettings() {
                             <label className="block text-[10px] uppercase font-bold text-slate-600 mb-1.5">Estimate % Above (+) or Below (-) per Core Type</label>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                                <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">CRGO Core %</label>
-                                <input required type="number" step="0.01" value={editFormData?.atPercentageCRGO ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageCRGO: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
-                                {editFormData && atPercentageHint(editFormData.atPercentageCRGO) && (
-                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentageCRGO)}</span>
-                                )}
-                              </div>
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                                <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">Amorphous Core %</label>
-                                <input required type="number" step="0.01" value={editFormData?.atPercentageAmorphous ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageAmorphous: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
-                                {editFormData && atPercentageHint(editFormData.atPercentageAmorphous) && (
-                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentageAmorphous)}</span>
-                                )}
-                              </div>
-                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
-                                <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">Wound Core %</label>
-                                <input required type="number" step="0.01" value={editFormData?.atPercentageWoundCore ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentageWoundCore: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
-                                {editFormData && atPercentageHint(editFormData.atPercentageWoundCore) && (
-                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentageWoundCore)}</span>
+                                <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">AT percentage %</label>
+                                <input required type="number" step="0.01" value={editFormData?.atPercentage ?? ''} onChange={e => setEditFormData(prev => prev ? {...prev, atPercentage: e.target.value} : null)} className="w-full px-2 py-1 text-xs border rounded font-semibold bg-white" placeholder="e.g. 4 or -2.5" />
+                                {editFormData && atPercentageHint(editFormData.atPercentage) && (
+                                  <span className="block mt-0.5 text-[9px] text-slate-500">{atPercentageHint(editFormData.atPercentage)}</span>
                                 )}
                               </div>
                             </div>
@@ -1434,10 +1387,10 @@ export function AtSettings() {
                     with the tender that states it is a fact the operator can check against
                     the letter in their hand - which is the only thing that makes pre-filling
                     it defensible at all. */}
-                {chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentageCRGO)) && (
+                {chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentage)) && (
                   <div className="sm:col-span-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-[11px] text-emerald-900 leading-relaxed">
                     <strong className="font-bold">
-                      {Number(chosenTemplate.atPercentageCRGO)}% from the tender
+                      {Number(chosenTemplate.atPercentage)}% from the tender
                       {chosenTemplate.atNumber ? ` (${chosenTemplate.atNumber})` : ` (${chosenTemplate.name})`}.
                     </strong>{' '}
                     This tender sets one accepted percentage for every agency, so it is filled in below.
@@ -1445,7 +1398,7 @@ export function AtSettings() {
                     fields stay editable, and an agency on varied terms should change them.
                   </div>
                 )}
-                {carryOverSource && !(chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentageCRGO))) && (
+                {carryOverSource && !(chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentage))) && (
                   <div className="sm:col-span-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-[11px] text-amber-900 leading-relaxed">
                     <strong className="font-bold">The percentages below start empty and must be answered.</strong>{' '}
                     They are what your agency quoted above (+) or below (&minus;) the UGVCL schedule in its bid,
@@ -1475,24 +1428,10 @@ export function AtSettings() {
                 <label className="block text-xs font-bold uppercase text-slate-600 mb-2">Estimate % Above (+) or Below (-) per Core Type</label>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">CRGO Core %</label>
-                    <input required type="number" step="0.01" value={newAt.atPercentageCRGO} onChange={e => setNewAt({...newAt, atPercentageCRGO: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
-                    {atPercentageHint(newAt.atPercentageCRGO) && (
-                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentageCRGO)}</span>
-                    )}
-                  </div>
-                  <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Amorphous Core %</label>
-                    <input required type="number" step="0.01" value={newAt.atPercentageAmorphous} onChange={e => setNewAt({...newAt, atPercentageAmorphous: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
-                    {atPercentageHint(newAt.atPercentageAmorphous) && (
-                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentageAmorphous)}</span>
-                    )}
-                  </div>
-                  <div className="bg-white p-2.5 rounded-lg border border-slate-200">
-                    <label className="block text-xs font-bold text-slate-700 mb-1">Wound Core %</label>
-                    <input required type="number" step="0.01" value={newAt.atPercentageWoundCore} onChange={e => setNewAt({...newAt, atPercentageWoundCore: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
-                    {atPercentageHint(newAt.atPercentageWoundCore) && (
-                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentageWoundCore)}</span>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">AT percentage % &mdash; one figure, every core type</label>
+                    <input required type="number" step="0.01" value={newAt.atPercentage} onChange={e => setNewAt({...newAt, atPercentage: e.target.value})} className="w-full px-3 py-1.5 text-xs border rounded font-semibold bg-slate-50" placeholder="e.g. 4 or -2.5" />
+                    {atPercentageHint(newAt.atPercentage) && (
+                      <span className="block mt-0.5 text-[10px] text-slate-500">{atPercentageHint(newAt.atPercentage)}</span>
                     )}
                   </div>
                 </div>

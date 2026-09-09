@@ -26,9 +26,9 @@ const atLabel = t => t ? (t.atNumber || t.name || t.id) : '(none)';
 const pctFor = (at, coreType) => {
   if (!at) return 4;
   const t = String(coreType || 'CRGO').trim().toUpperCase();
-  if (t.includes('AMORPHOUS') || t.includes('AM')) return at.atPercentageAmorphous ?? at.atPercentage ?? 4;
-  if (t.includes('WOUND') || t.includes('WC')) return at.atPercentageWoundCore ?? at.atPercentage ?? 4;
-  return at.atPercentageCRGO ?? at.atPercentage ?? 4;
+  // ONE PERCENTAGE PER TENDER, and null rather than a default when there is none - mirrors
+  // getAtPercentageForCore since the three per-core-type fields were collapsed.
+  return at.atPercentage ?? null;
 };
 
 const rows = [];
