@@ -20,6 +20,12 @@ export interface SupportTicket {
   ticketNo: string;
   userId: string;
   userEmail: string;
+  /**
+   * OPTIONAL CALL-BACK NUMBER, given on the ticket. Google sign-in returns no phone, and
+   * this app has no user profile collection - see the note in SupportTickets. Absent when
+   * they did not give one; never stored as an empty string.
+   */
+  userPhone?: string;
   agencyId?: string;
   agencyName?: string;
   subject: string;

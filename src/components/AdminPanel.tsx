@@ -1053,6 +1053,15 @@ export default function AdminPanel() {
                     <td className="p-3 font-extrabold text-blue-700">#{t.ticketNo}</td>
                     <td className="p-3">
                       <div className="font-bold text-slate-900">{t.userEmail}</div>
+                      {/* Only when given. A blank line where a number would be reads as
+                          "they declined" rather than "the field did not exist yet" - and
+                          every ticket written before today has none. */}
+                      {(t as any).userPhone && (
+                        <a href={`tel:${String((t as any).userPhone).replace(/[^+\d]/g, '')}`}
+                           className="text-[11px] font-mono text-blue-700 hover:underline">
+                          {(t as any).userPhone}
+                        </a>
+                      )}
                       <div className="text-[10px] text-slate-400">{t.agencyName || 'General'}</div>
                     </td>
                     <td className="p-3">
@@ -1306,6 +1315,15 @@ export default function AdminPanel() {
 
             <div className="bg-slate-50 p-3 rounded-lg text-xs space-y-1">
               <div><strong>User:</strong> {selectedTicket.userEmail} ({selectedTicket.agencyName})</div>
+              {(selectedTicket as any).userPhone && (
+                <div>
+                  <strong>Phone:</strong>{' '}
+                  <a href={`tel:${String((selectedTicket as any).userPhone).replace(/[^+\d]/g, '')}`}
+                     className="font-mono text-blue-700 hover:underline">
+                    {(selectedTicket as any).userPhone}
+                  </a>
+                </div>
+              )}
               <div><strong>Subject:</strong> {selectedTicket.subject}</div>
               <div className="text-slate-700 italic border-t pt-2 mt-2">{selectedTicket.description}</div>
             </div>

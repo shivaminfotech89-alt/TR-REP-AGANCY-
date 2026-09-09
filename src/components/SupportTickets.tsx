@@ -20,6 +20,29 @@ export default function SupportTickets() {
   const [category, setCategory] = useState<TicketCategory>('Technical Issue');
   const [priority, setPriority] = useState<TicketPriority>('Medium');
   const [description, setDescription] = useState('');
+  /**
+   * A NUMBER TO CALL BACK ON. OPTIONAL, AND ON THE TICKET RATHER THAN ON A PROFILE.
+   *
+   * Google sign-in returns an email and no phone - `phoneNumber` on the auth record is
+   * populated only by phone-auth, which this app does not use - so a number has to be
+   * collected rather than read.
+   *
+   * ⚠ IT IS NOT THE AGENCY'S PHONE, AND THE AGENCY'S PHONE CANNOT STAND IN FOR IT. That
+   * field is the business's PUBLISHED contact: it prints on the letterhead and the bill
+   * footer, on paper going to a division office. It is also per-agency and often absent -
+   * across the twelve live agencies only six carry one, one owner has two agencies with two
+   * DIFFERENT numbers, and another has four with none. A number for reaching a person is a
+   * different fact from a number printed on an invoice.
+   *
+   * ⚠ AND IT IS NOT A USER PROFILE. There is no user collection in this app - "the user" is
+   * a Firebase auth record plus an `ownerId` stamped on their documents - so a profile would
+   * mean a new collection, a new rule, and a standing capability for the vendor to read the
+   * phone number of people who never asked for anything. Attached to a ticket it is offered
+   * in the act of asking for help, `support_tickets` already grants the super admin read, and
+   * the twelve existing users need no migration: they are asked the next time they write in,
+   * which is exactly when the number is useful.
+   */
+  const [userPhone, setUserPhone] = useState('');
 
   const userEmail = auth.currentUser?.email || '';
 
@@ -40,6 +63,11 @@ export default function SupportTickets() {
       // Sort manually by createdAt desc
       list.sort((a, b) => b.createdAt - a.createdAt);
       setTickets(list);
+      // DEFAULTS TO WHATEVER THEY GAVE LAST TIME, from the most recent ticket carrying one.
+      // The list is already newest-first, so the first hit is the latest. Only seeds the
+      // field - it is never written back to an older ticket.
+      const lastPhone = list.find((t: any) => String(t.userPhone ?? '').trim())?.userPhone;
+      if (lastPhone) setUserPhone(String(lastPhone));
     } catch (err) {
       console.error('Error loading tickets:', err);
       handleFirestoreError(err, OperationType.LIST, 'support_tickets');
@@ -74,6 +102,10 @@ export default function SupportTickets() {
         priority,
         status: 'Open',
         description: description.trim(),
+        // Omitted when blank rather than stored as '' - an absent number and an empty one
+        // are the same fact here, and a field present-but-empty invites a reader to think
+        // someone declined rather than never being asked.
+        ...(userPhone.trim() ? { userPhone: userPhone.trim() } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -288,6 +320,25 @@ export default function SupportTickets() {
                     <option value="Urgent">Urgent</option>
                   </select>
                 </div>
+              </div>
+
+              {/* OPTIONAL, AND SAID SO. Required would be a wall in front of someone already
+                  asking for help, for a field that benefits the person answering. */}
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Phone / Mobile <span className="text-slate-400 normal-case font-medium">(optional)</span>
+                </label>
+                <input
+                  type="tel"
+                  value={userPhone}
+                  onChange={e => setUserPhone(e.target.value)}
+                  placeholder="e.g. +91 98765 43210"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:ring-1 focus:ring-blue-500"
+                />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  A number to call back on if the reply needs a conversation. Not your agency&rsquo;s
+                  letterhead phone &mdash; this one is not printed on anything.
+                </p>
               </div>
 
               <div>
