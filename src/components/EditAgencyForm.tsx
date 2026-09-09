@@ -3,8 +3,8 @@ import { stateCodeFromGstin, gstinScopeError } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { AgencyMarkTile } from './AgencyMarkTile';
-import { AgencyMark, MARK_SHAPES, MARK_COLOURS, SHAPE_LABEL, COLOUR_LABEL,
-         markFor, agenciesUsingMark } from '../lib/agencyMark';
+import { AgencyMark, AgencyMarkColour, MARK_COLOURS, COLOUR_LABEL,
+         markFor, agenciesUsingMark, deriveMonogram, normaliseMonogram } from '../lib/agencyMark';
 import {
   Loader2, FileUp, Check, Building2,
   CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
@@ -52,13 +52,23 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
    * kept as null rather than filled in with the derived value, so the document records
    * "nobody chose" rather than a choice nobody made.
    */
-  const [agencyMark, setAgencyMark] = useState<AgencyMark | null>((agency as any).mark ?? null);
+  /**
+   * TWO INDEPENDENT FIELDS, EACH EMPTY WHEN AUTOMATIC. The monogram can be typed while the
+   * colour stays derived, or the reverse. Storing one object with both filled in would lose
+   * that - and an empty box is what keeps "follows the name" true as the name is edited.
+   */
+  const [markMonogram, setMarkMonogram] = useState<string>((agency as any).mark?.monogram ?? '');
+  const [markColour, setMarkColour] = useState<AgencyMarkColour | ''>((agency as any).mark?.colour ?? '');
 
-  /** What this agency would show if nothing is chosen - and what the colour list defaults to. */
-  const autoMark = markFor({ id: agency.id } as any);
-  /** What the preview draws: the chosen mark, or the automatic one. */
-  const effectiveMark = agencyMark ?? autoMark;
-  /** Other agencies already showing that, chosen or derived. See agenciesUsingMark. */
+  /**
+   * What the preview draws. The monogram default follows `agencyName` AS IT IS TYPED, not the
+   * saved name, so renaming an agency shows its new monogram before the form is submitted.
+   */
+  const effectiveMark = markFor({
+    id: agency.id,
+    name: agencyName,
+    mark: { ...(markMonogram ? { monogram: markMonogram } : {}), ...(markColour ? { colour: markColour } : {}) },
+  } as any);
   const effectiveClash = agenciesUsingMark(effectiveMark, agencies as any, agency.id);
   const [address, setAddress] = useState(agency.address || '');
   const [agencyState, setAgencyState] = useState(agency.agencyState || '');
@@ -348,8 +358,13 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
       await updateAgency(agency.id, {
         name: agencyName,
-        // null, not the derived value - see agencyMark's state declaration.
-        mark: agencyMark,
+        // ⚠ EACH HALF OMITTED WHEN AUTOMATIC, never written with its derived value. `null`
+        // when neither was set, so "nobody chose" stays distinguishable from "chose the one
+        // that happens to match" - the same distinction as a blank AT percentage against a
+        // typed zero.
+        mark: (markMonogram || markColour)
+          ? { ...(markMonogram ? { monogram: markMonogram } : {}), ...(markColour ? { colour: markColour } : {}) } as any
+          : null,
         letterheadUrl: letterheadBase64,
         letterheadMode,
         letterheadHeaderHeightMm: headerHeightMm,
@@ -512,23 +527,16 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   placeholder="e.g. H. E. ELECTRICALS"
                 />
 
-                {/* ⚠ BESIDE THE NAME, BECAUSE THE MARK IS THE NAME'S VISUAL TWIN. Choosing
-                    them together is how they stay coherent. Deliberately NOT in the agency
-                    switcher: picking an identity while switching identity is a way to change
-                    the wrong agency's mark.
+                {/* ⚠ BESIDE THE NAME, BECAUSE THE MONOGRAM IS THE NAME. Choosing them
+                    together is how they stay coherent, and the default follows the name field
+                    above as it is typed. Deliberately NOT in the agency switcher: picking an
+                    identity while switching identity is a way to change the wrong one.
 
-                    ⚠ TWO NATIVE SELECTS, NOT A CUSTOM POPOVER, AND NOT ONE LIST OF 64.
-
-                    One list of 64 flattens a two-axis choice into one - you would hunt for
-                    "amber transformer" among 63 near-neighbours. Two lists of eight match how
-                    the mark is actually composed, and either changes without disturbing the
-                    other.
-
-                    Native cannot draw an SVG inside an <option>, so the lists carry names and
-                    the PREVIEW does the work the options cannot. That is the right trade: a
-                    custom popover has to re-earn click-outside, escape, focus management and
-                    touch behaviour - AgencySwitcher had to - and this field is used once per
-                    agency. Keyboard and mobile behaviour come free here. */}
+                    ⚠ A TEXT INPUT AND ONE SELECT. This was two selects over eight glyphs and
+                    eight colours; the glyphs are gone - see lib/agencyMark.ts for why an icon
+                    set could not work at 28px. The monogram is typed because the derived value
+                    cannot know what an owner calls their own agency: "ZR" for ZENITH
+                    TRANSFORMERS is neither ZE nor ZT nor ZN, and no rule produces it. */}
                 <div className="mt-3">
                   <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
                     Mark &mdash; how this agency is shown in the switcher
@@ -536,38 +544,23 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
                   <div className="flex items-center gap-2.5">
                     <div className="grid grid-cols-2 gap-2 flex-1 min-w-0">
-                      {/* ⚠ "AUTOMATIC" IS THE FIRST SHAPE OPTION, so null stays reachable.
-                          Choosing it clears the field rather than storing the derived value -
-                          "nobody chose" and "chose the one that matches" stay different facts. */}
+                      <input
+                        type="text"
+                        maxLength={2}
+                        value={markMonogram}
+                        onChange={e => setMarkMonogram(normaliseMonogram(e.target.value))}
+                        placeholder={deriveMonogram(agencyName)}
+                        className="w-full px-2.5 py-2 text-sm font-black tracking-tight uppercase text-center border border-slate-300 rounded bg-white"
+                      />
                       <select
-                        value={agencyMark ? agencyMark.shape : ''}
-                        onChange={e => {
-                          const v = e.target.value;
-                          if (!v) { setAgencyMark(null); return; }
-                          setAgencyMark({ shape: v as any, colour: (agencyMark?.colour ?? autoMark.colour) });
-                        }}
+                        value={markColour}
+                        onChange={e => setMarkColour(e.target.value as any)}
                         className="w-full px-2.5 py-2 text-xs border border-slate-300 rounded bg-white"
                       >
-                        <option value="">Automatic (from this agency)</option>
-                        {MARK_SHAPES.map(sh => (
-                          <option key={sh} value={sh}>{SHAPE_LABEL[sh]}</option>
-                        ))}
-                      </select>
-
-                      {/* ⚠ THE CLASH IS IN THE OPTION TEXT. The grid marked it with a 2px dot
-                          and a tooltip, which on a phone has no hover and is close to
-                          invisible. An <option> cannot carry an SVG but it can carry words,
-                          and at an 87% clash rate for sixteen agencies that is worth the small
-                          ugliness. Computed against the shape currently selected. */}
-                      <select
-                        value={agencyMark ? agencyMark.colour : ''}
-                        disabled={!agencyMark}
-                        onChange={e => setAgencyMark({ shape: agencyMark!.shape, colour: e.target.value as any })}
-                        className="w-full px-2.5 py-2 text-xs border border-slate-300 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
-                      >
-                        {!agencyMark && <option value="">&mdash;</option>}
-                        {agencyMark && MARK_COLOURS.map(co => {
-                          const used = agenciesUsingMark({ shape: agencyMark.shape, colour: co }, agencies as any, agency.id);
+                        <option value="">Automatic colour</option>
+                        {MARK_COLOURS.map(co => {
+                          const used = agenciesUsingMark(
+                            { monogram: effectiveMark.monogram, colour: co }, agencies as any, agency.id);
                           return (
                             <option key={co} value={co}>
                               {COLOUR_LABEL[co]}{used.length ? ` — used by ${used.join(', ')}` : ''}
@@ -577,25 +570,26 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                       </select>
                     </div>
 
-                    {/* THE LIVE PREVIEW. Dashed ring = automatic, solid = chosen - so an
-                        automatic mark and a chosen one that looks identical are still
-                        distinguishable, which is the whole reason the field stays null. */}
+                    {/* THE LIVE PREVIEW. Dashed ring while everything is automatic, solid once
+                        anything is chosen - so a typed mark that matches the derived one is
+                        still distinguishable from one nobody set. */}
                     <span className={`shrink-0 rounded-lg p-0.5 ${
-                      agencyMark ? 'ring-2 ring-slate-900' : 'ring-2 ring-dashed ring-slate-400'
+                      (markMonogram || markColour) ? 'ring-2 ring-slate-900' : 'ring-2 ring-dashed ring-slate-400'
                     }`}>
                       <AgencyMarkTile mark={effectiveMark} size="lg" />
                     </span>
                   </div>
 
                   <p className="mt-1.5 text-[11px] text-slate-500">
-                    {agencyMark ? 'Chosen' : 'Automatic'} &mdash; {COLOUR_LABEL[effectiveMark.colour]}{' '}
-                    {SHAPE_LABEL[effectiveMark.shape].toLowerCase()}.
+                    {markMonogram ? 'Typed' : 'From the name'} &mdash; <strong>{effectiveMark.monogram}</strong>,{' '}
+                    {markColour ? 'chosen' : 'automatic'} {COLOUR_LABEL[effectiveMark.colour].toLowerCase()}.
+                    {' '}Leave the box empty to follow the name.
                   </p>
 
                   {effectiveClash.length > 0 && (
                     <p className="mt-1.5 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1">
                       Also used by {effectiveClash.join(', ')} &mdash; two agencies will look the
-                      same in the switcher.
+                      same in the switcher. Type different letters, or pick another colour.
                     </p>
                   )}
 

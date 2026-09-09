@@ -1,16 +1,19 @@
 import React from 'react';
-import { AgencyMark, MARK_TILE, MARK_PATH, markFor, SHAPE_LABEL, COLOUR_LABEL } from '../lib/agencyMark';
+import { AgencyMark, MARK_TILE, markFor, COLOUR_LABEL } from '../lib/agencyMark';
 
 /**
- * ONE AGENCY'S MARK, rendered as a filled tile with a white glyph.
+ * ONE AGENCY'S MARK — two white letters on a filled tile.
  *
- * ⚠ THE ONLY PLACE A MARK IS DRAWN. Four screens show one; each renders this rather than
- * building its own tile, so the switcher button and the row beneath it cannot disagree
- * about an agency's colour - which is exactly what happened before, when the dropdown rows
- * coloured themselves from active state while the button used the app logo.
+ * ⚠ THE ONLY PLACE A MARK IS DRAWN. Three screens show one; each renders this rather than
+ * building its own tile, so the switcher button and the row beneath it cannot disagree about
+ * an agency's colour - which is what happened before, when the dropdown rows coloured
+ * themselves from active state.
  *
- * ⚠ NOT FOR PRINTED DOCUMENTS. See the rule at the top of lib/agencyMark.ts: printed sheets
- * carry the agency's real letterhead, and a mark this app invented has no business beside it.
+ * ⚠ THE LETTERS ARE ALWAYS WHITE and the tile always carries the colour. That is the
+ * nine-theme constraint: the switcher sits on nine sidebar themes, light and dark, and white
+ * on a saturated fill is the one treatment that reads on all of them.
+ *
+ * ⚠ NOT FOR PRINTED DOCUMENTS. See the rule at the top of lib/agencyMark.ts.
  */
 export function AgencyMarkTile({
   agency,
@@ -18,25 +21,25 @@ export function AgencyMarkTile({
   size = 'md',
   className = '',
 }: {
-  /** The agency to draw for. Its chosen mark, or the one derived from its id. */
-  agency?: { id: string; name?: string; mark?: AgencyMark | null } | null;
-  /** An explicit mark, for the picker's grid where there is no agency yet. */
+  agency?: { id: string; name?: string; mark?: Partial<AgencyMark> | null } | null;
+  /** An explicit mark, for the picker's preview where the choice is not saved yet. */
   mark?: AgencyMark;
   size?: 'sm' | 'md' | 'lg';
   className?: string;
 }) {
   const m = mark ?? markFor(agency as any);
   const box = size === 'sm' ? 'w-7 h-7' : size === 'lg' ? 'w-10 h-10' : 'w-7 h-7 sm:w-9 sm:h-9';
-  const glyph = size === 'lg' ? 'w-6 h-6' : 'w-4 h-4 sm:w-5 sm:h-5';
+  // Two characters at these sizes measure well inside the tile; see MONOGRAM_LENGTH for why
+  // a third would not. `tracking-tight` buys back a pixel on wide pairs like "MW".
+  const type = size === 'sm' ? 'text-[11px]' : size === 'lg' ? 'text-base' : 'text-[11px] sm:text-sm';
   return (
     <span
       className={`${box} ${MARK_TILE[m.colour]} rounded-lg grid place-items-center shrink-0 text-white ${className}`}
-      title={agency?.name ? `${agency.name} — ${COLOUR_LABEL[m.colour]} ${SHAPE_LABEL[m.shape].toLowerCase()}` : `${COLOUR_LABEL[m.colour]} ${SHAPE_LABEL[m.shape].toLowerCase()}`}
+      title={agency?.name ? `${agency.name} — ${m.monogram}, ${COLOUR_LABEL[m.colour].toLowerCase()}` : `${m.monogram}, ${COLOUR_LABEL[m.colour].toLowerCase()}`}
     >
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"
-           strokeLinecap="round" strokeLinejoin="round" className={glyph} aria-hidden="true">
-        <path d={MARK_PATH[m.shape]} />
-      </svg>
+      <span className={`${type} font-black tracking-tight leading-none select-none`}>
+        {m.monogram}
+      </span>
     </span>
   );
 }
