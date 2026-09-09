@@ -10444,3 +10444,83 @@ subtree catches it, and only if someone runs it.
 The app mark was left alone throughout, and that was the point of G25's decision to ship it
 **without a wordmark**: carrying no letters is exactly what let one icon survive a rename of
 every name around it.
+
+
+## G27. A rule that read like a check, and a payments screen that invented its own data
+
+Payment work started with six questions and none of them was answered by building. Four defects
+turned up first, and all four had the same property: **they were visible, validated, and wrong.**
+
+**`firestore.rules` granted the world read on `system_config`.** The line was
+
+    allow get, list: if isSuperAdmin() || isSignedIn() || true;
+
+and the `|| true` short-circuits everything to its left. Not "any signed-in user" — anyone on
+the internet holding the project id, no account required. The two checks before it could never
+be reached, and **they are precisely what made the line scan as authorised.** A reader's eye
+stops at `isSuperAdmin()`. `public_config` carried the same shape (`isSignedIn() || true`),
+where the outcome was intended; it now says `if true` and says why, because a grant that has to
+be reverse-engineered from a short-circuit will be misread by whoever adds the next field.
+
+The Admin Panel's payment tab wrote `keySecret` to `system_config/razorpay`. **The first Save
+would have published an API secret to the open internet with no error and nothing on screen.**
+The live database shows no such document — it was never pressed — so nothing leaked and no key
+needs rotating. That is luck, not design, and it is the wrong thing to conclude the incident on:
+**the defect was never the tab.** It was that a document holding whatever anyone adds to it next
+was public behind a rule that looked like a check.
+
+`isValidSystemConfig` would not have stopped it either. Every clause is `!('x' in data) || ...`,
+so **a field the validator does not name passes unchecked.** A validator that enumerates
+permitted fields cannot refuse an unexpected one — it is an allowlist that defaults to allow.
+
+**The same pattern, one collection over, defeated the entire payment gate before it was built.**
+`agencies` validated `subscriptionStatus`, `subscriptionExpiresAt` and `subscriptionPlan` — on a
+document the OWNER may update. One `updateDoc` from a browser console sets `status: 'active'`
+with an expiry in 2099. The fields were type-checked the whole time, and that is the trap:
+**validation on a field the wrong party can write is not a boundary, and reads like one.**
+
+And the two spellings disagreed. The rules said `subscriptionExpiresAt`; the TypeScript said
+`subscriptionExpiryDate`. Under `!('x' in data) ||`, **the app's own spelling passed completely
+unvalidated** — the validator was guarding a field nothing wrote and waving through the one that
+mattered. Collapsed while zero documents carried either.
+
+The general rule, and it is the one that governs the whole payment design: **Firestore rules
+cannot express "only a function may write this."** The Admin SDK bypasses rules rather than
+satisfying them as a privileged principal, so there is no predicate that distinguishes a server
+write from a client one. The only durable guarantee is structural — **the field a gate reads
+must live in a document no client can write at all.** Subscription state moves to
+`subscriptions/{agencyId}` with `allow write: if false`, and that is not a preference between
+two workable shapes; it is the only shape.
+
+**Fourth, and the one a person would actually have acted on.** The Admin Panel's agency table
+read `subscriptionStatus || 'active'`, `subscriptionExpiryDate || (Date.now() + 365 days)` and
+`subscriptionPlanAmount || 3999` — against a database where **not one agency carries any of the
+three.** Every agency rendered as ACTIVE PAID at ₹3,999/yr, expiring one year from whenever the
+page happened to load: an expiry date that changed daily and had never been true of anyone. The
+headline metric counted an agency with no subscription field as active — `|| !a.subscriptionStatus`
+— so the panel reported twelve paying subscribers where there were none.
+
+This is the sentinel shape recorded throughout this audit — a plausible value standing where a
+missing one belongs, so absence renders as fact — and **on a payments screen it is the worst
+version of it.** The one person deciding whether to chase twelve unpaid accounts was shown
+twelve paying customers. Every other instance of this pattern misled a reader about state; this
+one would have misled the owner about revenue.
+
+**The price was wrong in nine places, not four.** The app advertised ₹3,999/yr against a real
+price of ₹5,900: the tab label, two panel headings, a save confirmation, the announcement banner,
+a table fallback, a fake Key ID string, and — worst — **twice on the support form, where a
+customer reads it and would quote it back.** Nine literals of one fact is how they drift. It is
+now `SUBSCRIPTION_INCLUSIVE_INR` in `lib/pricing.ts`, with the GST carved out by subtraction so
+`taxable + tax` foots to the rupee, because an invoice that is out by a paisa is not a valid tax
+invoice. **The price is displayed and never edited:** a price editable from a browser can
+disagree with an invoice already issued, and a tax invoice is corrected by a credit note, never
+by editing it.
+
+**One check worth keeping as a habit.** Narrowing a read is the change that breaks quietly, so
+the one non-admin reader of `system_config` was traced before the rule was tightened:
+`AgencyContext` reads `estimate_master` there as the *second* branch of the rate chain, reached
+only when `public_config/estimate_master` is absent. It is present — verified against the live
+database, six populated sections — so no ordinary client reaches the collection at all, and if
+one ever did, the read sits in a try/catch that falls back to shipped defaults and says so on
+screen. **A tightened rule with an unexamined reader is an outage; the same rule with the reader
+traced is just a fix.**

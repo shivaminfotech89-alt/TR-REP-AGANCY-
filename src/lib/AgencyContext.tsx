@@ -146,10 +146,24 @@ export interface Agency {
    * SUBSCRIPTION FIELDS - written by AdminPanel, read by almost nothing (AUDIT O34).
    * Declared so the write is type-checked; their emptiness as a feature is a separate item.
    */
-  subscriptionStatus?: 'active' | 'trial' | 'expired' | 'suspended';
-  subscriptionPlanAmount?: number;
-  subscriptionLastPaid?: number;
-  subscriptionExpiryDate?: number;
+  // ⚠ NO SUBSCRIPTION FIELDS ON THE AGENCY, AND NONE MAY COME BACK.
+  //
+  // `subscriptionStatus`, `subscriptionPlanAmount`, `subscriptionLastPaid` and
+  // `subscriptionExpiryDate` were declared here. The agency document is OWNER-WRITABLE, so an
+  // owner with a browser console could set `subscriptionStatus: 'active'` with an expiry in
+  // 2099 and any gate reading it was decorative. The rules did type-check three of them, which
+  // is the trap: validation on a field the wrong party can write is not a boundary and reads
+  // like one.
+  //
+  // ⚠ THE RULES AND THIS FILE ALSO SPELLED IT DIFFERENTLY. firestore.rules validated
+  // `subscriptionExpiresAt`; this said `subscriptionExpiryDate`. Under the rules'
+  // `!('x' in data) ||` pattern the app's own spelling passed COMPLETELY UNVALIDATED - the
+  // validator was guarding a field nothing wrote and waving through the one that mattered.
+  // Collapsed to a single spelling in a single place while zero documents carried either.
+  //
+  // Subscription state belongs in `subscriptions/{agencyId}`, vendor-owned, `allow write: if
+  // false`. That is the only shape Firestore can guarantee: rules cannot say "only a function
+  // may write this", because the Admin SDK bypasses rules rather than satisfying them.
 }
 
 export function getEstimateCircleRecipient(agency?: Agency | null, circleOrDivision?: string): string {

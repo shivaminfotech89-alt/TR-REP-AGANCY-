@@ -179,10 +179,25 @@ service cloud.firestore {
              (!('gpValidationMonths' in data) || (data.gpValidationMonths is number)) &&
              (!('cgstPercent' in data) || (data.cgstPercent is number)) &&
              (!('sgstPercent' in data) || (data.sgstPercent is number)) &&
-             (!('subscriptionStatus' in data) || (data.subscriptionStatus is string && data.subscriptionStatus.size() <= 50)) &&
-             (!('subscriptionExpiresAt' in data) || (data.subscriptionExpiresAt is number)) &&
-             (!('subscriptionPlan' in data) || (data.subscriptionPlan is string && data.subscriptionPlan.size() <= 50)) &&
-             (!('annualFee' in data) || (data.annualFee is number)) &&
+             // ⚠ NO SUBSCRIPTION FIELDS HERE, AND NONE MAY BE ADDED BACK.
+             //
+             // This validated `subscriptionStatus`, `subscriptionExpiresAt`, `subscriptionPlan`
+             // and `annualFee` on the agency document - which the OWNER may update (see the
+             // update rule below). So an owner with a browser console could set
+             // `subscriptionStatus: 'active'` with an expiry in 2099, and any gate reading it
+             // was decorative. The fields were validated the whole time: a type check on a
+             // field the wrong party can write is not a boundary, and reads like one.
+             //
+             // ⚠ AND TWO SPELLINGS DISAGREED. The rules said `subscriptionExpiresAt`; the
+             // TypeScript said `subscriptionExpiryDate`. Because of the `!('x' in data) ||`
+             // pattern, the TypeScript spelling passed COMPLETELY UNVALIDATED - the validator
+             // was checking a field the app did not write, and waving through the one it did.
+             //
+             // Subscription state now lives in `subscriptions/{agencyId}`, which no client may
+             // write at all. That is the only shape Firestore can guarantee: rules cannot say
+             // "only a function may set this", because the Admin SDK bypasses rules rather than
+             // passing them as a privileged principal. The field the gate reads must live where
+             // no client can reach it. Collapsed while zero documents carried either spelling.
              (!('sharedWithEmails' in data) || (data.sharedWithEmails is list)) &&
              (!('members' in data) || (data.members is map || data.members is list)) &&
              (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 150)) &&
@@ -471,12 +486,47 @@ service cloud.firestore {
     // The admin SDK bypasses rules, so a genuine need is still met - by a scripted, dry-run
     // repair or removal. That is the right level of friction for altering a baseline an
     // agency prices from: a reviewed script and the service account, not a click.
+    // ⚠ WORLD-READABLE ON PURPOSE, AND NOW IT SAYS SO. This read `if isSignedIn() || true`,
+    // which is the same short-circuit that hid the system_config defect above - the difference
+    // is only that here the outcome was intended. `if true` states the grant plainly, so the
+    // next reader is not left deciding whether the sign-in check meant something.
+    //
+    // WHY PUBLIC IS RIGHT HERE. This is rung 3 of the rate chain - the shipped baseline an
+    // agency prices from when it has neither AT rates nor its own - and it is a frozen public
+    // fact, not a customer's data. It carries no name, no GSTIN, no figure belonging to anyone.
     match /public_config/{configId} {
-      allow get, list: if isSignedIn() || true;
+      allow get, list: if true;
     }
 
+    // ⚠ READ IS THE SUPER ADMIN'S ALONE. IT USED TO BE WORLD-READABLE, AND DID NOT LOOK IT.
+    //
+    // The rule read `if isSuperAdmin() || isSignedIn() || true`. The `|| true` short-circuits
+    // everything to its left, so this document was readable by ANYONE ON THE INTERNET holding
+    // the project id - no account required. The two checks before it were decoration that could
+    // never be reached, and they are exactly what made the line scan as authorised.
+    //
+    // ⚠ THIS IS NOT A RAZORPAY FIX, though that is what found it. The Admin Panel's payment tab
+    // wrote `keySecret` to `system_config/razorpay`; the first Save would have published an API
+    // secret to the open internet with no error and nothing to indicate it. That tab has since
+    // lost both secret fields - but the defect was never the tab. It is that a document holding
+    // whatever anyone adds to it next was public, behind a rule that read like a check.
+    //
+    // `isValidSystemConfig` would not have caught it either: every clause is
+    // `!('x' in data) || ...`, so a field the validator does not name passes unchecked. A
+    // validator that enumerates permitted fields cannot refuse an unexpected one.
+    //
+    // ⚠ THE ONE NON-ADMIN READER WAS CHECKED BEFORE TIGHTENING THIS, and it is worth
+    // stating because narrowing a read is exactly the change that breaks quietly.
+    // `AgencyContext` reads `system_config/estimate_master` as the SECOND branch of the rate
+    // chain - reached only when `public_config/estimate_master` does not exist. It does exist
+    // (verified against the live database: one document, six populated sections), so no normal
+    // client reaches this collection at all. If it ever did, the read is inside a try/catch
+    // that falls back to the shipped defaults and SAYS SO on screen, so the failure mode is a
+    // visible degradation rather than a silently wrong price.
+    //
+    // The Admin Panel lists the whole collection, which is a super-admin screen already.
     match /system_config/{configId} {
-      allow get, list: if isSuperAdmin() || isSignedIn() || true;
+      allow get, list: if isSuperAdmin();
       allow create, update: if isSuperAdmin() && isValidSystemConfig(incoming());
       allow delete: if isSuperAdmin();
     }

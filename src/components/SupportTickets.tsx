@@ -3,6 +3,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, addDoc, orderBy } from 'firebase/firestore';
 import { useAgency } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
+import { formatPrice } from '../lib/pricing';
 import { SupportTicket, TicketCategory, TicketPriority } from '../types/admin';
 import { LifeBuoy, PlusCircle, MessageSquare, Clock, CheckCircle2, AlertCircle, RefreshCw, Send, ShieldAlert, Sparkles } from 'lucide-react';
 import { formatDDMMYYYY } from '../lib/utils';
@@ -165,7 +166,7 @@ export default function SupportTickets() {
             </span>
           </div>
           <p className="text-slate-300 text-xs leading-relaxed max-w-2xl">
-            Have a question regarding Agency Management, Razorpay Annual Subscription (₹3,999/yr), Billing calculations, or technical support? Submit a ticket directly to Super Admin (<span className="text-amber-300 font-semibold">shivaminfotech89@gmail.com</span>).
+            Have a question regarding Agency Management, Razorpay Annual Subscription ({formatPrice()}/yr), Billing calculations, or technical support? Submit a ticket directly to Super Admin (<span className="text-amber-300 font-semibold">shivaminfotech89@gmail.com</span>).
           </p>
         </div>
         <button
@@ -297,7 +298,7 @@ export default function SupportTickets() {
                     onChange={(e) => setCategory(e.target.value as TicketCategory)}
                     className="w-full border border-slate-300 rounded-lg p-2 text-xs font-medium focus:ring-2 focus:ring-blue-500 outline-none bg-white"
                   >
-                    <option value="Razorpay & Billing">Razorpay & Subscription (₹3,999)</option>
+                    <option value="Razorpay & Billing">Razorpay &amp; Subscription ({formatPrice()})</option>
                     <option value="Technical Issue">Technical Issue</option>
                     <option value="Feature Request">Feature Request</option>
                     <option value="Bug Report">Bug Report</option>

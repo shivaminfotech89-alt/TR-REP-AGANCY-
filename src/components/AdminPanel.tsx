@@ -9,6 +9,7 @@ import {
 } from '../lib/estimateData';
 import { selectableSchedules, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD } from '../lib/ui';
+import { formatPrice, gstBreakdown } from '../lib/pricing';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
   ShieldCheck, Users, Building2, CreditCard, LifeBuoy, Settings, 
@@ -149,14 +150,12 @@ export default function AdminPanel() {
   const [razorpaySettings, setRazorpaySettings] = useState<RazorpaySettings>({
     enabled: true,
     testMode: true,
-    keyId: 'rzp_test_agency_3999_key',
-    keySecret: '••••••••••••••••',
-    annualFeePerAgency: 3999,
+    keyId: '',
   });
   const [systemSettings, setSystemSettings] = useState<SystemSettings>({
     maintenanceMode: false,
     maintenanceMessage: 'System undergoes scheduled maintenance. Normal ops resume shortly.',
-    announcementBanner: '⚡ Razorpay Annual Agency Subscription Gateway (₹3,999/yr) is active!',
+    announcementBanner: '',
     announcementActive: true,
     superAdminEmail: 'shivaminfotech89@gmail.com'
   });
@@ -330,7 +329,7 @@ export default function AdminPanel() {
     e.preventDefault();
     try {
       await setDoc(doc(db, 'system_config', 'razorpay'), razorpaySettings);
-      alert('Razorpay Payment Configuration (₹3,999/agency) saved successfully!');
+      alert('Razorpay settings saved.');
     } catch (err) {
       console.error('Error saving Razorpay settings:', err);
       alert('Failed to save settings.');
@@ -353,8 +352,14 @@ export default function AdminPanel() {
 
   // Compute metrics
   const totalAgenciesCount = allAgencies.length;
-  const activeAgenciesCount = allAgencies.filter(a => (a as any).subscriptionStatus === 'active' || !(a as any).subscriptionStatus).length;
-  const expiredAgenciesCount = allAgencies.filter(a => (a as any).subscriptionStatus === 'expired' || (a as any).subscriptionStatus === 'suspended').length;
+  // ⚠ NOT YET COUNTABLE, AND THE OLD COUNT SAID OTHERWISE. `activeAgenciesCount` counted an
+  // agency with NO subscription field as active - `|| !a.subscriptionStatus` - so the panel
+  // reported all twelve agencies as active paying subscribers when not one had ever paid or
+  // carried a single subscription field. Absence was being read as consent.
+  //
+  // Subscription state has moved to `subscriptions/{agencyId}`, which is not built yet. Until
+  // it is, the honest count is that there is nothing to count.
+  const subscriptionsKnown = false;
   const openTicketsCount = tickets.filter(t => t.status === 'Open' || t.status === 'In Progress').length;
 
   // Filtered ticket list
@@ -410,7 +415,7 @@ export default function AdminPanel() {
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Registered Agencies</span>
             <span className="text-xl font-black text-slate-900">{totalAgenciesCount}</span>
-            <span className="text-[11px] text-green-600 font-semibold block">{activeAgenciesCount} Active Paid</span>
+            <span className="text-[11px] text-slate-500 font-semibold block">Subscriptions not yet tracked</span>
           </div>
         </div>
 
@@ -420,8 +425,8 @@ export default function AdminPanel() {
           </div>
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Subscriptions</span>
-            <span className="text-xl font-black text-slate-900">{activeAgenciesCount} <span className="text-xs font-normal text-slate-500">/ {totalAgenciesCount}</span></span>
-            <span className="text-[11px] text-emerald-600 font-semibold block">{expiredAgenciesCount} Expired/Pending</span>
+            <span className="text-xl font-black text-slate-400">&mdash;</span>
+            <span className="text-[11px] text-slate-500 font-semibold block">Nothing has been billed yet</span>
           </div>
         </div>
 
@@ -466,7 +471,7 @@ export default function AdminPanel() {
           }`}
         >
           <Building2 className="w-4 h-4" />
-          <span>Agencies & Subscriptions (₹3,999/yr)</span>
+          <span>Agencies &amp; Subscriptions ({formatPrice()}/yr)</span>
         </button>
 
         <button
@@ -816,11 +821,11 @@ export default function AdminPanel() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base font-bold text-slate-900">Registered Agencies & Razorpay Subscriptions</h2>
-              <p className="text-xs text-slate-500">Manage agency active statuses, annual subscription fees (₹3,999/yr), and renewal dates</p>
+              <p className="text-xs text-slate-500">Registered agencies. Subscription status and renewal dates appear once billing is built.</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-xl text-xs text-blue-900 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-blue-600" />
-              <span>Standard Agency Subscription: <strong>₹3,999 / year per agency</strong></span>
+              <span>Standard Agency Subscription: <strong>{formatPrice()} / year per agency</strong>, inclusive of {gstBreakdown().ratePercent}% GST</span>
             </div>
           </div>
 
@@ -838,9 +843,18 @@ export default function AdminPanel() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {allAgencies.map((agency) => {
-                  const subStatus = (agency as any).subscriptionStatus || 'active';
-                  const expiryMs = (agency as any).subscriptionExpiryDate || (Date.now() + 365*24*60*60*1000);
-                  const planAmt = (agency as any).subscriptionPlanAmount || 3999;
+                  /* ⚠ THIS ROW USED TO INVENT A SUBSCRIPTION. It read
+                     `subscriptionStatus || 'active'`, `subscriptionExpiryDate || (now + 365
+                     days)` and `subscriptionPlanAmount || 3999` - against a database where NO
+                     agency carries any of the three. So every agency rendered as ACTIVE PAID,
+                     Rs 3999/yr, expiring one year from whenever the page happened to load: a
+                     figure that changed daily and had never been true of anyone.
+
+                     The same sentinel shape as the Dashboard's product-name fallback (G26) and
+                     the rest of this audit - a plausible value standing where a missing one
+                     belongs, so the absence renders as a fact. On a payments screen it is the
+                     worst version of it: the panel would have shown twelve paying customers to
+                     the one person deciding whether to chase them. */
 
                   return (
                     <tr key={agency.id} className="hover:bg-slate-50 transition-colors">
@@ -853,33 +867,15 @@ export default function AdminPanel() {
                         <span className="text-[10px] text-slate-400">GSTIN: {agency.gstin || 'N/A'}</span>
                       </td>
                       <td className="p-3">
-                        {subStatus === 'active' && (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-green-100 text-green-800 border border-green-300">
-                            ACTIVE PAID
-                          </span>
-                        )}
-                        {subStatus === 'trial' && (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-300">
-                            TRIAL PERIOD
-                          </span>
-                        )}
-                        {subStatus === 'expired' && (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-red-100 text-red-800 border border-red-300">
-                            EXPIRED
-                          </span>
-                        )}
-                        {subStatus === 'suspended' && (
-                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
-                            SUSPENDED
-                          </span>
-                        )}
+                        <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-300">
+                          NOT BILLED
+                        </span>
                       </td>
                       <td className="p-3 font-extrabold text-slate-900">
-                        ₹{planAmt} <span className="text-[10px] font-normal text-slate-400">/ yr</span>
+                        {formatPrice()} <span className="text-[10px] font-normal text-slate-400">/ yr</span>
+                        <span className="block text-[10px] font-normal text-slate-400">the rate, not a charge made</span>
                       </td>
-                      <td className="p-3 text-slate-600 font-medium">
-                        {formatDDMMYYYY(expiryMs)}
-                      </td>
+                      <td className="p-3 text-slate-400 font-medium">&mdash;</td>
                       <td className="p-3 text-right">
                         {/* ⚠ DISABLED, NOT REMOVED (AUDIT G1). These wrote to the customer's
                             AGENCY document across accounts, which the tightened rules no
@@ -1145,24 +1141,31 @@ export default function AdminPanel() {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Razorpay Key Secret</label>
-              <input
-                type="password"
-                value={razorpaySettings.keySecret}
-                onChange={(e) => setRazorpaySettings(prev => ({ ...prev, keySecret: e.target.value }))}
-                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-mono tabular-nums focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+            {/* ⚠ THERE IS NO KEY SECRET FIELD, AND ONE MUST NOT BE ADDED. It wrote to
+                `system_config/razorpay`, which was world-readable - the first Save would have
+                published the secret to the open internet, with no error to notice. The rule is
+                fixed, and the field is still gone: a secret belongs in a Functions secret the
+                client cannot read at all, not in a database the client talks to. A webhook
+                secret would be the same, and is gone with it. */}
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[11px] text-slate-600">
+                The key <strong>secret</strong> is not stored here. It is held as the Firebase
+                Functions secret <span className="font-mono">RAZORPAY_KEY_SECRET</span> and read
+                only by the server, which is what lets a signature be verified where the browser
+                cannot see the key.
+              </p>
             </div>
 
+            {/* ⚠ THE PRICE IS DISPLAYED, NOT EDITED. A price editable from a browser can
+                disagree with a GST invoice already issued, and a tax invoice is corrected by a
+                credit note rather than by editing it. It lives in src/lib/pricing.ts. */}
             <div>
-              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Annual Subscription Fee per Agency (INR)</label>
-              <input
-                type="number"
-                value={razorpaySettings.annualFeePerAgency}
-                onChange={(e) => setRazorpaySettings(prev => ({ ...prev, annualFeePerAgency: Number(e.target.value) }))}
-                className="w-full border border-slate-300 rounded-lg p-2.5 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-              />
+              <label className="block text-xs font-bold text-slate-700 uppercase mb-1">Annual Subscription Fee per Agency</label>
+              <div className="w-full border border-slate-200 bg-slate-50 rounded-lg p-2.5">
+                <span className="text-sm font-black text-slate-900">{formatPrice()}</span>
+                <span className="text-[11px] text-slate-500"> inclusive &mdash; {formatPrice(gstBreakdown().taxable)} + {formatPrice(gstBreakdown().tax)} GST at {gstBreakdown().ratePercent}%</span>
+                <span className="block text-[10px] text-slate-400 mt-0.5">Set in src/lib/pricing.ts, not here.</span>
+              </div>
             </div>
 
             <button

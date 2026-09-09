@@ -40,12 +40,25 @@ export interface SupportTicket {
   updatedAt: number;
 }
 
+/**
+ * ⚠ DECLARED, AND STILL USED BY NOTHING. Kept as the intended shape of a
+ * `subscriptions/{agencyId}` document, which is the next thing to be built - a VENDOR-OWNED
+ * collection no client may write. It is not the shape of anything that exists today: the live
+ * database has zero subscription documents and no agency carries a subscription field.
+ *
+ * `planAmount` records what was ACTUALLY CHARGED at the time, which is deliberately not the
+ * same thing as SUBSCRIPTION_INCLUSIVE_INR in lib/pricing.ts. The constant is today's price;
+ * this is the price on an invoice already issued. When the price changes those must differ, and
+ * a subscription that recomputed its own amount from the current constant would rewrite history
+ * on a document a GST invoice points at.
+ */
 export interface AgencySubscription {
   agencyId: string;
   agencyName: string;
   ownerEmail: string;
   status: 'active' | 'trial' | 'expired' | 'suspended';
-  planAmount: number; // e.g. 3999
+  /** What was charged, in rupees, inclusive of GST. Not re-derived from the current price. */
+  planAmount: number;
   currency: string; // 'INR'
   startDate: number;
   expiryDate: number;
@@ -54,13 +67,24 @@ export interface AgencySubscription {
   lastPaymentDate?: number;
 }
 
+/**
+ * ⚠ NO SECRETS IN THIS TYPE, BY CONSTRUCTION. `keySecret` and `webhookSecret` were fields
+ * here, written by the Admin Panel to `system_config/razorpay` - a document that was
+ * world-readable, so the first Save would have published an API secret to the open internet.
+ * Both are gone. The key secret is the Functions secret RAZORPAY_KEY_SECRET, which the client
+ * cannot read; a webhook secret, when there is a webhook, belongs in the same place.
+ *
+ * ⚠ AND NO PRICE. `annualFeePerAgency` was a number input in a browser. A price that can be
+ * edited from a browser is a price that can disagree with a GST invoice already issued. It is
+ * SUBSCRIPTION_INCLUSIVE_INR in lib/pricing.ts, in version control.
+ *
+ * What is left is not secret: whether the gateway is on, whether it is in test mode, and the
+ * publishable Key ID (`rzp_test_...`), which is designed to sit in client code.
+ */
 export interface RazorpaySettings {
   enabled: boolean;
   testMode: boolean;
   keyId: string;
-  keySecret: string;
-  annualFeePerAgency: number; // 3999
-  webhookSecret?: string;
 }
 
 export interface SystemSettings {
