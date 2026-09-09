@@ -5,10 +5,55 @@
 // greps it for the agency-mark component. Run it at two commits and compare.
 //
 //   node scripts/admin/print-subtree-hashes.js [--json]
+//
+// ⚠⚠ THIS TOOL IS DESTRUCTIVE BY CONSTRUCTION, AND ITS OUTPUT HIDES THAT.
+//
+// It reports hashes, so it READS as a read-only comparison. The comparison it is part of is
+// not: getting a "before" means `git checkout <earlier> -- src/`, and getting back means
+// `git checkout HEAD -- src/` - which restores to HEAD, NOT to what was in the working tree.
+// Uncommitted work in src/ is destroyed, silently, and `git status` comes back clean
+// afterwards so nothing announces the loss.
+//
+// THAT IS NOT HYPOTHETICAL. It ate a finished mark-picker rewrite during this session; the
+// commit that should have carried it reported "nothing to commit, working tree clean". It
+// was rebuilt from a scratchpad script. The guard below exists because the failure happened,
+// not because anyone anticipated it.
+//
+// ⚠ IT REFUSES ON A DIRTY TREE RATHER THAN STASHING. Stash-and-restore has its own failure
+// modes - a conflicted restore, an interrupted run, a stash left behind that nobody notices -
+// and a refusal has none. The discipline belongs in the tool, the same way the admin scripts
+// ship with MODE = 'dry-run' rather than relying on anyone remembering.
+//
+// `--no-guard` exists for the one legitimate case: a caller that has already made the tree
+// clean itself and is driving the checkouts deliberately.
 
 import { readFileSync, readdirSync, statSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
+import { execSync } from 'child_process';
+
+if (!process.argv.includes('--no-guard')) {
+  let dirty = '';
+  try {
+    dirty = execSync('git status --porcelain -- src/', { encoding: 'utf8' }).trim();
+  } catch {
+    // Not a git checkout, or git unavailable. Nothing to protect and nothing to check.
+  }
+  if (dirty) {
+    console.error('');
+    console.error('  REFUSING TO RUN — src/ has uncommitted changes.');
+    console.error('');
+    console.error('  This harness checks out an earlier src/ and would destroy uncommitted work.');
+    console.error('  Commit or stash first.');
+    console.error('');
+    for (const line of dirty.split('\n').slice(0, 12)) console.error('    ' + line);
+    if (dirty.split('\n').length > 12) console.error(`    ... and ${dirty.split('\n').length - 12} more`);
+    console.error('');
+    console.error('  (--no-guard skips this, for a caller already managing the checkouts.)');
+    console.error('');
+    process.exit(1);
+  }
+}
 
 const ROOT = join(process.cwd(), 'src');
 const MARK_TOKENS = ['AgencyMarkTile', 'agencyMark', 'markFor(', 'MARK_PATH', 'MARK_TILE'];

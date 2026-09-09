@@ -593,6 +593,48 @@ gap nobody can review.
 
 ---
 
+## Pattern: a tool that verifies by checking out history is destructive, and its output hides it
+
+**`scripts/admin/print-subtree-hashes.js` reports hashes.** It reads as a read-only
+comparison, and every line it prints supports that reading. The comparison it takes part in
+is not read-only at all: getting a "before" means `git checkout <earlier> -- src/`, and
+getting back means `git checkout HEAD -- src/` — **which restores to HEAD, not to what was in
+the working tree.**
+
+⚠ **SO UNCOMMITTED WORK IN `src/` IS DESTROYED, SILENTLY, AND `git status` COMES BACK CLEAN
+AFTERWARDS.** Nothing announces the loss. The next `git commit` reports "nothing to commit,
+working tree clean", which reads as "already committed" rather than "there is nothing left".
+
+**It happened.** A finished rewrite of the agency-mark picker — two native selects, live
+preview, collision text in the options — was wiped by exactly this sequence, moments after
+being built and type-checked. It was rebuilt from the scratchpad script that had produced it.
+**The guard exists because the failure occurred, not because anyone anticipated it.**
+
+**THE GUARD REFUSES; IT DOES NOT STASH.** Stash-and-restore has its own failure modes — a
+conflicted restore, an interrupted run, a stash left behind that nobody notices — and a
+refusal has none. The message says what to do rather than only what is wrong:
+
+    REFUSING TO RUN — src/ has uncommitted changes.
+    This harness checks out an earlier src/ and would destroy uncommitted work.
+    Commit or stash first.
+
+with the dirty paths listed beneath it. `--no-guard` exists for a caller that has already
+made the tree clean and is driving the checkouts deliberately.
+
+**The general shape, which is why this is a pattern and not an incident.** The discipline
+belongs in the tool, not in remembering — the same reason every admin script in this
+directory ships with `MODE = 'dry-run'` rather than trusting whoever runs it to check first.
+A tool is dangerous when its *mechanism* is destructive even though its *purpose* is not, and
+that gap is invisible from the name, the output and usually the call site. Before shipping
+anything that reads history to compare against it, ask what it does to work that is not
+committed yet.
+
+**Related.** The "no difference" harness pattern below is the twin: there the risk was a
+comparator that could not see, here it is a comparator that destroys what it is comparing.
+Both produce a confident, clean-looking result with nothing behind it.
+
+---
+
 ## Pattern: a harness that reports "no difference" must contain a case that MUST differ
 
 **The rule, first: a comparator whose whole job is to report an absence cannot detect its
