@@ -6,6 +6,7 @@ import { useSearchParams } from 'react-router-dom';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch, updateDoc } from 'firebase/firestore';
+import { MultiJobEstimateSheet } from './MultiJobEstimateSheet';
 import { 
   Loader2, Printer, Search, FileSpreadsheet, Edit3, Check, Save, FileText, X,
   Lock, Unlock, AlertTriangle, RotateCcw, Calendar, Send, CheckCircle2, Clock, CheckSquare,
@@ -85,7 +86,7 @@ export default function EstimateGenerate() {
    * `NO : {Math.floor(Math.random() * 100) + 1}` as its document number. See the audit entry
    * before reinstating anything from history here.
    */
-  const [estimateViewMode, setEstimateViewMode] = useState<'batch_all' | 'forwarding_only' | 'single_job'>('batch_all');
+  const [estimateViewMode, setEstimateViewMode] = useState<'batch_all' | 'forwarding_only' | 'single_job' | 'multi_job'>('batch_all');
   const [activeSingleJobId, setActiveSingleJobId] = useState<string | null>(null);
 
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
@@ -625,6 +626,77 @@ export default function EstimateGenerate() {
     if (!code) return undefined;
     return lines.find((l: any) =>
       String(l.itemCode ?? '').toLowerCase() === code.toLowerCase() && l.desc !== 'Labour Charge');
+  };
+
+  /**
+   * THE MULTI-JOB MATRIX'S DATA — items down, transformers across.
+   *
+   * ⚠ EVERY FIGURE COMES FROM `builderLineFor`, WHICH READS THE SINGLE BUILDER. Nothing here
+   * prices anything. That is the whole point: AUDIT G8 records that the deleted matrix
+   * computed its cells with a second engine which charged every optional item on every job,
+   * and the sheet did not reconcile against its own totals. If a number is wanted that this
+   * function cannot get from `builderLineFor` or from `getJobFullEstimate`, the answer is to
+   * extend those, never to compute it here.
+   *
+   * ⚠ ONLY ROWS THAT APPLY. A master row is printed if at least one job in the group has a
+   * non-zero amount for it. All 32 CRGO rows never apply to one MR, and rows of zeros would
+   * spend the page height that decides how many transformers fit.
+   */
+  const buildMultiJobData = (mr: string) => {
+    const jobs = estimableJobs(mr);
+    const master = jobs.length
+      ? getEstimateMasterForCore(
+          { at: atForJob(jobs[0], atMasters) ?? activeAtMaster, agency: activeAgency }, jobs[0].coreType)
+      : [];
+
+    const columns = jobs.map(job => {
+      const est = getJobFullEstimate(job);
+      const cells: Record<string, number> = {};
+      master.forEach((item: any) => {
+        const line = builderLineFor(item, job);
+        const amt = Number(line?.amt ?? 0);
+        if (amt) cells[String(item.itemCode)] = amt;
+      });
+      return {
+        jobId: job.id,
+        jobNo: job.jobNo || job.id,
+        kva: String(job.capacityKva ?? ''),
+        make: job.make || '',
+        serialNo: job.serialNo || '',
+        cells,
+        baseTotal: Number(est.baseTotal || 0),
+        atPercentage: Number(est.atPercentage || 0),
+        percentageAmount: Number(est.percentageAmount || 0),
+        finalAmount: Number(est.finalAmount || 0),
+        // The same refusal the single sheet makes, carried per column.
+        rateErrors: (est.rateErrors || []).map((e: any) => String(e.message).replace(/^[^:]+:\s*/, '')),
+      };
+    });
+
+    const used = new Set<string>();
+    columns.forEach(c => Object.keys(c.cells).forEach(k => used.add(k)));
+    const items = master
+      .filter((it: any) => used.has(String(it.itemCode)))
+      .map((it: any, i: number) => ({
+        sr: i + 1,
+        code: String(it.itemCode),
+        name: String(it.itemName || ''),
+        unit: String(it.unit || ''),
+      }));
+
+    // Blocked columns are excluded, exactly as they are excluded from a bill: a withheld
+    // amount is not a zero and must not be summed as one.
+    const grandTotal = Number(columns
+      .filter(c => c.rateErrors.length === 0)
+      .reduce((sum, c) => sum + c.finalAmount, 0).toFixed(2));
+
+    return {
+      refNo: refNoText,
+      mrNo: mr,
+      division: currentSelectedDivision || '',
+      items, columns, grandTotal,
+      signedByText,
+    };
   };
 
   // Helper to evaluate a job against Clause 4.0 Circle Estimate Power Limit
@@ -1719,11 +1791,24 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                 <FileCheck2 className="w-3.5 h-3.5" />
                 <span>Single Job Estimate Sheet</span>
               </button>
+              <button
+                onClick={() => setEstimateViewMode('multi_job')}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+                  estimateViewMode === 'multi_job'
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+                title="Five transformers per A4 page, items down and jobs across. REPLACES the per-job sheets rather than accompanying them - it carries the reference, the MR details, the percentages, the totals and the signature block. It cannot show quantity or unit rate per job; send the per-job sheets where that breakdown is needed."
+              >
+                <FileCheck2 className="w-3.5 h-3.5" />
+                <span>Multi-Job Estimate (5 per page)</span>
+              </button>
             </div>
             <div className="text-[11px] text-slate-500 font-medium italic">
               {estimateViewMode === 'batch_all' && '📌 Standard format: 1 Common Forwarding Letter (Cover) + Individual Job Estimate Sheets'}
               {estimateViewMode === 'forwarding_only' && '📌 Common Forwarding Letter for MR submission'}
               {estimateViewMode === 'single_job' && '📌 Inspecting individual 3-section breakdown (Physical, Internal, Labour)'}
+              {estimateViewMode === 'multi_job' && '📌 Five transformers per page, items down. Replaces the per-job sheets — no quantity or unit rate per job.'}
             </div>
           </div>
 
@@ -1973,6 +2058,15 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
 
             {/* VIEW MODE 1B: COMMON FORWARDING LETTER ONLY */}
             {estimateViewMode === 'forwarding_only' && renderForwardingLetterPages()}
+
+            {/* VIEW MODE 3: MULTI-JOB MATRIX — items down, five transformers across.
+                ⚠ A REBUILD, NOT A RESTORE FROM HISTORY (AUDIT G8). It is a component of its
+                own precisely so nobody reinstates 363 inline lines wholesale; every figure
+                comes from buildMultiJobData, which reads builderLineFor and prices nothing
+                itself. */}
+            {estimateViewMode === 'multi_job' && selectedMrNo && (
+              <MultiJobEstimateSheet agency={activeAgency} data={buildMultiJobData(selectedMrNo)} />
+            )}
 
             {/* VIEW MODE 2: SINGLE JOB ESTIMATE SHEET */}
             {estimateViewMode === 'single_job' && (
