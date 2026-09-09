@@ -8,6 +8,9 @@ import {
   createOrder, payWithRazorpay, CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined,
 } from '../lib/subscriptionClient';
 import { formatDDMMYYYY } from '../lib/utils';
+import {
+  classifySubscription, daysRemaining, type SubscriptionRecord,
+} from '../lib/subscriptionStatus';
 import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock, PlusSquare } from 'lucide-react';
 
 /**
@@ -23,65 +26,30 @@ import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock, PlusSquare } fr
  * state below comes from a document that exists. When there is none, it says there is none.
  */
 
-type Sub = {
-  status?: string;
-  planAmount?: number;
-  startDate?: number;
-  expiryDate?: number;
-  grantReason?: string;
-  invoicePending?: boolean;
-  lastPaymentDate?: number;
-};
+/**
+ * ⚠ THE VOCABULARY LIVES IN lib/subscriptionStatus.ts, NOT HERE. This screen used to classify
+ * a subscription itself, and the Admin Panel's table asserted NOT BILLED without reading the
+ * collection at all - two screens answering the same question, one of them without looking.
+ * Which state a payment is in is a single fact; only the sentence around it differs.
+ */
+type Sub = SubscriptionRecord;
 
-const DAY = 24 * 60 * 60 * 1000;
-
-/** How the four states read on screen. Colour is never the only signal - see ui.ts rule 1. */
-function describe(sub: Sub | null, now: number) {
-  if (!sub) {
-    return {
-      word: 'NOT SUBSCRIBED',
-      tone: 'bg-slate-100 text-slate-700 border-slate-300',
-      line: 'No subscription has been recorded for this agency.',
-    };
+/** The owner's phrasing. The vendor's table renders the same classification differently. */
+function lineFor(sub: Sub | null, cls: ReturnType<typeof classifySubscription>, now: number) {
+  const days = daysRemaining(sub, now);
+  switch (cls.key) {
+    case 'none':
+      return 'No subscription has been recorded for this agency.';
+    case 'admin':
+      return sub?.grantReason || 'Created by the vendor. No payment, and no expiry.';
+    case 'expired':
+      return `Expired on ${formatDDMMYYYY(Number(sub?.expiryDate || 0))}.`;
+    case 'granted':
+      return `${sub?.grantReason || 'Granted, not purchased.'} Runs to `
+        + `${formatDDMMYYYY(Number(sub?.expiryDate || 0))} — ${days} days.`;
+    default:
+      return `Paid to ${formatDDMMYYYY(Number(sub?.expiryDate || 0))} — ${days} days remaining.`;
   }
-  const expiry = Number(sub.expiryDate || 0);
-  const days = expiry ? Math.ceil((expiry - now) / DAY) : 0;
-
-  // ⚠ CHECKED BEFORE EXPIRY, BECAUSE AN ADMIN-CREATED AGENCY HAS NO EXPIRY AND MUST NOT BE
-  // TREATED AS ONE THAT RAN OUT. Its expiryDate is null, so `expiry` is 0, so the expiry branch
-  // below would call it EXPIRED - a subscription that never existed rendered as one that
-  // lapsed. Order is the whole guard here.
-  if (sub.status === 'admin') {
-    return {
-      word: 'ADMIN',
-      tone: 'bg-violet-100 text-violet-800 border-violet-300',
-      // Three provenances stay three facts (G28). This one was never paid for and never
-      // expires, and saying so is the point of having a fourth status at all.
-      line: sub.grantReason || 'Created by the vendor. No payment, and no expiry.',
-    };
-  }
-
-  if (expiry && expiry < now) {
-    return {
-      word: 'EXPIRED',
-      tone: 'bg-red-100 text-red-800 border-red-300',
-      line: `Expired on ${formatDDMMYYYY(expiry)}.`,
-    };
-  }
-  if (sub.status === 'granted') {
-    return {
-      word: 'GRANTED',
-      tone: 'bg-blue-100 text-blue-800 border-blue-300',
-      // ⚠ SAYS IT WAS NOT PAID FOR. A grant and a payment are different facts (G29) and an
-      // operator who thinks they have paid will not expect a renewal notice.
-      line: `${sub.grantReason || 'Granted, not purchased.'} Runs to ${formatDDMMYYYY(expiry)} — ${days} days.`,
-    };
-  }
-  return {
-    word: 'ACTIVE',
-    tone: 'bg-green-100 text-green-800 border-green-300',
-    line: `Paid to ${formatDDMMYYYY(expiry)} — ${days} days remaining.`,
-  };
 }
 
 export default function SubscriptionPanel() {
@@ -156,7 +124,8 @@ export default function SubscriptionPanel() {
   }, [uid]);
 
   const now = Date.now();
-  const state = describe(sub, now);
+  const cls = classifySubscription(sub, now);
+  const state = { word: cls.word, tone: cls.tone, line: lineFor(sub, cls, now) };
   const { taxable, tax, ratePercent } = gstBreakdown();
 
   const renew = async () => {

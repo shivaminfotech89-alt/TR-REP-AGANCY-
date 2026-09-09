@@ -10941,3 +10941,72 @@ that did not exist yet.
 deployed and proven would lock out creation entirely — including the vendor's — and the rule is
 the one part of this that cannot be tested locally. The function ships first, the rule closes
 after.
+
+
+## G34. The same defect as G28, erring the other way
+
+The Admin Panel's agency table hardcoded **`NOT BILLED`** on every row and **never opened the
+`subscriptions` collection at all.** That was true when it was written — nothing had been billed —
+and it stopped being true the moment the first payment landed, with no code change to mark the
+transition and nothing on screen to indicate one was needed.
+
+It is G28's shape exactly: **a screen asserting something about state it is not reading.** The
+difference is only direction. G28 overstated, showing twelve unpaid agencies as ACTIVE PAID at a
+price nobody was charged. This understated. **Understating is safer and is still an assertion
+made without looking** — and the failure it would have produced is the mirror image of G28's: the
+person deciding whether to chase twelve agencies for payment would have been told that customers
+who *had* paid had not.
+
+There is a second-order point worth keeping. G28's fix wrote the honest thing for the state that
+existed *at that moment*, and the honest thing became a lie four commits later. **A hardcoded
+truth has an expiry date that nothing enforces.** The correction was not to write a better
+constant; it was to make the screen read.
+
+**"NOT READ" AND "NOT BILLED" ARE DIFFERENT ANSWERS AND NOW LOOK DIFFERENT.** If the
+subscriptions read fails, `subsByAgency` stays `null` and every row shows an amber `NOT READ`
+rather than a grey `NOT BILLED`. Reporting a failed read as an absence of subscriptions would be
+a confident claim built on a failure — the same defect one layer down, and the one that would be
+hardest to notice, because a table full of "not billed" looks like information.
+
+`null` also distinguishes *not yet loaded* from *loaded and empty*, so the lie does not
+reappear for a second on every page load.
+
+**THE VOCABULARY IS SHARED, IN `lib/subscriptionStatus.ts`.** Two screens read a subscription —
+the owner's panel ("what do I have, when does it run out") and the vendor's table ("which of
+these has been paid for"). They phrase it differently and they must **classify** identically.
+This session is a catalogue of what two copies do: two spellings of an agency name, two
+subtitles on the two screens a user sees first, two spellings of a subscription expiry field
+where only the unvalidated one was ever written. **Which state a payment is in is a worse
+candidate for duplication than any of those.**
+
+`hasExpiry` and `wasPaid` come from the classification rather than being re-derived at each call
+site, so a badge and the date beside it cannot disagree, and the headline count cannot disagree
+with the rows it is counting.
+
+**`wasPaid` IS NOT "NOT EXPIRED".** A grant and an admin-created agency are both current and
+neither is revenue. Folding them into a "paid subscriptions" metric would restate G28's error in
+a metric instead of a row — a number that looks like income and is not. The card counts only
+`wasPaid`.
+
+**And `planAmount` is what was charged, never recomputed from today's price.** A subscription
+that recalculated its own amount would rewrite history on a record a GST invoice points at.
+Where nothing was charged, the rate is still shown and still labelled *"the rate, not a charge
+made"*.
+
+**Verified across all seven states** rather than eyeballed, including the two orderings that
+matter:
+
+    no document at all               none      NOT BILLED   hasExpiry false  wasPaid false
+    admin, expiryDate null           admin     ADMIN        false            false
+    admin, expiryDate absent         admin     ADMIN        false            false
+    granted, 18mo ahead              granted   GRANTED      true             false
+    active, 1yr ahead, paid 5900     active    ACTIVE       true             true
+    active but lapsed yesterday      expired   EXPIRED      true             true
+    granted but lapsed               expired   EXPIRED      true             false
+
+The first two lines are the ones that would have gone wrong. **`admin` is tested before expiry**,
+because an admin subscription carries `expiryDate: null`, so `Number(null || 0)` is `0`, so an
+expiry test reached first would find `0 < now` and render an agency that never had a
+subscription as one that **lapsed**. Same class of lie as G28's, erring the third possible way.
+The ordering is the entire guard, and nothing about the code makes that visible — which is why
+it is asserted in a test and stated in the comment.

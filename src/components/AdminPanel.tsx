@@ -10,6 +10,9 @@ import {
 import { selectableSchedules, SCHEDULES, ScheduleId } from '../lib/ugvclSchedules';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { formatPrice, gstBreakdown } from '../lib/pricing';
+import {
+  classifySubscription, daysRemaining, type SubscriptionRecord,
+} from '../lib/subscriptionStatus';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
   ShieldCheck, Users, Building2, CreditCard, LifeBuoy, Settings, 
@@ -147,6 +150,20 @@ export default function AdminPanel() {
   const [allAgencies, setAllAgencies] = useState<Agency[]>([]);
   const [userRoles, setUserRoles] = useState<UserRoleRecord[]>([]);
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  /**
+   * ⚠ THE REAL SUBSCRIPTIONS, READ FROM THE COLLECTION (AUDIT G34). This table used to hardcode
+   * NOT BILLED on every row and never open `subscriptions` at all. That was TRUE when it was
+   * written - nothing had been billed - and it stopped being true the moment the first payment
+   * landed, with no code change to mark the transition.
+   *
+   * It is the same shape as the defect it replaced (G28): a screen asserting something about
+   * state it is not reading. That one overstated - twelve agencies shown as ACTIVE PAID - and
+   * this one understated. Understating is safer and is still an assertion made without looking.
+   *
+   * `null` distinguishes NOT YET LOADED from LOADED AND EMPTY. Rendering "not billed" while a
+   * read is in flight would reintroduce the same lie for a second per page load.
+   */
+  const [subsByAgency, setSubsByAgency] = useState<Record<string, SubscriptionRecord> | null>(null);
   const [razorpaySettings, setRazorpaySettings] = useState<RazorpaySettings>({
     enabled: true,
     testMode: true,
@@ -201,6 +218,19 @@ export default function AdminPanel() {
       setTickets(tktList);
 
       // 4. Fetch System Settings if present
+      // Super admin may list `subscriptions` (firestore.rules); no client may write it.
+      try {
+        const subSnap = await getDocs(collection(db, 'subscriptions'));
+        const map: Record<string, SubscriptionRecord> = {};
+        subSnap.forEach(d => { map[d.id] = d.data() as SubscriptionRecord; });
+        setSubsByAgency(map);
+      } catch (e) {
+        // ⚠ LEFT AS null ON FAILURE, WHICH RENDERS "not read" RATHER THAN "not billed". A
+        // failed read must not be reported as an absence of subscriptions.
+        console.warn('subscriptions read failed', e);
+        setSubsByAgency(null);
+      }
+
       const sysSnap = await getDocs(collection(db, 'system_config'));
       sysSnap.docs.forEach(doc => {
         if (doc.id === 'razorpay') setRazorpaySettings(doc.data() as RazorpaySettings);
@@ -415,7 +445,9 @@ export default function AdminPanel() {
           <div>
             <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Registered Agencies</span>
             <span className="text-xl font-black text-slate-900">{totalAgenciesCount}</span>
-            <span className="text-[11px] text-slate-500 font-semibold block">Subscriptions not yet tracked</span>
+            <span className="text-[11px] text-slate-500 font-semibold block">
+              {subsByAgency === null ? 'Subscriptions not read' : `${Object.keys(subsByAgency).length} with a subscription record`}
+            </span>
           </div>
         </div>
 
@@ -424,9 +456,17 @@ export default function AdminPanel() {
             <CreditCard className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Active Subscriptions</span>
-            <span className="text-xl font-black text-slate-400">&mdash;</span>
-            <span className="text-[11px] text-slate-500 font-semibold block">Nothing has been billed yet</span>
+            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Paid Subscriptions</span>
+            {/* ⚠ COUNTS ONLY WHAT WAS PAID FOR. A grant and an admin-created agency are both
+                "not expired" and neither is revenue; folding them in would restate G28's
+                error in a metric instead of a row. `wasPaid` is the classification's own
+                answer, so the count and the badges cannot disagree. */}
+            <span className="text-xl font-black text-slate-900">
+              {subsByAgency === null ? '—' : Object.values(subsByAgency).filter(sb => classifySubscription(sb, Date.now()).wasPaid).length}
+            </span>
+            <span className="text-[11px] text-slate-500 font-semibold block">
+              {subsByAgency === null ? 'Not read' : `of ${totalAgenciesCount} agencies`}
+            </span>
           </div>
         </div>
 
@@ -821,7 +861,7 @@ export default function AdminPanel() {
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-base font-bold text-slate-900">Registered Agencies & Razorpay Subscriptions</h2>
-              <p className="text-xs text-slate-500">Registered agencies. Subscription status and renewal dates appear once billing is built.</p>
+              <p className="text-xs text-slate-500">Registered agencies, with the subscription recorded for each. Status is read from the subscriptions collection, which no client can write.</p>
             </div>
             <div className="bg-blue-50 border border-blue-200 p-2.5 rounded-xl text-xs text-blue-900 flex items-center gap-2">
               <Sparkles className="w-4 h-4 text-blue-600" />
@@ -856,6 +896,11 @@ export default function AdminPanel() {
                      worst version of it: the panel would have shown twelve paying customers to
                      the one person deciding whether to chase them. */
 
+                  const sub = subsByAgency ? (subsByAgency[agency.id] ?? null) : null;
+                  const cls = classifySubscription(sub, Date.now());
+                  const left = daysRemaining(sub, Date.now());
+                  const unread = subsByAgency === null;
+
                   return (
                     <tr key={agency.id} className="hover:bg-slate-50 transition-colors">
                       <td className="p-3 font-bold text-slate-900">
@@ -867,15 +912,65 @@ export default function AdminPanel() {
                         <span className="text-[10px] text-slate-400">GSTIN: {agency.gstin || 'N/A'}</span>
                       </td>
                       <td className="p-3">
-                        <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-slate-100 text-slate-600 border border-slate-300">
-                          NOT BILLED
-                        </span>
+                        {/* ⚠ "NOT READ" AND "NOT BILLED" ARE DIFFERENT ANSWERS AND MUST LOOK
+                            DIFFERENT. If the subscriptions read failed, this row knows nothing
+                            about this agency - and reporting that as "not billed" would be a
+                            confident claim built on a failure, which is precisely the shape
+                            this table is being fixed for. */}
+                        {unread ? (
+                          <span className="px-2.5 py-1 rounded-full text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-300">
+                            NOT READ
+                          </span>
+                        ) : (
+                          <span className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold border ${cls.tone}`}>
+                            {cls.word}
+                          </span>
+                        )}
+                        {cls.key === 'granted' && !unread && (
+                          <span className="block text-[10px] text-slate-400 mt-0.5">no invoice behind it</span>
+                        )}
+                        {sub?.invoicePending && (
+                          <span className="block text-[10px] text-amber-700 mt-0.5">invoice pending</span>
+                        )}
                       </td>
                       <td className="p-3 font-extrabold text-slate-900">
-                        {formatPrice()} <span className="text-[10px] font-normal text-slate-400">/ yr</span>
-                        <span className="block text-[10px] font-normal text-slate-400">the rate, not a charge made</span>
+                        {/* ⚠ WHAT WAS ACTUALLY CHARGED, WHEN ANYTHING WAS. `planAmount` is the
+                            figure recorded at the time of payment and is deliberately NOT
+                            recomputed from today's price - a subscription that recalculated its
+                            own amount would rewrite history on a record a GST invoice points at.
+                            Where nothing was charged the rate is still shown, and still labelled
+                            as a rate rather than a charge. */}
+                        {!unread && cls.wasPaid && Number(sub?.planAmount || 0) > 0 ? (
+                          <>
+                            {formatPrice(Number(sub?.planAmount))}
+                            <span className="text-[10px] font-normal text-slate-400"> paid</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-slate-400">{formatPrice()}</span>
+                            <span className="text-[10px] font-normal text-slate-400"> / yr</span>
+                            <span className="block text-[10px] font-normal text-slate-400">the rate, not a charge made</span>
+                          </>
+                        )}
                       </td>
-                      <td className="p-3 text-slate-400 font-medium">&mdash;</td>
+                      <td className="p-3 font-medium">
+                        {/* ⚠ AN EM DASH FOR admin AND none, NOT A DATE. An admin-created agency
+                            has no expiry because nothing was bought; printing one would invent
+                            a deadline no payment supports. `hasExpiry` is the classification's
+                            own answer, so this cannot disagree with the badge beside it. */}
+                        {unread || !cls.hasExpiry ? (
+                          <span className="text-slate-400">&mdash;</span>
+                        ) : (
+                          <span className={cls.key === 'expired' ? 'text-red-700' : 'text-slate-600'}>
+                            {formatDDMMYYYY(Number(sub?.expiryDate || 0))}
+                            {left !== null && (
+                              <span className="block text-[10px] text-slate-400">
+                                {left < 0 ? `${Math.abs(left)} days ago` : `${left} days left`}
+                              </span>
+                            )}
+                          </span>
+                        )}
+                      </td>
                       <td className="p-3 text-right">
                         {/* ⚠ DISABLED, NOT REMOVED (AUDIT G1). These wrote to the customer's
                             AGENCY document across accounts, which the tightened rules no
