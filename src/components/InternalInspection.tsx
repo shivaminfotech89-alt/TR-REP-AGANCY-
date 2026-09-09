@@ -1024,8 +1024,8 @@ export default function InternalInspection() {
                               <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
                                 {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
                               </td>
-                              <td className="border border-black p-0.5 font-mono text-[8.5px] truncate max-w-[55px]">{job.serialNo || '-'}</td>
-                              <td className="border border-black p-0.5 truncate max-w-[45px]">{job.make || '-'}</td>
+                              <td className="border border-black p-0.5 font-mono text-[8.5px] break-all max-w-[55px]" title={job.serialNo || '-'}>{job.serialNo || '-'}</td>
+                              <td className="border border-black p-0.5 break-all max-w-[45px]" title={job.make || '-'}>{job.make || '-'}</td>
                               <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
                               <td className="border border-black p-0.5 font-bold uppercase text-[8.5px] text-blue-900">
                                 {transCore}

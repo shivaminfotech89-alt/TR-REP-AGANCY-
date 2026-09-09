@@ -891,12 +891,12 @@ export default function ExternalInspection() {
                               <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
                                 {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
                               </td>
-                              <td className="border border-black p-0.5 truncate max-w-[50px]">{job.make || '-'}</td>
+                              <td className="border border-black p-0.5 break-all max-w-[50px]" title={job.make || '-'}>{job.make || '-'}</td>
                               <td className="border border-black p-0.5 font-bold">{job.capacityKva}</td>
                               <td className="border border-black p-0.5 font-bold uppercase text-[8.5px] text-blue-900">
                                 {transCore}
                               </td>
-                              <td className="border border-black p-0.5 text-[8.5px] font-semibold truncate max-w-[55px]" title={rating}>
+                              <td className="border border-black p-0.5 text-[8.5px] font-semibold break-words max-w-[55px]" title={rating}>
                                 {rating}
                               </td>
                               <td className="border border-black p-0.5">{data.kv || '11'}</td>

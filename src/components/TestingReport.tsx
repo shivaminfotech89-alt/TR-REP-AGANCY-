@@ -553,7 +553,7 @@ export default function TestingReport() {
                           return (
                             <tr key={job.id} className="border border-black h-6.5">
                               <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
-                              <td className="border border-black p-0.5 font-bold uppercase truncate max-w-[60px]">{job.division || '-'}</td>
+                              <td className="border border-black p-0.5 font-bold uppercase break-words max-w-[60px]" title={job.division || '-'}>{job.division || '-'}</td>
                               <td className="border border-black p-0.5 font-bold uppercase text-left pl-1">
                                 <div className="leading-tight">{job.jobNo}</div>
                                 {job.serialNo && (
