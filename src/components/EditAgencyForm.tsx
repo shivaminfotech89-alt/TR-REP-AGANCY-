@@ -4,7 +4,7 @@ import { useAgency } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { AgencyMarkTile } from './AgencyMarkTile';
 import { AgencyMark, MARK_SHAPES, MARK_COLOURS, SHAPE_LABEL, COLOUR_LABEL,
-         markFor, sameMark, agenciesUsingMark } from '../lib/agencyMark';
+         markFor, agenciesUsingMark } from '../lib/agencyMark';
 import {
   Loader2, FileUp, Check, Building2,
   CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
@@ -53,6 +53,13 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
    * "nobody chose" rather than a choice nobody made.
    */
   const [agencyMark, setAgencyMark] = useState<AgencyMark | null>((agency as any).mark ?? null);
+
+  /** What this agency would show if nothing is chosen - and what the colour list defaults to. */
+  const autoMark = markFor({ id: agency.id } as any);
+  /** What the preview draws: the chosen mark, or the automatic one. */
+  const effectiveMark = agencyMark ?? autoMark;
+  /** Other agencies already showing that, chosen or derived. See agenciesUsingMark. */
+  const effectiveClash = agenciesUsingMark(effectiveMark, agencies as any, agency.id);
   const [address, setAddress] = useState(agency.address || '');
   const [agencyState, setAgencyState] = useState(agency.agencyState || '');
   // Not defaulted to '24' - see AUDIT O8. Derived from the agency's own GSTIN below.
@@ -508,69 +515,91 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 {/* ⚠ BESIDE THE NAME, BECAUSE THE MARK IS THE NAME'S VISUAL TWIN. Choosing
                     them together is how they stay coherent. Deliberately NOT in the agency
                     switcher: picking an identity while switching identity is a way to change
-                    the wrong agency's mark. */}
+                    the wrong agency's mark.
+
+                    ⚠ TWO NATIVE SELECTS, NOT A CUSTOM POPOVER, AND NOT ONE LIST OF 64.
+
+                    One list of 64 flattens a two-axis choice into one - you would hunt for
+                    "amber transformer" among 63 near-neighbours. Two lists of eight match how
+                    the mark is actually composed, and either changes without disturbing the
+                    other.
+
+                    Native cannot draw an SVG inside an <option>, so the lists carry names and
+                    the PREVIEW does the work the options cannot. That is the right trade: a
+                    custom popover has to re-earn click-outside, escape, focus management and
+                    touch behaviour - AgencySwitcher had to - and this field is used once per
+                    agency. Keyboard and mobile behaviour come free here. */}
                 <div className="mt-3">
                   <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
                     Mark &mdash; how this agency is shown in the switcher
                   </label>
-                  <p className="text-[11px] text-slate-500 mb-2">
-                    {agencyMark
-                      ? <>Chosen. <button type="button" onClick={() => setAgencyMark(null)}
-                            className="font-bold underline hover:text-slate-800">Use the automatic one instead</button></>
-                      : <>Automatic, from this agency&rsquo;s id &mdash; shown with a dashed ring below. Pick one to set it.</>}
-                  </p>
 
-                  <div className="inline-block border border-slate-200 rounded-lg p-2 bg-slate-50/60 overflow-x-auto max-w-full">
-                    <div className="grid grid-flow-col auto-cols-max gap-1">
-                      {MARK_COLOURS.map(colour => (
-                        <div key={colour} className="grid gap-1">
-                          {MARK_SHAPES.map(shape => {
-                            const m = { shape, colour } as AgencyMark;
-                            const chosen = agencyMark && sameMark(agencyMark, m);
-                            const isAuto = !agencyMark && sameMark(markFor({ id: agency.id } as any), m);
-                            /* ⚠ NAMES THE CLASH. Sixteen agencies into 64 combinations is a
-                               birthday problem: a clash is the NORMAL case - only a 12.9%
-                               chance of none, and about 1.9 colliding pairs expected. The
-                               warning is what makes that liveable, so it counts DERIVED marks
-                               too: an owner looking at two identical rows does not care which
-                               of them picked it. */
-                            const clash = agenciesUsingMark(m, agencies as any, agency.id);
-                            return (
-                              <button
-                                key={shape}
-                                type="button"
-                                onClick={() => setAgencyMark(m)}
-                                title={clash.length
-                                  ? `${COLOUR_LABEL[colour]} ${SHAPE_LABEL[shape].toLowerCase()} — already used by ${clash.join(', ')}`
-                                  : `${COLOUR_LABEL[colour]} ${SHAPE_LABEL[shape].toLowerCase()}`}
-                                className={`relative rounded-lg p-0.5 transition-all ${
-                                  chosen ? 'ring-2 ring-slate-900'
-                                    : isAuto ? 'ring-2 ring-dashed ring-slate-400'
-                                    : 'hover:ring-2 hover:ring-slate-300'
-                                }`}
-                              >
-                                <AgencyMarkTile mark={m} size="sm" />
-                                {clash.length > 0 && (
-                                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-900 border border-white"
-                                        aria-hidden="true" />
-                                )}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ))}
+                  <div className="flex items-center gap-2.5">
+                    <div className="grid grid-cols-2 gap-2 flex-1 min-w-0">
+                      {/* ⚠ "AUTOMATIC" IS THE FIRST SHAPE OPTION, so null stays reachable.
+                          Choosing it clears the field rather than storing the derived value -
+                          "nobody chose" and "chose the one that matches" stay different facts. */}
+                      <select
+                        value={agencyMark ? agencyMark.shape : ''}
+                        onChange={e => {
+                          const v = e.target.value;
+                          if (!v) { setAgencyMark(null); return; }
+                          setAgencyMark({ shape: v as any, colour: (agencyMark?.colour ?? autoMark.colour) });
+                        }}
+                        className="w-full px-2.5 py-2 text-xs border border-slate-300 rounded bg-white"
+                      >
+                        <option value="">Automatic (from this agency)</option>
+                        {MARK_SHAPES.map(sh => (
+                          <option key={sh} value={sh}>{SHAPE_LABEL[sh]}</option>
+                        ))}
+                      </select>
+
+                      {/* ⚠ THE CLASH IS IN THE OPTION TEXT. The grid marked it with a 2px dot
+                          and a tooltip, which on a phone has no hover and is close to
+                          invisible. An <option> cannot carry an SVG but it can carry words,
+                          and at an 87% clash rate for sixteen agencies that is worth the small
+                          ugliness. Computed against the shape currently selected. */}
+                      <select
+                        value={agencyMark ? agencyMark.colour : ''}
+                        disabled={!agencyMark}
+                        onChange={e => setAgencyMark({ shape: agencyMark!.shape, colour: e.target.value as any })}
+                        className="w-full px-2.5 py-2 text-xs border border-slate-300 rounded bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                      >
+                        {!agencyMark && <option value="">&mdash;</option>}
+                        {agencyMark && MARK_COLOURS.map(co => {
+                          const used = agenciesUsingMark({ shape: agencyMark.shape, colour: co }, agencies as any, agency.id);
+                          return (
+                            <option key={co} value={co}>
+                              {COLOUR_LABEL[co]}{used.length ? ` — used by ${used.join(', ')}` : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
                     </div>
+
+                    {/* THE LIVE PREVIEW. Dashed ring = automatic, solid = chosen - so an
+                        automatic mark and a chosen one that looks identical are still
+                        distinguishable, which is the whole reason the field stays null. */}
+                    <span className={`shrink-0 rounded-lg p-0.5 ${
+                      agencyMark ? 'ring-2 ring-slate-900' : 'ring-2 ring-dashed ring-slate-400'
+                    }`}>
+                      <AgencyMarkTile mark={effectiveMark} size="lg" />
+                    </span>
                   </div>
 
-                  {agencyMark && agenciesUsingMark(agencyMark, agencies as any, agency.id).length > 0 && (
-                    <p className="mt-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1">
-                      Also used by {agenciesUsingMark(agencyMark, agencies as any, agency.id).join(', ')} &mdash;
-                      two agencies will look the same in the switcher.
+                  <p className="mt-1.5 text-[11px] text-slate-500">
+                    {agencyMark ? 'Chosen' : 'Automatic'} &mdash; {COLOUR_LABEL[effectiveMark.colour]}{' '}
+                    {SHAPE_LABEL[effectiveMark.shape].toLowerCase()}.
+                  </p>
+
+                  {effectiveClash.length > 0 && (
+                    <p className="mt-1.5 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1">
+                      Also used by {effectiveClash.join(', ')} &mdash; two agencies will look the
+                      same in the switcher.
                     </p>
                   )}
-                  <p className="mt-1 text-[10px] text-slate-400">
-                    A dot marks a combination another agency already shows. Never printed on any document.
-                  </p>
+
+                  <p className="mt-1 text-[10px] text-slate-400">Never printed on any document.</p>
                 </div>
               </div>
 
