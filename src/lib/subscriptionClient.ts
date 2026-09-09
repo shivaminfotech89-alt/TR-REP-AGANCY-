@@ -81,6 +81,60 @@ export class CheckoutDismissed extends Error {
 }
 
 /**
+ * RAZORPAY REFUSED THE PAYMENT. No money moved, and the server was never called.
+ *
+ * ⚠ THE WHOLE ERROR OBJECT IS KEPT, not just its description - and the first version of this
+ * file kept only the description, which is why a failure could not be diagnosed from what was
+ * on screen. Razorpay's `payment.failed` carries five fields that each answer a different
+ * question, and `step` is the one that matters most here:
+ *
+ *   step   WHERE it died. `payment_initiation` means Razorpay refused before it ever asked the
+ *          bank - the method is not enabled, the card is not accepted, the request was
+ *          malformed. `payment_authentication` means it reached the OTP/3-D Secure stage and
+ *          failed there. `payment_authorization` means the bank declined.
+ *          ⚠ NO OTP PROMPT APPEARING IS THE VISIBLE FORM OF step === 'payment_initiation'.
+ *   reason a machine code such as `invalid_card`, `payment_failed`,
+ *          `international_transaction_not_allowed`.
+ *   source whose problem it is - `customer`, `business`, `gateway`, `bank`, `network`.
+ *          `business` means the account, not the card.
+ *   code   the error class, e.g. BAD_REQUEST_ERROR, GATEWAY_ERROR.
+ *   metadata.payment_id  the id to search for in the dashboard's Payments tab.
+ */
+export class GatewayDeclined extends Error {
+  readonly code: string;
+  readonly reason: string;
+  readonly source: string;
+  readonly step: string;
+  readonly paymentId: string;
+  readonly raw: unknown;
+  constructor(err: any, raw: unknown) {
+    const description = String(err?.description || 'The payment was declined.');
+    super(description);
+    this.code = String(err?.code || '');
+    this.reason = String(err?.reason || '');
+    this.source = String(err?.source || '');
+    this.step = String(err?.step || '');
+    this.paymentId = String(err?.metadata?.payment_id || '');
+    this.raw = raw;
+  }
+  /** One line naming every field that was populated. This is what belongs on screen. */
+  get detail(): string {
+    const parts = [
+      this.reason && `reason ${this.reason}`,
+      this.step && `step ${this.step}`,
+      this.source && `source ${this.source}`,
+      this.code && this.code,
+      this.paymentId && this.paymentId,
+    ].filter(Boolean);
+    return parts.join(' \u00b7 ');
+  }
+  /** True when Razorpay refused before reaching authentication - no OTP was ever going to appear. */
+  get refusedBeforeAuth(): boolean {
+    return this.step === 'payment_initiation';
+  }
+}
+
+/**
  * Load Razorpay's checkout script, once.
  *
  * ⚠ LOADED ON DEMAND RATHER THAN IN index.html. It is a third-party script on every page load
@@ -134,6 +188,22 @@ export function payWithRazorpay(
       // a completed payment could be reported as a dismissal and the resolve discarded.
       let settled = false;
 
+      // ⚠ AND THE RACE RUNS THE OTHER WAY TOO, WHICH THE FIRST VERSION OF THIS FILE GOT WRONG.
+      //
+      // When a payment FAILS, Razorpay closes the modal - so `ondismiss` and `payment.failed`
+      // both fire, in an order this code does not control. `settled` alone meant whichever
+      // arrived first won, and if that was `ondismiss` the result was `CheckoutDismissed` -
+      // which the panel deliberately shows NO message for, because closing a payment window is
+      // ordinary. A real gateway refusal could therefore render as complete silence: the
+      // customer presses Pay, the modal vanishes, and nothing is said.
+      //
+      // The dismissal verdict is now DEFERRED briefly. A `payment.failed` arriving in that
+      // window wins, because it carries a reason and a dismissal does not. Nothing is lost if
+      // it never arrives - the dismissal simply resolves a moment later, and no human can
+      // perceive the delay on a modal that has already closed.
+      let dismissTimer: ReturnType<typeof setTimeout> | null = null;
+      const DISMISS_GRACE_MS = 600;
+
       const rzp = new (window as any).Razorpay({
         key: order.keyId,
         order_id: order.orderId,
@@ -155,8 +225,11 @@ export function payWithRazorpay(
         modal: {
           ondismiss: () => {
             if (settled) return;
-            settled = true;
-            reject(new CheckoutDismissed());
+            dismissTimer = setTimeout(() => {
+              if (settled) return;
+              settled = true;
+              reject(new CheckoutDismissed());
+            }, DISMISS_GRACE_MS);
           },
         },
         handler: async (response: any) => {
@@ -192,10 +265,19 @@ export function payWithRazorpay(
       });
 
       rzp.on('payment.failed', (resp: any) => {
+        if (dismissTimer) { clearTimeout(dismissTimer); dismissTimer = null; }
         if (settled) return;
         settled = true;
-        // A genuine gateway decline - card refused, expired, insufficient funds. No money moved.
-        reject(new Error(String(resp?.error?.description || 'The payment was declined. Nothing was charged.')));
+
+        // ⚠ LOGGED IN FULL, AND DELIBERATELY. This is the only place the gateway says WHY, and
+        // the payload is not reconstructible afterwards from anything on screen or in
+        // Firestore - the server is never called on this path. `console.error` with the whole
+        // object means a failure can be diagnosed from the browser console rather than guessed
+        // at from a description.
+        console.error('[razorpay] payment.failed', JSON.parse(JSON.stringify(resp ?? {})));
+
+        // A gateway decline. No money moved and verifySubscriptionPayment was never reached.
+        reject(new GatewayDeclined(resp?.error, resp));
       });
 
       rzp.open();

@@ -5,7 +5,7 @@ import { useAgency } from '../lib/AgencyContext';
 import { CARD, CARD_PAD, LABEL } from '../lib/ui';
 import { formatPrice, gstBreakdown } from '../lib/pricing';
 import {
-  createOrder, payWithRazorpay, CheckoutDismissed, PaymentTakenButUnverified,
+  createOrder, payWithRazorpay, CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined,
 } from '../lib/subscriptionClient';
 import { formatDDMMYYYY } from '../lib/utils';
 import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock } from 'lucide-react';
@@ -75,7 +75,20 @@ export default function SubscriptionPanel() {
   const [sub, setSub] = useState<Sub | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [note, setNote] = useState<{ kind: 'ok' | 'warn' | 'bad'; text: string } | null>(null);
+  /**
+   * ⚠ `stage` NAMES WHERE IT FAILED, because the three failures are indistinguishable to the
+   * person looking at them and lead to completely different places:
+   *
+   *   'gateway'  Razorpay refused. No money moved. The app was never involved.
+   *   'server'   The payment succeeded and this app could not confirm it. MONEY MOVED.
+   *   'app'      It never got as far as a payment - the order could not even be created.
+   *
+   * `detail` is the machine-readable half, shown in mono beneath. It is the string to quote,
+   * and printing it is the difference between a report that can be acted on and "it failed".
+   */
+  const [note, setNote] = useState<
+    { kind: 'ok' | 'warn' | 'bad'; text: string; stage?: string; detail?: string } | null
+  >(null);
 
   const agencyId = activeAgency?.id || '';
 
@@ -127,9 +140,30 @@ export default function SubscriptionPanel() {
       } else if (e instanceof PaymentTakenButUnverified) {
         // ⚠ THE ONE MESSAGE THAT MUST NOT SAY "FAILED". Money moved; the customer will see it
         // on their statement whatever this screen claims.
-        setNote({ kind: 'bad', text: e.message });
+        setNote({
+          kind: 'bad',
+          stage: 'The payment succeeded and this app could not confirm it',
+          text: e.message,
+          detail: `payment ${e.paymentId} · order ${e.orderId}`,
+        });
+      } else if (e instanceof GatewayDeclined) {
+        setNote({
+          kind: 'warn',
+          // ⚠ SAYS WHOSE REFUSAL IT WAS. Without this the customer cannot tell a declined card
+          // from a broken application, and will retry the same card indefinitely on a failure
+          // that is nothing to do with the card.
+          stage: e.refusedBeforeAuth
+            ? 'The payment gateway refused this before asking your bank'
+            : 'The payment gateway declined this',
+          text: e.message + ' Nothing was charged.',
+          detail: e.detail,
+        });
       } else {
-        setNote({ kind: 'warn', text: String(e?.message || 'The payment could not be started.') });
+        setNote({
+          kind: 'warn',
+          stage: 'The payment could not be started',
+          text: String(e?.message || 'Unknown error.') + ' Nothing was charged.',
+        });
       }
     } finally {
       setBusy(false);
@@ -171,7 +205,13 @@ export default function SubscriptionPanel() {
           : note.kind === 'bad' ? 'bg-red-50 border-red-300 text-red-900'
           : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
           {note.kind === 'ok' ? <ShieldCheck className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-          <span>{note.text}</span>
+          <span>
+            {note.stage && <strong className="block">{note.stage}.</strong>}
+            {note.text}
+            {note.detail && (
+              <span className="block mt-1 font-mono text-[10px] opacity-80 break-all">{note.detail}</span>
+            )}
+          </span>
         </div>
       )}
 

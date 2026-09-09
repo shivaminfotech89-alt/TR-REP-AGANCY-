@@ -147,7 +147,17 @@ export function makeCreateSubscriptionOrder(db) {
       const body = {
         amount: AMOUNT_PAISE,
         currency: CURRENCY,
-        receipt: `${kind}:${agencyId || uid}:${Date.now()}`,
+        // ⚠ RAZORPAY CAPS `receipt` AT 40 CHARACTERS, and the first version of this line
+        // produced 42: `renewal:` (8) + a 20-character Firestore id + `:` + a 13-digit
+        // millisecond timestamp. Over the cap the Orders API returns 400 and no order is
+        // created at all - which is a failure BEFORE checkout opens, and so is emphatically
+        // NOT the same thing as a payment failing after card entry.
+        //
+        // Nothing is lost by shortening it: the full ids are in `notes` below and in this
+        // application's own payment_orders document, and the receipt is only a short label for
+        // reconciliation in Razorpay's dashboard. Base-36 for the timestamp, and the tail of
+        // the id, which is the part that actually distinguishes one Firestore id from another.
+        receipt: `${kind === 'renewal' ? 'rnw' : 'new'}_${String(agencyId || uid).slice(-10)}_${Date.now().toString(36)}`,
         notes: { kind, uid, agencyId, agencyName, email },
       };
 
