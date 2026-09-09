@@ -472,6 +472,33 @@ service cloud.firestore {
      */
 
     /**
+     * THE PAYMENT LEDGER. Two collections written only by the payment functions.
+     *
+     * `payment_orders/{orderId}` records what an order was FOR - which agency, which kind -
+     * before the customer pays. At verification time those facts are read back from here and
+     * never from the browser, which is what stops a renewal order being redeemed as a slot to
+     * create a new agency.
+     *
+     * `payments/{razorpay_payment_id}` is the IDEMPOTENCY KEY, not a log. A checkout callback
+     * can arrive twice - a retry, a double-click, a refresh - and the transaction creates this
+     * document with `create`, which fails if it already exists. Without it the second arrival
+     * would extend a subscription by another year for one payment.
+     *
+     * ⚠ NO CLIENT READ AT ALL, not even the payer's. There is nothing here a customer needs:
+     * what they bought shows on their subscription, and the order id they need for checkout is
+     * returned by the function that made it. A ledger is the vendor's record.
+     */
+    match /payment_orders/{orderId} {
+      allow get, list: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    match /payments/{paymentId} {
+      allow get, list: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    /**
      * WHAT AN AGENCY HAS PAID FOR. Written by the payment function, after signature
      * verification, and by the vendor's grant script. Never by a browser.
      *

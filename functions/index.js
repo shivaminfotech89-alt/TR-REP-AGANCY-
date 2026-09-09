@@ -29,6 +29,7 @@ import { dirname, join } from 'node:path';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { makeCreateSubscriptionOrder, makeVerifySubscriptionPayment } from './subscription.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appConfig = JSON.parse(readFileSync(join(here, 'app-config.json'), 'utf8'));
@@ -161,3 +162,15 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
     label: guard.label,
   };
 });
+
+/**
+ * SUBSCRIPTION PAYMENTS. Defined in ./subscription.js and wired here because a deployed
+ * function is only discovered through the package's main entry.
+ *
+ * They take `db` rather than building their own handle, for the reason this file's header
+ * gives at length: the NAMED database is load-bearing, and a second `getFirestore()` call is a
+ * second chance to point at `(default)` and find an empty collection where the real one is.
+ * One handle, made once, from the committed config.
+ */
+export const createSubscriptionOrder = makeCreateSubscriptionOrder(db);
+export const verifySubscriptionPayment = makeVerifySubscriptionPayment(db);

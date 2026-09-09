@@ -10662,3 +10662,72 @@ in the data distinguishes a customer from a test record — `ADMIN`, `suchit` an
 excluded on judgement, not evidence. A script that presents a judgement as a fact is how a wrong
 one gets approved, so it prints what it inferred and why, for a person who knows these agencies
 to read against what they know.
+
+
+## G30. The two payment functions, and the four things a browser is not allowed to say
+
+`createSubscriptionOrder` and `verifySubscriptionPayment`, in `functions/subscription.js`. The
+client opens Razorpay's checkout with an order id it was handed and passes back what checkout
+returns. **Nothing it says about the outcome is believed.**
+
+Four inputs a browser might plausibly supply are refused on principle, and each is a real
+vulnerability rather than defensive habit:
+
+**1. The amount.** Taken from a constant in the function, never from the request. An order
+endpoint that accepts an amount is the most common form this bug takes, and it is total: the
+customer names their own price. `PRICE_INCLUSIVE_INR` is duplicated from `src/lib/pricing.ts`
+because a deployed function ships only what is under `functions/` — the same constraint that
+produced `app-config.json` and its predeploy sync. **The copy is safe here in a way the database
+id was not, because this one is authoritative:** the charge is whatever this function tells
+Razorpay, and the client's figure is only a label. If they drift the customer is charged this
+number and shown the other, which is a display bug. The reverse arrangement — the client naming
+the amount — is the one that must never exist.
+
+**2. What the payment was for.** `payment_orders/{orderId}` records the kind and the agency
+*before* the customer pays; verification reads them back from there. Without it a browser could
+present a renewal order and redeem it as a slot to create a new agency — same payment, different
+entitlement, and every signature check would pass, because **the signature proves the payment is
+genuine and says nothing about what it was for.**
+
+**3. That the payment succeeded.** Only `razorpay_signature` establishes that, being
+`HMAC-SHA256(order_id + "|" + payment_id)` under the key secret. The other two fields checkout
+returns can simply be invented. Compared with `timingSafeEqual`, **length-checked first because
+that function throws on a length mismatch rather than returning false** — an exception that would
+surface as a server error instead of a rejected payment, which is the wrong outcome dressed as
+the wrong kind of failure.
+
+**4. That it has not already been counted.** `payments/{razorpay_payment_id}` is an idempotency
+key, not a log. A checkout callback arrives twice for ordinary reasons — a retry, a double-click,
+a refresh — and the transaction uses `create`, which fails if the document exists, so the second
+attempt loses the race rather than both succeeding. Without it a single payment extends a
+subscription by two years.
+
+**RENEWAL EXTENDS FROM THE EXISTING EXPIRY, NOT FROM TODAY**, whenever that expiry is still in
+the future. Renewing early must not cost a customer the days they already hold — and with
+eighteen-month founding grants outstanding, early renewal is the *normal* case here rather than
+an edge one. A design that quietly resets to `now + 365` would take months from every founding
+agency, and would look correct in every test written against a lapsed subscription.
+
+**THE INVOICE IS DELIBERATELY NOT ISSUED IN THIS FUNCTION**, and it is the decision here most
+likely to be mistaken for an omission. Two requirements collide:
+
+- A GST invoice number must be sequential and **gap-free** within a financial year. The SAC code
+  is not settled, so an invoice cannot be rendered correctly today, and **allocating a number to
+  an invoice that cannot be rendered puts a permanent hole in the sequence** — a filing defect,
+  not a missing feature.
+- The money has already left the customer's account by the time this function runs. **Refusing
+  the payment over incomplete invoice configuration would lose a payment already taken**, which
+  is categorically worse than a late invoice.
+
+So a verified payment always records the subscription and flags `invoicePending: true`. Invoices
+are issued afterwards, in order, once the SAC code is set. Nothing is lost and no number is
+burned. The function returns `invoicePending` to the caller so the screen can say so plainly
+rather than implying a document is arriving in the next few seconds.
+
+**The two configuration values are separated on purpose.** `RAZORPAY_KEY_SECRET` is a Functions
+secret; `RAZORPAY_KEY_ID` is a deploy param, because it is publishable by design and switching
+test to live should be configuration rather than a code change. The key id is handed to the
+client **with the order** rather than duplicated in the bundle, so the two cannot disagree about
+which mode the app is in. When either is unset the refusal **names which one and which mechanism
+configures it** — "payments are not configured" sends the reader to the wrong place half the
+time.
