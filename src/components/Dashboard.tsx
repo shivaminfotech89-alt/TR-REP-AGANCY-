@@ -952,17 +952,77 @@ export default function Dashboard() {
         )}
       </div>
 
-      {/* ⚠ THE "QUICK WORKSHOP ACTIONS" TILE GRID WAS HERE AND IS NOT COMING BACK.
-          Twelve tiles, and ELEVEN of them duplicated the sidebar exactly - New Job, MR
-          Ledger, External, Internal, Testing, Estimate, Challan, Billing, Oil, Reports and
-          Estimate Master are all nav entries. The twelfth, Agency Settings, is linked three
-          separate times from AppLayout. Nothing was reachable only from here; that was
-          checked before it went rather than after.
+      {/* 5. COMPACT WORKSHOP SHORTCUTS (Mobile 3-col / Desktop 6-col) */}
+      <div className={`${CARD} ${CARD_PAD}`}>
+        <div className="flex items-center justify-between mb-2.5">
+          <h2 className={CARD_TITLE}>Quick Workshop Actions</h2>
+          <Link to="/reports" className="text-[11px] font-bold text-blue-600 hover:underline">
+            All Reports &rarr;
+          </Link>
+        </div>
 
-          A second copy of the nav cost the Dashboard about 150px on desktop and 250px on a
-          phone, above the insight cards people come here to read - and it had to be kept in
-          step with the sidebar by hand, which is a way for the two to disagree. */}
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+          <Link to="/new-job" className="p-2 rounded border border-emerald-200 bg-emerald-50/60 hover:bg-emerald-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-emerald-800 block">MR INTAKE</span>
+            <span className="text-[11px] text-emerald-950 font-bold block truncate mt-0.5">New Job</span>
+          </Link>
 
+          <Link to="/mr-ledger" className="p-2 rounded border border-slate-200 bg-slate-50/60 hover:bg-slate-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-slate-600 block">REGISTER</span>
+            <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">MR Ledger</span>
+          </Link>
+
+          <Link to="/external-inspection" className="p-2 rounded border border-cyan-200 bg-cyan-50/60 hover:bg-cyan-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-cyan-800 block">INSPECTION</span>
+            <span className="text-[11px] text-cyan-950 font-bold block truncate mt-0.5">External</span>
+          </Link>
+
+          <Link to="/internal-inspection" className="p-2 rounded border border-amber-200 bg-amber-50/60 hover:bg-amber-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-amber-800 block">WINDING</span>
+            <span className="text-[11px] text-amber-950 font-bold block truncate mt-0.5">Internal</span>
+          </Link>
+
+          <Link to="/testing-report" className="p-2 rounded border border-teal-200 bg-teal-50/60 hover:bg-teal-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-teal-800 block">TESTING</span>
+            <span className="text-[11px] text-teal-950 font-bold block truncate mt-0.5">Report</span>
+          </Link>
+
+          <Link to="/estimates/new" className="p-2 rounded border border-purple-200 bg-purple-50/60 hover:bg-purple-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-purple-800 block">ESTIMATE</span>
+            <span className="text-[11px] text-purple-950 font-bold block truncate mt-0.5">Rates</span>
+          </Link>
+
+          <Link to="/challan/new" className="p-2 rounded border border-blue-200 bg-blue-50/60 hover:bg-blue-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-blue-800 block">DELIVERY</span>
+            <span className="text-[11px] text-blue-950 font-bold block truncate mt-0.5">Challan</span>
+          </Link>
+
+          <Link to="/bills/new" className="p-2 rounded border border-indigo-200 bg-indigo-50/60 hover:bg-indigo-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-indigo-800 block">INVOICE</span>
+            <span className="text-[11px] text-indigo-950 font-bold block truncate mt-0.5">Billing</span>
+          </Link>
+
+          <Link to="/oil-inward" className="p-2 rounded border border-sky-200 bg-sky-50/60 hover:bg-sky-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-sky-800 block">OIL</span>
+            <span className="text-[11px] text-sky-950 font-bold block truncate mt-0.5">Ledger</span>
+          </Link>
+
+          <Link to="/reports" className="p-2 rounded border border-rose-200 bg-rose-50/60 hover:bg-rose-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-rose-800 block">REPORTS</span>
+            <span className="text-[11px] text-rose-950 font-bold block truncate mt-0.5">Hub</span>
+          </Link>
+
+          <Link to="/agency-settings?section=estimate-master" className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg text-center transition-colors">
+            <span className="text-[10px] font-black text-slate-700 block">MASTER</span>
+            <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">AT Rates</span>
+          </Link>
+
+          <Link to="/agency-settings" className="p-2 rounded border border-slate-200 bg-slate-50/60 hover:bg-slate-100 text-center transition-colors">
+            <span className="text-[10px] font-black text-slate-600 block">SETTINGS</span>
+            <span className="text-[11px] text-slate-900 font-bold block truncate mt-0.5">Agency</span>
+          </Link>
+        </div>
+      </div>
 
       {/* 6. SECONDARY INSIGHTS GRID (ALLOTMENT, OIL, WARRANTY, DIVISION DISTRIBUTION & BACKLOG) */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
