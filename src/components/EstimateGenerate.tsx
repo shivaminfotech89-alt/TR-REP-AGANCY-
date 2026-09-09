@@ -684,17 +684,14 @@ export default function EstimateGenerate() {
         unit: String(it.unit || ''),
       }));
 
-    // Blocked columns are excluded, exactly as they are excluded from a bill: a withheld
-    // amount is not a zero and must not be summed as one.
-    const grandTotal = Number(columns
-      .filter(c => c.rateErrors.length === 0)
-      .reduce((sum, c) => sum + c.finalAmount, 0).toFixed(2));
-
+    // No combined figure. Each column carries its own total and the sheet prints no grand
+    // total, so there is nothing here to sum - and nothing for a cross-page assertion to
+    // check, which is why that went with it. See the note in MultiJobEstimateSheet.
     return {
       refNo: refNoText,
       mrNo: mr,
       division: currentSelectedDivision || '',
-      items, columns, grandTotal,
+      items, columns,
       signedByText,
     };
   };

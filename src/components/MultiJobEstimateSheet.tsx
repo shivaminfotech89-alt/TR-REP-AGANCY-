@@ -76,10 +76,27 @@ export interface MultiJobEstimateData {
   division: string;
   items: MatrixItem[];
   columns: MatrixColumn[];
-  /** Sum of every column's finalAmount, computed by the caller from the same figures. */
-  grandTotal: number;
   signedByText: string;
 }
+
+/**
+ * SHORTER LABELS FOR THIS SHEET ONLY, where the tender's own wording will not fit 70mm.
+ *
+ * ⚠ A DELIBERATELY SHORTER LABEL, NOT A TRUNCATION. Paper has no hover: a sentence cut off
+ * with an ellipsis leaves a reader with no way to complete it, which is worse than a shorter
+ * label that is complete in itself. The full text is on `title` for the screen, and the words
+ * that survive are the operative ones - what was done, and the condition it was done under.
+ *
+ * The scrap row is code '22' in the CRGO master and '0' in the fixed-rate sections; it is the
+ * same charge, so both map to the same label. One entry today; add to it only when a real
+ * description overflows, not pre-emptively.
+ */
+const SHORT_LABEL: Record<string, string> = {
+  // "Rate for inspection & dismantling charges of damaged transformer declared as scrap by
+  //  E.E. (TR)" — 95 characters against ~34 that fit.
+  '22': 'Inspection & dismantling \u2014 scrap',
+  '0': 'Inspection & dismantling \u2014 scrap',
+};
 
 const PER_PAGE = 5;
 
@@ -90,18 +107,20 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
   }
   if (!pages.length) pages.push([]);
 
-  const priced = data.columns.filter(c => c.rateErrors.length === 0);
-  const blocked = data.columns.length - priced.length;
+  const blocked = data.columns.filter(c => c.rateErrors.length > 0).length;
 
-  /**
-   * ⚠ THE GRAND TOTAL IS ASSERTED, NOT ASSUMED. The caller sums the columns; this re-sums
-   * the pages. If a job were dropped between paginating and printing, the two disagree and
-   * the sheet SAYS SO rather than printing the smaller figure, which would look complete.
+  /*
+   * ⚠ THERE IS NO GRAND TOTAL, AND THE CROSS-PAGE ASSERTION WENT WITH IT. Each column carries
+   * its own total and a combined figure is not wanted. The assertion existed ONLY to check the
+   * page sum against that combined figure; with one of the two gone there are no longer two
+   * derivations in tension, and a column's Final Amount comes straight from
+   * getJobFullEstimate - the same value the single-job sheet prints - so there is nothing left
+   * for it to disagree with.
+   *
+   * ⚠ WHICH MAKES THE PAGE BANNER THE ONLY GUARD AGAINST A JOB BEING SILENTLY DROPPED. It is
+   * why the last page states the totals explicitly - "18 transformers on 4 pages" - so a
+   * reader counting columns has something to count against.
    */
-  const pagedSum = Number(
-    pages.flat().filter(c => c.rateErrors.length === 0)
-      .reduce((n, c) => n + Number(c.finalAmount || 0), 0).toFixed(2));
-  const totalsAgree = Math.abs(pagedSum - Number(data.grandTotal.toFixed(2))) < 0.01;
 
   return (
     <>
@@ -111,7 +130,18 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
         const to = pageIdx * PER_PAGE + cols.length;
         return (
           <PrintableA4Page key={pageIdx} agency={agency} documentTitle="ESTIMATE — MULTIPLE TRANSFORMERS">
-            <div className="text-black text-[10px]">
+            {/* ⚠ CENTRED EXPLICITLY, NOT BY FILLING THE WIDTH. The table is 187mm inside a
+                ~190mm content area, so today it looks centred by accident of nearly filling
+                the page. Raise a size or drop a column and it would sit left. `mx-auto` on a
+                `w-fit` wrapper keeps it centred at any width.
+
+                ⚠ VERTICAL SPARE IS LARGE AND HORIZONTAL SPARE IS 3mm - the two budgets are
+                not the same and only one constrains the column count. At the realistic worst
+                case (24 applicable item rows) the page has ~65mm to spare vertically, which
+                is why every size below could be raised while the 20mm columns could not
+                widen. Nothing on this sheet is below 9.5px, the floor the other printed
+                documents hold. */}
+            <div className="text-black text-[11px] mx-auto w-fit">
 
               {/* IDENTITY. The reference is the operator's, never generated - see the note
                   at the top of this file and AUDIT G8. */}
@@ -126,13 +156,22 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
                     : <p className="font-bold border border-black px-1.5 py-0.5">
                         REFERENCE NUMBER NOT SET
                       </p>}
+                  {/* ⚠ THE ONLY GUARD LEFT AGAINST A DROPPED JOB, now the grand total has
+                      gone. A reader counts columns against it, so the last page states the
+                      totals outright rather than leaving them to be inferred from "n of m". */}
                   <p className="mt-0.5">
                     Page {pageIdx + 1} of {pages.length} &mdash; transformers {from} to {to} of {data.columns.length}
                   </p>
+                  {isLast && (
+                    <p className="font-bold">
+                      {data.columns.length} transformer{data.columns.length === 1 ? '' : 's'} on{' '}
+                      {pages.length} page{pages.length === 1 ? '' : 's'}
+                    </p>
+                  )}
                 </div>
               </div>
 
-              <table className="w-full border-collapse border border-black text-[9.5px]">
+              <table className="border-collapse border border-black text-[10px] mx-auto">
                 <thead>
                   <tr className="font-bold">
                     <th className="border border-black p-1 w-7">Sr.</th>
@@ -142,10 +181,15 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
                     <th className="border border-black p-1 w-10">Unit</th>
                     {cols.map(c => (
                       <th key={c.jobId} className="border border-black p-1 text-right align-bottom" style={{ width: '20mm' }}>
+                        {/* ⚠ ONE LONG MAKE MAKES EVERY COLUMN HEADER TALLER, and that is
+                            accepted. Header height is shared across the row; per-column
+                            heights would not align, which is worse on a document read across.
+                            Live data: 2 of 64 makes and 2 of 64 serials exceed the ~10
+                            characters a 20mm column holds at this size. */}
                         <span className="block font-mono font-black">{c.jobNo}</span>
-                        <span className="block font-normal text-[8.5px] leading-tight">{c.kva} KVA</span>
-                        <span className="block font-normal text-[8.5px] leading-tight">{c.make || '—'}</span>
-                        <span className="block font-normal text-[8.5px] leading-tight font-mono">{c.serialNo || '—'}</span>
+                        <span className="block font-normal text-[9.5px] leading-tight">{c.kva} KVA</span>
+                        <span className="block font-normal text-[9.5px] leading-tight">{c.make || '—'}</span>
+                        <span className="block font-normal text-[9.5px] leading-tight font-mono">{c.serialNo || '—'}</span>
                       </th>
                     ))}
                   </tr>
@@ -154,7 +198,9 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
                   {data.items.map(item => (
                     <tr key={item.code}>
                       <td className="border border-black p-1 text-center">{item.sr}</td>
-                      <td className="border border-black p-1">{item.name}</td>
+                      <td className="border border-black p-1" title={item.name}>
+                        {SHORT_LABEL[item.code] ?? item.name}
+                      </td>
                       <td className="border border-black p-1 text-center">{item.unit}</td>
                       {cols.map(c => (
                         <td key={c.jobId} className="border border-black p-1 text-right font-mono tabular-nums">
@@ -180,15 +226,28 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
                       </td>
                     ))}
                   </tr>
+                  {/* ⚠ TWO ROWS, NOT ONE CELL WITH TWO NUMBERS IN IT. This printed
+                      "(+7.0%) 4,235.60" in a 20mm cell in a column of currency: fourteen
+                      characters that wrap, with the operative fact - the percentage - in
+                      parentheses where it reads as a footnote to the amount beside it. Split,
+                      each row carries one kind of number, and a reader following a column down
+                      gets exactly what the single sheet's totals box prints. Costs ~5mm of a
+                      65mm vertical spare. */}
                   <tr>
-                    <td className="border border-black p-1 text-right" colSpan={3}>
-                      Percentage
-                    </td>
+                    <td className="border border-black p-1 text-right" colSpan={3}>AT %</td>
                     {cols.map(c => (
                       <td key={c.jobId} className="border border-black p-1 text-right font-mono tabular-nums">
                         {c.rateErrors.length > 0
                           ? ''
-                          : <>({c.atPercentage >= 0 ? '+' : ''}{c.atPercentage.toFixed(1)}%) {formatCurrency(c.percentageAmount)}</>}
+                          : `${c.atPercentage >= 0 ? '+' : ''}${c.atPercentage.toFixed(1)}%`}
+                      </td>
+                    ))}
+                  </tr>
+                  <tr>
+                    <td className="border border-black p-1 text-right" colSpan={3}>Percentage Amount</td>
+                    {cols.map(c => (
+                      <td key={c.jobId} className="border border-black p-1 text-right font-mono tabular-nums">
+                        {c.rateErrors.length > 0 ? '' : formatCurrency(c.percentageAmount)}
                       </td>
                     ))}
                   </tr>
@@ -199,7 +258,7 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
                         {/* ⚠ WORDS, NOT A BLANK AND NOT A ZERO. This is the one cell where the
                             difference is unmissable, so it is where the refusal is said. */}
                         {c.rateErrors.length > 0
-                          ? <span className="font-bold text-[8px] leading-tight block">WITHHELD — rate not confirmed</span>
+                          ? <span className="font-bold text-[9.5px] leading-tight block">WITHHELD — rate not confirmed</span>
                           : formatCurrency(c.finalAmount)}
                       </td>
                     ))}
@@ -210,7 +269,7 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
               {/* THE BLOCKED JOBS NAMED, with their reasons, so "WITHHELD" in a column is
                   followed by why. */}
               {cols.some(c => c.rateErrors.length > 0) && (
-                <div className="mt-2 border border-black p-1.5 text-[9px]">
+                <div className="mt-2 border border-black p-1.5 text-[9.5px]">
                   <p className="font-bold">Transformers whose amount is withheld:</p>
                   {cols.filter(c => c.rateErrors.length > 0).map(c => (
                     <p key={c.jobId} className="mt-0.5">
@@ -222,32 +281,10 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
 
               {isLast && (
                 <>
-                  <div className="mt-3 flex justify-end">
-                    <table className="border-collapse border border-black text-xs">
-                      <tbody>
-                        <tr className="font-black">
-                          <td className="border border-black p-1.5">
-                            GRAND TOTAL &mdash; {priced.length} transformer{priced.length === 1 ? '' : 's'}
-                          </td>
-                          <td className="border border-black p-1.5 text-right font-mono tabular-nums w-32">
-                            {totalsAgree ? formatCurrency(data.grandTotal) : '—'}
-                          </td>
-                        </tr>
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {!totalsAgree && (
-                    <p className="mt-1 text-right text-[9px] font-bold border border-black inline-block px-1.5 py-0.5 float-right clear-both">
-                      TOTAL WITHHELD &mdash; the per-page column totals ({formatCurrency(pagedSum)}) do not
-                      reconcile against the estimate total ({formatCurrency(data.grandTotal)}).
-                    </p>
-                  )}
-
                   {blocked > 0 && (
-                    <p className="mt-1 clear-both text-[9px] font-bold">
-                      {blocked} transformer{blocked === 1 ? ' is' : 's are'} excluded from the grand total
-                      because {blocked === 1 ? 'its amount is' : 'their amounts are'} withheld.
+                    <p className="mt-2 text-[10px] font-bold">
+                      {blocked} transformer{blocked === 1 ? '' : 's'} on this estimate
+                      {blocked === 1 ? ' has its amount' : ' have their amounts'} withheld &mdash; named above.
                     </p>
                   )}
 
