@@ -10821,3 +10821,41 @@ those grants outstanding, almost every renewal for the next eighteen months will
 customer who suspects renewing early will forfeit their remaining days will simply wait — and
 then renew late, which is the outcome the whole screen exists to avoid. One line: *"Renewing
 early adds a year to the date above rather than restarting from today. No days are lost."*
+
+**THE TEST CARD, RECORDED BECAUSE IT COST AN HOUR.**
+
+`4111 1111 1111 1111` is the card Razorpay's own documentation gives, and on this account it is
+**rejected as an international card.** The working domestic test card is:
+
+    5267 3181 8797 5449      any future expiry, any CVV
+
+The failure is silent in the way that matters: card details are accepted, the modal closes, and
+**no OTP or bank-simulation page ever appears.** That absence is the diagnosis - it is the
+visible form of `step: "payment_initiation"`, meaning Razorpay refused before it ever asked a
+bank. A failure at the OTP stage looks completely different, because the OTP stage happens.
+
+Two defects in this codebase turned that hour into a blind one, and both are worth more than the
+card number:
+
+- **`payment.failed` kept only `error.description`** and discarded `code`, `reason`, `source`,
+  `step` and `metadata.payment_id`. The four discarded fields are the diagnostic ones; `step`
+  alone would have answered the question immediately. The whole payload is now logged and the
+  five fields print on screen.
+
+- **A gateway refusal could render as complete silence.** When a payment fails Razorpay closes
+  the modal, so `ondismiss` and `payment.failed` both fire in an order the app does not control.
+  Whichever arrived first won, and a dismissal deliberately shows no message - closing a payment
+  window is ordinary. So a real refusal could look like nothing happening at all. The dismissal
+  verdict is now deferred 600ms; a `payment.failed` in that window wins, because it carries a
+  reason and a dismissal does not.
+
+**The general rule: when a third party refuses, keep everything it said.** A gateway's error
+object is the only account of why, it is not reconstructible afterwards from anything on screen
+or in the database - the server is never called on that path - and the field that turns out to
+matter is rarely the one that reads best in a message box.
+
+A latent defect found while diagnosing, which was **not** the cause: the order `receipt` was
+built as `renewal:` + a 20-character Firestore id + `:` + a 13-digit timestamp = **42 characters
+against Razorpay's 40-character cap.** Over the cap the Orders API returns 400 and no order is
+created - a failure *before* checkout opens, so it cannot explain a payment failing after card
+entry. Fixed regardless, at 23 characters; the full ids live in `notes` and in `payment_orders`.
