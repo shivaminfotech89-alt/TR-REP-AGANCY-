@@ -46,6 +46,14 @@ export interface Agency {
    */
   ownerId?: string;
   name: string;
+  /**
+   * THE AGENCY'S MARK - a shape and a colour, so sixteen agencies are not sixteen identical
+   * rows. ABSENT MEANS NOBODY CHOSE, and one is derived from the id for display; the field
+   * is never written with that derived value, so "unchosen" stays distinguishable from
+   * "chose the one that happens to match". See lib/agencyMark.ts - which also states, at
+   * the top, that this must never appear on a printed document.
+   */
+  mark?: { shape: string; colour: string } | null;
   letterheadUrl: string;
   letterheadMode?: 'full_a4' | 'header_only' | 'standard';
   letterheadHeaderHeightMm?: number;

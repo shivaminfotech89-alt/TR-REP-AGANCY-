@@ -2,6 +2,9 @@ import React, { useState, useRef, useEffect } from 'react';
 import { stateCodeFromGstin, gstinScopeError } from '../lib/utils';
 import { useAgency } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
+import { AgencyMarkTile } from './AgencyMarkTile';
+import { AgencyMark, MARK_SHAPES, MARK_COLOURS, SHAPE_LABEL, COLOUR_LABEL,
+         markFor, sameMark, agenciesUsingMark } from '../lib/agencyMark';
 import {
   Loader2, FileUp, Check, Building2,
   CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
@@ -12,7 +15,7 @@ import { LetterheadCalibrator } from './LetterheadCalibrator';
 import { AMORPHOUS_ESTIMATE_TEXT } from '../lib/ugvclSchedules';
 
 export default function EditAgencyForm({ agency }: { agency: any }) {
-  const { updateAgency, activeAtMaster } = useAgency();
+  const { updateAgency, activeAtMaster, agencies } = useAgency();
 
   /**
    * WHERE JOB NUMBER PREFIXES ACTUALLY COME FROM.
@@ -43,6 +46,13 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
   // Agency (Supplier) Details
   const [agencyName, setAgencyName] = useState(agency.name || '');
+
+  /**
+   * THE AGENCY'S MARK. `null` means nothing has been chosen and the derived one is showing -
+   * kept as null rather than filled in with the derived value, so the document records
+   * "nobody chose" rather than a choice nobody made.
+   */
+  const [agencyMark, setAgencyMark] = useState<AgencyMark | null>((agency as any).mark ?? null);
   const [address, setAddress] = useState(agency.address || '');
   const [agencyState, setAgencyState] = useState(agency.agencyState || '');
   // Not defaulted to '24' - see AUDIT O8. Derived from the agency's own GSTIN below.
@@ -331,6 +341,8 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
       await updateAgency(agency.id, {
         name: agencyName,
+        // null, not the derived value - see agencyMark's state declaration.
+        mark: agencyMark,
         letterheadUrl: letterheadBase64,
         letterheadMode,
         letterheadHeaderHeightMm: headerHeightMm,
@@ -492,6 +504,74 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. H. E. ELECTRICALS"
                 />
+
+                {/* ⚠ BESIDE THE NAME, BECAUSE THE MARK IS THE NAME'S VISUAL TWIN. Choosing
+                    them together is how they stay coherent. Deliberately NOT in the agency
+                    switcher: picking an identity while switching identity is a way to change
+                    the wrong agency's mark. */}
+                <div className="mt-3">
+                  <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
+                    Mark &mdash; how this agency is shown in the switcher
+                  </label>
+                  <p className="text-[11px] text-slate-500 mb-2">
+                    {agencyMark
+                      ? <>Chosen. <button type="button" onClick={() => setAgencyMark(null)}
+                            className="font-bold underline hover:text-slate-800">Use the automatic one instead</button></>
+                      : <>Automatic, from this agency&rsquo;s id &mdash; shown with a dashed ring below. Pick one to set it.</>}
+                  </p>
+
+                  <div className="inline-block border border-slate-200 rounded-lg p-2 bg-slate-50/60 overflow-x-auto max-w-full">
+                    <div className="grid grid-flow-col auto-cols-max gap-1">
+                      {MARK_COLOURS.map(colour => (
+                        <div key={colour} className="grid gap-1">
+                          {MARK_SHAPES.map(shape => {
+                            const m = { shape, colour } as AgencyMark;
+                            const chosen = agencyMark && sameMark(agencyMark, m);
+                            const isAuto = !agencyMark && sameMark(markFor({ id: agency.id } as any), m);
+                            /* ⚠ NAMES THE CLASH. Sixteen agencies into 64 combinations is a
+                               birthday problem: a clash is the NORMAL case - only a 12.9%
+                               chance of none, and about 1.9 colliding pairs expected. The
+                               warning is what makes that liveable, so it counts DERIVED marks
+                               too: an owner looking at two identical rows does not care which
+                               of them picked it. */
+                            const clash = agenciesUsingMark(m, agencies as any, agency.id);
+                            return (
+                              <button
+                                key={shape}
+                                type="button"
+                                onClick={() => setAgencyMark(m)}
+                                title={clash.length
+                                  ? `${COLOUR_LABEL[colour]} ${SHAPE_LABEL[shape].toLowerCase()} — already used by ${clash.join(', ')}`
+                                  : `${COLOUR_LABEL[colour]} ${SHAPE_LABEL[shape].toLowerCase()}`}
+                                className={`relative rounded-lg p-0.5 transition-all ${
+                                  chosen ? 'ring-2 ring-slate-900'
+                                    : isAuto ? 'ring-2 ring-dashed ring-slate-400'
+                                    : 'hover:ring-2 hover:ring-slate-300'
+                                }`}
+                              >
+                                <AgencyMarkTile mark={m} size="sm" />
+                                {clash.length > 0 && (
+                                  <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-slate-900 border border-white"
+                                        aria-hidden="true" />
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {agencyMark && agenciesUsingMark(agencyMark, agencies as any, agency.id).length > 0 && (
+                    <p className="mt-1.5 text-[11px] font-bold text-amber-800 bg-amber-50 border border-amber-300 rounded px-2 py-1">
+                      Also used by {agenciesUsingMark(agencyMark, agencies as any, agency.id).join(', ')} &mdash;
+                      two agencies will look the same in the switcher.
+                    </p>
+                  )}
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    A dot marks a combination another agency already shows. Never printed on any document.
+                  </p>
+                </div>
               </div>
 
               {/* Placed immediately before the GSTIN it must agree with, because the

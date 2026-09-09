@@ -3,8 +3,9 @@ import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
 import { isGpJob } from '../lib/estimateCalc';
 import { computeOilBalance, describeOil } from '../lib/oilBalance';
-import { APP_MARK, CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
+import { CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
 import { AllotmentWidget } from './AllotmentWidget';
+import { AgencyMarkTile } from './AgencyMarkTile';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { 
@@ -533,12 +534,10 @@ export default function Dashboard() {
       <div className="bg-slate-900 rounded-lg p-2.5 sm:p-3 text-white border border-slate-800">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
           <div className="flex items-center gap-2.5">
-            <img 
-              src={APP_MARK} 
-              alt="Logo" 
-              className="w-8 h-8 shrink-0" 
-              referrerPolicy="no-referrer"
-            />
+            {/* THE AGENCY'S MARK, since the agency is named immediately beside it. The
+                APP mark stays on the sidebar brand and the login card, where it means the
+                app rather than a workspace. */}
+            <AgencyMarkTile agency={activeAgency as any} size="lg" />
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h1 className="text-sm sm:text-base font-black text-white truncate tracking-tight">

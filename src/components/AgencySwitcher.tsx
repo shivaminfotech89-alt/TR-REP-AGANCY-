@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAgency } from '../lib/AgencyContext';
+import { AgencyMarkTile } from './AgencyMarkTile';
 import { Building2, Check, ChevronsUpDown, Settings2, Plus } from 'lucide-react';
 
 /**
@@ -59,18 +60,12 @@ export default function AgencySwitcher({ appLogo }: { appLogo?: string }) {
         title="Switch agency"
         className="flex items-center gap-2 sm:gap-2.5 min-w-0 rounded-lg px-1.5 py-1 -mx-1.5 hover:bg-slate-100 active:bg-slate-200 transition-colors min-h-[44px]"
       >
-        {appLogo ? (
-          <img
-            src={appLogo}
-            alt=""
-            className="w-7 h-7 sm:w-9 sm:h-9 shrink-0"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <span className="w-7 h-7 sm:w-9 sm:h-9 rounded-lg bg-blue-600 text-white grid place-items-center shrink-0">
-            <Building2 className="w-4 h-4" />
-          </span>
-        )}
+        {/* ⚠ THE ACTIVE AGENCY'S MARK, NOT THE APP LOGO. This is the site the whole feature
+            exists for: an owner with sixteen agencies saw the same picture on every one of
+            them, so it carried no information at the one place it was meant to. `appLogo`
+            is still accepted by the props for callers that pass it, and deliberately
+            ignored here. */}
+        <AgencyMarkTile agency={activeAgency as any} />
 
         <span className="min-w-0 text-left">
           <span className="flex items-center gap-1">
@@ -110,13 +105,15 @@ export default function AgencySwitcher({ appLogo }: { appLogo?: string }) {
                   isActive ? 'bg-blue-50' : 'hover:bg-slate-50'
                 }`}
               >
-                <span
-                  className={`mt-0.5 w-7 h-7 rounded-lg grid place-items-center shrink-0 text-white ${
-                    isActive ? 'bg-blue-600' : 'bg-slate-400'
-                  }`}
-                >
-                  <Building2 className="w-3.5 h-3.5" />
-                </span>
+                {/* ⚠ THE TILE IS THE AGENCY'S IDENTITY, NOT ITS STATE. It used to colour
+                    from `isActive` - blue when selected, grey otherwise - so every inactive
+                    agency looked the same and the tile told you which row you were already
+                    on, which the highlight and the tick already say twice. Worse, it was a
+                    SECOND colour source for the same agency: the button above would have
+                    shown the mark's colour and the row beneath it a different one. Replaced
+                    rather than sat beside. Selection is still shown, by the row background
+                    and the check on the right. */}
+                <AgencyMarkTile agency={agency as any} size="sm" className="mt-0.5" />
 
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-bold text-slate-900 truncate">
