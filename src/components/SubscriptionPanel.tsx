@@ -8,7 +8,7 @@ import {
   createOrder, payWithRazorpay, CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined,
 } from '../lib/subscriptionClient';
 import { formatDDMMYYYY } from '../lib/utils';
-import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock } from 'lucide-react';
+import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock, PlusSquare } from 'lucide-react';
 
 /**
  * THE ACTIVE AGENCY'S SUBSCRIPTION, AND THE ONE BUTTON THAT RENEWS IT (AUDIT G31).
@@ -74,6 +74,18 @@ export default function SubscriptionPanel() {
   const { activeAgency } = useAgency();
   const [sub, setSub] = useState<Sub | null>(null);
   const [loaded, setLoaded] = useState(false);
+  /**
+   * ⚠ AGENCY SLOTS ARE KEYED BY USER, NOT BY AGENCY, AND THAT IS WHY THIS PANEL MUST RENDER
+   * WITH NO AGENCY SELECTED.
+   *
+   * A brand-new customer has no agency. Under the gate they cannot create one until they hold
+   * a slot, and a slot is bought here. If this component returned null when `activeAgency` was
+   * absent - as it did - the first thing a paying customer would meet is a paywall with no way
+   * to pay. That is worse than no paywall: it is a locked door with no handle, and it would
+   * have shipped invisibly because every existing account already has an agency.
+   */
+  const [slots, setSlots] = useState<number | null>(null);
+  const [slotsLoaded, setSlotsLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   /**
    * ⚠ `stage` NAMES WHERE IT FAILED, because the three failures are indistinguishable to the
@@ -109,6 +121,25 @@ export default function SubscriptionPanel() {
     );
     return () => stop();
   }, [agencyId]);
+
+  const uid = auth.currentUser?.uid || '';
+  useEffect(() => {
+    if (!uid) { setSlots(null); setSlotsLoaded(true); return; }
+    setSlotsLoaded(false);
+    const stop = onSnapshot(
+      doc(db, 'entitlements', uid),
+      snap => {
+        // ⚠ NO DOCUMENT MEANS ZERO, AND THAT IS A FACT RATHER THAN A FALLBACK. Nobody is
+        // seeded with an entitlement: all seven existing owners start at zero deliberately,
+        // because backfilling would mean deciding whether their existing agencies retroactively
+        // consumed slots, and that question has no right answer. Absence here is the answer.
+        setSlots(snap.exists() ? Number((snap.data() as any)?.agencySlots || 0) : 0);
+        setSlotsLoaded(true);
+      },
+      err => { console.warn('entitlement read failed', err); setSlots(null); setSlotsLoaded(true); },
+    );
+    return () => stop();
+  }, [uid]);
 
   const now = Date.now();
   const state = describe(sub, now);
@@ -170,9 +201,92 @@ export default function SubscriptionPanel() {
     }
   };
 
-  if (!activeAgency) return null;
+  const buySlot = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const order = await createOrder('new_agency');
+      const paid = await payWithRazorpay(order, {
+        name: auth.currentUser?.displayName || '',
+        email: auth.currentUser?.email || '',
+        contact: '',
+      });
+      setNote({
+        kind: 'ok',
+        text: paid.alreadyProcessed
+          ? 'That payment had already been recorded. Nothing was charged twice.'
+          : 'Slot added. You can create one agency.'
+            + (paid.invoicePending ? ' The GST invoice follows separately.' : ''),
+      });
+    } catch (e: any) {
+      if (e instanceof CheckoutDismissed) setNote(null);
+      else if (e instanceof PaymentTakenButUnverified) {
+        setNote({ kind: 'bad', stage: 'The payment succeeded and this app could not confirm it',
+          text: e.message, detail: `payment ${e.paymentId} · order ${e.orderId}` });
+      } else if (e instanceof GatewayDeclined) {
+        setNote({ kind: 'warn',
+          stage: e.refusedBeforeAuth
+            ? 'The payment gateway refused this before asking your bank'
+            : 'The payment gateway declined this',
+          text: e.message + ' Nothing was charged.', detail: e.detail });
+      } else {
+        setNote({ kind: 'warn', stage: 'The payment could not be started',
+          text: String(e?.message || 'Unknown error.') + ' Nothing was charged.' });
+      }
+    } finally { setBusy(false); }
+  };
+
+  /** The slots card. Rendered whether or not an agency is selected - see the note on `slots`. */
+  const slotsCard = (
+    <div className={`${CARD} ${CARD_PAD} space-y-2.5`}>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <span className={LABEL}>Agency slots</span>
+          <h3 className="text-sm font-bold text-slate-900">
+            {slotsLoaded
+              ? (slots === null ? 'Not known' : `${slots} available`)
+              : 'Checking…'}
+          </h3>
+        </div>
+        <PlusSquare className="w-4 h-4 text-slate-400 mt-1" />
+      </div>
+      <p className="text-xs text-slate-600">
+        {slots && slots > 0
+          ? `You can create ${slots} more ${slots === 1 ? 'agency' : 'agencies'}. Creating one uses a slot.`
+          : 'One slot lets you create one agency. Agencies you already have are unaffected.'}
+      </p>
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-2.5">
+        <span className="text-base font-black text-slate-900">{formatPrice()}</span>
+        <span className="text-[11px] text-slate-500">
+          {' '}per slot, inclusive &mdash; includes the first year's subscription
+        </span>
+      </div>
+      <button
+        type="button"
+        onClick={buySlot}
+        disabled={busy}
+        className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs px-4 py-2.5 rounded-lg"
+      >
+        {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <PlusSquare className="w-4 h-4" />}
+        {busy ? 'Opening checkout…' : 'Buy a slot'}
+      </button>
+    </div>
+  );
+
+  // ⚠ NO EARLY `return null`. It used to read `if (!activeAgency) return null`, which hid the
+  // only way to buy the first agency from the only people who need it.
+  if (!activeAgency) {
+    return (
+      <div className="space-y-3">
+        {note && <NoteBox note={note} />}
+        {slotsCard}
+      </div>
+    );
+  }
 
   return (
+    <div className="space-y-3">
     <div className={`${CARD} ${CARD_PAD} space-y-3`}>
       <div className="flex items-start justify-between gap-3 flex-wrap">
         <div>
@@ -199,21 +313,7 @@ export default function SubscriptionPanel() {
         </div>
       </div>
 
-      {note && (
-        <div className={`text-[11px] font-medium rounded px-2.5 py-2 border flex gap-2 ${
-          note.kind === 'ok' ? 'bg-green-50 border-green-300 text-green-900'
-          : note.kind === 'bad' ? 'bg-red-50 border-red-300 text-red-900'
-          : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
-          {note.kind === 'ok' ? <ShieldCheck className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
-          <span>
-            {note.stage && <strong className="block">{note.stage}.</strong>}
-            {note.text}
-            {note.detail && (
-              <span className="block mt-1 font-mono text-[10px] opacity-80 break-all">{note.detail}</span>
-            )}
-          </span>
-        </div>
-      )}
+      {note && <NoteBox note={note} />}
 
       <button
         type="button"
@@ -233,6 +333,29 @@ export default function SubscriptionPanel() {
         <Clock className="w-3 h-3 mt-0.5 shrink-0" />
         Renewing early adds a year to the date above rather than restarting from today. No days are lost.
       </p>
+    </div>
+    {slotsCard}
+    </div>
+  );
+}
+
+type Note = { kind: 'ok' | 'warn' | 'bad'; text: string; stage?: string; detail?: string };
+
+/** One rendering, two callers. A second copy is how the two messages come to disagree. */
+function NoteBox({ note }: { note: Note }) {
+  return (
+    <div className={`text-[11px] font-medium rounded px-2.5 py-2 border flex gap-2 ${
+      note.kind === 'ok' ? 'bg-green-50 border-green-300 text-green-900'
+      : note.kind === 'bad' ? 'bg-red-50 border-red-300 text-red-900'
+      : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
+      {note.kind === 'ok' ? <ShieldCheck className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
+      <span>
+        {note.stage && <strong className="block">{note.stage}.</strong>}
+        {note.text}
+        {note.detail && (
+          <span className="block mt-1 font-mono text-[10px] opacity-80 break-all">{note.detail}</span>
+        )}
+      </span>
     </div>
   );
 }

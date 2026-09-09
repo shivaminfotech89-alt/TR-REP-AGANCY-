@@ -13,7 +13,9 @@
         "*.log"
       ],
       "predeploy": [
-        "node scripts/sync-functions-config.js"
+        "node scripts/sync-functions-config.js",
+        "node scripts/sync-agency-seed.js",
+        "node scripts/admin/verify-seed-equality.js"
       ]
     }
   ]

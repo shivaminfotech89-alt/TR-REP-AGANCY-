@@ -3,6 +3,7 @@ import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { pricingModelForJob } from './ugvclSchedules';
 import { sectionsDiffer } from './compareSections';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { buildNewAgencyDocument } from './agencySeed';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -1579,23 +1580,19 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       //    shipped constants are in version control, reviewable, and the same for everyone.
       //    They are the baseline now, and the two writers that could change `public_config`
       //    from inside the app have been removed.
-      const defaultCRGO = defaultEstimateData;
-      const defaultAmorphous = defaultAmorphousEstimateData;
-      const defaultWoundCore = defaultWoundCoreEstimateData;
-      const defaultOverhauling = defaultOverhaulingEstimateData;
-      const defaultCircleLimits = defaultCircleLimitsEstimateData;
-
-      const newAgency = { 
-        estimateMasterCRGO: defaultCRGO,
-        // No `estimateMaster` mirror - a new agency has no legacy to support, and being
-        // born with an unread duplicate is how every existing agency acquired one. D4.
-        estimateMasterAmorphous: defaultAmorphous,
-        estimateMasterWoundCore: defaultWoundCore,
-        estimateMasterOverhauling: defaultOverhauling,
-        estimateMasterCircleLimits: defaultCircleLimits,
-        ...agencyData, 
-        ownerId: auth.currentUser.uid 
-      };
+      //    ⚠ THE ASSEMBLY NOW LIVES IN lib/agencySeed.ts, AND THIS IS NOT TIDYING. Agency
+      //    creation is moving behind a Cloud Function (the payment gate), and a deployed
+      //    function ships only what is under functions/ - so it cannot import this file. The
+      //    choice was one authored implementation compiled into functions/ at predeploy, or
+      //    two copies of the code that decides what every future agency contains. F30 is what
+      //    the second option costs, and this is the worst possible place to pay it again.
+      //
+      //    The spread order, the absent `estimateMaster` mirror and the deliberate absence of
+      //    `createdAt` are all preserved there, with their reasoning. The extraction is PROVED
+      //    rather than assumed: scripts/admin/verify-seed-equality.js builds the document three
+      //    ways - the legacy expression that stood here, the shared function, and the compiled
+      //    artefact the server will run - and refuses unless all three hash identically.
+      const newAgency = buildNewAgencyDocument(agencyData, auth.currentUser.uid);
       // CREATION TIME, FROM THE SERVER CLOCK (AUDIT A4 -> F38).
       //
       // Agencies and ATs recorded no creation timestamp at all, which has now blocked two
