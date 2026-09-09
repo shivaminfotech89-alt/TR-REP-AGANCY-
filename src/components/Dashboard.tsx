@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
+import { isGpJob } from '../lib/estimateCalc';
 import { computeOilBalance, describeOil } from '../lib/oilBalance';
 import { APP_MARK, CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
 import { AllotmentWidget } from './AllotmentWidget';
@@ -8,7 +9,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { 
   PlusCircle, 
-  FileText, 
+  FileText, Receipt, 
   Wrench, 
   Zap, 
   Truck, 
@@ -212,6 +213,57 @@ export default function Dashboard() {
     if (selectedDivision === 'All') return scopedJobs;
     return scopedJobs.filter((j: any) => (j.division || '').trim().toLowerCase() === selectedDivision.trim().toLowerCase());
   }, [scopedJobs, selectedDivision]);
+
+  /**
+   * ESTIMATE AND BILL FOLLOW-UP — SIX COUNTS, NO AMOUNTS.
+   *
+   * ⚠ GP JOBS ARE EXCLUDED FROM ALL SIX, not only from the two "pending" figures. A GP repair
+   * is done under guarantee at no cost: it is never estimated and never billed
+   * (BillingSystem:350). Excluding it only from the pending counts would break the
+   * arithmetic below AND leave 14 of the 64 live jobs counted as pending approval and
+   * pending payment PERMANENTLY - a number that starts wrong and never falls. A GP job is
+   * not an "estimate sent" either, so it is out of the numerator and the denominator alike.
+   *
+   * SCRAP JOBS ARE INCLUDED in both bill counts. A scrap transformer is billed - one flat
+   * Rs 500 inspection-and-dismantling charge - and can be paid, so it belongs there.
+   *
+   * ⚠ `sent = received + pending` BY CONSTRUCTION, and that is deliberate. Each pending
+   * figure is a strict SUBSET of the sent figure above it - "sent with nothing recorded
+   * against it" - not "everything not approved", which would sweep in every job that was
+   * never estimated at all. If the three numbers on a tile ever fail to add up, that is a
+   * data problem surfacing, not a display bug.
+   *
+   * WHICH FIELD, AND WHY:
+   *   estimateStatus === 'Sent'   the status the send handler STATES, written in the same
+   *                               batch as estimateSentDate and estimateRefNo. Not the date,
+   *                               which could be set for another reason.
+   *   approvalNo present          the approval handler writes approvalNo, approvalDate,
+   *                               approvedAmount and estimateApprovalStatus together.
+   *                               ⚠ NOT estimateApprovalStatus - that is ALSO set at send
+   *                               time, derived from approvalNo, so reading it would be
+   *                               reading a copy of the thing itself.
+   *   billNo present              the identifier; it cannot be blank on a real bill.
+   *   paymentStatus === 'Paid'    explicit. paidAmount alone would count a PARTIAL payment
+   *                               as complete.
+   *
+   * SCOPE: filteredJobs, so the division picker applies exactly as it does to every other
+   * count on this screen. Tender scope comes with it via scopedJobs (AUDIT F95).
+   */
+  const followUp = useMemo(() => {
+    const billable = filteredJobs.filter((j: any) => !isGpJob(j));
+    const estimatesSent = billable.filter((j: any) => j.estimateStatus === 'Sent');
+    const approvalsReceived = estimatesSent.filter((j: any) => String(j.approvalNo ?? '').trim() !== '');
+    const billsSent = billable.filter((j: any) => String(j.billNo ?? '').trim() !== '');
+    const paymentsReceived = billsSent.filter((j: any) => j.paymentStatus === 'Paid');
+    return {
+      estimatesSent: estimatesSent.length,
+      approvalsReceived: approvalsReceived.length,
+      pendingApproval: estimatesSent.length - approvalsReceived.length,
+      billsSent: billsSent.length,
+      paymentsReceived: paymentsReceived.length,
+      paymentPending: billsSent.length - paymentsReceived.length,
+    };
+  }, [filteredJobs]);
 
   // Primary Metrics and Pipeline Calculations
   const stats = useMemo(() => {
@@ -1033,6 +1085,73 @@ export default function Dashboard() {
             <AllotmentWidget atMaster={activeAtMaster} />
           </div>
         )}
+
+        {/* ⚠ COUNTS ONLY, NO RUPEE AMOUNTS - ON PURPOSE. A follow-up tile answers "how many
+            are waiting", which is a work list. An amount beside it invites the reading that
+            this is money owed, and the figures behind these fields are not that: an estimate
+            amount is a recomputation, an approved amount is what the division sanctioned, and
+            a bill total is what was claimed. Three different things that would sit under one
+            heading and be read as one.
+
+            THE THREE NUMBERS ADD UP, and that is the point of showing all three rather than
+            the pending figure alone: pending is sent MINUS received, by construction. A row
+            that does not reconcile is a data problem visible on the Dashboard.
+
+            TWO OF THE SIX LINK, and only the two that have somewhere real to land.
+            EstimateGenerate already has 'sent' and 'approvals' tabs. Nothing exists for
+            sent-but-unapproved, and BillingSystem has no sent/paid/pending view at all - so
+            those four are plain figures. A tile that navigates somewhere UNFILTERED promises
+            a work list and delivers a full list, which is worse than one that does not
+            navigate. See AUDIT for what building those views would take. */}
+        <div className={`${CARD} ${CARD_PAD} flex flex-col justify-between`}>
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <FileText className="w-4 h-4 text-purple-600" />
+              <h3 className={CARD_TITLE}>Estimate follow-up</h3>
+            </div>
+            <dl className="space-y-1.5">
+              <Link to="/estimates/new?tab=sent" className="flex items-baseline justify-between hover:bg-slate-50 rounded px-1 -mx-1">
+                <dt className="text-xs text-slate-600">Estimates sent</dt>
+                <dd className={`${NUM} text-sm font-bold text-slate-900`}>{followUp.estimatesSent}</dd>
+              </Link>
+              <Link to="/estimates/new?tab=approvals" className="flex items-baseline justify-between hover:bg-slate-50 rounded px-1 -mx-1">
+                <dt className="text-xs text-slate-600">Approvals received</dt>
+                <dd className={`${NUM} text-sm font-bold text-emerald-700`}>{followUp.approvalsReceived}</dd>
+              </Link>
+              <div className="flex items-baseline justify-between px-1 -mx-1 pt-1 border-t border-slate-100">
+                <dt className="text-xs font-bold text-slate-700">Pending approval</dt>
+                <dd className={`${NUM} text-sm font-black ${followUp.pendingApproval > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+                  {followUp.pendingApproval}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <div className={`${CARD} ${CARD_PAD} flex flex-col justify-between`}>
+          <div>
+            <div className="flex items-center gap-1.5 mb-2">
+              <Receipt className="w-4 h-4 text-indigo-600" />
+              <h3 className={CARD_TITLE}>Bill follow-up</h3>
+            </div>
+            <dl className="space-y-1.5">
+              <div className="flex items-baseline justify-between px-1 -mx-1">
+                <dt className="text-xs text-slate-600">Bills sent</dt>
+                <dd className={`${NUM} text-sm font-bold text-slate-900`}>{followUp.billsSent}</dd>
+              </div>
+              <div className="flex items-baseline justify-between px-1 -mx-1">
+                <dt className="text-xs text-slate-600">Payments received</dt>
+                <dd className={`${NUM} text-sm font-bold text-emerald-700`}>{followUp.paymentsReceived}</dd>
+              </div>
+              <div className="flex items-baseline justify-between px-1 -mx-1 pt-1 border-t border-slate-100">
+                <dt className="text-xs font-bold text-slate-700">Payment pending</dt>
+                <dd className={`${NUM} text-sm font-black ${followUp.paymentPending > 0 ? 'text-amber-700' : 'text-slate-400'}`}>
+                  {followUp.paymentPending}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        </div>
 
         {/* Card 2: Guarantee Period (GP) & Warranty */}
         <div className={`${CARD} ${CARD_PAD} flex flex-col justify-between`}>

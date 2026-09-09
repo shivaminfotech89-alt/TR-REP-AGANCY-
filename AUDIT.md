@@ -6791,6 +6791,50 @@ for pricing, which is what they should be.**
 
 ---
 
+### O51. The Dashboard's follow-up counts have no view to link to, and no data to show yet
+
+**Two things recorded together because they are the same shape: a count that is correct and
+currently useless.**
+
+**1. FOUR OF THE SIX FIGURES CANNOT LINK ANYWHERE.** The Estimate / Bill follow-up tiles show
+six counts. Two link - `EstimateGenerate` already has `sent` and `approvals` tabs, and now
+reads `?tab=` to land on one. The other four have no destination that exists:
+
+  - **Pending approval** needs a SENT-BUT-UNAPPROVED view on `EstimateGenerate`. Its `sent`
+    tab shows everything sent, approved or not.
+  - **Bills sent / Payments received / Payment pending** need sent, paid and pending views on
+    `BillingSystem`, which has none. It already has `useSearchParams` and reads `?mr=`, so
+    the plumbing is there and the filter is not.
+
+They were left as plain figures deliberately. A tile that navigates to an unfiltered list
+promises a work list and delivers everything, which is worse than one that does not
+navigate - and inventing filters on two screens as a side effect of adding a Dashboard tile
+is the wrong shape of change. Worth doing when those screens are next opened for their own
+reasons.
+
+**2. THE ONLY JOB WITH FOLLOW-UP DATA IS A GP JOB, WHICH SHOULD HAVE NONE.**
+
+    MSBT-12   repairType GP   estimateStatus Sent   billNo BILL/1   paymentStatus Paid
+              atId NONE
+
+A guarantee-period repair is done under guarantee at no cost: it is never estimated and never
+billed (`BillingSystem:350` excludes GP from every bill). MSBT-12 carries the entire chain -
+sent, approved, billed, paid - and it is also the one job holding an `approvedAmount`, and
+one of three with no `atId` at all.
+
+⚠ **SO ALL SIX COUNTS READ ZERO**, correctly. The tiles exclude GP, and the single job that
+would otherwise populate them is GP. That is the counts working, not failing - but it means
+the feature has never been exercised against real data and its first real numbers will appear
+only when a non-GP job is actually sent.
+
+**Which of two things this is, is not settled here:** either MSBT-12 is test data typed to
+exercise the estimate and billing paths - the same explanation that turned out to be true of
+the per-core-type percentages (O50) - or a GP job really was estimated and billed against the
+tender's terms. The first is likely and harmless. The second would be a billing error.
+Checking it needs someone who knows what MSBT-12 actually was.
+
+---
+
 ### O50. FOUND AND DISSOLVED — LSTC took CRGO's percentage by accident of branch ordering
 
 **Recorded although it no longer exists, because of HOW it stopped existing.** Nobody

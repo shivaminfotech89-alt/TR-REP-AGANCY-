@@ -2,6 +2,7 @@
 import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
+import { useSearchParams } from 'react-router-dom';
 import React, { useState, useEffect, useMemo } from 'react';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, writeBatch, updateDoc } from 'firebase/firestore';
@@ -56,6 +57,24 @@ export default function EstimateGenerate() {
   
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
+
+  /**
+   * ?tab=sent | approvals - so the Dashboard's follow-up tile lands on the right stage.
+   *
+   * ⚠ ONLY THE TABS THAT EXIST. There is no sent-but-unapproved view here, so the
+   * Dashboard's "Pending approval" figure does NOT link anywhere: a tile that navigates to
+   * an unfiltered list promises a work list and delivers everything. Building that view is
+   * worth doing when this screen is next opened for its own reasons - see AUDIT.
+   *
+   * Read once, on mount. It sets a starting tab, it does not pin one - the operator can
+   * switch freely afterwards and the URL is not rewritten under them.
+   */
+  const [estimateParams] = useSearchParams();
+  useEffect(() => {
+    const t = estimateParams.get('tab');
+    if (t === 'sent' || t === 'approvals') setActiveTab(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /**
    * Estimate view modes. 'batch_all' is the default: one common forwarding letter, then one
