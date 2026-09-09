@@ -9165,6 +9165,52 @@ save, while a block costs the agency all intake.
 
 A failed seed query is caught and warned, never fatal, for the same reason.
 
+### F43a. A template may carry the tender's percentage — and F43 still stands
+
+**Both are true, and the difference is PROVENANCE rather than behaviour.** Recorded together
+because the second looks like a reversal of the first and is not.
+
+**F43 removed a CARRY-FORWARD.** A new AT pre-filled its three percentages from the previous
+AT, and the reasoning against it was already written in the code that did it: last year's 8%
+"looks deliberate and would price a whole tender wrongly while appearing configured". A field
+already holding a plausible number is submitted unread, and a wrong percentage is invisible
+on the finished document because no line says which was used. **That has not come back.**
+`openAddForm` still opens empty, and the previous AT's figures are still available only
+behind `copyPercentagesFromPreviousAt`, a button.
+
+**F43a adds a STATEMENT BY THE TENDER.** Some tenders quote one accepted rate to every
+agency — A/T 1819 clause 2.0 accepts 7.00% above for CRGO / Amorphous, the same figure for
+all — and some let each agency bid. Live data shows both: ZENITH and ADMIN both run 7/7/7 on
+UGVCL-2026, while on the SAME 2020 schedule MEGHA runs 4/-8/-4 and suchit 5/-2/4. So the
+percentage cannot be derived from the schedule; it is a fact about the tender that only
+sometimes exists.
+
+`PublishedAt` therefore carries the three percentages **optionally**, beside the dates it
+already carries as suggestions. Filled when the tender sets one rate for everyone; blank
+otherwise, in which case the AT form's fields stay blank and required.
+
+**THE LABEL IS THE WHOLE JUSTIFICATION.** A pre-filled figure with no source is a default,
+and a default is precisely what F43 removed. The same figure labelled "7% from the tender
+(UGVCL/…/AT/1819). Confirm against your acceptance letter." is something an operator can
+check against the paper in their hand. A labelled fact can be confirmed; a silent default can
+only be missed. Remove the label and this becomes F43 again.
+
+**OPTIONAL AND NOT REQUIRED, deliberately.** A required field makes an admin who does not
+know type something, and a wrong percentage propagated to every adopting agency is worse than
+a blank each of them answers from its own acceptance letter. The publish form says so:
+"Fill these only if the tender sets one rate for every agency."
+
+**CREATION ONLY.** `adoptPublishedAt` does not write percentages onto an existing AT — it
+writes `ratesSource`, `scheduleId` and the five rate sections, and nothing else. Changing a
+tender's percentages as a side effect of taking its rates is the shape that made re-adoption
+on save dangerous, and is the same reason the template's dates are a suggestion at creation
+rather than an update.
+
+**No backfill.** Both existing 1819 ATs already carry 7/7/7, typed at creation before any of
+this existed. Verified against live data; no script was written.
+
+---
+
 ### F43. A new AT's percentages are pre-filled from the previous one, visibly
 
 Skipping the AT percentages was the remaining **silent** wrong result on the rollover path:

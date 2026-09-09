@@ -397,6 +397,35 @@ export interface PublishedAt {
   /** The rate schedule this tender is priced from; copied onto the AT on adoption. */
   scheduleId?: string;
 
+  /**
+   * THE TENDER'S ACCEPTED PERCENTAGE, WHERE THE TENDER SETS ONE FOR EVERY AGENCY.
+   *
+   * ⚠ OPTIONAL, AND THE ABSENCE IS MEANINGFUL. Some tenders quote a single rate to all
+   * agencies - A/T 1819 clause 2.0 accepts 7.00% above for CRGO / Amorphous, the same
+   * figure for everyone on it. Others let each agency bid, and live data shows two agencies
+   * on the SAME 2020 schedule running 4/-8/-4 and 5/-2/4. So this cannot be derived from the
+   * schedule; it is a fact about the tender that only sometimes exists.
+   *
+   * ⚠ AND THIS IS NOT A REVERSAL OF F43, WHICH STANDS. F43 removed the pre-fill that carried
+   * LAST YEAR'S percentages onto a new AT, because an unread default is indistinguishable
+   * from an answered one and a wrong percentage is invisible on the finished document. That
+   * is still true and that pre-fill has not come back. What is different here is PROVENANCE:
+   * a figure the tender itself states, carried by the template of that tender, and LABELLED
+   * with where it came from - "7% from the tender (UGVCL 2026-28). Confirm against your
+   * acceptance letter." A labelled fact with a source is a different object from a silent
+   * default, and the label is the whole difference.
+   *
+   * Filled only when the tender sets one rate for every agency. Left blank when agencies
+   * bid separately, in which case the AT form's fields stay blank and required.
+   *
+   * ⚠ CREATION ONLY. `adoptPublishedAt` does NOT write these onto an existing AT, exactly
+   * as it does not write the dates: changing a tender's percentages as a side effect of
+   * taking its rates is the shape that made re-adoption on save dangerous.
+   */
+  atPercentageCRGO?: number;
+  atPercentageAmorphous?: number;
+  atPercentageWoundCore?: number;
+
   estimateMasterCRGO?: EstimateItem[];
   estimateMasterAmorphous?: EstimateItem[];
   estimateMasterWoundCore?: EstimateItem[];
@@ -1004,7 +1033,8 @@ interface AgencyContextType {
   publishedAts: PublishedAt[];
   /** Admin only. Creates a new template, or bumps an existing one's version. */
   publishAtTemplate: (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string },
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
+           atPercentageCRGO?: number; atPercentageAmorphous?: number; atPercentageWoundCore?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ) => Promise<string>;
   /** Copy a template's sections onto an AT, stamping which template and version. */
@@ -2151,7 +2181,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * leave their `publishedAtVersion` pointing at nothing.
    */
   const publishAtTemplate = async (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string },
+    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
+           atPercentageCRGO?: number; atPercentageAmorphous?: number; atPercentageWoundCore?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ): Promise<string> => {
     if (!isSuperAdmin) throw new Error('Only the administrator can publish a rate template.');
@@ -2228,6 +2259,14 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
      * is a pre-existing template, the second cannot occur because the form requires one.
      */
     if (String(tpl.scheduleId ?? '').trim()) payload.scheduleId = String(tpl.scheduleId).trim();
+    // OMITTED WHEN ABSENT, never written as 0. A stored zero reads as "bid at par", which is
+    // a real answer and a different fact from "this tender does not set one".
+    (['atPercentageCRGO', 'atPercentageAmorphous', 'atPercentageWoundCore'] as const).forEach(k => {
+      const v = (tpl as any)[k];
+      if (v !== undefined && v !== null && String(v).trim() !== '' && Number.isFinite(Number(v))) {
+        payload[k] = Number(v);
+      }
+    });
     Object.entries(sections).forEach(([k, v]) => { if (Array.isArray(v) && v.length) payload[k] = v; });
 
     const ref = tpl.id ? doc(db, 'published_ats', tpl.id) : doc(collection(db, 'published_ats'));

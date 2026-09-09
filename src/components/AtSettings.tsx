@@ -516,8 +516,35 @@ export function AtSettings() {
         endDate: t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : prev.endDate,
       }));
     }
-    // The schedule travels with the rates and is derived at save from the template - see
-    // effectiveSchedule. Nothing to set here; the form displays it as a fact.
+    /**
+     * ⚠ THE TENDER'S PERCENTAGE, WHERE THE TENDER SETS ONE - PRE-FILLED AND LABELLED.
+     *
+     * Only when the template carries them, which the admin fills only when the tender quotes
+     * one rate to every agency (A/T 1819 clause 2.0: 7.00% above, the same for all). When it
+     * does not, these stay blank and required, and the operator answers from its own
+     * acceptance letter.
+     *
+     * ⚠ THIS IS NOT F43'S PRE-FILL RETURNING. F43 removed the carry-forward of LAST YEAR'S
+     * percentages, on the ground that a field already holding a plausible number is
+     * submitted unread. That still stands and has not come back - `openAddForm` still opens
+     * empty, and last year's figures are still only available behind
+     * `copyPercentagesFromPreviousAt`, a button.
+     *
+     * What differs is PROVENANCE, and the label carries it: the form says the figure came
+     * from this tender and names it. A labelled fact with a source can be confirmed; a
+     * silent default can only be missed. That distinction is the whole justification.
+     */
+    const pct = (v: unknown) =>
+      v === undefined || v === null || !Number.isFinite(Number(v)) ? undefined : String(v);
+    const c = pct(t.atPercentageCRGO), am = pct(t.atPercentageAmorphous), wc = pct(t.atPercentageWoundCore);
+    if (c !== undefined || am !== undefined || wc !== undefined) {
+      setNewAt(prev => ({
+        ...prev,
+        atPercentageCRGO: c ?? prev.atPercentageCRGO,
+        atPercentageAmorphous: am ?? prev.atPercentageAmorphous,
+        atPercentageWoundCore: wc ?? prev.atPercentageWoundCore,
+      }));
+    }
   };
 
   /** Offer the previous tender's percentages - an act, not a default. */
@@ -1402,7 +1429,23 @@ export function AtSettings() {
                     </>
                   )}
                 </div>
-                {carryOverSource && (
+                {/* ⚠ WHERE THE FIGURE CAME FROM, NAMED. A pre-filled percentage with no source
+                    is a default, and a default is what F43 removed. The same number labelled
+                    with the tender that states it is a fact the operator can check against
+                    the letter in their hand - which is the only thing that makes pre-filling
+                    it defensible at all. */}
+                {chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentageCRGO)) && (
+                  <div className="sm:col-span-2 p-2.5 rounded-lg bg-emerald-50 border border-emerald-300 text-[11px] text-emerald-900 leading-relaxed">
+                    <strong className="font-bold">
+                      {Number(chosenTemplate.atPercentageCRGO)}% from the tender
+                      {chosenTemplate.atNumber ? ` (${chosenTemplate.atNumber})` : ` (${chosenTemplate.name})`}.
+                    </strong>{' '}
+                    This tender sets one accepted percentage for every agency, so it is filled in below.
+                    <strong className="font-bold"> Confirm against your acceptance letter</strong> &mdash; the
+                    fields stay editable, and an agency on varied terms should change them.
+                  </div>
+                )}
+                {carryOverSource && !(chosenTemplate && Number.isFinite(Number(chosenTemplate.atPercentageCRGO))) && (
                   <div className="sm:col-span-2 p-2.5 rounded-lg bg-amber-50 border border-amber-300 text-[11px] text-amber-900 leading-relaxed">
                     <strong className="font-bold">The percentages below start empty and must be answered.</strong>{' '}
                     They are what your agency quoted above (+) or below (&minus;) the UGVCL schedule in its bid,

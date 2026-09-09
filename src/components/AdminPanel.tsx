@@ -65,6 +65,10 @@ export default function AdminPanel() {
    * cannot be used - a failure discovered by the adopting agency rather than here.
    */
   const [tplScheduleId, setTplScheduleId] = useState<string>('');
+  /** The tender's accepted percentage, where it sets one for every agency. Optional. */
+  const [tplPctCrgo, setTplPctCrgo] = useState('');
+  const [tplPctAm, setTplPctAm] = useState('');
+  const [tplPctWc, setTplPctWc] = useState('');
   const [tplEnd, setTplEnd] = useState('');
   const [tplSaving, setTplSaving] = useState(false);
   const [tplMsg, setTplMsg] = useState<string | null>(null);
@@ -103,6 +107,9 @@ export default function AdminPanel() {
           startDate: tplStart ? new Date(tplStart).getTime() : undefined,
           endDate: tplEnd ? new Date(tplEnd).getTime() : undefined,
           scheduleId: tplScheduleId,
+          atPercentageCRGO: tplPctCrgo.trim() === '' ? undefined : Number(tplPctCrgo),
+          atPercentageAmorphous: tplPctAm.trim() === '' ? undefined : Number(tplPctAm),
+          atPercentageWoundCore: tplPctWc.trim() === '' ? undefined : Number(tplPctWc),
         },
         {
           estimateMasterCRGO: JSON.parse(JSON.stringify(defaultEstimateData)),
@@ -587,6 +594,43 @@ export default function AdminPanel() {
                          placeholder="UGVCL/EE-T-1/TRANS REP/2026-28/01/AT/1819"
                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono" />
                 </div>
+                {/* ⚠ OPTIONAL, AND DELIBERATELY NOT REQUIRED. A required field makes an
+                    admin who does not know type something, and a wrong percentage carried
+                    onto every adopting agency is worse than a blank each of them answers
+                    from its own acceptance letter.
+
+                    This does NOT reinstate F43's pre-fill. F43 removed the carry-forward of
+                    LAST YEAR'S percentages, because an unread default cannot be told apart
+                    from an answered one. A figure the TENDER states, carried by that
+                    tender's template and labelled with its source on the AT form, is a
+                    different object. Both hold. */}
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                    Accepted percentage &mdash; optional
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {([['CRGO', tplPctCrgo, setTplPctCrgo],
+                       ['Amorphous', tplPctAm, setTplPctAm],
+                       ['Wound Core', tplPctWc, setTplPctWc]] as const).map(([label, val, set]) => (
+                      <label key={label} className="block">
+                        <span className="block text-[10px] font-bold text-slate-600 mb-0.5">{label} %</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          value={val}
+                          onChange={e => (set as any)(e.target.value)}
+                          placeholder="e.g. 7"
+                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-mono tabular-nums"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-600">
+                    Fill these only if the tender sets one rate for every agency. Leave blank when
+                    agencies bid separately &mdash; each will then answer from its own acceptance letter.
+                  </p>
+                </div>
+
                 <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">UGVCL schedule this template is published against</label>
                   <select
