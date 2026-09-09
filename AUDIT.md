@@ -6833,6 +6833,68 @@ for pricing, which is what they should be.**
 
 ---
 
+### O54. The Admin Panel has no `?tab=` deep link, and nothing yet needs one
+
+Recorded as available rather than missing. The estimate screen gained `?tab=sent|approvals`
+this session because the Dashboard's follow-up tiles needed to land on a specific stage.
+**Nothing links into the Admin Panel at all** - the sidebar entry is the only way in - so
+there is no caller to serve and building it now would be speculative.
+
+If a link ever wants one, `EstimateGenerate`'s is the shape to copy: read `?tab=` once on
+mount, set a STARTING tab rather than a pinned one, and do not rewrite the URL under the
+operator afterwards.
+
+---
+
+### O53. Razorpay settings and maintenance mode are stored and read by nothing
+
+Two settings screens write `system_config` and no code anywhere consults what they write.
+
+**Razorpay** (`system_config/razorpay`): key id, secret, annual fee, enabled, test mode.
+There is no Razorpay integration in the app. The only other occurrences of the word are
+prose in `SupportTickets`. So the "enabled" toggle enables nothing and no payment is taken
+or checked.
+
+**Maintenance mode** (`system_config/general`): `maintenanceMode` appears in exactly two
+places - the panel that writes it and `types/admin.ts`. Switching it on records a flag and
+does not lock anyone out, show a banner, or change what any user sees.
+
+**RELABELLED, NOT BUILT.** Both headings now say "not yet connected" / "not yet enforced"
+with a line naming what does not happen. Neither is urgent and neither was mistaken for a
+guarantee - unlike the RBAC screen, which was (O52).
+
+**What making each real would take.** Razorpay: the integration itself - checkout, webhook,
+a record of what was paid, and a decision about where subscription state lives, which G1
+already says is NOT the customer's agency document. Maintenance mode: a read of
+`system_config/general` on app load and a gate in `AppLayout` ahead of the router, plus a
+decision about whether the super admin is exempt (they must be, or the switch cannot be
+turned off from inside the app).
+
+---
+
+### O52. The RBAC screen recorded roles that grant and restrict nothing
+
+**The dangerous one of the three, because it read as a security control.** The heading was
+"User Role & RBAC Permissions Management" and the screen assigns Super Admin, Manager,
+Operator and Viewer with permissions. **Nothing outside the Admin Panel reads `user_roles`.**
+
+Access is decided by `isSuperAdmin()` in `firestore.rules`, which tests the signed-in email,
+and by nothing else. So someone could reasonably assign a *restricted* role to a user
+believing it takes effect, and it would not - the difference between a control that is
+missing and one that appears to be there is that only the second gets relied on.
+
+**RELABELLED to "User role records"**, with a notice saying plainly that the records do not
+grant or restrict anything, that access comes from the super-admin email in the rules, and
+that assigning a restricted role does not limit that user.
+
+**What making it real would take:** `firestore.rules` reading `user_roles` - a
+`get(/databases/$(database)/documents/user_roles/$(request.auth.uid))` in the permission
+helpers - which costs a document read on every rule evaluation and needs a decision about
+what each role may do per collection. That is a security design task, not a screen change,
+which is why it is recorded rather than attempted.
+
+---
+
 ### O51. The Dashboard's follow-up counts have no view to link to, and no data to show yet
 
 **Two things recorded together because they are the same shape: a count that is correct and

@@ -13,7 +13,7 @@ import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySett
 import { 
   ShieldCheck, Users, Building2, CreditCard, LifeBuoy, Settings, 
   RefreshCw, Search, CheckCircle2, AlertTriangle, Clock, PlusCircle, 
-  Trash2, Lock, Key, DollarSign, Sparkles, MessageSquare, Send, Check, AlertCircle, ToggleLeft, ToggleRight
+  Trash2, Lock, Key, DollarSign, Sparkles, MessageSquare, Send, Check, AlertCircle, ToggleLeft, ToggleRight, Database
 } from 'lucide-react';
 
 export default function AdminPanel() {
@@ -25,7 +25,17 @@ export default function AdminPanel() {
   const currentUser = auth.currentUser;
   const isSuperAdminEmail = currentUser?.email === 'shivaminfotech89@gmail.com';
 
-  const [activeTab, setActiveTab] = useState<'agencies' | 'users' | 'tickets' | 'razorpay' | 'system'>('agencies');
+  /**
+   * ⚠ DEFAULTS TO 'templates', WHICH IS THE LEAST-USED TAB. Deliberate: it is the only one
+   * that is a JOB rather than a place to look something up, and an admin opens this screen in
+   * order to publish a tender template. Landing on the reason for visiting.
+   *
+   * No `?tab=` deep link. Nothing in the app links into the Admin Panel at all - the sidebar
+   * entry is the only way in - so there is no caller to serve. The estimate screen gained one
+   * this session because the Dashboard's follow-up tiles needed to land on a stage; if a link
+   * ever wants one here, that is the shape to copy. AUDIT O54.
+   */
+  const [activeTab, setActiveTab] = useState<'templates' | 'agencies' | 'users' | 'tickets' | 'razorpay' | 'system'>('templates');
 
   /**
    * AUTHORING A RATE TEMPLATE, WITH NO AGENCY AND NO AT.
@@ -439,7 +449,16 @@ export default function AdminPanel() {
       </div>
 
       {/* Tabs Navigation */}
-      <div className="flex border-b border-slate-200 bg-white p-1.5 rounded-xl border shadow-sm gap-2">
+      <div className="flex flex-wrap border-b border-slate-200 bg-white p-1.5 rounded-xl border shadow-sm gap-2">
+        <button
+          onClick={() => setActiveTab('templates')}
+          className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'templates' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Database className="w-4 h-4" />
+          <span>Tender Templates</span>
+        </button>
         <button
           onClick={() => setActiveTab('agencies')}
           className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${
@@ -448,16 +467,6 @@ export default function AdminPanel() {
         >
           <Building2 className="w-4 h-4" />
           <span>Agencies & Subscriptions (₹3,999/yr)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('users')}
-          className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${
-            activeTab === 'users' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>User & Role Management</span>
         </button>
 
         <button
@@ -473,6 +482,16 @@ export default function AdminPanel() {
               {openTicketsCount}
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('users')}
+          className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all ${
+            activeTab === 'users' ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Users className="w-4 h-4" />
+          <span>User & Role Management</span>
         </button>
 
         <button
@@ -496,6 +515,19 @@ export default function AdminPanel() {
         </button>
       </div>
 
+      {/* --- TAB: TENDER TEMPLATES ---
+           ⚠ A TAB, NOT A BLOCK ABOVE THE TABS. It used to sit between the tab bar and
+           the tab content, so it cost EVERY other tab 200px collapsed and about 600px
+           with the form open - an admin opening Support Tickets scrolled past a rate
+           register to reach them.
+
+           It is FIRST, and not because it is most used - it is the least used, touched
+           once or twice a year at a rollover. It is first because it is the only tab
+           that is a JOB: an admin arrives at this screen IN ORDER TO publish a
+           template. The others are places you look something up. The reason for
+           visiting goes first, which is also why activeTab defaults here. */}
+      {activeTab === 'templates' && (
+        <>
       {/* --- THE PUBLISHED AT REGISTER (AUDIT F73) ---
            Read-only here. Templates are PUBLISHED from Estimate Master, where the rates
            being published are on screen and can be checked - publishing from a list would
@@ -505,7 +537,7 @@ export default function AdminPanel() {
            under the AT the admin happens to have selected. "Which templates exist, at what
            version, and who is on an old one" is an administrative question and had no
            screen. */}
-      {activeTab === 'agencies' && (
+      <>
         <div className={`${CARD} p-6 space-y-4 mb-6`}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -773,6 +805,9 @@ export default function AdminPanel() {
             </div>
           )}
         </div>
+      </>
+
+        </>
       )}
 
       {/* --- TAB 1: AGENCIES & SUBSCRIPTION MANAGEMENT --- */}
@@ -875,8 +910,20 @@ export default function AdminPanel() {
         <div className={`${CARD} p-6 space-y-6`}>
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-4 border-b border-slate-100">
             <div>
-              <h2 className="text-base font-bold text-slate-900">User Role & RBAC Permissions Management</h2>
-              <p className="text-xs text-slate-500">Manage full user roles across web app (Super Admin, Manager, Operator, Viewer)</p>
+              {/* ⚠ RENAMED FROM "User Role & RBAC Permissions Management", WHICH WAS THE
+                  DANGEROUS PART. That title reads as a security control, and someone could
+                  reasonably assign a restricted role believing it takes effect. It does not:
+                  nothing outside this panel reads `user_roles`. Access is decided by
+                  isSuperAdmin() on the email in firestore.rules, and by nothing else. These
+                  are RECORDS of an intention, not a mechanism - so the heading says record.
+                  AUDIT O52. */}
+              <h2 className="text-base font-bold text-slate-900">User role records</h2>
+              <p className="text-xs text-slate-500">A register of who is meant to hold which role</p>
+              <p className={`mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5`}>
+                These records do not grant or restrict anything yet. Access is decided by the
+                super-admin email in the security rules; nothing reads this collection. Assigning
+                a restricted role here does not limit that user.
+              </p>
             </div>
             <button
               onClick={() => setShowUserModal(true)}
@@ -1041,8 +1088,13 @@ export default function AdminPanel() {
       {activeTab === 'razorpay' && (
         <div className={`${CARD} p-6 space-y-6`}>
           <div className="pb-4 border-b border-slate-100">
-            <h2 className="text-base font-bold text-slate-900">Razorpay Annual Subscription Gateway (₹3,999/yr)</h2>
-            <p className="text-xs text-slate-500">Configure Razorpay payment gateway credentials for agency subscription billing</p>
+            {/* Stored, not wired. AUDIT O53. */}
+            <h2 className="text-base font-bold text-slate-900">Razorpay settings (not yet connected)</h2>
+            <p className="text-xs text-slate-500">Credentials and fee, stored for the integration when it is built</p>
+            <p className={`mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5`}>
+              Nothing reads these settings yet. There is no Razorpay integration in the app, so
+              &ldquo;enabled&rdquo; enables nothing and no payment is taken or checked.
+            </p>
           </div>
 
           <form onSubmit={handleSaveRazorpayConfig} className="max-w-2xl space-y-5">
@@ -1118,8 +1170,13 @@ export default function AdminPanel() {
       {activeTab === 'system' && (
         <div className={`${CARD} p-6 space-y-6`}>
           <div className="pb-4 border-b border-slate-100">
-            <h2 className="text-base font-bold text-slate-900">Web Application & Maintenance Controls</h2>
-            <p className="text-xs text-slate-500">Configure global app banners, broadcast notices, and system availability</p>
+            {/* Stored, not enforced. AUDIT O53. */}
+            <h2 className="text-base font-bold text-slate-900">Maintenance &amp; broadcast settings (not yet enforced)</h2>
+            <p className="text-xs text-slate-500">Stored for when the app checks them on load</p>
+            <p className={`mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5`}>
+              Nothing reads these yet. Switching maintenance mode on records the flag but does
+              not lock anyone out, show a banner, or change what any user sees.
+            </p>
           </div>
 
           <form onSubmit={handleSaveSystemSettings} className="max-w-2xl space-y-5">

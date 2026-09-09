@@ -226,7 +226,7 @@ you are in Case 2 whatever the three cells say.
 
 ### Case 1 — the rates are a schedule the app already has
 
-**Admin Panel → New tender template.** Fill in:
+**Admin Panel → Tender Templates → New tender template.** Fill in:
 
 1. **Template name** — what agencies will pick it by, e.g. *UGVCL 2026-28
    Schedule A*.
@@ -277,8 +277,8 @@ them from a screen.
 
 ### Revising a template you have already published
 
-**Admin Panel → New tender template**, then change the dropdown at the top of the
-form from *A NEW template* to **Revise "…" — currently vN**. Everything prefills:
+**Admin Panel → Tender Templates → New tender template**, then change the dropdown at
+the top of the form from *A NEW template* to **Revise “…” — currently vN**. Everything
 name, AT number, dates, schedule, percentage. Change what you need and press
 **Publish new version**.
 
