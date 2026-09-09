@@ -10731,3 +10731,59 @@ client **with the order** rather than duplicated in the bundle, so the two canno
 which mode the app is in. When either is unset the refusal **names which one and which mechanism
 configures it** — "payments are not configured" sends the reader to the wrong place half the
 time.
+
+
+## G31. Checkout, and the state between "money left" and "the server knows"
+
+`src/lib/subscriptionClient.ts` and `src/components/SubscriptionPanel.tsx`. The browser opens a
+checkout with an order id it was handed and passes back what Razorpay returns. It does not
+choose the price, does not decide what the payment buys, and **its report that a payment
+succeeded is not what activates anything.**
+
+**THE FAILURE THIS CODE EXISTS TO HANDLE CORRECTLY** is the window between the card being
+charged and the server recording it. Razorpay takes the money before our handler runs. If
+verification then fails — a dropped connection, a closed tab, a cold start timing out — **the
+customer has paid and the subscription is not active.** That is a real state, not a hypothetical.
+
+The instinct is to show a payment failure. That is the one thing that must not happen: it tells
+the customer nothing was charged, which is false, and which they will discover from their bank
+statement. `PaymentTakenButUnverified` carries the payment id and says so plainly — *"Your
+payment went through, but this app could not confirm it. Nothing is lost. Quote payment
+`pay_xxx` to support and it will be applied."* **The payment id is the only thing that lets the
+payment be found afterwards, so it belongs on screen rather than in a console.**
+
+Three smaller things in the same family, each a real behaviour of the gateway rather than
+defensive habit:
+
+- **`settled` guards against both callbacks firing.** Razorpay calls `ondismiss` when the modal
+  closes, which on some flows happens *after* a successful handler. Without the flag a completed
+  payment could be reported as a dismissal and the resolve discarded — a paid customer told they
+  cancelled.
+- **Razorpay's own retry is disabled.** Its retry UI re-opens checkout against a *new* order
+  behind the app's back, which would leave a paid order this app never verified. A retry here is
+  the customer pressing the button again, which makes a fresh order the server knows about.
+- **A dismissal is not an error and shows no message.** Closing a payment window is an ordinary
+  thing to do, and an alarm on it trains people to ignore alarms.
+
+**`alreadyProcessed` IS REPORTED AS SUCCESS, NOT AS A FAULT.** The same payment reaching the
+server twice is ordinary — a retry, a refresh — and the idempotency key refuses the second
+arrival rather than counting it (G30). The screen says *"That payment had already been recorded.
+Nothing was charged twice."* Presenting that as an error would send a customer to support over
+a system working exactly as designed.
+
+**THE PANEL SHOWS ABSENCE AS ABSENCE**, which is the direct inversion of what it replaces. The
+screen it supersedes read `subscriptionStatus || 'active'` against a database where no agency had
+ever paid, and rendered twelve customers as ACTIVE PAID on an expiry date that changed daily
+(G28). Every state here comes from a document that exists; when there is none it says
+`NOT SUBSCRIBED`. It reads `subscriptions/{agencyId}` live and writes nothing — it cannot, the
+collection is `allow write: if false` (G29).
+
+**A grant reads as a grant, not as a payment.** `status: 'granted'` renders GRANTED with its
+reason, not ACTIVE. Nine founding agencies hold eighteen-month grants, and an operator who
+believes they have paid will not expect a renewal notice.
+
+**And the early-renewal rule is stated on the button rather than left to be discovered.** With
+those grants outstanding, almost every renewal for the next eighteen months will be early. A
+customer who suspects renewing early will forfeit their remaining days will simply wait — and
+then renew late, which is the outcome the whole screen exists to avoid. One line: *"Renewing
+early adds a year to the date above rather than restarting from today. No days are lost."*

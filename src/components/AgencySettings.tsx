@@ -9,6 +9,7 @@ import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
+import SubscriptionPanel from './SubscriptionPanel';
 
 /** The four Gujarat DISCOMs. Names only - see AUDIT O7 for why no registration
  *  details are attached to these. */
@@ -321,6 +322,12 @@ export default function AgencySettings() {
     // which fits the pairs this form is actually made of (GSTIN/PAN, bank/IFSC,
     // DISCOM/circle office). Region B breaks out wider still - see its own note.
     <div className="max-w-[900px] mx-auto space-y-5">
+      {/* ⚠ SCOPED TO THE ACTIVE AGENCY, WHICH IS WHY IT SITS WITH THE CONTEXT BAR RATHER THAN
+          IN THE FORMS BELOW. A subscription belongs to one agency; showing it inside a form
+          that edits agency details would invite the reading that it is a field being edited.
+          It is not editable from here at all - `subscriptions/{agencyId}` is server-written
+          (AUDIT G29), and this panel only reads it. */}
+      <SubscriptionPanel />
       {/* ============================ CONTEXT BAR ============================
           The SCOPE everything below sits in, not a section you edit. "Switch Agency" was
           a card list, which implied it was content; it is the frame.
