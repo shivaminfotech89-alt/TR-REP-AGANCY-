@@ -449,6 +449,67 @@ service cloud.firestore {
       allow delete: if isSuperAdmin();
     }
 
+    /**
+     * MONEY. TWO COLLECTIONS NO CLIENT MAY WRITE, EVER (AUDIT G27, G28).
+     *
+     * ⚠ `allow write: if false` IS THE WHOLE MECHANISM, AND IT IS NOT A STRICTER VERSION OF
+     * A NORMAL RULE. A Firestore rule CANNOT express "only a Cloud Function may write this".
+     * The Admin SDK does not satisfy rules as a privileged principal - it BYPASSES them
+     * entirely - so there is no predicate that tells a server write from a client one. The
+     * only construction that gives the guarantee is a total client denial: everything the
+     * rules can see is refused, and the only writer left is the one the rules never evaluate.
+     *
+     * That is why subscription state could not simply stay on the agency document with a
+     * tighter condition. The agency is owner-writable; a validated field there was forgeable
+     * by the party with the incentive to forge it, and the type check read as a boundary
+     * while being orthogonal to one. There is no clever predicate that fixes that. The field
+     * a gate reads has to live where no client can write at all.
+     *
+     * ⚠ READ IS DELIBERATELY GRANTED, and it is not a weakening. An agency owner must be
+     * able to see what they have paid for and when it expires - a paywall that will not tell
+     * you your own expiry date generates a support ticket per customer per year. Reading
+     * cannot forge anything; only writing can.
+     */
+
+    /**
+     * WHAT AN AGENCY HAS PAID FOR. Written by the payment function, after signature
+     * verification, and by the vendor's grant script. Never by a browser.
+     *
+     * ⚠ THE DOCUMENT ID IS THE AGENCY ID, which is what makes the ownership check possible:
+     * the rule can `get()` the agency at a known path and compare its ownerId. A random
+     * subscription id would leave nothing to check against without a query, and rules cannot
+     * query. The id carries the relationship the rule needs.
+     *
+     * ⚠ NO DELETE, NOT EVEN THE SUPER ADMIN'S. A subscription is what a GST invoice points
+     * at, and an invoice is answered with a credit note rather than by removing the record it
+     * refers to. Expiry is a status, not an absence.
+     */
+    match /subscriptions/{agencyId} {
+      allow get, list: if isSuperAdmin()
+                          || (isSignedIn()
+                              && exists(/databases/$(database)/documents/agencies/$(agencyId))
+                              && get(/databases/$(database)/documents/agencies/$(agencyId)).data.ownerId == request.auth.uid);
+      allow write: if false;
+    }
+
+    /**
+     * HOW MANY AGENCIES AN ACCOUNT MAY CREATE. Keyed by uid, because at the moment agency
+     * creation is gated there IS no agency id yet - the document is about to be made. Keying
+     * this by agency would be unusable at exactly the moment it is consulted.
+     *
+     * ⚠ THE GATE ITSELF IS THE createAgency FUNCTION, NOT THIS DOCUMENT. A rule can read
+     * `agencySlots > 0` and permit a create, but nothing makes the slot get CONSUMED - rules
+     * cannot decrement, so one paid slot would create unlimited agencies. Check-and-decrement
+     * has to happen in one transaction, which only the server can do. This collection exists
+     * so the server has somewhere unforgeable to keep the count, and so the client can SHOW
+     * the operator how many they have left.
+     */
+    match /entitlements/{uid} {
+      allow get: if isSuperAdmin() || (isSignedIn() && request.auth.uid == uid);
+      allow list: if isSuperAdmin();
+      allow write: if false;
+    }
+
     // ADMIN-PUBLISHED RATE TEMPLATES (AUDIT F73).
     //
     // World-readable by design - a published baseline everyone can copy - and admin-write

@@ -10524,3 +10524,141 @@ database, six populated sections — so no ordinary client reaches the collectio
 one ever did, the read sits in a try/catch that falls back to shipped defaults and says so on
 screen. **A tightened rule with an unexamined reader is an outage; the same rule with the reader
 traced is just a fix.**
+
+
+## G28. Twelve agencies shown as paying customers, and the person misled was the one deciding whether to chase them
+
+Recorded separately from G27, which listed it as one of four defects found before the payment
+work. It deserves its own entry: **it is the sharpest instance of the sentinel pattern in this
+codebase**, and the pattern is the single most repeated finding in this document.
+
+`AdminPanel:841-843`, three lines:
+
+```js
+const subStatus = (agency as any).subscriptionStatus || 'active';
+const expiryMs  = (agency as any).subscriptionExpiryDate || (Date.now() + 365*24*60*60*1000);
+const planAmt   = (agency as any).subscriptionPlanAmount || 3999;
+```
+
+Against a database where **no agency carried any of the three fields.** Not some. None — verified
+against the live database, twelve of twelve. So every `||` fell through, every time, for every
+row, and the table rendered:
+
+- **ACTIVE PAID**, in green, on all twelve
+- **₹3,999 / yr**, a price nobody had ever been charged and which was not even the right price
+- **an expiry one year from page load** — a date that was different every day the page was
+  opened, and had never been true of anyone
+
+And the headline metric above it:
+
+```js
+const activeAgenciesCount = allAgencies.filter(a => a.subscriptionStatus === 'active'
+                                                 || !a.subscriptionStatus).length;
+```
+
+`|| !a.subscriptionStatus` — **an agency with no subscription field counted as an active paying
+subscriber.** Absence was read as consent. The card said `12 Active Paid`.
+
+**WHY THIS ONE IS WORSE THAN THE OTHERS.** The pattern recurs throughout this audit: a plausible
+value standing where a missing one belongs, so the absence renders as a fact. `Dashboard:544`
+fell back to the product name where an agency name belonged (G26). `CircleLimitCheck.finalAmt`
+was named for a figure it did not hold. In every previous instance the harm was **a reader
+believing something false about state they could go and check.**
+
+Here the reader was the vendor, the subject was revenue, and there was nothing to check against —
+the screen was the check. The one person deciding whether twelve agencies needed chasing for
+payment was shown twelve agencies that had already paid. A defect that misreports state invites
+a wrong action; **a defect that misreports revenue invites no action at all**, which is the
+failure mode with no error message and no moment of discovery.
+
+It would also have survived the payment integration. Once real subscriptions existed, some rows
+would carry real fields and the rest would keep falling through to the invented ones — and the
+fabricated rows would look *more* credible, not less, because they would sit beside genuine ones
+in the same column with the same styling.
+
+**THE RULE, and it is the same one every time this appears.** `||` is not a default; it is a
+claim. `a || b` asserts that when `a` is absent, `b` is a true statement about the world. That is
+sometimes right — a display string, a formatting choice, an empty list. It is never right for a
+**fact about what happened**: a payment, an expiry, a status, an amount, an owner. For those the
+honest fallback is not a plausible value but the admission that there is none, and the screen has
+to be built to render that admission rather than hide it.
+
+Both now say what is true: `NOT BILLED`, and `Nothing has been billed yet`. The price column
+still shows ₹5,900/yr, labelled *"the rate, not a charge made"* — because the rate is a real fact
+and the charge is not, and a screen about money has to keep those apart.
+
+**A note on how it was found.** Not by a test, a type error or a bug report — none of which could
+have caught it, since every value was well-typed, non-null and plausible. It was found by reading
+the live database first and the screen second, and noticing they disagreed. That is the only
+method that finds this class, and it is why the six payment questions were answered by a live
+read before any of them was answered by building.
+
+
+## G29. Two collections no client may write, and a trailing space that proved the guard works
+
+**THE COLLECTIONS.** `subscriptions/{agencyId}` and `entitlements/{uid}`, both `allow write: if
+false`, both readable by the party they concern.
+
+`allow write: if false` is not a stricter version of an ordinary rule; it is a different kind of
+thing, and the reason is worth stating plainly because it constrains every later design decision
+about money. **A Firestore rule cannot express "only a Cloud Function may write this."** The
+Admin SDK does not satisfy rules as a privileged principal — it bypasses them entirely — so
+there is no predicate available that distinguishes a server write from a client one. The only
+construction that yields the guarantee is total client denial: everything the rules can see is
+refused, and the only writer left is the one the rules never evaluate.
+
+This is why subscription state could not stay on the agency document behind a tighter condition
+(G27). The agency is owner-writable; a validated field there was forgeable by exactly the party
+with an incentive to forge it. There is no clever predicate that fixes that — **the field a gate
+reads has to live where no client can write at all.**
+
+Read is granted deliberately and is not a weakening. An owner must be able to see what they have
+paid for and when it expires; a paywall that will not tell you your own expiry date generates a
+support ticket per customer per year. **Reading cannot forge anything. Only writing can.**
+
+Two shape decisions worth keeping:
+
+- **The subscription document id IS the agency id**, which is what makes the ownership check
+  possible at all: the rule can `get()` the agency at a known path and compare `ownerId`. A
+  random subscription id would leave nothing to check against without a query, and rules cannot
+  query. The id carries the relationship the rule needs.
+- **Entitlements are keyed by uid, not by agency**, because at the moment agency creation is
+  gated there is no agency id yet — the document is about to be made. Keying it by agency would
+  be unusable at precisely the moment it is consulted.
+
+**THE TRAILING SPACE.** The grant script's first draft classified agencies by name, listing nine
+to grant and three to exclude. It refused, and the refusal was initially confusing rather than
+clarifying: two agencies appeared as UNCLASSIFIED *and* as NAMED-BUT-ABSENT simultaneously.
+
+The database holds `"DYNAMIC TRAMSFORMER "` and `"ZENITH TRANSFORMERS "` — **with a trailing
+space**, typed into the creation form and never trimmed. The earlier census printed them through
+`padEnd`, which is exactly the formatting that makes trailing whitespace invisible, so the report
+that produced the list could not have shown it.
+
+The lesson is not about trimming input. It is that **a display string a human typed is not an
+identifier.** It carries whitespace, case, and typos — note that `DYNAMIC TRAMSFORMER` is itself
+misspelt in the data — and it can be edited later without anything noticing that a script
+depended on it. The document id cannot. The script now keys on ids, carries names only so its
+output is readable, re-reads those names live, and flags any that have since been renamed.
+
+**And the guard is what turned a silent mismatch into a stopped run.** The script refuses on any
+agency in neither list rather than defaulting. Had it defaulted to "skip the unrecognised", the
+two whitespace names would have been silently excluded from the grant and two real customers
+would have been locked out eighteen months later, with the script's own output reporting success.
+Had it defaulted the other way, an unknown agency would have been granted a free year in silence.
+**The refusal cost one confusing message and caught a defect the report that produced the list
+could not have shown** — which is the argument for guards that stop rather than choose, in the
+same shape as the print-hash tool refusing on a dirty tree.
+
+**THE GRANT ITSELF.** Nine agencies, eighteen months, status `'granted'` and not `'active'` —
+a grant and a payment are different facts and must stay distinguishable, since a grant has no
+invoice behind it and nothing should ever go looking for one. `planAmount: 0` for the same
+reason. It never overwrites an existing subscription: if one exists it was written by a payment,
+and a grant must not shorten or extend what somebody paid for.
+
+**The classification is an inference from the name, and the script says so in its own output**
+rather than presenting it as a finding. No agency record carries an email or a GSTIN, so nothing
+in the data distinguishes a customer from a test record — `ADMIN`, `suchit` and `MEGHA` were
+excluded on judgement, not evidence. A script that presents a judgement as a fact is how a wrong
+one gets approved, so it prints what it inferred and why, for a person who knows these agencies
+to read against what they know.
