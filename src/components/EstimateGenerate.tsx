@@ -1915,7 +1915,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
               onto a document that goes to UGVCL would be worse than the ambiguity it
               describes. */}
           {selectedJobsData.some((j: any) => j.estimateSentDate || j.estimateRefNo) && (
-            <div className="print:hidden mb-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-[12px] text-amber-900 leading-relaxed">
+            <div className="print:hidden mb-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 leading-relaxed">
               <strong className="font-bold">Already sent - this is a recalculation, not the copy that was issued.</strong>
               <p className="mt-0.5">
                 Amounts below are worked out from the estimate master and AT percentage <em>as they are now</em>.

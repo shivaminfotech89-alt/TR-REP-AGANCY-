@@ -1600,7 +1600,7 @@ export default function SingleJobEstimateReport({
                   </div>
 
                   {isFirst && (
-                    <div className="grid grid-cols-2 text-[12px] border border-black p-1.5 mb-1 leading-snug bg-white">
+                    <div className="grid grid-cols-2 text-xs border border-black p-1.5 mb-1 leading-snug bg-white">
                       <div className="space-y-0.5 border-r border-black pr-2">
                         <div className="flex">
                           <span className="font-bold w-28">Job No.:</span>
@@ -1626,7 +1626,7 @@ export default function SingleJobEstimateReport({
                           <span className="font-bold w-28">Oil Shortage:</span>
                           <span className="font-mono">{Number(oilShort).toFixed(2)}</span>
                         </div>
-                        <div className="flex text-[12px] pt-0.5">
+                        <div className="flex text-xs pt-0.5">
                           <span className="font-bold w-28">Order No.:</span>
                           <span className="font-mono truncate">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
                         </div>
@@ -1673,7 +1673,7 @@ export default function SingleJobEstimateReport({
                   )}
 
                   {isFirst && (
-                    <p className="text-[12px] text-justify leading-relaxed mb-2">{clauseText}</p>
+                    <p className="text-xs text-justify leading-relaxed mb-2">{clauseText}</p>
                   )}
 
                   <table className="w-full border-collapse border border-black text-[13px]">
@@ -1709,7 +1709,7 @@ export default function SingleJobEstimateReport({
                   )}
 
                   {isLast && estimate.rateErrors.length > 0 && (
-                    <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-[12px]">
+                    <div className="mt-2 p-2 border-2 border-red-600 bg-red-50 text-red-800 text-xs">
                       <p className="font-black uppercase tracking-wide mb-1">⚠ Estimate incomplete - rate not found</p>
                       <ul className="list-disc list-inside space-y-0.5 font-normal">
                         {estimate.rateErrors.map((e, i) => <li key={i}>{e.message}</li>)}

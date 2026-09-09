@@ -48,6 +48,79 @@ export const LABEL = 'text-[10px] font-bold uppercase tracking-wider text-slate-
 /** Secondary line under a heading. */
 export const SUBLABEL = 'text-[11px] text-slate-600';
 
+/* ============================================================================================
+ * THE TYPE SCALE — TWO OF THEM, DERIVED FROM WHAT THE SCREENS ALREADY USE
+ * ============================================================================================
+ *
+ * These were not invented. Every size below was counted across src/components before it was
+ * written down, and the counts are kept here because they are the argument: four sizes carry
+ * 96% of the app, and they are the scale whether or not anyone names it.
+ *
+ *     text-xs      12px   1045 uses          text-base  16px    72
+ *     text-[10px]         468                text-lg    18px    46
+ *     text-[11px]         343                text-xl    20px    43
+ *     text-sm      14px   289                text-2xl   24px    29
+ *     text-[9px]          142                text-3xl   30px     6
+ *
+ * ⚠ TWO SCALES, BECAUSE SCREEN AND PAPER ARE GOVERNED BY DIFFERENT THINGS. Splitting the
+ * count by whether a file renders an A4 document shows it: EVERYTHING below 9px is print
+ * (26 uses of 8.5px, 20 of 8px, against 5 on screen). Print is small because an A4 page has
+ * a fixed height and the rows have to fit - a physical constraint. Screen text has no such
+ * limit, so its floor is set by legibility on a monitor, which is higher. A single ladder
+ * would have to justify 8px as a legitimate step, and on screen it is not one.
+ *
+ * ⚠ ADOPTING THESE IS NOT A SWEEP. 300+ sites use the raw classes and they are not being
+ * rewritten: the value of a scale is in what it PREVENTS, not in what it changes, and a
+ * large diff with no visible outcome is its own risk. Use these when a screen is next
+ * touched for another reason.
+ *
+ * ⚠ AND IT CANNOT BE APPLIED MECHANICALLY. Three exceptions, named rather than left to be
+ * discovered by whoever runs the sweep:
+ *
+ *   1. LetterheadCalibrator's 6px and 7px are a SCALED-DOWN PREVIEW of a page - deliberately
+ *      illegible, representing something else at size. Exempt by name; not in violation.
+ *
+ *   2. SingleJobEstimateReport's text-[15px] and text-[10.5px] are PAGINATION-TUNED against
+ *      the measured mm constants at the top of that file, which were fitted to real printed
+ *      output. Rounding them to a scale would change a page that fits.
+ *
+ *   3. The debt this scale NAMES rather than fixes:
+ *        - 69 SCREEN uses below 9px, under any sensible screen floor
+ *        - 45 PRINT uses below the 9.5px floor. Mostly the tax invoice, and that waits on a
+ *          height measurement: raising them costs page height the invoice may not have.
+ *        - 5 remaining text-[13px], which sits between xs and sm for no reason. Three others
+ *          were the bill's forwarding letter and became text-sm; of the five left, THREE ARE
+ *          IN THE PAGINATION-TUNED ESTIMATE SHEET and fall under exception 2 above, so only
+ *          two are genuinely loose.
+ */
+
+/** SCREEN. Chips, badges, sub-labels. The floor - nothing smaller belongs on a monitor. */
+export const T_MICRO = 'text-[10px]';
+/** SCREEN. Secondary and help text. */
+export const T_MINOR = 'text-[11px]';
+/** SCREEN. The default. Two-thirds of everything on screen is this size. */
+export const T_BODY = 'text-xs';
+/** SCREEN. Emphasised body, form inputs. */
+export const T_LEAD = 'text-sm';
+/** SCREEN. Card and section titles. */
+export const T_TITLE = 'text-base';
+/** SCREEN. Page headings. Above this, METRIC owns the sizes. */
+export const T_HEAD = 'text-lg';
+
+/**
+ * PRINT. The smallest thing that may go on paper.
+ *
+ * 9.5px is not a preference - it is the floor agreed when the inspection reports and the
+ * fixed-rate estimate were raised. Anything below it is legacy and is listed as debt above.
+ */
+export const P_MIN = 'text-[9.5px]';
+/** PRINT. Table bodies. */
+export const P_BODY = 'text-[10px]';
+/** PRINT. Emphasised rows and totals. */
+export const P_LEAD = 'text-[11px]';
+/** PRINT. Document headings. */
+export const P_HEAD = 'text-xs';
+
 /**
  * Any figure IN A TABLE OR A METRIC. Tabular so columns align; mono for digit width.
  *

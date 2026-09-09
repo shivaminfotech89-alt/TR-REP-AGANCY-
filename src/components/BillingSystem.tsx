@@ -3118,7 +3118,7 @@ export default function BillingSystem() {
               onto a document that goes to UGVCL would be worse than the ambiguity it
               describes. */}
           {selectedJobsData.some((j: any) => j.billNo || j.billSentDate) && (
-            <div className="print:hidden mb-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-[12px] text-amber-900 leading-relaxed">
+            <div className="print:hidden mb-3 p-3 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-900 leading-relaxed">
               <strong className="font-bold">Already sent - this is a recalculation, not the copy that was issued.</strong>
               <p className="mt-0.5">
                 Amounts below are worked out from the estimate master and AT percentage <em>as they are now</em>.
@@ -3144,7 +3144,7 @@ export default function BillingSystem() {
               <div className="text-black">
                 <div>
                   {/* Recipient */}
-                  <div className="mb-4 text-[13px] text-black whitespace-pre-wrap font-medium">
+                  <div className="mb-4 text-sm text-black whitespace-pre-wrap font-medium">
                     {forwardingTo || `To\n${activeAgency?.divisionAuthority || ''}\n${activeAgency?.discomName || ''}\nDivision Office : ${currentDivision}`}
                     {divisionGstin && <p className="font-bold mt-1">GST No. {divisionGstin}</p>}
                   </div>
@@ -3157,7 +3157,7 @@ export default function BillingSystem() {
                   </div>
 
                   {/* Salutation & Body */}
-                  <div className="text-[13px] text-black space-y-3 leading-relaxed mb-4">
+                  <div className="text-sm text-black space-y-3 leading-relaxed mb-4">
                     <p>Dear Sir,</p>
                     <div className="pl-4 space-y-1">
                       <p>
@@ -3188,7 +3188,7 @@ export default function BillingSystem() {
                 {/* mt-6 IS THE GAP, STATED. It used to be whatever justify-between left. */}
                 <div className="mt-6">
                   {/* Enclosures & Signatures */}
-                  <div className="flex justify-between items-end text-[13px] text-black pt-4">
+                  <div className="flex justify-between items-end text-sm text-black pt-4">
                     <div className="space-y-1">
                       <p className="font-bold">Encl :-</p>
                       <ol className="list-decimal list-inside space-y-0.5 text-xs">
