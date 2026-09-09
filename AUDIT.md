@@ -10664,6 +10664,40 @@ one gets approved, so it prints what it inferred and why, for a person who knows
 to read against what they know.
 
 
+**WHAT WAS DONE ABOUT IT, AND THE LINE THE FIX WOULD NOT CROSS.**
+
+The creation form now trims **on save, not on change**. That distinction is the whole fix: a
+trim in the `onChange` handler would make the field impossible to use, because you could never
+type the space in "ZENITH TRANSFORMERS" — it would be eaten the instant it was typed. The edit
+form does the same. Division names three blocks above the offending line were *already* trimmed,
+so the knowledge was in the file; it had simply never been applied to the field that names the
+agency.
+
+The two stored names are cleared by `scripts/admin/trim-agency-names.js`, and that script sits
+deliberately outside a boundary the app cannot cross. **G1 removed `isSuperAdmin()` from every
+agency write** on the stated reasoning that a vendor who can edit a customer's rates, estimates
+or bills is a liability rather than a capability — *if the figures are wrong, the customer cannot
+say it was not us.* The Admin SDK bypasses rules, so this script does what the rules forbid.
+
+It is justified because **that restraint is about substance.** Rates, estimates, bills, figures a
+customer would dispute. A trailing space is none of those: nobody typed it deliberately, no human
+can see it, it does not change what the agency is called, and **it is our defect rather than
+their data** — the form should never have stored it.
+
+**The spelling is a different matter and is not touched.** "DYNAMIC TRAMSFORMER" is misspelt, and
+it is the agency's own name as they gave it; it prints on their documents. Correcting a
+customer's name because it looks wrong to us is precisely the substance G1 says is not ours to
+touch. **The whitespace is ours. The spelling is theirs.** That line is the useful one, because
+it is a rule about *whose data a defect belongs to* rather than about how big the change is —
+and the trailing space is the smaller edit of the two.
+
+The script's scope is drawn to match: one field, on the documents that actually differ, with
+`update()` rather than `set()` so nothing else can be touched even by accident, and every value
+printed **JSON-quoted** before and after. A diff whose entire content is invisible whitespace
+cannot be reviewed any other way — and printing through `padEnd` is exactly what hid the defect
+to begin with.
+
+
 ## G30. The two payment functions, and the four things a browser is not allowed to say
 
 `createSubscriptionOrder` and `verifySubscriptionPayment`, in `functions/subscription.js`. The

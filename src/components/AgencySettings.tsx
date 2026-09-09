@@ -130,7 +130,15 @@ export default function AgencySettings() {
       });
 
       await addAgency({
-        name: newAgencyName,
+        // ⚠ TRIMMED ON SAVE, NOT ON CHANGE. Two live agencies are stored as
+        // "DYNAMIC TRAMSFORMER " and "ZENITH TRANSFORMERS " because this line wrote the input
+        // verbatim (AUDIT G29). Trimming in the onChange handler instead would make the field
+        // impossible to use - you could never type the space in "ZENITH TRANSFORMERS", because
+        // it would be eaten the moment it was typed. The trim belongs at the write.
+        //
+        // Note that division names three blocks above were ALREADY trimmed. The knowledge was
+        // in this file; it just had not been applied to the field that names the agency.
+        name: newAgencyName.trim(),
         letterheadUrl: letterheadBase64,
         letterheadMode,
         letterheadHeaderHeightMm: headerHeightMm,

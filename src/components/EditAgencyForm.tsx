@@ -357,7 +357,10 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       }
 
       await updateAgency(agency.id, {
-        name: agencyName,
+        // Trimmed on save, for the reason AgencySettings gives at the creation form: a
+        // display string a human typed is not an identifier, and the trim cannot live in
+        // onChange without making the field impossible to type a space into.
+        name: agencyName.trim(),
         // ⚠ EACH HALF OMITTED WHEN AUTOMATIC, never written with its derived value. `null`
         // when neither was set, so "nobody chose" stays distinguishable from "chose the one
         // that happens to match" - the same distinction as a blank AT percentage against a

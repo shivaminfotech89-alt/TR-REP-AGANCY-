@@ -46,8 +46,15 @@ const RAZORPAY_KEY_SECRET = defineSecret('RAZORPAY_KEY_SECRET');
  * configuration change instead of a code change. It is handed to the client with the order
  * rather than being duplicated in the bundle, so the two cannot disagree about which mode the
  * app is in.
+ *
+ * ⚠ NO DEFAULT VALUE, DELIBERATELY. It was written as `{ default: '' }` first, which is the
+ * worse failure by some distance: a deploy would succeed, the function would be live, and the
+ * first customer to press Pay would meet a runtime refusal. With no default the Firebase CLI
+ * REFUSES TO DEPLOY until a value exists - it prompts once and persists the answer to
+ * functions/.env.<project>. The misconfiguration is caught at deploy time by someone watching
+ * a terminal rather than at payment time by a customer.
  */
-const RAZORPAY_KEY_ID = defineString('RAZORPAY_KEY_ID', { default: '' });
+const RAZORPAY_KEY_ID = defineString('RAZORPAY_KEY_ID');
 
 /**
  * ⚠ THE PRICE IS DUPLICATED FROM src/lib/pricing.ts, AND THAT IS NOT AN OVERSIGHT.
