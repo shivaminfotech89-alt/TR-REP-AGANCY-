@@ -10859,3 +10859,85 @@ built as `renewal:` + a 20-character Firestore id + `:` + a 13-digit timestamp =
 against Razorpay's 40-character cap.** Over the cap the Orders API returns 400 and no order is
 created - a failure *before* checkout opens, so it cannot explain a payment failing after card
 entry. Fixed regardless, at 23 characters; the full ids live in `notes` and in `payment_orders`.
+
+
+## G33. A negative control that silently did nothing, and the gate it was guarding
+
+**THE CONTROL FAILED, AND REPORTED PASS.** `verify-seed-equality.js` compares three
+implementations of the agency seed and reports whether they agree. Because a harness that
+reports no difference is worthless until something proves it can see one, a negative control was
+run by hand: perturb one rate in the compiled artefact, confirm the comparator catches it.
+
+The perturbation was applied with a regex that did not match the generated file's format. It
+threw, the shell reported the traceback, and **the comparator then ran against a file nobody had
+modified and printed PASS.** The output was indistinguishable from a control that applied its
+perturbation and found the comparator working perfectly.
+
+**This is the third harness in this codebase blind to its own subject, and it is the sharpest of
+the three.** The print-hash tool compared CRLF against LF and reported 13 changed documents that
+were identical. It also could not see an ADDED document, because its "before" pass restored old
+files without removing new ones. Both were comparators that answered confidently about something
+they were not looking at. **This one was the instrument built specifically to prove the
+comparator could see — and it silently did nothing while reporting success.** A broken measuring
+device is one problem; a broken calibration of the measuring device is the same problem one level
+up, and it is the level nobody checks.
+
+**THE RULE: a negative control must fail loudly if it cannot apply its own perturbation.**
+Verify the perturbation LANDED before believing the difference it produces — assert the modified
+value is actually present, not merely that the hashes differ. A control that cannot distinguish
+"I perturbed it and the comparator saw the change" from "I perturbed nothing and there was no
+change" is not a control. Both produce a green result, and the green one you get is the one you
+did not earn.
+
+It is now **built into the harness and runs on every invocation**, rather than being a thing
+someone remembers to do by hand. It clones the built document, changes one `itemName` to a
+sentinel, **asserts the sentinel is present**, and only then asks whether the hash moved. The
+harness is in the functions predeploy hook, so a drifted seed — or a comparator that has gone
+blind — refuses to deploy.
+
+Same family as the print-hash tool refusing on a dirty tree: **the discipline belongs in the
+tool, not in whoever is running it.**
+
+---
+
+**THE GATE ITSELF.** `createAgency` is a callable function, and agency creation goes through it.
+
+A Firestore rule *can* read `entitlements/{uid}.agencySlots > 0` and permit a create. What it
+cannot do is **decrement** — rules evaluate a write, they do not perform one. So a rule-only gate
+lets one paid slot create unlimited agencies: every create passes the same check against the same
+untouched counter. Check-and-decrement has to be one transaction, and only the server can run
+one. Identical reasoning to `deleteIfEmpty`: the guard and the act in one call, with no window.
+
+**The vendor exemption is decided from the verified auth token, and the screen gets no say.** The
+client sends no flag, and the function would not read one if it did. A boolean the browser sets
+and the server trusts is not an exemption — it is a *request* to be exempted, and it is the shape
+every "admin mode" vulnerability takes. The identity now has **one definition**,
+`functions/adminIdentity.js`: it was a literal in `deleteIfEmpty` and again in `firestore.rules`,
+and `createAgency` would have been the third copy. Three copies of "who is the vendor" is where
+they begin to disagree, and an exemption that is true in one function and false in another looks
+correct in both isolations. It normalises case before comparing, because a provider's token
+casing varies and `Shivaminfotech89@Gmail.com` failing a naive `===` would deny the vendor their
+own exemption silently.
+
+**Three provenances stay three facts**, which is G28's lesson applied before the defect rather
+than after it:
+
+| status | meaning | expiry |
+|---|---|---|
+| `active` | paid, invoice behind it | one year |
+| `granted` | founding agency, predates billing | eighteen months |
+| `admin` | vendor-created, no payment | **null** |
+
+`admin` writes `expiryDate: null`, and the panel checks for it **before** the expiry branch —
+otherwise `expiry` is 0, `0 < now` is true, and an agency that never had a subscription renders
+as one that **lapsed**. A subscription that never existed shown as expired is the same class of
+lie as one that never existed shown as ACTIVE PAID. Order is the entire guard.
+
+The year on a slot-created agency runs **from creation, not from purchase**. A slot may sit unused
+for months, and starting the clock at payment would sell somebody a year of service for an agency
+that did not exist yet.
+
+**`allow create` on agencies is deliberately still open.** Closing it before the replacement is
+deployed and proven would lock out creation entirely — including the vendor's — and the rule is
+the one part of this that cannot be tested locally. The function ships first, the rule closes
+after.

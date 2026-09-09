@@ -3,7 +3,7 @@ import { db, auth, handleFirestoreError, OperationType } from './firebase';
 import { pricingModelForJob } from './ugvclSchedules';
 import { sectionsDiffer } from './compareSections';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
-import { buildNewAgencyDocument } from './agencySeed';
+import { createAgencyViaFunction } from './agencyCreate';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -1541,7 +1541,6 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const addAgency = async (agencyData: Omit<Agency, 'id'>): Promise<string | undefined> => {
     if (!auth.currentUser) return undefined;
     try {
-      const newRef = doc(collection(db, 'agencies'));
       
       // SEEDING A NEW AGENCY'S ESTIMATE MASTER.
       //
@@ -1592,7 +1591,27 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       //    rather than assumed: scripts/admin/verify-seed-equality.js builds the document three
       //    ways - the legacy expression that stood here, the shared function, and the compiled
       //    artefact the server will run - and refuses unless all three hash identically.
-      const newAgency = buildNewAgencyDocument(agencyData, auth.currentUser.uid);
+      // ⚠ THE AGENCY IS CREATED BY A CLOUD FUNCTION, NOT BY THIS LINE (AUDIT G33).
+      //
+      // The client cannot gate its own creation. A Firestore rule can READ
+      // `entitlements/{uid}.agencySlots > 0` and permit a write, but it cannot DECREMENT one -
+      // rules evaluate a write, they do not perform one - so a rule-only gate lets a single
+      // paid slot create unlimited agencies, every create passing the same check against the
+      // same untouched counter. Check-and-decrement has to be one transaction, and only the
+      // server can run one.
+      //
+      // The function assembles the document with the SAME COMPILED CODE this file used to run
+      // inline (agency-seed.generated.mjs, from lib/agencySeed.ts), so what a new agency
+      // contains has not changed - proved by scripts/admin/verify-seed-equality.js rather than
+      // assumed.
+      //
+      // ⚠ NOTHING HERE TELLS THE SERVER WHO IS CALLING. The vendor exemption is decided from
+      // the verified auth token inside the function. A flag set by a browser and trusted by a
+      // server is not an exemption; it is a request to be exempted.
+      const created = await createAgencyViaFunction(agencyData as Record<string, unknown>);
+      const newRefId = created.id;
+      const newAgency = created.document as Omit<Agency, 'id'>;
+
       // CREATION TIME, FROM THE SERVER CLOCK (AUDIT A4 -> F38).
       //
       // Agencies and ATs recorded no creation timestamp at all, which has now blocked two
@@ -1612,16 +1631,20 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       // Deliberately NOT added to the local state object below: serverTimestamp() is a
       // sentinel, not a value, and storing it in React state would put a FieldValue where
       // a date is expected. Absent locally until the next fetch is the honest state.
-      await setDoc(newRef, { ...newAgency, createdAt: serverTimestamp() });
-      setAgencies(prev => [...prev, { id: newRef.id, ...newAgency }]);
+      //
+      // ⚠ THE STAMP IS NOW WRITTEN BY THE FUNCTION, with FieldValue.serverTimestamp() on the
+      // Admin SDK - the same server clock, for the same reason. The note above still governs
+      // what comes BACK: the document the function returns deliberately carries no `createdAt`,
+      // so a FieldValue sentinel never reaches React state.
+      setAgencies(prev => [...prev, { id: newRefId, ...newAgency }]);
       // Activate the agency just created. The old guard was `if (!activeAgencyId)` -
       // "is anything stored" where it meant "is this the one being worked on". Creating
       // a second agency while another was active left the first one active, so an AT
       // added next was written with the WRONG agencyId: a successful write, filtered out
       // of the new agency's list and appearing under the old one. Same guard shape as
       // F20 in atMasters (see the pattern note on scope-specific guards).
-      setActiveAgencyId(newRef.id);
-      return newRef.id;
+      setActiveAgencyId(newRefId);
+      return newRefId;
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'agencies');
       throw err;

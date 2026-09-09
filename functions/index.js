@@ -30,6 +30,8 @@ import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { makeCreateSubscriptionOrder, makeVerifySubscriptionPayment } from './subscription.js';
+import { makeCreateAgency } from './createAgency.js';
+import { isSuperAdmin as callerIsSuperAdmin } from './adminIdentity.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appConfig = JSON.parse(readFileSync(join(here, 'app-config.json'), 'utf8'));
@@ -37,8 +39,10 @@ const appConfig = JSON.parse(readFileSync(join(here, 'app-config.json'), 'utf8')
 initializeApp();
 const db = getFirestore(appConfig.firestoreDatabaseId);
 
-/** The one account allowed to delete another owner's document. Mirrors isSuperAdmin() in the rules. */
-const SUPER_ADMIN_EMAIL = 'shivaminfotech89@gmail.com';
+// ⚠ THE VENDOR'S IDENTITY NOW HAS ONE DEFINITION, in ./adminIdentity.js. It was written out
+// here as a literal and again in firestore.rules; createAgency would have been the third copy,
+// and three copies of "who is the vendor" is the point at which they start to disagree. An
+// exemption that is true in one function and false in another looks right in both isolations.
 
 /** How many blocking items to name in the refusal. Enough to recognise, not a dump. */
 const SAMPLE = 10;
@@ -94,7 +98,6 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
     throw new HttpsError('unauthenticated', 'Sign in first.');
   }
   const uid = request.auth.uid;
-  const email = String(request.auth.token?.email || '').toLowerCase().trim();
 
   // ---- 2. a collection this function is willing to touch
   const collection = String(request.data?.collection || '');
@@ -121,7 +124,7 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
   // the function directly, or a stale screen belonging to a different account, is refused
   // by the same test either way.
   const isOwner = String(data.ownerId || '') === uid;
-  const isSuperAdmin = email === SUPER_ADMIN_EMAIL;
+  const isSuperAdmin = callerIsSuperAdmin(request.auth.token?.email);
   if (!isOwner && !isSuperAdmin) {
     throw new HttpsError('permission-denied', 'That record belongs to another account.');
   }
@@ -174,3 +177,9 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
  */
 export const createSubscriptionOrder = makeCreateSubscriptionOrder(db);
 export const verifySubscriptionPayment = makeVerifySubscriptionPayment(db);
+
+/**
+ * AGENCY CREATION, GATED. See ./createAgency.js - a rule can read an entitlement but cannot
+ * decrement one, so check-and-decrement has to be a transaction, which only the server can run.
+ */
+export const createAgency = makeCreateAgency(db);

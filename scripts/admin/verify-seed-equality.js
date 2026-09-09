@@ -141,6 +141,48 @@ console.log(`    ${'(total)'.padEnd(30)} ${Object.values(seed.AGENCY_SEED).reduc
 console.log(`\n  no 'estimateMaster' mirror: ${!('estimateMaster' in shared) ? 'confirmed' : 'FAIL — one was added'}`);
 console.log(`  no 'createdAt' in the built document: ${!('createdAt' in shared) ? 'confirmed' : 'FAIL — a clock leaked in'}`);
 
-const ok = bad === 0 && overrodeSeed && ownerWins && !('estimateMaster' in shared) && !('createdAt' in shared);
-console.log(`\n${ok ? 'PASS — the extraction is a no-op.' : 'FAIL — see above.'}\n`);
+// ---- THE NEGATIVE CONTROL, RUN EVERY TIME RATHER THAN REMEMBERED (AUDIT G33) -------------
+//
+// ⚠ A HARNESS THAT REPORTS NO DIFFERENCE MUST CONTAIN A CASE THAT MUST DIFFER. This one is
+// built in, because the first time it was run by hand it SILENTLY DID NOTHING: the perturbation
+// was applied with a regex that did not match the generated file's format, the exception was
+// caught by the shell rather than the script, and the comparator then reported PASS against a
+// file nobody had modified. A control that cannot apply its own perturbation reports the same
+// PASS as a control that applied it and found no difference.
+//
+// So the perturbation is ASSERTED TO HAVE LANDED before its result is believed. Confirming the
+// modified value is actually present is the whole difference between proving the comparator can
+// see and proving nothing at all.
+function selfTest() {
+  const clone = JSON.parse(JSON.stringify(shared));
+  const section = clone.estimateMasterCRGO;
+  if (!Array.isArray(section) || !section.length) {
+    console.log('\n  SELF-TEST COULD NOT RUN: no CRGO section to perturb.');
+    return false;
+  }
+
+  // Perturb one field of one item - the smallest change the comparator must still catch.
+  const SENTINEL = '__PERTURBED__';
+  const before = section[0].itemName;
+  section[0].itemName = SENTINEL;
+
+  // ⚠ ASSERT THE PERTURBATION LANDED. Not "did the hash change" - that is the thing being
+  // tested and cannot also be the evidence that the test ran.
+  const landed = clone.estimateMasterCRGO[0].itemName === SENTINEL && before !== SENTINEL;
+  if (!landed) {
+    console.log('\n  SELF-TEST FAILED TO PERTURB. The control did not run, so nothing above is proved.');
+    return false;
+  }
+
+  const changed = sha(canonicalJson(clone)) !== first;
+  console.log(`\n  negative control: perturbation landed, comparator ${changed ? 'SAW it' : 'MISSED IT'}`);
+  return changed;
+}
+
+const controlPassed = selfTest();
+
+const ok = bad === 0 && overrodeSeed && ownerWins
+  && !('estimateMaster' in shared) && !('createdAt' in shared)
+  && controlPassed;
+console.log(`\n${ok ? 'PASS — the extraction is a no-op, and the comparator can see.' : 'FAIL — see above.'}\n`);
 process.exit(ok ? 0 : 1);

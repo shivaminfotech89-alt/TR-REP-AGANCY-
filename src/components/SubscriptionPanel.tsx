@@ -47,6 +47,20 @@ function describe(sub: Sub | null, now: number) {
   const expiry = Number(sub.expiryDate || 0);
   const days = expiry ? Math.ceil((expiry - now) / DAY) : 0;
 
+  // ⚠ CHECKED BEFORE EXPIRY, BECAUSE AN ADMIN-CREATED AGENCY HAS NO EXPIRY AND MUST NOT BE
+  // TREATED AS ONE THAT RAN OUT. Its expiryDate is null, so `expiry` is 0, so the expiry branch
+  // below would call it EXPIRED - a subscription that never existed rendered as one that
+  // lapsed. Order is the whole guard here.
+  if (sub.status === 'admin') {
+    return {
+      word: 'ADMIN',
+      tone: 'bg-violet-100 text-violet-800 border-violet-300',
+      // Three provenances stay three facts (G28). This one was never paid for and never
+      // expires, and saying so is the point of having a fourth status at all.
+      line: sub.grantReason || 'Created by the vendor. No payment, and no expiry.',
+    };
+  }
+
   if (expiry && expiry < now) {
     return {
       word: 'EXPIRED',
