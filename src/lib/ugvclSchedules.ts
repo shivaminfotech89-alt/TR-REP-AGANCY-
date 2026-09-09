@@ -407,12 +407,22 @@ export interface ScheduleSet {
   /**
    * PARTS OF THIS SET BORROWED FROM ANOTHER SCHEDULE, pending their own pages.
    *
-   * A schedule can be usable without being finished. UGVCL-2026's Schedule-A is
-   * transcribed; its Schedule-B has not been supplied, so it uses 2020's rather than
-   * blocking every Amorphous job under the new tender. That is a deliberate, temporary
-   * mixture and it is DECLARED rather than left to be inferred from equal-looking arrays -
-   * an estimate carrying 2026 itemised rows beside 2020 fixed rates, with nothing saying
-   * so, is the failure that would never be reported.
+   * A schedule can be usable without being finished. Where a part of a tender has not been
+   * transcribed, the set may borrow that part from an older one rather than blocking every
+   * job under the new tender - a deliberate, temporary mixture, DECLARED here rather than
+   * left to be inferred from equal-looking arrays. An estimate carrying one tender's itemised
+   * rows beside another's rates, with nothing saying so, is the failure that would never be
+   * reported.
+   *
+   * \u26a0 DO NOT WRITE THE CURRENT BORROWINGS INTO THIS COMMENT. It used to name one: that
+   * UGVCL-2026 borrowed 2020's Schedule-B. That stopped being true when the tender was
+   * confirmed to have NO Schedule-B at all - see the UGVCL-2026 entry below, which says so
+   * explicitly - and the comment was left teaching the opposite of what the file did, on the
+   * TYPE, which is the first thing a reader consults to understand the mechanism.
+   *
+   * The borrowings are in the data. `borrowedFrom` on each set is the answer, and every screen
+   * that shows one derives it from there rather than from prose. A comment that caches a fact
+   * the code already carries has no way of being told when the fact changes.
    *
    * Rendered wherever rates are shown. Deliberately NOT on the printed sheet: the tender
    * governs what is charged, and a note about this app's transcription state is not part

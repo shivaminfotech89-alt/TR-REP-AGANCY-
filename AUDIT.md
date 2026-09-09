@@ -11010,3 +11010,69 @@ expiry test reached first would find `0 < now` and render an agency that never h
 subscription as one that **lapsed**. Same class of lie as G28's, erring the third possible way.
 The ordering is the entire guard, and nothing about the code makes that visible — which is why
 it is asserted in a test and stated in the comment.
+
+
+## G35. An allowlist that defaults to allow — 176 clauses, and the field it let through
+
+Recorded separately from the stale-notice sweep that found it, because it is not a stale notice.
+**It is a rules design that admits every field nobody thought to name**, and unlike a comment
+that goes wrong at a moment, this goes wrong **once per new field, forever.**
+
+Every one of the nine validators in `firestore.rules` is built from the same clause shape:
+
+    (!('fieldName' in data) || (data.fieldName is string && data.fieldName.size() <= 150)) &&
+
+Read it plainly: *if the field is absent, pass; if present, it must be the right type.* Which
+means **a field the validator does not name is absent from the validator, and therefore passes
+unchecked.** The nine of them together carry **176 such clauses** against roughly 20 that
+actually require anything:
+
+    isValidAgency            57        isValidPublishedAt        9
+    isValidJob               48        isValidSystemConfig       8
+    isValidAtMaster          31        isValidSupportTicket      7
+    isValidOilTransaction     9        isValidUserRole           4
+                                       isValidInspection         3
+
+It reads as an allowlist. It behaves as a **denylist of the fields somebody remembered**, and
+the two are indistinguishable until the day they differ — which is the day a new field is added.
+
+**IT HAS ALREADY COST SOMETHING, TWICE.**
+
+`isValidSystemConfig` names six estimate sections, `updatedAt` and `updatedBy`. The Admin
+Panel's payment tab wrote **`keySecret`** to that collection, and the validator waved it through
+because it had never heard of it. Combined with the `|| true` read grant (G27), the first Save
+would have published an API secret to the open internet — **type-checked and permitted by a
+function whose entire job is to say what may be written.**
+
+And `isValidAgency` validated `subscriptionExpiresAt` while the TypeScript wrote
+`subscriptionExpiryDate`. The validator guarded a field nothing wrote and **waved through the
+one that mattered**, so the forgeable field was the unvalidated one. Not a coincidence: an
+allowlist that defaults to allow is at its weakest exactly where the code is newest, because a
+recently added field is the one least likely to be in the list.
+
+**WHY THE SHAPE IS TEMPTING.** Firestore documents in this app are genuinely sparse — an agency
+carries 57 optional fields and most are absent on most documents. Requiring them would break
+every existing record. So the `!('x' in data) ||` guard is the correct treatment **for a field
+you have decided to allow**. The defect is not the guard; it is that **nothing anywhere states
+the closed set.** There is no clause saying *"and no other field may be present."*
+
+**WHAT WOULD ACTUALLY CLOSE IT.** Firestore rules do have the primitive:
+`request.resource.data.keys().hasOnly([...])` — an explicit closed set, refusing anything not
+listed. Adding it to `isValidAgency` means enumerating all 57 names plus every legacy field on
+documents created before the app had a schema, and getting that list wrong locks a customer out
+of saving their own agency. So it is not a one-line fix, it is an inventory: **read the live
+documents, take the union of every key present, reconcile against the TypeScript type, decide
+which of the differences are fields and which are debris.**
+
+That inventory is worth doing and has not been done. It is the same work the estimate-master
+census did for rates, and it would answer a question nobody has asked yet: *what is actually on
+these documents?*
+
+**THE GENERAL RULE, which is not about Firestore.** A validator that enumerates what is
+permitted must also state that the enumeration is complete. Otherwise it is not validating the
+document — it is validating the intersection of the document with the author's memory, and
+reporting a pass. **The failure is silent, it favours the newest code, and the thing it lets
+through is by definition the thing nobody was thinking about.**
+
+Left open deliberately, with the decision recorded rather than taken: closing it wrong is a
+lockout, and closing it right needs the inventory first.

@@ -387,9 +387,14 @@ export default function AdminPanel() {
   // reported all twelve agencies as active paying subscribers when not one had ever paid or
   // carried a single subscription field. Absence was being read as consent.
   //
-  // Subscription state has moved to `subscriptions/{agencyId}`, which is not built yet. Until
-  // it is, the honest count is that there is nothing to count.
-  const subscriptionsKnown = false;
+  // Subscription state lives in `subscriptions/{agencyId}`, which this screen now READS - see
+  // `subsByAgency` above and AUDIT G34. The counts below come from that collection.
+  //
+  // ⚠ A `const subscriptionsKnown = false` STOOD HERE AND WAS READ BY NOTHING. It encoded
+  // "no subscriptions exist" as a literal, was true when written, and survived the fix that
+  // made this screen read the collection - so a later reader wiring it up would have got a
+  // permanent `false` from a line that looked like state. A fact about the database belongs
+  // in the database.
   const openTicketsCount = tickets.filter(t => t.status === 'Open' || t.status === 'In Progress').length;
 
   // Filtered ticket list
@@ -980,10 +985,10 @@ export default function AdminPanel() {
                             that fails with `permission-denied` and diagnose it as a bug. */}
                         <div className="flex items-center justify-end gap-1.5">
                           <span
-                            title="Subscription writes are deferred until the Razorpay work. They wrote to the customer's agency document across accounts, which the vendor no longer has permission to do — see AUDIT G1. When built, subscription belongs in its own vendor-owned collection, not on the agency."
+                            title="Subscriptions are written by the payment function and by the founding-grant script, into subscriptions/{agencyId} — a collection no client may write, including this one (AUDIT G29). The status shown in this row is read from there. Editing it from here would mean reopening a write path the rules deliberately closed."
                             className="text-[10px] font-bold uppercase tracking-wide text-slate-500 bg-slate-100 border border-slate-300 px-2.5 py-1.5 rounded-lg"
                           >
-                            Deferred until Razorpay
+                            Server-written
                           </span>
                         </div>
                       </td>
@@ -1008,12 +1013,24 @@ export default function AdminPanel() {
                   isSuperAdmin() on the email in firestore.rules, and by nothing else. These
                   are RECORDS of an intention, not a mechanism - so the heading says record.
                   AUDIT O52. */}
+              {/* ⚠ THIS NOTICE SAID "these records do not grant or restrict anything yet" and
+                  "nothing reads this collection". Both were true, and both were PROMISES THAT
+                  EXPIRE - dangerously, in the direction that matters. If RBAC is ever
+                  implemented and this text is not updated in the same change, an administrator
+                  reads that a role is inert, assigns a restricted one to test, and restricts a
+                  real user.
+
+                  What replaced it POINTS AT THE AUTHORITY INSTEAD OF CACHING ITS ANSWER.
+                  "What a role permits is whatever firestore.rules says" is true today, true
+                  after RBAC lands, and true after it changes again - and it sends the reader to
+                  the one place that can actually answer. A screen that repeats what a rule
+                  currently does has no way of being told when the rule changes. */}
               <h2 className="text-base font-bold text-slate-900">User role records</h2>
               <p className="text-xs text-slate-500">A register of who is meant to hold which role</p>
-              <p className={`mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5`}>
-                These records do not grant or restrict anything yet. Access is decided by the
-                super-admin email in the security rules; nothing reads this collection. Assigning
-                a restricted role here does not limit that user.
+              <p className={`mt-2 text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5`}>
+                This register records an intention. What a role actually permits is decided by
+                <span className="font-mono"> firestore.rules</span> &mdash; read the rules to
+                know what any role allows, rather than inferring it from what is written here.
               </p>
             </div>
             <button
@@ -1188,12 +1205,22 @@ export default function AdminPanel() {
       {activeTab === 'razorpay' && (
         <div className={`${CARD} p-6 space-y-6`}>
           <div className="pb-4 border-b border-slate-100">
-            {/* Stored, not wired. AUDIT O53. */}
-            <h2 className="text-base font-bold text-slate-900">Razorpay settings (not yet connected)</h2>
-            <p className="text-xs text-slate-500">Credentials and fee, stored for the integration when it is built</p>
-            <p className={`mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5`}>
-              Nothing reads these settings yet. There is no Razorpay integration in the app, so
-              &ldquo;enabled&rdquo; enables nothing and no payment is taken or checked.
+            {/* ⚠ THIS NOTICE USED TO SAY "there is no Razorpay integration in the app, so
+                enabled enables nothing and no payment is taken or checked". Payments have
+                worked end to end since G30-G31, and the sentence was still on the payments
+                screen telling its reader that payments did not exist.
+
+                What replaced it describes what this tab HOLDS rather than what the rest of
+                the app does with it. That is a sentence that cannot expire: the secret's
+                location and the price's location are facts about this screen, and they stay
+                true whatever is built next. */}
+            <h2 className="text-base font-bold text-slate-900">Razorpay settings</h2>
+            <p className="text-xs text-slate-500">Gateway mode and the publishable Key ID</p>
+            <p className={`mt-2 text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5`}>
+              The key <strong>secret</strong> is not here &mdash; it is the Functions secret
+              <span className="font-mono"> RAZORPAY_KEY_SECRET</span>, readable only by the
+              server. The price is not here either: it is set in
+              <span className="font-mono"> src/lib/pricing.ts</span>, in version control.
             </p>
           </div>
 
@@ -1277,12 +1304,22 @@ export default function AdminPanel() {
       {activeTab === 'system' && (
         <div className={`${CARD} p-6 space-y-6`}>
           <div className="pb-4 border-b border-slate-100">
-            {/* Stored, not enforced. AUDIT O53. */}
-            <h2 className="text-base font-bold text-slate-900">Maintenance &amp; broadcast settings (not yet enforced)</h2>
-            <p className="text-xs text-slate-500">Stored for when the app checks them on load</p>
-            <p className={`mt-2 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2.5 py-1.5`}>
-              Nothing reads these yet. Switching maintenance mode on records the flag but does
-              not lock anyone out, show a banner, or change what any user sees.
+            {/* ⚠ THIS NOTICE SAID "nothing reads these yet" and, explicitly, that switching
+                maintenance mode on "does not lock anyone out". True when written, and the most
+                dangerous sentence in this panel to leave standing: the day a maintenance check
+                is added, an administrator who trusts this text flips the switch to see what it
+                does and locks out every customer mid-tender.
+
+                A notice that says what a control DOES cannot expire. A notice that promises
+                what it does NOT do expires the moment someone implements the thing. So this
+                describes the write and stops - and if flipping the switch turns out to change
+                nothing, the absence says so more reliably than a sentence can. */}
+            <h2 className="text-base font-bold text-slate-900">Maintenance &amp; broadcast settings</h2>
+            <p className="text-xs text-slate-500">Written to system_config/general</p>
+            <p className={`mt-2 text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-300 rounded px-2.5 py-1.5`}>
+              Saving records the maintenance flag, its message and the banner text. Whether the
+              app acts on them is decided in the app&rsquo;s own load path, not here &mdash; so
+              treat this as arming a setting, and verify the effect rather than assuming it.
             </p>
           </div>
 
