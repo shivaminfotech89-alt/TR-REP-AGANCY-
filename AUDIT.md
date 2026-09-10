@@ -12390,3 +12390,60 @@ says the same thing in the same words: *"The trial is one per account, not one p
 That last point matters more than it looks. **The refusal is the only place a customer meets this
 rule while it is being enforced against them**, and a message that merely says "already used"
 invites the reply *"but this is a different agency."*
+
+
+## G51. A fix validated against the population that cannot exhibit the bug
+
+Creating an agency left Agency Settings empty — "nothing is linked up". **Nothing selected the
+first agency an account ever created.**
+
+G39 removed the automatic switch after creation, on reasoning that was right: *creating an agency
+is a setup act; being moved out of the one you are working in is a side effect nobody asked for*
+— the read-causing-a-mutation shape removed from the AT list for the same reason.
+
+**That reasoning was applied to one case and generalised to all.** It holds for an operator who
+already has an agency. It does not hold for an account with **none**, because there is nothing to
+be moved out of. For them the removal did not preserve a selection; it left `activeAgencyId` null,
+and every section of Agency Settings is gated on `activeAgency`. Their first agency was created
+correctly, entered the list correctly, and rendered an empty page.
+
+### THE SHAPE: VALIDATED AGAINST A POPULATION THAT CANNOT SHOW THE DEFECT
+
+Every existing user has an agency. Every one of them was **unaffected** — the bug is not merely
+hard to see for them, it is **impossible** for them, because the branch that fails is guarded by
+a condition none of them satisfies.
+
+So the change was tested, reviewed and shipped against a population in which it is provably
+correct, and it is **fatal to the only population it was actually built for: a new customer.**
+Every trial would meet it on the first click — the click that decides whether they ever come back.
+
+That is worth naming as its own hazard, because it is not carelessness and it will recur. **A
+change is naturally exercised against the data that exists, and the data that exists is the data
+of people who already got past the step being changed.** The onboarding path is uniquely exposed:
+it is the one code path that, by definition, nobody in the current database has taken recently.
+
+The tell was present and unremarkable — *"stay on the agency you were working in"* is a sentence
+with a presupposition in it, and the presupposition was never checked.
+
+### THE FIX, AND THE SECOND HALF IT CLOSES
+
+`registerCreatedAgencies(docs, selectIfNone)` decides both in one place. **The test is whether
+the account had ANY agency**, so G39's property survives intact: an operator who has one is still
+never moved out of it.
+
+⚠ **And reading `agencies` from the closure is CORRECT here, which is worth stating because the
+same read was the bug in G39.** There the guard asked *"is this id in the list"*, and the list had
+not caught up with the id just created — a stale answer to a question about the new agency. Here
+the question is *"did this account have any agency BEFORE this call"*, and the pre-update value is
+exactly the right answer. **Same variable, opposite correctness, depending on which moment is
+being asked about.**
+
+That closes the stale-closure window flagged in G39 and left unfixed: `setActiveAgencyId` carries
+G39's guard and would have refused the very agency just registered, because `agencies` has not
+updated at that instant. The pointer state is set directly instead — the id came from the server
+and needs no validation against a list it was just added to.
+
+⚠ **And not inside the `setAgencies` updater**, which was the first attempt. It would have closed
+the window too, at the cost of an **impure updater**: React may invoke an updater more than once,
+and a state setter inside one runs with it. Correct-looking, and the kind of thing that produces a
+duplicated write under StrictMode and nowhere else.

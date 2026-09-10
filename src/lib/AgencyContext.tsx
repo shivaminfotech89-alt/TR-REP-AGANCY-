@@ -1118,7 +1118,16 @@ interface AgencyContextType {
   agencyPointerNotice: string | null;
   dismissAgencyPointerNotice: () => void;
   /** Take agencies the server has just created into local state. See the note on the impl. */
-  registerCreatedAgencies: (created: Array<{ id: string; document: Record<string, unknown> }>) => void;
+  /**
+   * Take agencies the server has just created into local state.
+   *
+   * `selectIfNone` selects the first of them ONLY when the account had no agency at all - see
+   * the implementation for why that preserves G39 rather than reversing it.
+   */
+  registerCreatedAgencies: (
+    created: Array<{ id: string; document: Record<string, unknown> }>,
+    selectIfNone?: boolean,
+  ) => void;
 
   /** Admin-published rate templates, readable by everyone. See PublishedAt. */
   publishedAts: PublishedAt[];
@@ -1676,8 +1685,34 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * `agencies` is fetched once with getDocs and there is no listener on the collection, so
    * without this a creation is invisible until a reload.
    */
-  const registerCreatedAgencies = (created: Array<{ id: string; document: Record<string, unknown> }>) => {
+  const registerCreatedAgencies = (
+    created: Array<{ id: string; document: Record<string, unknown> }>,
+    selectIfNone = false,
+  ) => {
     if (!Array.isArray(created) || created.length === 0) return;
+
+    /**
+     * ⚠ SELECT THE FIRST AGENCY AN ACCOUNT EVER CREATES - AND ONLY THAT ONE (AUDIT G51).
+     *
+     * G39 removed the automatic switch after creation, because being moved out of the agency you
+     * are working in is a side effect nobody asked for. That reasoning is right and it survives:
+     * the test is whether the account had ANY agency, so an operator who has one is still never
+     * moved out of it.
+     *
+     * What G39 missed is that an account with NO agency has nothing to be moved out of. For them
+     * the removal did not preserve a selection - it left `activeAgencyId` null, and every section
+     * of Agency Settings is gated on `activeAgency`. Their first agency was created correctly,
+     * entered this list correctly, and rendered an empty page.
+     *
+     * ⚠ READING `agencies` FROM THE CLOSURE IS CORRECT HERE, WHICH IS WORTH SAYING BECAUSE THE
+     * SAME READ WAS THE BUG IN G39. There the guard asked "is this id in the list", and the list
+     * had not caught up with the id just created - a stale answer to a question about the new
+     * agency. Here the question is "did this account have any agency BEFORE this call", and the
+     * pre-update value is exactly the right answer. Same variable, opposite correctness,
+     * depending on which moment is being asked about.
+     */
+    const hadNone = agencies.length === 0;
+
     setAgencies(prev => {
       const known = new Set(prev.map(a => a.id));
       const fresh = created
@@ -1685,6 +1720,26 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         .map(c => ({ id: c.id, ...(c.document as any) } as Agency));
       return fresh.length ? [...prev, ...fresh] : prev;
     });
+
+    /**
+     * ⚠ NOT `setActiveAgencyId`, AND NOT INSIDE THE UPDATER ABOVE.
+     *
+     * `setActiveAgencyId` carries G39's guard - it refuses an id absent from `agencies`, and
+     * `agencies` has not been updated yet at this instant, so it would refuse the very agency
+     * just registered. That is the stale-closure window flagged in G39 and left unfixed.
+     *
+     * Doing it inside the `setAgencies` updater would close that window but make the updater
+     * impure: React may invoke an updater more than once, and a state setter inside one is a
+     * side effect that runs with it. Setting the pointer state directly, out here, is neither -
+     * the id is known, it came from the server, and it needs no validation against a list it was
+     * just added to.
+     */
+    if (selectIfNone && hadNone) {
+      const first = created[0].id;
+      setActiveAgencyIdState(first);
+      localStorage.setItem('activeAgencyId', first);
+      setAgencyPointerNotice(null);
+    }
   };
 
   const addAgency = async (agencyData: Omit<Agency, 'id'>): Promise<string | undefined> => {

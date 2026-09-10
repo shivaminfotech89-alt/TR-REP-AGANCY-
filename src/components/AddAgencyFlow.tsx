@@ -81,7 +81,11 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
     // ⚠ INTO CONTEXT STATE FIRST. `agencies` comes from a one-shot getDocs with no listener,
     // so without this the new agencies do not exist as far as any screen is concerned until a
     // reload (AUDIT G39).
-    registerCreatedAgencies(docs);
+    // ⚠ `true` = SELECT IT ONLY IF THIS ACCOUNT HAD NONE (AUDIT G51). An operator who already
+    // has an agency is still never moved out of it - that is G39 and it stands. An account whose
+    // FIRST agency this is has nothing to be moved out of, and leaving it unselected renders an
+    // empty Agency Settings: created correctly, listed correctly, and invisible.
+    registerCreatedAgencies(docs, true);
 
     setNote({
       kind: 'ok',
