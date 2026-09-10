@@ -70,6 +70,7 @@ export function makeCreateAgency(db) {
 
     const now = Date.now();
     const createdIds = [];
+    const createdDocs = [];
 
     // ---- 5. ONE TRANSACTION, ALL OR NONE.
     //
@@ -80,6 +81,7 @@ export function makeCreateAgency(db) {
       // Cleared per attempt: a transaction callback CAN RUN MORE THAN ONCE under contention,
       // and an array filled across attempts would report ids from a rolled-back one.
       createdIds.length = 0;
+      createdDocs.length = 0;
 
       const owned = await tx.get(db.collection('agencies').where('ownerId', '==', uid));
       const taken = new Set(owned.docs.map(d => nameKey((d.data() || {}).name)));
@@ -93,10 +95,9 @@ export function makeCreateAgency(db) {
 
       for (const nm of names) {
         const ref = db.collection('agencies').doc();
-        tx.create(ref, {
-          ...buildNewAgencyDocument({ name: nm }, uid),
-          createdAt: FieldValue.serverTimestamp(),
-        });
+        const document = buildNewAgencyDocument({ name: nm }, uid);
+        tx.create(ref, { ...document, createdAt: FieldValue.serverTimestamp() });
+        createdDocs.push({ id: ref.id, document });
         tx.set(db.collection('subscriptions').doc(ref.id), {
           agencyId: ref.id,
           agencyName: nm,
@@ -117,6 +118,24 @@ export function makeCreateAgency(db) {
       }
     });
 
-    return { createdAgencyIds: createdIds, createdNames: names, admin: true };
+      // ⚠ THE ASSEMBLED DOCUMENT GOES BACK TO THE CALLER (AUDIT G39). The client keeps its
+      // agency list in memory from a one-shot read, so a creation it does not learn about
+      // leaves that list stale - and a stale list plus a pointer at a new agency renders an
+      // empty page, which is exactly the defect this returns to prevent.
+      //
+      // ⚠ THE SERVER SENDS IT RATHER THAN THE CLIENT REBUILDING IT. The client HAS the same
+      // seed code and could assemble an identical document, but then local state would be the
+      // client's assertion about what the server wrote rather than the server's account of it.
+      // The two are identical today - proved by verify-seed-equality - and the point is that
+      // nothing has to keep proving it.
+      //
+      // ⚠ WITHOUT `createdAt`. It is a serverTimestamp sentinel, not a value, and putting a
+      // FieldValue into React state puts a sentinel where a date is expected (AUDIT A5).
+    return {
+      createdAgencyIds: createdIds,
+      createdNames: names,
+      createdAgencies: createdDocs,
+      admin: true,
+    };
   });
 }

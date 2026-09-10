@@ -23,7 +23,7 @@ const DISCOM_OPTIONS = [
 ];
 
 export default function AgencySettings() {
-  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, publishedAts, loading } = useAgency();
+  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, publishedAts, loading, agencyPointerNotice, dismissAgencyPointerNotice } = useAgency();
   // ATs belonging to the ACTIVE agency only - the selector must never offer another
   // agency's tender period (AUDIT F20 was exactly that leak).
   const agencyAtsForContext = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -224,6 +224,21 @@ export default function AgencySettings() {
           </button>
         ))}
       </div>
+
+      {/* ⚠ A REFUSED OR REPAIRED SELECTION SAYS SO (AUDIT G39). Every section below is gated
+          on `activeAgency`, so a pointer at an agency this session does not hold rendered a
+          page with a header and nothing else - no error, no explanation, and twenty jobs sitting
+          untouched in a database the operator had no reason to trust any more. Same shape as
+          F84's superseded AT selection: the app did something quiet and sensible, and left the
+          person to work out why the screen no longer matched what they expected. */}
+      {agencyPointerNotice && (
+        <div className="flex items-start gap-2 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+          <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+          <p className="text-[11px] font-bold text-amber-900 flex-1">{agencyPointerNotice}</p>
+          <button type="button" onClick={dismissAgencyPointerNotice}
+            className="text-[11px] font-bold text-amber-800 hover:text-amber-950 shrink-0">Dismiss</button>
+        </div>
+      )}
 
       {settingsTab === 'subscription' && <ManageSubscription />}
 

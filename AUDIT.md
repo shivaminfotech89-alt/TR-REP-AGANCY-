@@ -11344,3 +11344,81 @@ mistake to point.
 exist separately from `email`. `email` is an access grant (G37): whoever signs in with it can
 write the agency. These two are ordinary data for an invoice and a support ticket. **That
 nothing in `firestore.rules` reads them is the point**, not an omission.
+
+
+## G39. A defensive guard that turned a missing dependency into a blank page
+
+Two agencies were created from the admin login. Agency Settings went blank and the previous
+agency appeared to be gone. **Nothing was lost.** ADMIN kept all 52 fields, 20 jobs, 21
+inspections and 2 AT masters; both new agencies were created correctly, with identical
+`createdAt` timestamps proving the batch transaction committed as one write.
+
+The page was blank because **every section of it is gated on `activeAgency`, and `activeAgency`
+was null.**
+
+### THE GUARD
+
+`AddAgencyFlow` was written as:
+
+```js
+const { agencies, setActiveAgencyId, refreshAgencies } = useAgency() as any;
+...
+if (typeof refreshAgencies === 'function') refreshAgencies();
+```
+
+**`refreshAgencies` has never existed on that context.** The `as any` removed the compiler's
+ability to say so, and the `typeof` guard — written to be safe — made the absence invisible at
+runtime. The call did nothing, silently, every time.
+
+So the sequence was: the server created two agencies; the context's `agencies` array, populated
+once by `getDocs` with no listener on the collection, still held the old two; `setActiveAgencyId`
+then pointed at an id that array did not contain; `agencies.find(...) || null` returned null; and
+both `{activeAgency && (...)}` regions rendered nothing. **A clean console, a working database,
+and a void on screen.**
+
+**THE GUARD IS THE FINDING, NOT THE MISSING FUNCTION.** `typeof x === 'function'` around a
+dependency is the sentinel shape wearing a defensive coat: it substitutes a plausible outcome —
+"nothing to do" — for a fact it has no way to establish. **It is worse than the crash it
+prevents.** A `TypeError: refreshAgencies is not a function` would have named the problem in one
+line, on the first run, pointing at the exact call site. Instead the failure surfaced two steps
+downstream as an empty page, and cost a diagnosis session to trace back.
+
+The rule: **a guard belongs around a value that may legitimately be absent, never around a
+dependency that must exist.** For a dependency, absence is a bug, and the loudest possible
+failure is the correct one. `as any` on a context read is the same defect one level up — it
+turns a compile-time answer into a runtime silence.
+
+### THE POINTER
+
+`setActiveAgencyId` accepted any id. It also persists to `localStorage`, so the broken pointer
+survived reloads — and on the next load it resolved to a near-empty new agency rather than the
+one being worked in, which is why ADMIN "disappeared".
+
+It now **refuses an id not present in `agencies`**, and the stored pointer is **validated once
+the list is known**, falling back to the first agency. Both cases now *say so* rather than
+rendering nothing:
+
+> *The agency last selected is not on this account any more, so ADMIN is selected instead.
+> Nothing has been changed or removed.*
+
+Same class as F84, where a stored AT selection that had been superseded was quietly honoured and
+the operator was left to work out why every screen showed last year's work. **The app doing
+something sensible and silent is not the same as the app being understood.** And the last
+sentence of that notice is the one that matters: a person whose twenty jobs have apparently
+vanished needs to be told they have not.
+
+### THE SIDE EFFECT
+
+Creation used to select the first agency it made. That is removed.
+
+**Creating an agency is a setup act, and being moved out of the one you are working in is a side
+effect nobody asked for** — the same shape as a read causing a mutation, which was removed from
+the AT list for exactly this reason. The operator was mid-task somewhere; they did not ask to
+leave. The success note now says where the new agencies are, the selector is two lines above it,
+and switching is one deliberate act rather than an undo of something that happened to them.
+
+**And the documents now come back from the server** rather than the client rebuilding them. The
+client holds the same seed code and would produce an identical object — proved by
+`verify-seed-equality` — but local state should be the server's account of what was written, not
+the client's assertion about it. Without `createdAt`, which is a `serverTimestamp` sentinel and
+would put a `FieldValue` where React state expects a date (A5).

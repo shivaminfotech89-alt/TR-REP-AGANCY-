@@ -34,9 +34,20 @@ export function priceFor(count: number): number {
   return SUBSCRIPTION_INCLUSIVE_INR * Math.max(0, count);
 }
 
+export type CreatedAgencyDoc = { id: string; document: Record<string, unknown> };
+
 export type PurchaseResult = {
   createdNames: string[];
   createdAgencyIds: string[];
+  /**
+   * The assembled documents, from the server.
+   *
+   * ⚠ THE CALLER MUST PUT THESE INTO CONTEXT STATE. `agencies` is fetched once with getDocs
+   * and there is no listener on the collection, so a creation the context is not told about
+   * leaves the list stale - and a stale list plus a pointer at a new agency renders an empty
+   * page with a clean console (AUDIT G39).
+   */
+  createdAgencies: CreatedAgencyDoc[];
   alreadyProcessed: boolean;
   invoicePending: boolean;
 };
@@ -85,6 +96,7 @@ export async function purchaseAgencies(names: string[]): Promise<PurchaseResult>
   return {
     createdNames: paid.createdNames || clean,
     createdAgencyIds: paid.createdAgencyIds || [],
+    createdAgencies: (paid as any).createdAgencies || [],
     alreadyProcessed: paid.alreadyProcessed,
     invoicePending: paid.invoicePending,
   };
@@ -105,6 +117,7 @@ export async function createAgenciesAsAdmin(names: string[]): Promise<PurchaseRe
   return {
     createdNames: d.createdNames || clean,
     createdAgencyIds: d.createdAgencyIds || [],
+    createdAgencies: d.createdAgencies || [],
     alreadyProcessed: false,
     invoicePending: false,
   };

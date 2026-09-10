@@ -1055,6 +1055,11 @@ interface AgencyContextType {
    */
   atSupersededNotice: { movedTo: string; wasOn: string } | null;
   dismissAtSupersededNotice: () => void;
+  /** Why the selected agency is not the one that was asked for. Null when nothing was refused. */
+  agencyPointerNotice: string | null;
+  dismissAgencyPointerNotice: () => void;
+  /** Take agencies the server has just created into local state. See the note on the impl. */
+  registerCreatedAgencies: (created: Array<{ id: string; document: Record<string, unknown> }>) => void;
 
   /** Admin-published rate templates, readable by everyone. See PublishedAt. */
   publishedAts: PublishedAt[];
@@ -1103,7 +1108,38 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
   const dismissGlobalConfigError = () => setGlobalConfigError(null);
 
+  /**
+   * WHY THE SELECTED AGENCY IS NOT THE ONE THAT WAS ASKED FOR. Null when nothing was refused.
+   *
+   * ⚠ A REFUSAL THAT RENDERS NOTHING IS INDISTINGUISHABLE FROM A BLANK PAGE (AUDIT G39). This
+   * exists so the screen can SAY what happened, which is the same lesson F84 recorded about a
+   * stored AT selection that had been superseded: the app quietly did something sensible and
+   * the operator was left to work out why the screen no longer matched their expectation.
+   */
+  const [agencyPointerNotice, setAgencyPointerNotice] = useState<string | null>(null);
+  const dismissAgencyPointerNotice = () => setAgencyPointerNotice(null);
+
+  /**
+   * ⚠ IT REFUSES AN ID THAT IS NOT IN `agencies`, RATHER THAN POINTING AT NOTHING.
+   *
+   * `activeAgency` is `agencies.find(...) || null`, and every section of Agency Settings is
+   * gated on it - so an id absent from the list produced a page with a header and nothing
+   * else, no error, no explanation. That is exactly what happened when AddAgencyFlow pointed
+   * at an agency the context had not yet been told about: two real agencies existed, twenty
+   * jobs were untouched, and the screen showed a void.
+   *
+   * The pointer is only accepted if it names something this context can actually render.
+   */
   const setActiveAgencyId = (id: string | null) => {
+    if (id && !agencies.some(a => a.id === id)) {
+      console.warn('[agency] refused a pointer to an unknown agency', id);
+      setAgencyPointerNotice(
+        'That agency could not be selected because this session does not have it loaded. '
+        + 'Nothing has changed. Reload to pick it up.',
+      );
+      return;
+    }
+    setAgencyPointerNotice(null);
     setActiveAgencyIdState(id);
     if (id) {
       localStorage.setItem('activeAgencyId', id);
@@ -1370,6 +1406,32 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     }
   }, [auth.currentUser]);
 
+  /**
+   * ⚠ THE STORED POINTER IS VALIDATED ONCE THE LIST IS KNOWN, AND SAYS SO IF IT IS STALE.
+   *
+   * `activeAgencyId` is read from localStorage at mount, before any agency has been fetched, so
+   * it can name an agency this account no longer has - deleted elsewhere, signed in as someone
+   * else, or written by a build that pointed at something it had not loaded. Every section of
+   * Agency Settings is gated on `activeAgency`, so a stale pointer rendered a blank page rather
+   * than an error: the F84 shape, where the app does something quietly and leaves the operator
+   * to work out why the screen does not match.
+   *
+   * It moves to the first agency and SAYS WHICH, rather than sitting on nothing.
+   */
+  useEffect(() => {
+    if (loading || agencies.length === 0 || !activeAgencyId) return;
+    if (agencies.some(a => a.id === activeAgencyId)) return;
+    const fallback = agencies[0];
+    console.warn('[agency] stored pointer names an agency this account does not have',
+      activeAgencyId);
+    setAgencyPointerNotice(
+      `The agency last selected is not on this account any more, so ${fallback.name || 'the first agency'} `
+      + 'is selected instead. Nothing has been changed or removed.',
+    );
+    setActiveAgencyIdState(fallback.id);
+    localStorage.setItem('activeAgencyId', fallback.id);
+  }, [loading, agencies, activeAgencyId]);
+
   const activeAgency = agencies.find(a => a.id === activeAgencyId) || null;
 
   /**
@@ -1538,6 +1600,34 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   };
 
   /** Returns the new agency's id so the caller can select it. */
+  /**
+   * TAKE AGENCIES THE SERVER HAS JUST CREATED INTO LOCAL STATE (AUDIT G39).
+   *
+   * ⚠ THIS EXISTS BECAUSE A GUARD HID ITS ABSENCE. `AddAgencyFlow` called
+   * `if (typeof refreshAgencies === 'function') refreshAgencies()` against a context that has
+   * never had such a function. The guard was written to be safe and did the opposite: a missing
+   * dependency became a silent no-op, the agency list stayed stale, the new pointer found
+   * nothing, and Agency Settings rendered an empty page with a clean console. A crash would
+   * have named the problem in one line.
+   *
+   * ⚠ THE DOCUMENTS COME FROM THE SERVER, not from rebuilding them here. The client has the
+   * same seed code and could produce an identical object - but then local state would be this
+   * file's assertion about what was written rather than the server's account of it.
+   *
+   * `agencies` is fetched once with getDocs and there is no listener on the collection, so
+   * without this a creation is invisible until a reload.
+   */
+  const registerCreatedAgencies = (created: Array<{ id: string; document: Record<string, unknown> }>) => {
+    if (!Array.isArray(created) || created.length === 0) return;
+    setAgencies(prev => {
+      const known = new Set(prev.map(a => a.id));
+      const fresh = created
+        .filter(c => c && c.id && !known.has(c.id))
+        .map(c => ({ id: c.id, ...(c.document as any) } as Agency));
+      return fresh.length ? [...prev, ...fresh] : prev;
+    });
+  };
+
   const addAgency = async (agencyData: Omit<Agency, 'id'>): Promise<string | undefined> => {
     if (!auth.currentUser) return undefined;
     try {
@@ -2347,7 +2437,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       addAtMaster, updateAtMaster,
       predictNextJobNo, getJobNoPrefix, syncCountersState,
       publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster,
-      atSupersededNotice, dismissAtSupersededNotice
+      atSupersededNotice, dismissAtSupersededNotice,
+      agencyPointerNotice, dismissAgencyPointerNotice, registerCreatedAgencies
     }}>
       {children}
     </AgencyContext.Provider>

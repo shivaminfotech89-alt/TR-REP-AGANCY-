@@ -33,7 +33,13 @@ import { Loader2, Plus, Trash2, AlertTriangle, ShieldCheck, CreditCard } from 'l
 const SUPER_ADMIN_EMAIL = 'shivaminfotech89@gmail.com';
 
 export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
-  const { agencies, setActiveAgencyId, refreshAgencies } = useAgency() as any;
+  // ⚠ NO `as any`, AND NO OPTIONAL GUARD. This read
+  //   `const { agencies, setActiveAgencyId, refreshAgencies } = useAgency() as any`
+  // and then called `if (typeof refreshAgencies === 'function') refreshAgencies()` against a
+  // context that has never had such a function. `as any` removed the compiler's ability to say
+  // so, and the guard turned the missing dependency into a silent no-op (AUDIT G39). Naming
+  // the real function here means a rename breaks the build instead of the screen.
+  const { agencies, registerCreatedAgencies } = useAgency();
 
   const [mode, setMode] = useState<'ask' | 'names'>('ask');
   const [names, setNames] = useState<string[]>(['']);
@@ -62,19 +68,34 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
     setNote(null);
   };
 
-  const finish = (created: string[], ids: string[], invoicePending: boolean, paid: boolean) => {
+  const finish = (
+    created: string[],
+    docs: Array<{ id: string; document: Record<string, unknown> }>,
+    invoicePending: boolean,
+    paid: boolean,
+  ) => {
+    // ⚠ INTO CONTEXT STATE FIRST. `agencies` comes from a one-shot getDocs with no listener,
+    // so without this the new agencies do not exist as far as any screen is concerned until a
+    // reload (AUDIT G39).
+    registerCreatedAgencies(docs);
+
     setNote({
       kind: 'ok',
       text: `${created.length} ${created.length === 1 ? 'agency' : 'agencies'} created: `
-        + `${created.join(', ')}. Add each one's DISCOM, GSTIN and divisions from `
-        + `“This Agency” below.`
+        + `${created.join(', ')}. Switch to one from the Agency selector above to add its `
+        + `DISCOM, GSTIN and divisions.`
         + (paid && invoicePending ? ' The GST invoice follows separately.' : ''),
     });
-    // ⚠ SELECT THE FIRST ONE CREATED, so the next screen is about something. Landing back on
-    // whichever agency happened to be active before is the F20-shaped mistake: work done next
-    // would attach to the wrong agency, successfully and invisibly.
-    if (ids[0]) setActiveAgencyId(ids[0]);
-    if (typeof refreshAgencies === 'function') refreshAgencies();
+
+    // ⚠ THE ACTIVE AGENCY IS NOT MOVED, DELIBERATELY.
+    //
+    // It used to jump to the first agency created. Creating an agency is a SETUP act; being
+    // moved out of the one you are working in, as a side effect of it, is the same shape as a
+    // read causing a mutation - which is what was removed from the AT list for the same reason.
+    // The operator was mid-task in some agency; they did not ask to leave it.
+    //
+    // The note says where the new ones are, and the selector is two lines up. Switching is one
+    // deliberate act rather than an undo of something that happened to them.
     setNames(['']);
     setMode('ask');
   };
@@ -86,13 +107,13 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
     try {
       if (isAdmin) {
         const r = await createAgenciesAsAdmin(filled);
-        finish(r.createdNames, r.createdAgencyIds, false, false);
+        finish(r.createdNames, r.createdAgencies, false, false);
       } else {
         const r = await purchaseAgencies(filled);
         if (r.alreadyProcessed) {
           setNote({ kind: 'ok', text: 'That payment had already been recorded. Nothing was charged twice.' });
         } else {
-          finish(r.createdNames, r.createdAgencyIds, r.invoicePending, true);
+          finish(r.createdNames, r.createdAgencies, r.invoicePending, true);
         }
       }
     } catch (e: any) {

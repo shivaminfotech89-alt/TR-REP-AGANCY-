@@ -58,6 +58,8 @@ export type VerifiedPayment = {
   /** For a purchase: what the server actually created, reported by the server. */
   createdAgencyIds?: string[];
   createdNames?: string[];
+  /** The assembled documents, so the caller can put them into context state (AUDIT G39). */
+  createdAgencies?: Array<{ id: string; document: Record<string, unknown> }>;
 };
 
 /**
@@ -270,6 +272,7 @@ export function payWithRazorpay(
               invoicePending: !!d.invoicePending,
               createdAgencyIds: d.createdAgencyIds || [],
               createdNames: d.createdNames || [],
+              createdAgencies: d.createdAgencies || [],
             });
           } catch (e: any) {
             // ⚠ THE MONEY HAS ALREADY MOVED BY THE TIME WE ARE HERE. Whatever went wrong, the

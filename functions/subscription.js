@@ -311,6 +311,7 @@ export function makeVerifySubscriptionPayment(db) {
       // subscription by another year for a single payment. `create` fails if the document
       // exists, so the second attempt loses the race rather than both succeeding.
       const createdIds = [];
+      const createdDocs = [];
       const result = await db.runTransaction(async (tx) => {
         // ⚠ CLEARED ON EVERY ATTEMPT. A Firestore transaction callback CAN RUN MORE THAN
         // ONCE when it hits contention, and an array declared outside it accumulates across
@@ -318,6 +319,7 @@ export function makeVerifySubscriptionPayment(db) {
         // rolled-back attempt that wrote nothing. The writes are safe either way; the report
         // to the customer is what would have lied.
         createdIds.length = 0;
+        createdDocs.length = 0;
         const payRef = db.collection('payments').doc(paymentId);
         if ((await tx.get(payRef)).exists) {
           return { alreadyProcessed: true };
@@ -396,10 +398,9 @@ export function makeVerifySubscriptionPayment(db) {
             const ref = db.collection('agencies').doc();
             // The SAME compiled seed the browser uses (agency-seed.generated.mjs), so what a
             // new agency contains does not depend on which path created it (AUDIT G32).
-            tx.create(ref, {
-              ...buildNewAgencyDocument({ name: nm }, uid),
-              createdAt: FieldValue.serverTimestamp(),
-            });
+            const document = buildNewAgencyDocument({ name: nm }, uid);
+            tx.create(ref, { ...document, createdAt: FieldValue.serverTimestamp() });
+            createdDocs.push({ id: ref.id, document });
             tx.set(db.collection('subscriptions').doc(ref.id), {
               agencyId: ref.id,
               agencyName: nm,
@@ -443,7 +444,12 @@ export function makeVerifySubscriptionPayment(db) {
 
         tx.update(orderSnap.ref, { status: 'paid', paidAt: now, paymentId });
 
-        return { alreadyProcessed: false, expiryDate, created: [...createdIds] };
+        return {
+          alreadyProcessed: false,
+          expiryDate,
+          created: [...createdIds],
+          createdDocs: [...createdDocs],
+        };
       });
 
       return {
@@ -452,6 +458,9 @@ export function makeVerifySubscriptionPayment(db) {
         agencyId,
         createdAgencyIds: result.created || [],
         createdNames: orderedNames,
+        // See the note in createAgency.js: the client's agency list is a one-shot read, and a
+        // creation it does not learn about leaves it stale.
+        createdAgencies: result.createdDocs || [],
         alreadyProcessed: !!result.alreadyProcessed,
         expiryDate: result.expiryDate ?? null,
         // Stated plainly so the screen can say it rather than implying an invoice is coming
