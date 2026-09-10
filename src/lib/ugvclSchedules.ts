@@ -1,3 +1,4 @@
+import type { CoreClass } from '../components/SingleJobEstimateReport';
 // src/lib/ugvclSchedules.ts
 //
 // THE UGVCL RATE SCHEDULES, ONE SET PER TENDER. Schedule-A (CRGO item-wise) and
@@ -637,7 +638,7 @@ export type PricingModel = 'ITEMISED' | 'FIXED_RATE' | 'OH';
 
 export function pricingModelForSchedule(
   set: ScheduleSet,
-  coreClass: 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE'
+  coreClass: CoreClass
 ): PricingModel {
   if (coreClass === 'OH') return 'OH';
   if (coreClass === 'AMORPHOUS' || coreClass === 'WOUND_CORE') {
@@ -650,7 +651,7 @@ export function pricingModelForSchedule(
 /** Convenience for callers holding an AT rather than a resolved set. */
 export function pricingModelForJob(
   at: { scheduleId?: string } | null | undefined,
-  coreClass: 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE'
+  coreClass: CoreClass
 ): PricingModel {
   return pricingModelForSchedule(scheduleSetForAt(at as any), coreClass);
 }

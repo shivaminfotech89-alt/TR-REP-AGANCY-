@@ -11718,3 +11718,128 @@ AT carries `guaranteeMonths` yet and every agency was on 18 — so the printed o
 in value while the source is not. The harness hashes source, which is why it reported the change
 correctly and why the prediction was wrong: I counted the documents whose *text* I was editing,
 not the subtrees whose *source* I was touching.
+
+
+## G43. A used field with no reachable purpose, and one core type that is two things at once
+
+### THE DEFECT: THIRTEEN AGENCIES CONFIGURED SOMETHING THEY COULD NEVER USE
+
+**Thirteen agencies and five ATs carry real LSTC job-number prefixes** — `ZTLSTC`, `LSU`, `LPLN`,
+`KLLSL`, `DTLSTC`, `LS21 IS`, `L21 IS`, `LAAR`. Deliberate, agency-specific values, typed by
+operators into an input that exists on the division form and always has.
+
+**Not one job can ever carry that core type**, because `NewJob`'s core-type select offered three
+options: CRGO, Amorphous, Wound Core. Zero live jobs have an LSTC core type, and none could.
+
+This is a different shape from anything in the stale-truth sweep. Those were **claims that went
+false** — a notice saying "not built yet" about something built, a count of subscriptions nobody
+had. This is **configuration that was correct, deliberate, saved, read by `getJobNoPrefix`, and
+connected to nothing.** A used field with no reachable purpose.
+
+It is also invisible from either end. From the division form the field works: you type a prefix,
+it saves, it comes back. From intake, LSTC simply is not among the options, and nothing suggests
+it should be. **Only someone holding both screens at once could see it**, which is why it
+survived — and it is the same structural blindness as the two subtitles in G26, where no screen
+showed both.
+
+I reported this wrongly first, and the correction matters more than the original claim: I said
+*"no live division has a `prefixLSTC`"* and *"a field that is saved and can never be set."* Both
+false. I had grepped the section of the file I had just written rather than the file. **The
+field renders at `AtDivisions:411` and thirteen agencies had filled it in.**
+
+---
+
+### LSTC / PAT IS TWO THINGS AT ONCE, AND BOTH ARE THE TENDER'S DOING
+
+**It prices as CRGO.** Schedule-A's own header reads *"ITEM-WISE RATE FOR REPAIRING OF DAMAGED
+11/22 KV, 5 to 500 KVA CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous Core DIST. TRANSFORMERS"* —
+PAT and SDT appear there as **sub-types of CRGO**, not as a separate core. Clause 48.0 says it
+again: *"UGVCL reserves the right to repair SDT, PAT and PLMT in line with CRGO rates and
+conditions."*
+
+⚠ **So the absence of an LSTC pricing branch is the tender's instruction, not a gap.** It falls
+through to CRGO deliberately. A reader who finds LSTC missing from a core-type switch and "fixes"
+it by adding a branch will have introduced a divergence the tender forbids. That is the specific
+mistake the note in `classifyCoreType` exists to prevent, and it is prominent there rather than
+being a passing remark.
+
+**It numbers and guarantees as itself.** Its own prefix and counter, and **six months** rather
+than CRGO's eighteen, because clause 38.2 names it: *"11 / 22 KV SDT / PAT, various ampere
+ratings — 6 months"*.
+
+**⚠ AND THOSE TWO CLAUSES ARE IN TENSION — AN AMBIGUITY IN THE TENDER, NOT IN THE APP.** 48.0
+says *"CRGO rates **and conditions**"*, and CRGO's condition is eighteen months. 38.2 names
+SDT/PAT explicitly at six. The specific clause beats the general one, so six stands. But the
+disagreement is real, it is in the document, and being able to point at it later is worth more
+than the sentence costs.
+
+**One label, not two.** The tender says SDT/PAT/PLMT and the app says LSTC, and the tempting
+split — tender's word on print, app's word on screen — is exactly what G26 was about. An
+operator would select "LSTC" at intake and read "SDT/PAT" on the estimate for the same
+transformer minutes later. `LSTC / PAT` everywhere: LSTC because thirteen agencies have already
+typed it, `/ PAT` because that is the tender's word and makes the connection legible on a
+document.
+
+---
+
+### OVERHAULING HAS NO GUARANTEE, VERIFIED TWICE
+
+- **`1819AT.md`**: the word "overhaul" **appears nowhere**. Clause 38.2's table lists four types
+  and overhauling is not among them.
+- **`schedule-a-ugvcl-2026.md`**: Sr. No. 21 is *"Overhauling of transformer including outside
+  cleaning and painting"* — a rate row with KVA-band prices. Searching the entire schedule for
+  "guarantee", "warrant" or "month" returns **nothing, for any item**.
+
+38.2's own framing supports the silence: it guarantees *"the whole unit irrespective of parts
+repaired or replaced"* — a warranty on a **repair**. Overhauling replaces nothing.
+
+So `guaranteeMonthsFor` returns **`null` for OH, not `0`**. Zero months reads as a guarantee that
+has expired; null is the absence of one, and on a signed certificate that difference is the whole
+meaning.
+
+**Three consequences, each a decision:**
+
+- **The certificate lists one clause per core type on the bill**, and names overhauling as
+  carrying none. It previously took its period from `selectedJobsData[0]` — so an MR with an OH
+  job first would have certified "no guarantee" across an otherwise-CRGO bill.
+- **It lists rather than stating the shortest.** The shortest would understate the guarantee on
+  every unit that is not the shortest: a claim against oneself, but a **false** one. A
+  certificate that says less than the truth is not the safe option, it is a different wrong
+  number.
+- **An all-overhauling bill prints no Guarantee Card at all.** A card headed "Guarantee Card"
+  saying "no guarantee" is worse than its absence — the heading is the claim, and a reader takes
+  the card's presence as the fact.
+- **A GP booking on an OH job is refused before the window is computed**, with that reason.
+  Previously it was measured against eighteen months like everything else and would usually have
+  passed — booking a free repair under a guarantee that does not exist.
+
+---
+
+### THE SECOND SILENT COUNTER BUG, CAUGHT THE SAME WAY AS THE FIRST
+
+`getCounterKey` tested `type === 'OH'` **exactly**, while `classifyCoreType` next door tested
+`type === 'OH' || type.includes('OVERHAUL')`. **Two spellings of one question, agreeing until
+something passed the long form** — and the new divisions table does exactly that: its row label
+is `"Overhauling"`, which fell through every branch to `${div}_CRGO`. An overhauling starting
+number would have seeded the **CRGO** counter.
+
+That is the same failure as LSTC falling to `else`, in a branch that already existed. Both were
+found the same way: **a table of every core type against the key it produces**, run rather than
+read. Nine cases now, and the check is the reason two silent defects became two lines.
+
+---
+
+### THE LAYOUT
+
+One table per division, **core types as rows**: prefix, starting number, guarantee. Core type is
+the row because **it is the axis that gains members** — this change alone added the fifth. Rows
+grow downward without reflowing; columns do not.
+
+It replaced three separate blocks in three different column orders, none of which shared an axis:
+the guarantee had no division dimension at all. Answering *"what is SABARMATI's Amorphous
+setup?"* meant reading a prefix in one block, a starting number in another and a guarantee in a
+third.
+
+The guarantee stays **read-only in each row with a single editor above**, because it is per-AT
+and not per-division. An editable field repeated on every division would imply it varies by
+division — which is the confusion G42 corrected.

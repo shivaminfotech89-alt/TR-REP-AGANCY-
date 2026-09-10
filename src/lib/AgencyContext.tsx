@@ -504,12 +504,29 @@ export interface PublishedAt {
 export function getCounterKey(division: string, coreType: string = 'CRGO'): string {
   const div = (division || '').trim();
   const type = (coreType || 'CRGO').trim().toUpperCase();
-  if (type === 'OH') {
+  // ⚠ `includes('OVERHAUL')` AS WELL AS THE EXACT 'OH' (AUDIT G43). This tested `type === 'OH'`
+  // only, while classifyCoreType next door tested `type === 'OH' || type.includes('OVERHAUL')` -
+  // two spellings of one question, agreeing until something passed the long form. The divisions
+  // table does exactly that: its row label is "Overhauling", and the exact test fell through to
+  // the CRGO branch, so an overhauling starting number would have seeded the CRGO counter.
+  //
+  // Found by a table of every core type against its key rather than by reading the function -
+  // the same check that caught the missing LSTC branch, one row further down.
+  if (type === 'OH' || type.includes('OVERHAUL')) {
     return `${div}_OH`;
   } else if (type.includes('AMORPHOUS') || type.includes('AM')) {
     return `${div}_AMORPHOUS`;
   } else if (type.includes('WOUND') || type.includes('WC')) {
     return `${div}_WOUND_CORE`;
+  } else if (type.includes('LSTC') || type.includes('SDT') || type.includes('PLMT') || type.includes('PAT')) {
+    // ⚠ THIS BRANCH IS THE ONE THAT WOULD HAVE FAILED SILENTLY (AUDIT G43). Without it, LSTC
+    // falls to the `else` and counts under `${div}_CRGO` - so two prefix series share one
+    // counter, and job numbers interleave between them: LSU-1, then SU-2, then LSU-3. Nothing
+    // errors, nothing warns, and the numbering is wrong on a document UGVCL reads.
+    //
+    // LSTC prices as CRGO by clause 48.0 and numbers as ITSELF by clause 38.2. Sharing rates
+    // does not mean sharing a counter.
+    return `${div}_LSTC`;
   } else {
     return `${div}_CRGO`;
   }

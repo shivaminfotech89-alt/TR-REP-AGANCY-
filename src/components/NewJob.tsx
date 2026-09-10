@@ -33,7 +33,7 @@ import {
   Scale
 } from 'lucide-react';
 import { useAgency, getCircleLimitsEstimateMaster, isIntakeOpen } from '../lib/AgencyContext';
-import { guaranteeMonthsFor } from '../lib/guaranteePeriod';
+import { guaranteeMonthsFor, hasNoGuarantee } from '../lib/guaranteePeriod';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
@@ -223,6 +223,18 @@ export default function NewJob() {
    */
   const guaranteeMonthsForCore = (coreType: string | null | undefined) =>
     guaranteeMonthsFor(activeAtMaster, coreType);
+
+  /**
+   * ⚠ AN OVERHAULING JOB CANNOT BE BOOKED AS GP (AUDIT G43). Overhauling carries no guarantee
+   * term in either tender document, so there is nothing for a guarantee claim to be made
+   * against. Without this it was measured against eighteen months like everything else and
+   * would usually have passed - booking a free repair under a guarantee that does not exist.
+   */
+  const gpRefusalForCore = (coreType: string | null | undefined): string | null =>
+    hasNoGuarantee(coreType)
+      ? 'Overhauling carries no guarantee period under this tender, so it cannot be booked as a '
+        + 'GP repair. Book it as OGP.'
+      : null;
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
@@ -1134,7 +1146,15 @@ ${intakeGate.reason}`);
           setModalAlertMessage(err);
           return;
         }
-        const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType));
+        // ⚠ REFUSED BEFORE THE WINDOW IS COMPUTED (AUDIT G43). Overhauling has no guarantee
+        // term to measure against; computing one against eighteen months would let it pass, and
+        // book a free repair under a guarantee that does not exist.
+        const ohRefusal = gpRefusalForCore(t.coreType);
+        if (ohRefusal) {
+          const err = `Transformer #${i + 1} (Job #${t.jobNo}): ${ohRefusal}`;
+          setErrorMsg(err); setModalAlertMessage(err); setLoading(false); return;
+        }
+        const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType) ?? 0);
         if (!gpCalc || !gpCalc.isValidDate) {
           const err = `Invalid Last Date of Repaired for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter a valid date.`;
           setErrorMsg(err);
@@ -1142,7 +1162,7 @@ ${intakeGate.reason}`);
           return;
         }
         if (!gpCalc.isWithinWarranty) {
-          const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${guaranteeMonthsForCore(t.coreType)}-month Guarantee Period and cannot be booked as a GP repair.`;
+          const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${guaranteeMonthsForCore(t.coreType) ?? 0}-month Guarantee Period and cannot be booked as a GP repair.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
           return;
@@ -1232,13 +1252,21 @@ ${intakeGate.reason}`);
             return;
           }
           if (!t.prevDeliveryDate || !t.prevDeliveryDate.trim()) {
-            const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${guaranteeMonthsForCore(t.coreType)}-Month Guarantee Period before saving.`;
+            const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${guaranteeMonthsForCore(t.coreType) ?? 0}-Month Guarantee Period before saving.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
             return;
           }
-          const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType));
+          // ⚠ REFUSED BEFORE THE WINDOW IS COMPUTED (AUDIT G43). Overhauling has no guarantee
+          // term to measure against; computing one against eighteen months would let it pass, and
+          // book a free repair under a guarantee that does not exist.
+          const ohRefusal2 = gpRefusalForCore(t.coreType);
+          if (ohRefusal2) {
+            const err = `Transformer #${i + 1} (Job #${t.jobNo}): ${ohRefusal2}`;
+            setErrorMsg(err); setModalAlertMessage(err); setLoading(false); return;
+          }
+          const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType) ?? 0);
           if (!gpCalc || !gpCalc.isValidDate) {
             const err = `Invalid Last Date of Repaired for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter a valid date.`;
             setErrorMsg(err);
@@ -1247,7 +1275,7 @@ ${intakeGate.reason}`);
             return;
           }
           if (!gpCalc.isWithinWarranty) {
-            const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${guaranteeMonthsForCore(t.coreType)}-month Guarantee Period and cannot be booked as a GP repair.`;
+            const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${guaranteeMonthsForCore(t.coreType) ?? 0}-month Guarantee Period and cannot be booked as a GP repair.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
@@ -1588,7 +1616,7 @@ ${intakeGate.reason}`);
           const newJobRef = doc(collection(db, 'jobs'));
             // Previous AT & GP Warranty Metadata (Computed directly from row's Last Repaired Date & Agency GP Validation setting)
             const rowGpCalc = (commonData.repairType === 'GP' && t.prevDeliveryDate) 
-              ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType)) 
+              ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType) ?? 0) 
               : null;
 
             const jobData = {
@@ -2401,6 +2429,13 @@ ${intakeGate.reason}`);
                       <option value="CRGO">CRGO</option>
                       <option value="Amorphous">Amorphous</option>
                       <option value="Wound Core">Wound Core</option>
+                      {/* ⚠ THIS OPTION WAS MISSING WHILE THIRTEEN AGENCIES HAD ALREADY
+                          CONFIGURED ITS PREFIX (AUDIT G43). `prefixLSTC` has an input on the
+                          division form, it is saved, `getJobNoPrefix` reads it - and operators
+                          filled it in: ZTLSTC, LSU, LPLN, KLLSL, LAAR, DTLSTC. Not one job could
+                          ever carry the core type, because this select offered three.
+                          Configuration for work that could not be entered. */}
+                      <option value="LSTC / PAT">LSTC / PAT</option>
                       <option value="LSTC">LSTC</option>
                       <option value="OH">OH (Overhauling)</option>
                     </select>
@@ -2420,7 +2455,7 @@ ${intakeGate.reason}`);
                   const isLegacyEntry = !isLinkedFromSaved && (t.gpSource === 'legacy' || noSuggestions);
                   const monthsElapsed = elapsedMonthsBetween(t.prevDeliveryDate || '', commonData.dateOfIssue);
                   const rowGpCalc = t.prevDeliveryDate
-                    ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType))
+                    ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType) ?? 0)
                     : null;
 
                   if (isLinkedFromSaved) {
@@ -2441,8 +2476,8 @@ ${intakeGate.reason}`);
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="font-bold">
                                 {rowGpCalc?.isWithinWarranty
-                                  ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months.`
-                                  : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months, so this must be booked as OGP, not GP.`}
+                                  ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType) ?? 0} months.`
+                                  : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType) ?? 0} months, so this must be booked as OGP, not GP.`}
                               </span>
                               <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono tabular-nums font-bold rounded border border-black/10">
                                 Job #{t.prevJobNo || t.jobNo}
@@ -2554,8 +2589,8 @@ ${intakeGate.reason}`);
                             )}
                             <span>
                               {rowGpCalc.isWithinWarranty
-                                ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months.`
-                                : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months, so this must be booked as OGP, not GP.`}
+                                ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType) ?? 0} months.`
+                                : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType) ?? 0} months, so this must be booked as OGP, not GP.`}
                             </span>
                           </div>
                           <div className="text-[11px] font-mono tabular-nums opacity-90">

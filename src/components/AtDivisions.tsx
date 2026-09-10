@@ -4,8 +4,8 @@ import { Plus, Trash2, Save, Loader2, Check, AlertTriangle, Layers } from 'lucid
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { getCounterKey } from '../lib/AgencyContext';
 import {
-  guaranteeMonthsFor, seedFromStartingNumber, startingNumberFromSeed,
-  GUARANTEED_CORE_TYPES, DEFAULT_GUARANTEE_MONTHS,
+  seedFromStartingNumber, startingNumberFromSeed,
+  ALL_CORE_TYPES, GUARANTEE_DEFAULTS, hasNoGuarantee,
 } from '../lib/guaranteePeriod';
 
 export function AtDivisions({ at }: { at: AtMaster }) {
@@ -80,8 +80,8 @@ export function AtDivisions({ at }: { at: AtMaster }) {
    */
   const [guaranteeMonths, setGuaranteeMonths] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
-    GUARANTEED_CORE_TYPES.forEach(ct => {
-      out[ct] = String(at.guaranteeMonths?.[ct] ?? DEFAULT_GUARANTEE_MONTHS);
+    Object.keys(GUARANTEE_DEFAULTS).forEach(label => {
+      out[label] = String(at.guaranteeMonths?.[label] ?? GUARANTEE_DEFAULTS[label]);
     });
     return out;
   });
@@ -179,104 +179,53 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           </p>
         </div>
 
-        {/* ===================== GUARANTEE PERIOD, PER CORE TYPE =====================
-            ⚠ A TENDER TERM, ON THE TENDER (AUDIT G42). It used to be one figure on the AGENCY,
-            which meant it survived a rollover and applied the previous tender's terms to this
-            tender's work. It also had two rivals: a free-text box on the bill and a hardcoded
-            eighteen on the Dashboard, two of which printed on the same document. */}
+        {/* ================= GUARANTEE PERIOD — ONE EDITOR, PER CORE TYPE =================
+            ⚠ A TENDER TERM, ON THE TENDER (AUDIT G42). Edited ONCE here and shown read-only
+            against every division below, because it does NOT vary by division. Repeating an
+            editable field per division would imply that it does, which is the confusion this
+            change corrects.
+
+            ⚠ THE STARTING NUMBER USED TO BE A SECOND STANDALONE BLOCK HERE. It is now a column
+            in each division's table, beside that division's prefix, because an operator asking
+            "what is SABARMATI's Amorphous setup?" was reading a prefix in one block, a starting
+            number in another and a guarantee in a third - three blocks, three column orders,
+            and the guarantee not aligned with anything because it has no division axis. */}
         <div className="mb-4 border border-slate-200 rounded-lg p-3 bg-slate-50">
           <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
-            <h5 className="text-xs font-black text-slate-900">Guarantee period</h5>
+            <h5 className="text-xs font-black text-slate-900">Guarantee period for this AT</h5>
             <span className="text-[10px] text-slate-500">
-              A/T clause 38.2. Printed on the guarantee certificate and checked when a GP job is booked.
+              A/T clause 38.2. Printed on the guarantee certificate, and checked when a GP job is booked.
             </span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {GUARANTEED_CORE_TYPES.map(ct => (
-              <div key={ct}>
-                <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">{ct}</label>
+            {Object.keys(GUARANTEE_DEFAULTS).map(label => (
+              <div key={label}>
+                <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">{label}</label>
                 <div className="flex items-center gap-1">
                   <input
                     type="number"
                     min={1}
-                    value={guaranteeMonths[ct] ?? ''}
-                    onChange={e => setGuaranteeMonths(prev => ({ ...prev, [ct]: e.target.value }))}
+                    value={guaranteeMonths[label] ?? ''}
+                    onChange={e => setGuaranteeMonths(prev => ({ ...prev, [label]: e.target.value }))}
                     className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-mono tabular-nums"
                   />
-                  <span className="text-[10px] text-slate-500 shrink-0">months</span>
+                  <span className="text-[10px] text-slate-500 shrink-0">mo</span>
                 </div>
               </div>
             ))}
           </div>
-          {/* ⚠ SAID HERE RATHER THAN LEFT AS AN ABSENCE. LSTC/PAT would be six months under
-              clause 38.2, and the app has no such core type to attach it to. */}
+          {/* ⚠ OVERHAULING IS ABSENT FROM THE EDITOR BECAUSE IT HAS NO GUARANTEE AT ALL, stated
+              rather than left as a blank column. Verified in BOTH tender documents: "overhaul"
+              appears nowhere in 1819AT.md, and Schedule-A Sr. No. 21 ("Overhauling of transformer
+              including outside cleaning and painting") is a rate row with no term - a search of
+              the whole schedule for guarantee, warrant or month returns nothing for any item. */}
           <p className="text-[10px] text-slate-500 mt-2">
-            LSTC / PAT would be 6 months under clause 38.2. It is not offered because this app has
-            no LSTC core type &mdash; it exists only as a job-number prefix, and no job carries it.
-            Adding it means making LSTC a real core type first.
+            <strong>Overhauling has no guarantee period</strong> and is not listed above &mdash; it
+            is a service, not a repair, so nothing is replaced and nothing is guaranteed. The
+            tender is silent on it in the conditions and in Schedule-A item 21.
+            {' '}<strong>LSTC / PAT is 6 months</strong> under clause 38.2, against 18 for CRGO and
+            amorphous.
           </p>
-        </div>
-
-        {/* ===================== STARTING JOB NUMBER =====================
-            ⚠ A SEED, NOT A SETTING. `lastJobNumbers` holds the LAST USED number and the
-            suggestion is `last + 1`, so starting at 47 stores 46 - the conversion lives in
-            seedFromStartingNumber and nowhere else. Once a real job has advanced the counter
-            this cannot change anything, so the field DISABLES ITSELF and says why: a control
-            that quietly stops working is read as broken. */}
-        <div className="mb-4 border border-slate-200 rounded-lg p-3 bg-slate-50">
-          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
-            <h5 className="text-xs font-black text-slate-900">Starting job number</h5>
-            <span className="text-[10px] text-slate-500">
-              For an agency joining this tender part-way. Leave at 1 to start from the beginning.
-            </span>
-          </div>
-          <div className="space-y-2">
-            {divisions.filter(d => d.name.trim()).map((d, di) => (
-              <div key={di} className="grid grid-cols-2 sm:grid-cols-5 gap-2 items-end">
-                <div className="text-[11px] font-bold text-slate-700 truncate sm:col-span-1">
-                  {d.name.trim()}
-                </div>
-                {GUARANTEED_CORE_TYPES.filter(ct => ct !== 'OH').map(ct => {
-                  // ⚠ getCounterKey, NOT A SECOND COPY OF IT. A hand-rolled
-                  // `${div}_${ct.toUpperCase()}` happened to produce the same strings today, and
-                  // that is exactly the parallel-implementation shape AgencyContext warns about
-                  // three lines above getCounterKey itself: a second copy that drifts seeds a
-                  // counter nothing reads, silently, and job numbering restarts from 1.
-                  const key = getCounterKey(d.name.trim(), ct);
-                  const moved = counterMoved(key) || (ct === 'CRGO' && counterMoved(d.name.trim()));
-                  const last = Number(at.lastJobNumbers?.[key] || (ct === 'CRGO' ? at.lastJobNumbers?.[d.name.trim()] : 0) || 0);
-                  return (
-                    <div key={ct}>
-                      <label className="block text-[9px] uppercase font-bold text-slate-500 mb-0.5">{ct}</label>
-                      <input
-                        type="number"
-                        min={1}
-                        disabled={moved}
-                        value={startingNumbers[key] ?? '1'}
-                        onChange={e => setStartingNumbers(prev => ({ ...prev, [key]: e.target.value }))}
-                        className={`w-full px-2 py-1.5 text-xs border rounded font-mono tabular-nums ${
-                          moved
-                            ? 'bg-slate-200 border-slate-300 text-slate-500 cursor-not-allowed'
-                            : 'bg-white border-slate-300'
-                        }`}
-                        title={moved
-                          ? `Numbering has started for this division and core type - the last issued number is ${last}. A starting number only seeds an unused counter; changing it now would do nothing, so it is disabled rather than accepting an edit that has no effect.`
-                          : 'The first job number to issue. Stored as one less, because the counter records the last number used.'}
-                      />
-                      {moved && (
-                        <span className="block text-[9px] text-slate-500 mt-0.5">
-                          in use &mdash; last {last}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-            {divisions.filter(d => d.name.trim()).length === 0 && (
-              <p className="text-[11px] text-slate-500">Add a division below first.</p>
-            )}
-          </div>
         </div>
         
         <button 
@@ -372,62 +321,94 @@ export function AtDivisions({ at }: { at: AtMaster }) {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 pt-2 border-t border-slate-200">
-                <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
-                  <label className="block text-[9px] uppercase font-black text-blue-700 mb-0.5">CRGO Prefix *</label>
-                  <input 
-                    required 
-                    type="text" 
-                    value={div.prefixCRGO} 
-                    onChange={e => handleDivisionChange(index, 'prefixCRGO', e.target.value)} 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded font-semibold focus:ring-1 focus:ring-indigo-500 bg-slate-50/50" 
-                    placeholder="e.g. 21 IS" 
-                  />
-                </div>
+              {/* ================= ONE TABLE PER DIVISION, CORE TYPES AS ROWS =================
+                  ⚠ CORE TYPE IS THE ROW, NOT THE COLUMN, BECAUSE IT IS THE AXIS THAT GAINS
+                  MEMBERS (AUDIT G43). This was a five-column grid of prefixes, with the starting
+                  number in a separate block above and the guarantee in a third - so answering
+                  "what is SABARMATI's Amorphous setup?" meant reading three blocks in three
+                  different column orders. Adding LSTC / PAT as a fifth core type would have
+                  widened all three.
 
-                <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
-                  <label className="block text-[9px] uppercase font-bold text-amber-700 mb-0.5">Amorphous Prefix</label>
-                  <input 
-                    type="text" 
-                    value={div.prefixAmorphous} 
-                    onChange={e => handleDivisionChange(index, 'prefixAmorphous', e.target.value)} 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 bg-slate-50/50" 
-                    placeholder="e.g. AM21 IS" 
-                  />
-                </div>
+                  Rows grow downward without reflowing. Columns do not. */}
+              <div className="pt-2 border-t border-slate-200 overflow-x-auto">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="text-[9px] uppercase font-black text-slate-500">
+                      <th className="py-1 pr-2">Core type</th>
+                      <th className="py-1 pr-2">Job no. prefix</th>
+                      <th className="py-1 pr-2">Starting no.</th>
+                      <th className="py-1">Guarantee</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ALL_CORE_TYPES.map(label => {
+                      const field = ({
+                        'CRGO': 'prefixCRGO',
+                        'Amorphous': 'prefixAmorphous',
+                        'Wound Core': 'prefixWoundCore',
+                        'LSTC / PAT': 'prefixLSTC',
+                        'Overhauling': 'prefixOH',
+                      } as Record<string, string>)[label];
 
-                <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
-                  <label className="block text-[9px] uppercase font-bold text-emerald-700 mb-0.5">Wound Core Prefix</label>
-                  <input 
-                    type="text" 
-                    value={div.prefixWoundCore} 
-                    onChange={e => handleDivisionChange(index, 'prefixWoundCore', e.target.value)} 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 bg-slate-50/50" 
-                    placeholder="e.g. WC21 IS" 
-                  />
-                </div>
+                      // ⚠ getCounterKey, NOT A SECOND COPY OF IT. A hand-rolled key produced the
+                      // same strings today and is exactly the parallel-implementation shape
+                      // AgencyContext warns about beside getCounterKey itself: a seed written
+                      // under a key nothing reads, silently, and numbering restarting from 1.
+                      const key = getCounterKey(div.name.trim(), label);
+                      const bare = label === 'CRGO' ? Number(at.lastJobNumbers?.[div.name.trim()] || 0) : 0;
+                      const last = Math.max(Number(at.lastJobNumbers?.[key] || 0), bare);
+                      const moved = last > 0;
+                      const noGuarantee = hasNoGuarantee(label);
 
-                <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
-                  <label className="block text-[9px] uppercase font-bold text-purple-700 mb-0.5">LSTC Prefix</label>
-                  <input 
-                    type="text" 
-                    value={div.prefixLSTC} 
-                    onChange={e => handleDivisionChange(index, 'prefixLSTC', e.target.value)} 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 bg-slate-50/50" 
-                    placeholder="e.g. LS21 IS" 
-                  />
-                </div>
-
-                <div className="bg-white p-2 rounded-lg border border-slate-200 shadow-2xs">
-                  <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">O/H Prefix</label>
-                  <input 
-                    type="text" 
-                    value={div.prefixOH} 
-                    onChange={e => handleDivisionChange(index, 'prefixOH', e.target.value)} 
-                    className="w-full px-2 py-1 text-xs border border-slate-200 rounded focus:ring-1 focus:ring-indigo-500 bg-slate-50/50" 
-                    placeholder="e.g. OH21 IS" 
-                  />
-                </div>
+                      return (
+                        <tr key={label} className="border-t border-slate-100 align-top">
+                          <td className="py-1.5 pr-2 text-[11px] font-bold text-slate-700 whitespace-nowrap">
+                            {label}
+                            {label === 'CRGO' && <span className="text-red-500"> *</span>}
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              required={label === 'CRGO'}
+                              type="text"
+                              value={(div as any)[field] || ''}
+                              onChange={e => handleDivisionChange(index, field as any, e.target.value)}
+                              className="w-full min-w-[90px] px-2 py-1 text-xs border border-slate-200 rounded font-semibold bg-slate-50/50 focus:ring-1 focus:ring-indigo-500"
+                            />
+                          </td>
+                          <td className="py-1.5 pr-2">
+                            <input
+                              type="number"
+                              min={1}
+                              disabled={moved || !div.name.trim()}
+                              value={startingNumbers[key] ?? '1'}
+                              onChange={e => setStartingNumbers(prev => ({ ...prev, [key]: e.target.value }))}
+                              title={moved
+                                ? `Numbering has started here — the last issued number is ${last}. A starting number only seeds an unused counter, so changing it now would do nothing; it is disabled rather than accepting an edit with no effect.`
+                                : 'The first job number to issue. Stored as one less, because the counter records the last number used.'}
+                              className={`w-full min-w-[70px] px-2 py-1 text-xs border rounded font-mono tabular-nums ${
+                                moved
+                                  ? 'bg-slate-200 border-slate-300 text-slate-500 cursor-not-allowed'
+                                  : 'bg-slate-50/50 border-slate-200'
+                              }`}
+                            />
+                            {moved && (
+                              <span className="block text-[9px] text-slate-500">in use &mdash; last {last}</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 text-[11px] whitespace-nowrap">
+                            {/* ⚠ READ-ONLY HERE. The guarantee is per AT, not per division; an
+                                editable field repeated on every division would imply otherwise. */}
+                            {noGuarantee
+                              ? <span className="text-slate-500 italic">no guarantee</span>
+                              : <span className="text-slate-700 font-mono tabular-nums">
+                                  {guaranteeMonths[label] || GUARANTEE_DEFAULTS[label]} months
+                                </span>}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           );

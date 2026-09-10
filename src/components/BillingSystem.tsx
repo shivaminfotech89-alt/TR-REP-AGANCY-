@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
-import { guaranteeMonthsFor } from '../lib/guaranteePeriod';
+import { guaranteeMonthsFor, normaliseCoreLabel } from '../lib/guaranteePeriod';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
          RepairWithinLimitConsent, activeConsent } from '../lib/estimateCalc';
@@ -373,7 +373,33 @@ export default function BillingSystem() {
    * would the moment two core types differed, and the honest place to record that is here
    * rather than in a comment nobody reads after it has broken.
    */
-  const certGuaranteeMonths = guaranteeMonthsFor(activeAtMaster, selectedJobsData[0]?.coreType);
+  /**
+   * THE GUARANTEE PERIODS THIS BILL'S CERTIFICATE MUST STATE (AUDIT G43).
+   *
+   * ⚠ ACROSS EVERY SELECTED JOB, NOT THE FIRST ONE. It read `selectedJobsData[0]?.coreType`,
+   * which is wrong the moment an MR mixes core types - and mixing is ordinary. With an
+   * overhauling job first, an otherwise-CRGO bill would have certified "no guarantee" across
+   * the lot.
+   *
+   * ⚠ AND IT LISTS RATHER THAN TAKING THE SHORTEST. Stating the shortest would understate the
+   * guarantee on every unit that is not the shortest - a claim against oneself, but a FALSE
+   * one, on a signed document. A certificate that says less than the truth is not the safe
+   * option; it is a different wrong number.
+   */
+  const certGuaranteeRows = useMemo(() => {
+    const seen = new Map<string, number | null>();
+    selectedJobsData.forEach(j => {
+      const label = normaliseCoreLabel(j.coreType);
+      if (!seen.has(label)) {
+        seen.set(label, guaranteeMonthsFor(activeAtMaster, j.coreType, j.gpGuaranteeMonths));
+      }
+    });
+    return [...seen.entries()].map(([label, months]) => ({ label, months }));
+  }, [selectedJobsData, activeAtMaster]);
+
+  /** True when NOTHING on this bill carries a guarantee - then no Guarantee Card prints. */
+  const noGuaranteeAtAll = certGuaranteeRows.length > 0
+    && certGuaranteeRows.every(r => r.months === null);
 
   /** GP jobs in this MR - excluded from the bill, counted so the numbers reconcile. */
   const selectedMrGpJobs = useMemo(
@@ -3259,7 +3285,20 @@ export default function BillingSystem() {
                   </div>
 
                   <p className="text-xs text-black leading-loose text-justify font-medium">
-                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certGuaranteeMonths} months from the date of delivery.
+                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong> are Replaced and Fitted, the above Transformers are guaranteed as follows from the date of delivery:{' '}
+                    {/* ⚠ ONE CLAUSE PER CORE TYPE PRESENT ON THIS BILL. Overhauling appears here
+                        SAYING SO rather than being omitted or printed as a number: a reader of a
+                        signed certificate must be able to tell "this carries no guarantee" from
+                        "we forgot to mention it". */}
+                    {certGuaranteeRows.map((r, i) => (
+                      <span key={r.label}>
+                        {i > 0 ? '; ' : ''}
+                        <strong className="font-bold">{r.label}</strong>{' '}
+                        {r.months === null
+                          ? '\u2014 no guarantee period applies (overhauling is a service, not a repair)'
+                          : `\u2014 ${r.months} months`}
+                      </span>
+                    ))}.
                   </p>
 
                   <div className="text-right mt-10">
@@ -3562,6 +3601,19 @@ export default function BillingSystem() {
                     </div>
                   </div>
 
+                  {/* ⚠ NO GUARANTEE CARD AT ALL WHEN NOTHING ON THE BILL CARRIES ONE (AUDIT
+                      G43). An all-overhauling bill used to print a card headed "Guarantee Card"
+                      stating a period the tender never granted. A card saying "no guarantee" is
+                      worse than its absence: the heading is the claim, and a reader takes the
+                      presence of the card as the fact. */}
+                  {noGuaranteeAtAll ? (
+                    <div className="p-2 flex flex-col text-[9px] justify-center">
+                      <p className="text-[8.5px] leading-tight text-center text-slate-600">
+                        No guarantee card is issued for this bill. Overhauling is a service, not a
+                        repair, and carries no guarantee period under this tender.
+                      </p>
+                    </div>
+                  ) : (
                   <div className="p-2 flex flex-col text-[9px]">
                     <div>
                       <h4 className="font-black text-center uppercase tracking-wider mb-1 border-b border-black pb-0.5 text-[9px]">
@@ -3575,7 +3627,13 @@ export default function BillingSystem() {
                             stands is accurate, matches A/T clause 38.2, and says nothing false. A number that is
                             right only while an assumption holds is the hardcoded-truth shape; this is that shape
                             AVOIDED rather than committed. */}
-                        We guarantee the satisfactory performance of the above repaired transformers for {certGuaranteeMonths} months for 11 KV and 12 months for 22 KV from date of delivery.
+                        We guarantee the satisfactory performance of the above repaired transformers from date of delivery:{' '}
+                        {certGuaranteeRows.filter(r => r.months !== null).map((r, i) => (
+                          <span key={r.label}>{i > 0 ? '; ' : ''}<strong className="font-bold">{r.label}</strong> &mdash; {r.months} months for 11 KV and 12 months for 22 KV</span>
+                        ))}
+                        {certGuaranteeRows.some(r => r.months === null) && (
+                          <span>. Overhauling carries no guarantee period.</span>
+                        )}
                       </p>
                     </div>
                     <div className="pt-2 text-center">
@@ -3584,6 +3642,7 @@ export default function BillingSystem() {
                       <p className="text-[8px] text-slate-500">(Authorized Signatory)</p>
                     </div>
                   </div>
+                  )}
                 </div>
               </div>
             </PrintableA4Page>
@@ -3777,8 +3836,14 @@ export default function BillingSystem() {
               <div>
                 <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Guarantee Certificate Period</label>
                 <div className="w-full px-3 py-2 text-sm border rounded bg-slate-100 text-slate-700">
-                  {certGuaranteeMonths} months
-                  <span className="block text-[10px] text-slate-500">
+                  {certGuaranteeRows.length === 0
+                    ? <span className="text-slate-500">No jobs selected</span>
+                    : certGuaranteeRows.map(r => (
+                        <span key={r.label} className="block">
+                          {r.label}: {r.months === null ? 'no guarantee' : `${r.months} months`}
+                        </span>
+                      ))}
+                  <span className="block text-[10px] text-slate-500 mt-1">
                     From the AT, by core type. Change it in Divisions &amp; Core Prefixes.
                   </span>
                 </div>

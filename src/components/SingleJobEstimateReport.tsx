@@ -32,12 +32,41 @@ const SECTION_LABELS: Record<EstimateSection, string> = {
 
 // Same classification convention as getAtPercentage / getEstimateMasterForCore
 // in AgencyContext.tsx - kept consistent so a job classifies identically everywhere.
-export type CoreClass = 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE';
+/**
+ * ⚠⚠ LSTC / PAT IS TWO DIFFERENT THINGS AT ONCE, AND BOTH ARE THE TENDER'S DOING (AUDIT G43).
+ *
+ * IT PRICES AS CRGO.
+ *   Schedule-A's own header reads "ITEM-WISE RATE FOR REPAIRING OF DAMAGED 11/22 KV, 5 to 500
+ *   KVA CRGO (STACK/Wound/DRY/PAT/SDT) / Amorphous Core DIST. TRANSFORMERS" - PAT and SDT are
+ *   listed there as SUB-TYPES OF CRGO, not as a separate core. Clause 48.0 says it again:
+ *   "UGVCL reserves the right to repair SDT (special design transformer), PAT and PLMT in line
+ *   with CRGO rates and conditions."
+ *
+ *   ⚠ SO THE ABSENCE OF AN LSTC PRICING BRANCH IS THE TENDER'S INSTRUCTION, NOT A GAP. It falls
+ *   through to CRGO deliberately, and a reader who sees LSTC missing from a core-type switch and
+ *   "fixes" it by adding a branch will have introduced a divergence the tender forbids. That is
+ *   the specific mistake this note exists to prevent.
+ *
+ * IT NUMBERS AND GUARANTEES AS ITSELF.
+ *   Its own job-number prefix and counter (getCounterKey), and SIX months rather than CRGO's
+ *   eighteen, because clause 38.2 names it: "11 / 22 KV SDT / PAT, various ampere ratings — 6
+ *   months".
+ *
+ * ⚠ AND THOSE TWO CLAUSES ARE IN TENSION, WHICH IS THE TENDER'S AMBIGUITY AND NOT THE APP'S.
+ *   48.0 says "CRGO rates AND CONDITIONS", and CRGO's condition is eighteen months. 38.2 names
+ *   SDT/PAT explicitly at six. The specific clause beats the general one, so six stands - but
+ *   the disagreement is real, it is in the tender, and being able to point at it later is worth
+ *   more than this paragraph costs.
+ */
+export type CoreClass = 'CRGO' | 'OH' | 'AMORPHOUS' | 'WOUND_CORE' | 'LSTC';
 export function classifyCoreType(coreType: string): CoreClass {
   const type = (coreType || 'CRGO').trim().toUpperCase();
   if (type === 'OH' || type.includes('OVERHAUL')) return 'OH';
   if (type.includes('AMORPHOUS') || type.includes('AM')) return 'AMORPHOUS';
   if (type.includes('WOUND') || type.includes('WC')) return 'WOUND_CORE';
+  // ⚠ BEFORE THE CRGO FALLBACK, or an LSTC job classifies as CRGO and loses its guarantee and
+  // its counter. It keeps CRGO's RATES - see the note above - but it is not CRGO.
+  if (type.includes('LSTC') || type.includes('SDT') || type.includes('PLMT') || type.includes('PAT')) return 'LSTC';
   return 'CRGO';
 }
 
