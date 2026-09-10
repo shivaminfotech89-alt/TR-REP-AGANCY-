@@ -45,6 +45,14 @@ const REGION = 'us-central1';
  */
 const TRIAL_HOURS = 72;
 
+/**
+ * ⚠ THE MECHANISM IS HOURS AND THE WORDING IS DAYS (AUDIT G50). Hours are right for the
+ * mechanism - calendar days would give an 11pm signup 73 hours and a 9am signup 96 - but that is
+ * the vendor's reasoning, not the customer's. Every message a person reads says "3 days"; the
+ * expiry they are shown is the exact moment.
+ */
+const TRIAL_LENGTH_LABEL = '3 days';
+
 export function makeCreateAgency(db) {
   return onCall({ region: REGION }, async (request) => {
     // ---- 1. signed in
@@ -95,8 +103,9 @@ export function makeCreateAgency(db) {
       const hadTrial = ownSubs.docs.some(d => (d.data() || {}).status === 'trial');
       if (hadTrial) {
         throw new HttpsError('failed-precondition',
-          'This account has already had its free trial. Add an agency by buying one - the price '
-          + 'and what it includes are on the Pricing page.');
+          `This login has already used its free ${TRIAL_LENGTH_LABEL}. The trial is one per `
+          + 'account, not one per agency - add this one by buying it. The price and what it '
+          + 'includes are on the Pricing page.');
       }
 
       // ⚠ NO TRIAL FOR AN ACCOUNT THAT ALREADY HOLDS AN AGENCY. Someone who has paid does not
@@ -181,7 +190,7 @@ export function makeCreateAgency(db) {
           trialHours: isTrial ? TRIAL_HOURS : null,
           createdByAdmin: !isTrial,
           grantReason: isTrial
-            ? `Free trial, ${TRIAL_HOURS} hours from creation.`
+            ? `Free trial - ${TRIAL_LENGTH_LABEL} from creation (${TRIAL_HOURS}h).`
             : 'Created by the vendor. No payment, and no expiry.',
         });
         createdIds.push(ref.id);

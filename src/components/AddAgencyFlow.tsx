@@ -6,6 +6,7 @@ import {
   MAX_AGENCIES, priceFor, localNameProblems, purchaseAgencies, createAgenciesAsAdmin,
   startFreeTrial,
 } from '../lib/agencyPurchase';
+import { TRIAL_LENGTH_LABEL } from '../lib/trialGate';
 import {
   CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined,
 } from '../lib/subscriptionClient';
@@ -187,15 +188,17 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {/* ⚠ THE TRIAL IS OFFERED FIRST AND ONLY TO A NON-ADMIN. A vendor creating agencies
-              for themselves does not want a 72-hour clock on one, and the server would refuse
+              for themselves does not want a trial clock on one, and the server would refuse
               anyway once they own an agency. */}
           {!isAdmin && (
             <button type="button" onClick={() => start(false, true)}
               className="text-left border-2 border-indigo-400 bg-indigo-50 rounded-lg p-3 hover:border-indigo-600 sm:col-span-2">
-              <span className="block text-sm font-bold text-indigo-900">Try it free for 72 hours</span>
+              <span className="block text-sm font-bold text-indigo-900">Try it free for {TRIAL_LENGTH_LABEL}</span>
               <span className="block text-[11px] text-indigo-800 mt-0.5">
-                One agency, everything working, no card. After 72 hours your work stays readable
-                and printable &mdash; recording new work needs a subscription. One trial per account.
+                One agency, everything working, no card. After {TRIAL_LENGTH_LABEL} your work
+                stays readable and printable &mdash; recording new work needs a subscription.
+                {' '}<strong>One free trial per login</strong>, however many agencies you go on to
+                add.
               </span>
             </button>
           )}
@@ -260,7 +263,7 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
             <div className="text-sm">
               {isTrial ? (
                 <span className="font-bold text-indigo-800">
-                  Free for 72 hours &mdash; no card, no charge
+                  Free for {TRIAL_LENGTH_LABEL} &mdash; no card, no charge
                 </span>
               ) : isAdmin ? (
                 <span className="font-bold text-violet-800">

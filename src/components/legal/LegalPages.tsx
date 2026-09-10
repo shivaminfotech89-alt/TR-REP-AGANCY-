@@ -3,6 +3,7 @@ import { LegalLayout, Section, SellerBlock } from './LegalLayout';
 import { SELLER, isPlaceholder } from '../../lib/seller';
 import { SUBSCRIPTION_INCLUSIVE_INR, gstBreakdown, formatPrice } from '../../lib/pricing';
 import { Walkthrough, SHOTS } from './Walkthrough';
+import { TRIAL_LENGTH_LABEL } from '../../lib/trialGate';
 
 /**
  * THE PUBLIC POLICY PAGES (AUDIT G41).
@@ -76,6 +77,23 @@ export function PricingPage() {
             <span>Total payable</span><span className="font-mono">{formatPrice()}</span>
           </div>
         </div>
+      </div>
+
+      {/* ⚠ THE TRIAL IS ON THE PRICING PAGE BECAUSE THAT IS WHERE SOMEONE DECIDES (AUDIT
+          G50). It is also the one public page a prospect can reach without an account, so it is
+          the only place the offer can be seen before signing in. */}
+      <div className="border-2 border-indigo-400 rounded-lg p-4 bg-indigo-50">
+        <p className="text-sm font-black text-indigo-900">Try it free for {TRIAL_LENGTH_LABEL}</p>
+        <p className="text-xs text-indigo-900 mt-1">
+          One agency, everything working, no card. Afterwards your work stays readable, printable
+          and exportable &mdash; recording new work needs a subscription.
+        </p>
+        {/* ⚠ PER LOGIN, NOT PER AGENCY, AND IT SAYS SO. "3 days free" beside a page about
+            buying agencies would otherwise read as though each new agency came with its own
+            trial. It does not: the server allows one per account, ever. */}
+        <p className="text-xs font-bold text-indigo-900 mt-1.5">
+          One free trial per login &mdash; not one per agency.
+        </p>
       </div>
 
       <Section n={1} heading="What one subscription covers">

@@ -12337,3 +12337,56 @@ missing index fails at **runtime** with `FAILED_PRECONDITION` and a console URL.
 prospect ever to click Start Trial would have met an error nobody had seen.** One equality filter
 now, with the status checked in code: an account holds a handful of subscriptions, and the check
 depends on no configuration.
+
+
+## G50. The mechanism is hours, the wording is days
+
+The trial runs on a 72-hour timestamp and every string a customer reads says **"3 days"**.
+
+Hours are right for the **mechanism**: calendar days would give an 11pm signup 73 hours and a 9am
+signup 96, which is a different product depending on when someone happened to sign up. That is
+why the expiry is a timestamp and not a date, and it stays.
+
+But it is **the vendor's reasoning, not the customer's.** "3 days free" is what a person compares
+against every other trial they have seen; "72 hours" makes them do arithmetic to reach the same
+number and reads like a parking meter. **The precision that matters to them is not the duration —
+it is the moment it ends**, and that is shown exactly.
+
+Five user-facing strings changed: the trial card, its sub-line, the price line, and both banner
+forms. `hoursLeft` survives — but only to **decide**, choosing between the calm banner and the
+urgent one at 24 hours. Its comment now says so, because a field named `hoursLeft` is an
+invitation to render it.
+
+### "TOMORROW" IS A CALENDAR COMPARISON, NOT AN HOUR COUNT
+
+The banner says *"ends tomorrow at 4:15 pm"*, and getting that from an hour count would be wrong:
+something ending in 20 hours is *tomorrow* if it is now evening and *today* if it is now
+midnight. A customer reads the calendar the way they read a wall, and **saying "tomorrow" when
+they would say "today" is the small wrongness that makes a person distrust the rest of the
+message** — including the deadline itself.
+
+`describeEnd` compares start-of-day to start-of-day. Checked across the cases a customer actually
+meets, including the awkward one: an 11:30pm signup with 20 hours to go correctly reads **"today
+at 11:30 pm"**, because the end is on the same calendar day even though it is twenty hours away.
+
+### THE TRIAL IS PER LOGIN, AND NOW SAYS SO
+
+Confirmed in the code rather than from memory. Both server checks key on **`ownerId == uid`**:
+
+```
+const ownSubs = await db.collection('subscriptions').where('ownerId', '==', uid).get();
+const hadTrial = ownSubs.docs.some(d => (d.data() || {}).status === 'trial');
+```
+
+plus a second refusal if the account already owns any agency. **One trial per login, ever,
+regardless of how many agencies they go on to create.**
+
+⚠ **The wording had to be fixed too, and this is the part that was actually wrong.** "3 days
+free" on a page about *buying agencies* reads naturally as *"each agency comes with 3 days"* —
+the offer was accurate and its placement made it ambiguous. It now says **"One free trial per
+login — not one per agency"** on the Add Agency card and on `/pricing`, and the server's refusal
+says the same thing in the same words: *"The trial is one per account, not one per agency."*
+
+That last point matters more than it looks. **The refusal is the only place a customer meets this
+rule while it is being enforced against them**, and a message that merely says "already used"
+invites the reply *"but this is a different agency."*
