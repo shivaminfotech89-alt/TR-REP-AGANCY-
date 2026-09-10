@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
+import { SELLER } from '../lib/seller';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -41,8 +42,6 @@ interface LandingPageProps {
 }
 
 export default function LandingPage({ onLogin, isLoading = false }: LandingPageProps) {
-  const [isTermsModalOpen, setIsTermsModalOpen] = useState(false);
-  const [isPrivacyModalOpen, setIsPrivacyModalOpen] = useState(false);
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
@@ -53,7 +52,19 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans selection:bg-blue-600 selection:text-white relative">
       
-      {/* Top 24/7 Technical Support & Compliance Notice Bar */}
+      {/* ⚠ EVERY "24/7 SUPPORT" CLAIM ON THIS PAGE IS GONE (AUDIT G41). There were NINE, not
+          the two first counted: this bar, the nav, the mobile menu, a statistic tile, a section
+          heading, a "Live Helpdesk" card, an "Enterprise SLA & Support Guarantee" heading, an
+          FAQ answer describing a "cloud operations and engineering team", and the footer.
+
+          None of it was true. Support is one person answering a ticket form during working
+          hours, and the support panel is unbuilt by explicit decision. A service-level claim a
+          product does not meet is a defect anywhere; on a page a payment processor reads before
+          approving a merchant, it invites the review to fail on something never needed.
+
+          What replaced them says what IS true - the software runs unattended on Google Cloud,
+          so the workshop can use it at any hour. That is the useful half of the claim, and it
+          happens to be the accurate half. */}
       <div className="bg-slate-900 text-slate-300 text-[10px] sm:text-[11px] font-medium py-1.5 px-3 sm:px-4 border-b border-slate-800">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-1.5 sm:gap-2 text-center sm:text-left">
           <div className="flex items-center justify-center sm:justify-start gap-1.5 sm:gap-2 flex-wrap">
@@ -63,7 +74,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             </span>
             <span className="text-white font-bold flex items-center gap-1">
               <Headphones className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-blue-400 shrink-0" />
-              24/7 Technical Support Active
+              Cloud-hosted, available any hour
             </span>
             <span className="hidden md:inline text-slate-500">|</span>
             <span className="hidden md:inline text-slate-400">Dedicated Cloud Assistance for Overhaul Agencies</span>
@@ -105,7 +116,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             <a href="#about" className="hover:text-blue-600 transition-colors">About App</a>
             <a href="#features" className="hover:text-blue-600 transition-colors">Core Modules</a>
             <a href="#workflow" className="hover:text-blue-600 transition-colors">Process Lifecycle</a>
-            <a href="#support" className="hover:text-blue-600 transition-colors">24/7 Support</a>
+            <a href="#support" className="hover:text-blue-600 transition-colors">Support</a>
             <a href="#terms" className="hover:text-blue-600 transition-colors">Terms & Compliance</a>
             <a href="#faq" className="hover:text-blue-600 transition-colors">FAQ</a>
           </nav>
@@ -173,7 +184,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
                 onClick={() => setIsMobileMenuOpen(false)}
                 className="py-2.5 px-3 rounded-lg hover:bg-blue-50 hover:text-blue-600 transition-colors flex items-center justify-between"
               >
-                <span>24/7 Technical Support</span>
+                <span>Support</span>
                 <ChevronRight className="w-4 h-4 text-slate-400" />
               </a>
               <a 
@@ -286,9 +297,9 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
                 <div className="text-center sm:text-left border-x sm:border-x-0 border-slate-200 px-1 sm:px-0">
                   <div className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center justify-center sm:justify-start gap-1 sm:gap-1.5">
                     <Headphones className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-600 shrink-0" />
-                    <span className="truncate">24*7</span>
+                    <span className="truncate">Email</span>
                   </div>
-                  <div className="text-[10px] sm:text-[11px] text-slate-500 font-medium">Tech Support</div>
+                  <div className="text-[10px] sm:text-[11px] text-slate-500 font-medium">Direct support</div>
                 </div>
                 <div className="text-center sm:text-left">
                   <div className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center justify-center sm:justify-start gap-1 sm:gap-1.5">
@@ -347,20 +358,19 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
 
                   <div className="pt-1 text-center">
                     <p className="text-[10px] sm:text-[11px] text-slate-400 leading-relaxed">
+                      {/* ⚠ REAL URLS, NOT MODAL TRIGGERS (AUDIT G41). These opened dialogs, so
+                          the documents a user was agreeing to had no address at all: they could
+                          not be linked to, bookmarked, sent to anyone, crawled, or opened by a
+                          payment processor's reviewer. A term you accept by signing in has to be
+                          one you can read without signing in. */}
                       By signing in, you agree to our{' '}
-                      <button 
-                        onClick={() => setIsTermsModalOpen(true)}
-                        className="text-blue-600 hover:underline font-semibold"
-                      >
+                      <a href="/terms" className="text-blue-600 hover:underline font-semibold">
                         Terms of Service
-                      </button>{' '}
+                      </a>{' '}
                       and{' '}
-                      <button 
-                        onClick={() => setIsPrivacyModalOpen(true)}
-                        className="text-blue-600 hover:underline font-semibold"
-                      >
+                      <a href="/privacy" className="text-blue-600 hover:underline font-semibold">
                         Privacy Policy
-                      </button>.
+                      </a>.
                     </p>
                   </div>
                 </div>
@@ -626,7 +636,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
         </div>
       </section>
 
-      {/* 24*7 Technical Support Section */}
+      {/* Support and reliability. See the note at the top of this file about what stood here. */}
       <section id="support" className="py-10 sm:py-16 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white border-b border-slate-800 relative overflow-hidden">
         {/* Glow decoration */}
         <div className="absolute top-0 right-0 w-96 h-96 bg-blue-600/10 rounded-full blur-3xl pointer-events-none"></div>
@@ -638,13 +648,21 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             <div className="lg:col-span-7 space-y-3.5 sm:space-y-4">
               <div className="inline-flex items-center space-x-2 bg-blue-500/10 border border-blue-400/20 px-2.5 sm:px-3 py-1 rounded-full text-blue-400 text-[11px] sm:text-xs font-bold">
                 <Clock className="w-3.5 h-3.5 shrink-0" />
-                <span>Round-the-Clock Reliability</span>
+                <span>Built for tender deadlines</span>
               </div>
+              {/* ⚠ THIS CLAIMED 24*7 SUPPORT AND A "cloud operations team". There is neither:
+                  support is one person answering a ticket form during working hours, and the
+                  support panel is unbuilt by decision. What replaced it is true and is a better
+                  claim anyway - the service running unattended is a real property of hosting it
+                  on Google Cloud; a team that does not exist is not. */}
               <h2 className="text-xl sm:text-3xl lg:text-4xl font-black tracking-tight text-white leading-tight">
-                24*7 Technical Support & Cloud Reliability
+                Your records, available whenever the workshop is
               </h2>
               <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-                We understand transformer overhaul facilities operate on tight DISCOM turnaround deadlines. Our dedicated technical support and cloud operations team are available around the clock to assist your workshop.
+                Transformer overhaul runs to tight DISCOM turnaround deadlines. The application
+                runs on Google Cloud and is available around the clock, so a job card can be
+                raised or a bill printed at whatever hour the work actually happens. Support
+                questions are answered by email during working hours.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4 pt-1 sm:pt-2">
@@ -661,10 +679,10 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
                 <div className="bg-slate-800/80 border border-slate-700/80 p-3.5 sm:p-4 rounded-xl">
                   <div className="flex items-center gap-2 text-blue-400 font-bold text-xs mb-1">
                     <Headphones className="w-4 h-4 shrink-0" />
-                    <span>24*7 Live Helpdesk</span>
+                    <span>Direct email support</span>
                   </div>
                   <p className="text-[10px] sm:text-[11px] text-slate-400 leading-relaxed">
-                    Direct technical assistance for stationery print margins, DISCOM AT rates setup, and database syncing.
+                    Questions about print margins, DISCOM AT rate setup or your data go straight to the person who built the software. Answered during working hours.
                   </p>
                 </div>
               </div>
@@ -673,10 +691,13 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             <div className="lg:col-span-5 bg-white/5 border border-white/10 rounded-2xl p-5 sm:p-7 backdrop-blur-md">
               <h3 className="text-sm sm:text-base font-bold text-white mb-2 flex items-center gap-2">
                 <ShieldCheck className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-400 shrink-0" />
-                <span>Enterprise SLA & Support Guarantee</span>
+                {/* ⚠ THERE IS NO SLA, NO GUARANTEE AND NO MEASURED 99.9%. The Terms now say so in as
+                      many words. "Enterprise" described nothing, and a percentage nobody
+                      measures is a number invented to look like one. */}
+                  <span>Where your data lives</span>
               </h3>
               <p className="text-[11px] sm:text-xs text-slate-300 mb-3 sm:mb-4 leading-relaxed">
-                Continuous automated database backups, 99.9% uptime cloud architecture, and priority engineer assistance.
+                Records are held in Google Cloud Firestore with per-agency access rules, and can be exported to Excel or PDF at any time from the screens that produce them.
               </p>
 
               <div className="space-y-2 text-[11px] sm:text-xs text-slate-300">
@@ -773,13 +794,16 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
           </div>
 
           <div className="text-center mt-6 sm:mt-8">
-            <button
-              onClick={() => setIsTermsModalOpen(true)}
+            {/* ⚠ "SLA Agreement" IS NOT OFFERED AND WAS NEVER OFFERED. The Terms carry no
+                service level and now say so explicitly; a button promising one is the same
+                false claim as the 24*7 support it sat beside. */}
+            <a
+              href="/terms"
               className="inline-flex items-center space-x-2 px-4 sm:px-5 py-2.5 bg-white hover:bg-slate-100 text-slate-800 text-xs font-bold rounded-lg border border-slate-300 shadow-2xs cursor-pointer transition-colors min-h-[44px] touch-manipulation"
             >
-              <span>Read Full Legal Terms & SLA Agreement</span>
+              <span>Read the full Terms of Service</span>
               <ChevronRight className="w-3.5 h-3.5 text-slate-500" />
-            </button>
+            </a>
           </div>
         </div>
       </section>
@@ -803,8 +827,8 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
                 a: "The system provides complete lifecycle tracking: from recording incoming damaged transformer vehicle batches (MR Inward), conducting external and core audits, logging lab testing loss reports, calculating AT rates, to generating official DISCOM Delivery Challans, Gate Passes, and closing the job."
               },
               {
-                q: "How does the 24*7 Technical Support work?",
-                a: "Our cloud operations and engineering team offer 24*7 uptime monitoring, automated real-time database backups on Google Cloud Firestore, and live assistance with stationery margin adjustments, tender schedule setups, and user permissions."
+                q: "How does support work?",
+                a: "Write to the support address, or use the support form inside the application - both reach the proprietor directly, who answers during Indian business hours on working days. There is no call centre and no overnight desk. The software itself runs on Google Cloud and is available at any hour, so a job card can be raised or a bill printed whenever the work happens."
               },
               {
                 q: "Can I print reports directly on my company's physical pre-printed letterhead?",
@@ -847,7 +871,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-3 sm:space-y-4">
           <h2 className="text-xl sm:text-2xl font-black tracking-tight">Ready to streamline your repair workshop operations?</h2>
           <p className="text-xs text-slate-400 max-w-xl mx-auto leading-relaxed">
-            Log in with your authorized Google account to access your agency dashboard, active job orders, and testing reports with 24*7 technical assistance.
+            Log in with your Google account to reach your agency dashboard, active job orders and testing reports.
           </p>
           <div className="pt-1 sm:pt-2">
             <button
@@ -880,137 +904,43 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
             </div>
 
             <div className="flex flex-wrap items-center justify-center gap-4 sm:gap-6 text-[10px] sm:text-[11px]">
-              <button onClick={() => setIsTermsModalOpen(true)} className="hover:text-white transition-colors py-1">
-                Terms of Service
-              </button>
-              <button onClick={() => setIsPrivacyModalOpen(true)} className="hover:text-white transition-colors py-1">
-                Privacy Policy
-              </button>
-              <a href="#about" className="hover:text-white transition-colors py-1">Documentation</a>
-              <span className="text-slate-600 hidden sm:inline">•</span>
-              <span className="text-emerald-400 font-semibold flex items-center gap-1 py-1">
-                <Headphones className="w-3 h-3" /> 24*7 Support
+              {/* ⚠ EVERY POLICY IS LINKED FROM HERE. A merchant reviewer looks in the footer
+                  first, and a policy that exists but is not linked from the front page is one
+                  they will not find (AUDIT G41). */}
+              <a href="/pricing" className="hover:text-white transition-colors py-1">Pricing</a>
+              <a href="/terms" className="hover:text-white transition-colors py-1">Terms of Service</a>
+              <a href="/privacy" className="hover:text-white transition-colors py-1">Privacy Policy</a>
+              <a href="/refunds" className="hover:text-white transition-colors py-1">Refunds &amp; Cancellation</a>
+              <a href="/shipping" className="hover:text-white transition-colors py-1">Delivery</a>
+              <a href="/contact" className="hover:text-white transition-colors py-1">Contact</a>
+              <span className="text-slate-600 hidden sm:inline">&bull;</span>
+              {/* ⚠ "24*7 Support" WAS HERE AND WAS NOT TRUE. One person answers a ticket form.
+                  A service-level claim the product does not meet is a defect anywhere; in a
+                  footer a payment processor reads before approving a merchant, it invites the
+                  review to fail on something that was never needed. */}
+              <span className="text-slate-400 font-semibold flex items-center gap-1 py-1">
+                <Headphones className="w-3 h-3" /> Email support
               </span>
             </div>
 
             <div className="text-[9px] sm:text-[10px] text-slate-500 text-center md:text-right">
-              © {new Date().getFullYear()} TransRegister. All rights reserved.
+              {/* ⚠ THE OPERATOR IS NAMED. The site identified itself as "TransRegister" and
+                  nothing else - no legal entity anywhere on any page - and a payment processor
+                  must be able to check that whoever takes the money is whoever the site says
+                  runs it. A proprietorship's legal party is the PROPRIETOR; the trade name is a
+                  style, not an entity. */}
+              © {new Date().getFullYear()} {SELLER.legalName}, trading as {SELLER.tradeName}.
+              GSTIN {SELLER.gstin}. All rights reserved.
             </div>
           </div>
         </div>
       </footer>
 
-      {/* Full Terms and Conditions Modal */}
-      {isTermsModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200">
-            <div className="p-4 sm:p-6 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900">Terms of Service & License Agreement</h3>
-                <p className="text-[10px] sm:text-xs text-slate-500">Effective Date: August 2026 • Version 2.5</p>
-              </div>
-              <button
-                onClick={() => setIsTermsModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 sm:p-6 overflow-y-auto space-y-3 sm:space-y-4 text-[11px] sm:text-xs text-slate-600 leading-relaxed">
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">1. Acceptance of Terms</h4>
-              <p>
-                By logging into or accessing TransRegister, the transformer repair management software ("Software"), you agree to be bound by these Terms of Service. If you do not agree to these terms, you must not access or use the application.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">2. Authorized Use & Contractor Credentials</h4>
-              <p>
-                Access to this ERP platform is strictly granted to registered electrical repair agencies, transformer overhaul workshops, certified electrical testing laboratories, and authorized utility (DISCOM) inspectors. You are responsible for ensuring that all login credentials remain secure.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">3. Technical Data Integrity & Electrical Standards</h4>
-              <p>
-                The software provides automated calculations for excitation current, no-load loss, full-load loss, % impedance, oil BDV, and AT repair rates. Users agree that all entered test values must reflect true, calibrated measurements conducted in compliance with <strong>IS 1180 (Part 1): 2014</strong>, <strong>IS 2026</strong>, and relevant DISCOM specifications. The software developer assumes no liability for fraudulent, incorrect, or miscalibrated field entries.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">4. Data Ownership & Cloud Storage</h4>
-              <p>
-                All transformer job cards, inspection records, delivery challans, and financial invoices entered by your agency remain the sole intellectual and proprietary property of your agency. Data is stored on isolated Google Cloud Firestore partitions with restricted access controls.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">5. Schedule of Rates & Financial Disclaimer</h4>
-              <p>
-                The AT rate estimation module computes billing items based on tender contract rate schedules inputted by the user. Users must independently verify final GST tax computations before submitting invoices to state utility divisions.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">6. Termination & Service Availability</h4>
-              <p>
-                The software service is provided on an "as is" and "as available" basis with high-availability cloud architecture and 24*7 support monitoring. Agencies may export their data to Excel/PDF formats at any time.
-              </p>
-            </div>
-
-            <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl flex justify-end">
-              <button
-                onClick={() => setIsTermsModalOpen(false)}
-                className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer min-h-[40px]"
-              >
-                I Understand & Accept
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Privacy Policy Modal */}
-      {isPrivacyModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl border border-slate-200">
-            <div className="p-4 sm:p-6 border-b border-slate-200 flex items-center justify-between">
-              <div>
-                <h3 className="text-base sm:text-lg font-black text-slate-900">Privacy Policy & Data Security</h3>
-                <p className="text-[10px] sm:text-xs text-slate-500">How we protect your workshop records</p>
-              </div>
-              <button
-                onClick={() => setIsPrivacyModalOpen(false)}
-                className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors min-h-[40px] min-w-[40px] flex items-center justify-center"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-4 sm:p-6 overflow-y-auto space-y-3 sm:space-y-4 text-[11px] sm:text-xs text-slate-600 leading-relaxed">
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">1. Information We Collect</h4>
-              <p>
-                We collect your Google email address and display name upon authentication for access verification and audit logs. We also store the operational records you input, including Material Receipts (MR), transformer serial numbers, inspection notes, test readings, and agency configuration details.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">2. Use of Information</h4>
-              <p>
-                Your data is used solely to provide ERP functionality: tracking repair workflow, generating printable A4 letterhead reports, calculating oil accounts, and drafting GST delivery challans. We never sell, share, or monetize your business records.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">3. Security & Cloud Encryption</h4>
-              <p>
-                All data transmission between your browser and the server occurs over HTTPS with SSL/TLS encryption. Database persistence is secured via Firebase Firestore security rules ensuring strict multi-tenant agency isolation.
-              </p>
-
-              <h4 className="font-bold text-slate-900 text-xs sm:text-sm">4. Data Export & Retention</h4>
-              <p>
-                You retain complete control of your data and can export all records into standard XLSX and PDF formats at any time from the respective module dashboards.
-              </p>
-            </div>
-
-            <div className="p-3 sm:p-4 border-t border-slate-200 bg-slate-50 rounded-b-2xl flex justify-end">
-              <button
-                onClick={() => setIsPrivacyModalOpen(false)}
-                className="w-full sm:w-auto px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer min-h-[40px]"
-              >
-                Close Privacy Policy
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ⚠ THE TWO MODALS ARE GONE (AUDIT G41). The Terms and the Privacy Policy lived here
+          as dialog state, which meant the documents a user agreed to by signing in had no URL:
+          nothing to link, bookmark, send, crawl, or hand to a payment processor's reviewer. They
+          are now pages at /terms and /privacy, reachable signed out, and the links above point
+          at them. Six policy pages exist; a modal cannot be one of them. */}
 
     </div>
   );

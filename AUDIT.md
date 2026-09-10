@@ -11499,3 +11499,99 @@ Fixed as `cancelled || (expiry && expiry <= now)`. The `<=` corrects the arithme
 durable half — an ended subscription is ended, whatever a comparison says about the boundary.
 Twelve cases now cover the vocabulary, including a cancelled grant (not revenue) and a cancelled
 paid subscription (still revenue).
+
+
+## G41. Six policy pages, and ten claims that were not true
+
+Razorpay's merchant review checks for policy pages **publicly reachable at their own URLs**. The
+site had two documents and no mechanism for a URL.
+
+**THE STRUCTURAL DEFECT WAS THE ROUTER, NOT THE MISSING PAGES.** `BrowserRouter` lived inside the
+signed-in branch of `App.tsx`:
+
+```jsx
+if (!user) return <LandingPage … />;
+return (<ThemeProvider><AgencyProvider><BrowserRouter>…</BrowserRouter></…>);
+```
+
+So when signed out there was **no router at all** and every path rendered the landing page.
+Combined with the SPA rewrite from G36, `transregister.com/terms` returned HTTP 200 and showed a
+marketing page. The Terms and Privacy documents that did exist were **modal state** —
+`isTermsModalOpen`, `isPrivacyModalOpen` — with no address at all: nothing to link, bookmark,
+send, crawl or hand to a reviewer. **A term you accept by signing in has to be one you can read
+without signing in**, and these could not be.
+
+**Public pages are now matched from `window.location.pathname` before the auth check**, rather
+than through the router. Three reasons, and the first is the one that matters: a policy page
+must not depend on authentication resolving, or on it resolving a particular way — a reviewer
+sees the document immediately and identically whether or not they are signed in. Second, it
+avoids nesting one `<Routes>` inside another: `AppLayout` has its own router with absolute
+paths, and putting the app under a catch-all makes those resolve relative to the parent match —
+a subtle breakage across twenty-two routes for no gain. Third, these are **documents, not app
+screens**; plain `<a href>` and a full page load is what a reviewer does anyway.
+
+Six pages: `/pricing`, `/terms`, `/privacy`, `/refunds`, `/shipping`, `/contact`.
+
+---
+
+**THE SELLER WAS NOWHERE ON THE SITE.** `MSD CORPORATION` and the GSTIN appeared only in
+*comments* in `lib/pricing.ts`; `MEGHA HASMUKHBHAI PANCHAL` appeared nowhere at all. The site
+identified its operator as "© TransRegister" and nothing else — no entity, no GSTIN, no address,
+no phone. A processor must verify that whoever takes the money is whoever the site says runs it.
+
+**The legal party is the PROPRIETOR, not the trade name**, and on these pages that is not
+pedantry. The GSTIN's fifth character is `P`, marking a proprietorship: there is no company, and
+`MSD CORPORATION` is a style the proprietor trades under. It cannot be a party to a contract
+because it is not a person or a body corporate. Writing it alone would name nobody a customer
+could hold to anything — and it would not match the GST registration or the bank account, which
+is itself a rejection cause.
+
+**The address and phone are `[registered address]` and `[phone]`, and they render as
+`TO BE SUPPLIED` in red.** They cannot be inferred or borrowed from a sample; they are checked
+against the registration. `/contact` shows a banner saying it is incomplete. **A page that looks
+finished while missing its address is worse than one that admits it.**
+
+---
+
+**TEN FALSE SERVICE CLAIMS, WHERE THE FIRST COUNT SAID TWO.** The report that opened this work
+said "on the landing page twice and in Terms section 6". A proper sweep found:
+
+    the top notice bar          "24/7 Technical Support Active"
+    the nav                     "24/7 Support"
+    the mobile menu             "24/7 Technical Support"
+    a statistic tile            "24*7" over "Tech Support"
+    a section heading           "24*7 Technical Support & Cloud Reliability"
+    a card                      "24*7 Live Helpdesk"
+    a heading                   "Enterprise SLA & Support Guarantee", "99.9% uptime"
+    a button                    "Read Full Legal Terms & SLA Agreement"
+    an FAQ answer               "Our cloud operations and engineering team offer 24*7…"
+    the closing line            "…with 24*7 technical assistance"
+    the footer                  "24*7 Support"
+    Terms §6                    "24*7 support monitoring"
+
+**None of it was true.** Support is one person answering a ticket form; the support panel is
+unbuilt by explicit decision; no SLA was ever offered and the Terms now say so; and nobody
+measures 99.9% of anything. **A percentage nobody measures is a number invented to look like
+one**, and "Enterprise" described nothing at all.
+
+The undercount is worth recording on its own. I grepped for the phrasing I had already seen
+rather than for the claim, found two instances, and reported two — the same shape as every
+census in this audit that counted what it expected. **The correct question was "where does this
+page promise support", not "where does the string 24*7 appear."**
+
+What replaced them says what is **true**, and it is the better claim anyway: the software runs
+unattended on Google Cloud and is available at any hour, so a job card can be raised whenever
+the work happens. Support is answered by email during working hours. The useful half of the
+original claim was the accurate half; the invented half was doing no work.
+
+---
+
+**AND THE PRICE IS PUBLIC FOR THE FIRST TIME.** ₹5,900 existed only behind a login. `/pricing`
+shows it with the GST split, the multi-agency arithmetic and the renewal rule — all read from
+`lib/pricing.ts`, because a price typed into a policy page would be a tenth literal of a figure
+that was already wrong in nine places (G27), in the one place it must never drift.
+
+The stale `Version 2.5 • August 2026` header is gone with the modal: a version literal G26
+deleted from the login page for encoding a fact nothing updated, surviving on the document where
+being out of date matters most. It is a single "Last updated" date that somebody must change
+when they change the text.
