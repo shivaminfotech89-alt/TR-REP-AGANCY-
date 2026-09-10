@@ -38,6 +38,7 @@ import { defineSecret, defineString } from 'firebase-functions/params';
 import { FieldValue } from 'firebase-admin/firestore';
 import { buildNewAgencyDocument } from './agency-seed.generated.mjs';
 import { nameKey, validateNames } from './agencyNames.js';
+import { isSuperAdmin } from './adminIdentity.js';
 
 /** The key secret. Never returned, never logged, never written to Firestore. */
 const RAZORPAY_KEY_SECRET = defineSecret('RAZORPAY_KEY_SECRET');
@@ -94,7 +95,32 @@ const SUBSCRIPTION_DAYS = 365;
  * subscription year runs from the same instant for every agency on the order rather than from
  * whenever each credit happened to be spent.
  */
-const ORDER_KINDS = ['renewal', 'new_agencies'];
+const ORDER_KINDS = ['renewal', 'new_agencies', 'live_check'];
+
+/**
+ * A ONE-RUPEE PROOF THAT THE LIVE GATEWAY WORKS (AUDIT G44).
+ *
+ * ⚠ IT WRITES NO SUBSCRIPTION, AND THAT IS THE WHOLE DESIGN. What needs proving is the gateway
+ * round trip - that the live keys authenticate, that checkout opens against live, that the HMAC
+ * verifies with the live secret, that the idempotency write lands. NONE of that requires a
+ * subscription. Writing one would be inventing a customer relationship in order to test a
+ * network call, and it would then need a flag on the document, a branch in
+ * classifySubscription, a case in the revenue metric and a row on the table saying "ignore me".
+ *
+ * Four things that can later be got wrong, against zero for the document that is never created.
+ * Same lesson as deleting `entitlements` rather than leaving it empty (G38).
+ *
+ * ⚠ ADMIN ONLY. It moves real money on a live deploy - a rupee, but real - and an endpoint that
+ * charges the caller must not be reachable by the accounts that are supposed to be charged
+ * properly.
+ *
+ * ⚠ AND THE MODE IS THE KEY PAIR, NOT A FLAG. There is deliberately no TEST_MODE switch
+ * anywhere in this file: putting "does real money move?" behind a value someone can change
+ * means the failure mode is BELIEVING you are testing. An order created with rzp_live_ keys is
+ * real and one created with rzp_test_ keys is not, and nothing in the application can confuse
+ * the two.
+ */
+const LIVE_CHECK_PAISE = 100;
 
 
 const REGION = 'us-central1';
@@ -140,6 +166,14 @@ export function makeCreateSubscriptionOrder(db) {
         throw new HttpsError('invalid-argument', `Unknown order kind "${kind}".`);
       }
 
+      // ⚠ THE LIVE CHECK IS THE VENDOR'S ALONE, decided from the verified token. The screen
+      // shows the button; this decides what may happen, and a caller reaching the function
+      // directly meets the same test.
+      if (kind === 'live_check' && !isSuperAdmin(request.auth.token?.email)) {
+        throw new HttpsError('permission-denied',
+          'The gateway check is the vendor\'s alone. It charges the caller.');
+      }
+
       const agencyId = String(request.data?.agencyId || '').trim();
       let agencyName = '';
       let agencyNames = [];
@@ -156,7 +190,7 @@ export function makeCreateSubscriptionOrder(db) {
           () => db.collection('agencies').where('ownerId', '==', uid).get());
       }
 
-      const quantity = kind === 'renewal' ? 1 : agencyNames.length;
+      const quantity = kind === 'new_agencies' ? agencyNames.length : 1;
 
       const keyId = RAZORPAY_KEY_ID.value();
       const keySecret = RAZORPAY_KEY_SECRET.value();
@@ -176,7 +210,9 @@ export function makeCreateSubscriptionOrder(db) {
         // ⚠ STILL NOT FROM THE REQUEST. The COUNT comes from the validated name list and the
         // unit price from the constant; the client sends neither an amount nor a quantity it
         // could inflate. Three agencies is 3 x 5,900, computed here.
-        amount: AMOUNT_PAISE * quantity,
+        // ⚠ STILL NEVER FROM THE REQUEST. A live check is one rupee because this constant says
+        // so, not because a client asked for a small number.
+        amount: kind === 'live_check' ? LIVE_CHECK_PAISE : AMOUNT_PAISE * quantity,
         currency: CURRENCY,
         // ⚠ RAZORPAY CAPS `receipt` AT 40 CHARACTERS, and the first version of this line
         // produced 42: `renewal:` (8) + a 20-character Firestore id + `:` + a 13-digit
@@ -188,7 +224,7 @@ export function makeCreateSubscriptionOrder(db) {
         // application's own payment_orders document, and the receipt is only a short label for
         // reconciliation in Razorpay's dashboard. Base-36 for the timestamp, and the tail of
         // the id, which is the part that actually distinguishes one Firestore id from another.
-        receipt: `${kind === 'renewal' ? 'rnw' : 'new'}${quantity}_${String(agencyId || uid).slice(-10)}_${Date.now().toString(36)}`,
+        receipt: `${kind === 'renewal' ? 'rnw' : kind === 'live_check' ? 'chk' : 'new'}${quantity}_${String(agencyId || uid).slice(-10)}_${Date.now().toString(36)}`,
         // ⚠ THE NAMES ARE NOT PUT IN `notes`. Razorpay caps notes at 15 keys and 256
         // characters per value, so three long agency names would breach it - and the failure
         // would land at the gateway, as a rejected order, rather than anywhere that explains
@@ -236,7 +272,7 @@ export function makeCreateSubscriptionOrder(db) {
         quantity,
         uid,
         email,
-        amountPaise: AMOUNT_PAISE * quantity,
+        amountPaise: kind === 'live_check' ? LIVE_CHECK_PAISE : AMOUNT_PAISE * quantity,
         currency: CURRENCY,
         createdAt: Date.now(),
         status: 'created',
@@ -244,7 +280,7 @@ export function makeCreateSubscriptionOrder(db) {
 
       return {
         orderId: String(order.id),
-        amountPaise: AMOUNT_PAISE * quantity,
+        amountPaise: kind === 'live_check' ? LIVE_CHECK_PAISE : AMOUNT_PAISE * quantity,
         currency: CURRENCY,
         keyId,
         kind,
@@ -425,6 +461,10 @@ export function makeVerifySubscriptionPayment(db) {
             });
             createdIds.push(ref.id);
           }
+        } else if (kind === 'live_check') {
+          // ⚠ NOTHING. No subscription, no entitlement, no agency touched. The payment record
+          // written below IS the whole result - it proves the round trip happened and it is the
+          // only thing that should exist afterwards.
         } else {
           throw new HttpsError('failed-precondition', `Order ${orderId} has no usable kind.`);
         }
@@ -439,7 +479,13 @@ export function makeVerifySubscriptionPayment(db) {
           amountPaise: Number(order.amountPaise || 0),
           currency: String(order.currency || CURRENCY),
           verifiedAt: now,
-          invoicePending: true,
+          // ⚠ A GATEWAY CHECK IS NOT A SALE AND MUST NOT ENTER THE INVOICE QUEUE. That queue is
+          // the forcing function for the SAC-code decision, and it only works as one if
+          // everything in it is real - a fake line on a real GST sequence would be a hole in a
+          // gap-free numbering nobody could explain later.
+          invoicePending: kind !== 'live_check',
+          // Identifiable forever, in the one place it exists.
+          isLiveCheck: kind === 'live_check',
         });
 
         tx.update(orderSnap.ref, { status: 'paid', paidAt: now, paymentId });
@@ -456,6 +502,7 @@ export function makeVerifySubscriptionPayment(db) {
         ok: true,
         kind,
         agencyId,
+        isLiveCheck: kind === 'live_check',
         createdAgencyIds: result.created || [],
         createdNames: orderedNames,
         // See the note in createAgency.js: the client's agency list is a one-shot read, and a

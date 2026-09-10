@@ -11843,3 +11843,77 @@ third.
 The guarantee stays **read-only in each row with a single editor above**, because it is per-AT
 and not per-division. An editable field repeated on every division would imply it varies by
 division — which is the confusion G42 corrected.
+
+
+## G44. A one-rupee proof, and the document deliberately not written
+
+Razorpay approved the account, so the next deploy moves real money. The question was how to
+verify the live configuration without inventing a customer.
+
+**THE ANSWER WAS TO WRITE NOTHING.** A `live_check` order charges ₹1, verifies the signature, and
+writes **only** the `payments/{razorpay_payment_id}` record. No subscription, no entitlement, no
+agency touched.
+
+The obvious design was a ₹1 payment marked as a test and excluded from the revenue count. That
+would have needed **a flag on the document, a branch in `classifySubscription`, a case in the
+metric card, and a row on the admin table saying "ignore me" — four things that can later be got
+wrong, against zero for a document that is never created.** Same lesson as deleting
+`entitlements` rather than leaving it empty (G38): the record you do not write cannot be
+mis-filtered.
+
+It works because of a fact the measurement established rather than assumed: **revenue is counted
+only from `subscriptions`.** `AdminPanel` filters `subsByAgency` by `wasPaid`, and **no client
+screen reads `payments` or `payment_orders` at all.** So a payment record with no subscription
+behind it is invisible to every figure the vendor looks at, by construction rather than by
+filtering.
+
+**What it actually proves:** the keys authenticate against the Orders API, checkout opens against
+the deployed key pair, the HMAC verifies with the deployed secret, and the idempotency write
+lands. **What it does not prove:** that a ₹5,900 subscription writes correctly — already proven
+in test, and the code path is identical from `verifySubscriptionPayment` onward. Naming both
+halves matters: a check whose reach is overstated is the G33 defect.
+
+### `invoicePending: false`, and why the queue only works if everything in it is real
+
+Every other verified payment sets `invoicePending: true`, and that queue is the **forcing
+function** for the unresolved SAC-code decision — it grows until somebody issues the invoices.
+
+A ₹1 gateway check must not enter it. A GST invoice sequence is gap-free by law, so a fake line
+in the queue becomes either a hole in a real numbering or an invoice for a rupee nobody can
+explain. **And the queue stops working as a forcing function the moment it contains something
+that does not need acting on** — one entry that can be safely ignored teaches the reader that
+entries can be safely ignored.
+
+### NO TEST_MODE SWITCH, DELIBERATELY
+
+Razorpay's mode is the key pair: an order created with `rzp_live_` keys is real and one created
+with `rzp_test_` keys is not. There is no runtime selector, and **none was added.**
+
+A `TEST_MODE` flag would put *"does real money move?"* behind a value someone can change, and its
+failure mode is **believing you are testing** — the worst possible direction for that particular
+mistake. The key pair being the mode is a stronger guarantee than any flag, because nothing in
+the application can confuse the two and no code path can get it wrong.
+
+The consequence is accepted rather than worked around: going live means every payment is real.
+The ₹1 check is what makes that acceptable — it is a better test than test mode, because it
+tests the thing you actually want to be true.
+
+### THE PAYMENT ID NOW COMES BACK ON SUCCESS
+
+`payWithRazorpay` carried the payment id only on `PaymentTakenButUnverified`, where it is
+desperately needed. It is now on the success result too.
+
+**A verification whose result cannot be found afterwards has verified nothing anybody can point
+at.** The check's entire output is an id to look up in the dashboard — which is also how the
+operator confirms *which mode it landed in*, independently of what this application claims.
+
+### ADMIN-ONLY, FROM THE VERIFIED TOKEN
+
+`live_check` is refused for anyone but the vendor, decided from `request.auth.token.email` by the
+same `isSuperAdmin` the other privileged paths use. The client sends no flag. An endpoint that
+charges its caller must not be reachable by the accounts that are supposed to be charged
+properly.
+
+The amount is `LIVE_CHECK_PAISE = 100`, a server constant. **No amount is read from the request
+anywhere in this file** — verified by grep, not by memory — because an order endpoint that
+accepts an amount is the most common form of the worst bug in a payment system.

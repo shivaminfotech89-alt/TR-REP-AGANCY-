@@ -14,12 +14,14 @@ import {
   classifySubscription, daysRemaining, type SubscriptionRecord,
 } from '../lib/subscriptionStatus';
 import { SubscriptionActions } from './SubscriptionActions';
+import { runLiveGatewayCheck } from '../lib/adminSubscription';
+import { CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined } from '../lib/subscriptionClient';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
   ShieldCheck, Users, Building2, CreditCard, LifeBuoy, Settings, 
   RefreshCw, Search, CheckCircle2, AlertTriangle, Clock, PlusCircle, 
   Trash2, Lock, Key, DollarSign, Sparkles, MessageSquare, Send, Check, AlertCircle, ToggleLeft, ToggleRight, Database
-} from 'lucide-react';
+, Loader2 } from 'lucide-react';
 
 export default function AdminPanel() {
   // ⚠ `updateAgency` is deliberately NOT destructured here (AUDIT G1). AdminPanel's agency
@@ -168,6 +170,9 @@ export default function AdminPanel() {
   const [subActionNote, setSubActionNote] = useState<string | null>(null);
   /** Bumped after an admin action so the rows re-read rather than showing what they showed. */
   const [subReload, setSubReload] = useState(0);
+  const [gatewayCheck, setGatewayCheck] = useState<
+    { kind: 'busy' | 'ok' | 'bad'; text: string } | null
+  >(null);
   const [razorpaySettings, setRazorpaySettings] = useState<RazorpaySettings>({
     enabled: true,
     testMode: true,
@@ -1304,6 +1309,69 @@ export default function AdminPanel() {
                 fixed, and the field is still gone: a secret belongs in a Functions secret the
                 client cannot read at all, not in a database the client talks to. A webhook
                 secret would be the same, and is gone with it. */}
+            {/* ================= THE ONE-RUPEE GATEWAY CHECK (AUDIT G44) =================
+                ⚠ IT WRITES NO SUBSCRIPTION. It proves the round trip - the keys authenticate,
+                the order is created, checkout opens, the signature verifies server-side, and the
+                idempotency record lands. A subscription would prove nothing extra and would then
+                need a flag on the document, a branch in classifySubscription, a case in the
+                revenue metric and a row saying "ignore me": four things that can be got wrong,
+                against zero for a document never created.
+
+                ⚠ AND THE MODE IS THE KEY PAIR, NOT A SWITCH. Against test keys this costs
+                nothing and runs identical code; after the live swap it costs a rupee and proves
+                the live configuration. There is deliberately no TEST_MODE flag anywhere - a
+                value someone can change that decides whether real money moves has the failure
+                mode of believing you are testing. */}
+            <div className="rounded-lg border border-slate-300 bg-white p-3 space-y-2">
+              <div>
+                <p className="text-xs font-bold text-slate-900">Gateway check &mdash; &#8377;1</p>
+                <p className="text-[11px] text-slate-600">
+                  Takes a real &#8377;1 payment through whichever key pair is deployed, verifies
+                  the signature, and writes nothing but a payment record. No subscription, no
+                  invoice queue entry, no agency touched.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={gatewayCheck?.kind === 'busy'}
+                onClick={async () => {
+                  setGatewayCheck({ kind: 'busy', text: 'Opening checkout…' });
+                  try {
+                    const r = await runLiveGatewayCheck();
+                    setGatewayCheck({
+                      kind: 'ok',
+                      text: `Gateway verified. Payment ${r.paymentId} — look it up in the Razorpay `
+                        + `dashboard to confirm which mode it landed in.`,
+                    });
+                  } catch (e: any) {
+                    if (e instanceof CheckoutDismissed) setGatewayCheck(null);
+                    else if (e instanceof PaymentTakenButUnverified) {
+                      // ⚠ MONEY MOVED. A rupee, but the message must not say "failed".
+                      setGatewayCheck({ kind: 'bad', text: e.message });
+                    } else if (e instanceof GatewayDeclined) {
+                      setGatewayCheck({ kind: 'bad', text: `${e.message} ${e.detail}` });
+                    } else {
+                      setGatewayCheck({ kind: 'bad', text: String(e?.message || 'Failed.') });
+                    }
+                  }
+                }}
+                className="inline-flex items-center gap-2 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-300 text-white font-bold text-xs px-4 py-2 rounded-lg"
+              >
+                {gatewayCheck?.kind === 'busy'
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <ShieldCheck className="w-4 h-4" />}
+                {gatewayCheck?.kind === 'busy' ? 'Working…' : 'Run the \u20b91 check'}
+              </button>
+              {gatewayCheck && gatewayCheck.kind !== 'busy' && (
+                <p className={`text-[11px] font-bold rounded px-2.5 py-2 border ${
+                  gatewayCheck.kind === 'ok'
+                    ? 'bg-green-50 border-green-300 text-green-900'
+                    : 'bg-red-50 border-red-300 text-red-900'}`}>
+                  {gatewayCheck.text}
+                </p>
+              )}
+            </div>
+
             <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
               <p className="text-[11px] text-slate-600">
                 The key <strong>secret</strong> is not stored here. It is held as the Firebase

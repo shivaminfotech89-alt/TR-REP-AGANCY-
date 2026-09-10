@@ -84,3 +84,23 @@ export function grantDays(agencyId: string, days: number, reason: string) {
 export function markPaid(agencyId: string, reference: string, amount?: number, days?: number) {
   return call({ op: 'mark_paid', agencyId, reference, amount, days });
 }
+
+/**
+ * THE ONE-RUPEE GATEWAY CHECK (AUDIT G44).
+ *
+ * ⚠ IT WRITES NO SUBSCRIPTION. What it proves is the round trip: the keys authenticate, the
+ * order is created, checkout opens, the signature verifies server-side, and the idempotency
+ * record lands. A subscription would prove nothing extra and would then need a flag, a branch
+ * in classifySubscription, a case in the revenue metric and a row saying "ignore me".
+ *
+ * ⚠ AND THE MODE IS THE KEY PAIR. There is no test switch anywhere: an order made with
+ * `rzp_live_` keys is real and one made with `rzp_test_` keys is not. Running this against test
+ * keys costs nothing and exercises the identical code; running it after the live swap costs a
+ * rupee and proves the live configuration.
+ */
+export async function runLiveGatewayCheck(): Promise<{ paymentId: string }> {
+  const { createOrder, payWithRazorpay } = await import('./subscriptionClient');
+  const order = await createOrder('live_check');
+  const done = await payWithRazorpay(order, { name: '', email: '', contact: '' });
+  return { paymentId: done.paymentId };
+}

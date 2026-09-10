@@ -33,7 +33,7 @@ const functionsClient = () => (fns ??= getFunctions(app, REGION));
 
 const CHECKOUT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 
-export type OrderKind = 'renewal' | 'new_agencies';
+export type OrderKind = 'renewal' | 'new_agencies' | 'live_check';
 
 export type CreatedOrder = {
   orderId: string;
@@ -60,6 +60,17 @@ export type VerifiedPayment = {
   createdNames?: string[];
   /** The assembled documents, so the caller can put them into context state (AUDIT G39). */
   createdAgencies?: Array<{ id: string; document: Record<string, unknown> }>;
+  /** True when this was the one-rupee gateway check - no subscription was written. */
+  isLiveCheck?: boolean;
+  /**
+   * ⚠ THE GATEWAY'S PAYMENT ID, ON THE SUCCESS PATH TOO - not only on the failure one.
+   *
+   * It was carried only by PaymentTakenButUnverified, because that is where it is desperately
+   * needed. But it is the identifier for a payment that SUCCEEDED as well, and the gateway
+   * check exists precisely to produce one a person can look up in the dashboard. A verification
+   * whose result cannot be found afterwards has verified nothing anybody can point at.
+   */
+  paymentId: string;
 };
 
 /**
@@ -225,7 +236,9 @@ export function payWithRazorpay(
         amount: order.amountPaise,
         currency: order.currency,
         name: 'TransRegister',
-        description: order.kind === 'renewal'
+        description: order.kind === 'live_check'
+          ? 'Gateway check — ₹1'
+          : order.kind === 'renewal'
           ? `Annual subscription — ${order.agencyName}`
           : `Annual subscription — ${order.quantity || 1} new `
             + `${(order.quantity || 1) === 1 ? 'agency' : 'agencies'}`,
@@ -273,6 +286,8 @@ export function payWithRazorpay(
               createdAgencyIds: d.createdAgencyIds || [],
               createdNames: d.createdNames || [],
               createdAgencies: d.createdAgencies || [],
+              isLiveCheck: !!d.isLiveCheck,
+              paymentId,
             });
           } catch (e: any) {
             // ⚠ THE MONEY HAS ALREADY MOVED BY THE TIME WE ARE HERE. Whatever went wrong, the
