@@ -11917,3 +11917,83 @@ properly.
 The amount is `LIVE_CHECK_PAISE = 100`, a server constant. **No amount is read from the request
 anywhere in this file** — verified by grep, not by memory — because an order endpoint that
 accepts an amount is the most common form of the worst bug in a payment system.
+
+
+## G45. An `else` that was correct while there were two kinds
+
+The ₹1 gateway check failed with **"No agency names were given."**
+
+`createSubscriptionOrder` branched on kind as:
+
+```js
+if (kind === 'renewal') { … } else { validateNames(…) }
+```
+
+written when `else` meant exactly one thing. Adding `live_check` gave it an entry in
+`ORDER_KINDS`, an admin guard, its own amount, its own receipt shape and its own verification
+branch — **and left this two-way test alone.** So the new kind inherited name validation written
+for `new_agencies`, and the client's honest `agencyNames: []` tripped a check it should never
+have reached.
+
+### THE FAILURE MODE IS INHERITANCE, NOT ABSENCE
+
+This is why it is harder to see than a missing case. **A missing case does nothing, and nothing
+is conspicuous. A case that falls into `else` does something — and something plausible.** The
+error message named a real check, referred to a real field, and described a real requirement.
+It just belonged to a different kind.
+
+Nothing in it said *"this branch was not written for you."* Every part of the failure looked
+like a correctly working validation, which is exactly what it was.
+
+### TWO LISTS THAT MUST AGREE, AND NOTHING MADE THEM
+
+`ORDER_KINDS` and the branch list are two enumerations of the same set, maintained by hand, with
+no mechanism connecting them. **Adding to one without the other is silent** — the array accepts
+the kind, the switch quietly hands it someone else's behaviour.
+
+The fix is not the missing branch. It is the **terminal `throw`**: a kind listed in `ORDER_KINDS`
+with no branch of its own now announces itself by name rather than borrowing whichever branch
+happens to be last. A disagreement between the two lists is loud instead of invisible.
+
+**And `verifySubscriptionPayment` already ended that way** — `throw new HttpsError(…, \`Order
+${orderId} has no usable kind.\`)`. The two halves of the same file disagreed about how to handle
+an unrecognised kind, one throwing and one falling through. **The order function was the odd one
+out, and nobody noticed because with two kinds the `else` happened to be right.** A safety
+property that holds by coincidence looks identical to one that holds by design, until the
+coincidence ends.
+
+### THE TELL WAS TWO LINES BELOW, AND I WROTE IT
+
+Adding `live_check`, I changed
+
+```js
+const quantity = kind === 'renewal' ? 1 : agencyNames.length;
+```
+
+to
+
+```js
+const quantity = kind === 'new_agencies' ? agencyNames.length : 1;
+```
+
+**for exactly this reason** — a binary test is unsafe once there are three kinds, so name the one
+you mean. The reasoning was correct, it was applied deliberately, and it was applied to **one of
+the two binary tests in the same function**, two lines apart. I fixed the instance I happened to
+be editing and did not look up.
+
+That is worth more than the bug. **Recognising a hazard is not the same as searching for it**,
+and a correct piece of reasoning applied to the site in front of you is how a codebase ends up
+with one fixed instance and one live one — which is the parallel-implementation shape this audit
+keeps recording, in miniature, inside a single function.
+
+### SCOPE, MEASURED RATHER THAN ASSUMED
+
+- `renewal` has its own explicit branch and never reached `validateNames`. **Renew a year and
+  Subscribe worked throughout; a customer could always pay.**
+- `new_agencies` reached the `else`, where the validation was the right one.
+- **Only `live_check` was broken**, and it failed *before* an order was created — so no money
+  moved and no partial state exists. A refused order is the safest failure available here.
+- The client was correct throughout: `createOrder('live_check')` sent `kind: 'live_check'`.
+
+A check now asserts that every member of `ORDER_KINDS` has a branch in **both** functions, and
+that both end in a throw. Three kinds, six branches, two terminal throws.

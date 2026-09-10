@@ -178,16 +178,39 @@ export function makeCreateSubscriptionOrder(db) {
       let agencyName = '';
       let agencyNames = [];
 
+      // ⚠ EVERY KIND IS NAMED, AND THE FINAL BRANCH THROWS (AUDIT G45).
+      //
+      // This was `if (renewal) … else …`, written when `else` meant exactly one thing. Adding
+      // `live_check` to ORDER_KINDS gave it an admin guard, an amount, a receipt shape and a
+      // verification branch - and left this two-way test alone, so the new kind INHERITED name
+      // validation written for `new_agencies` and failed with "No agency names were given."
+      //
+      // ⚠ THE FAILURE MODE IS INHERITANCE, NOT ABSENCE, which is why it is hard to see: a
+      // missing case does nothing and is obvious, while a case that falls into `else` does
+      // SOMETHING, and something plausible. The error even named a real check.
+      //
+      // ORDER_KINDS and this branch list are two lists that must agree and nothing makes them
+      // agree. The terminal `throw` is what makes a disagreement loud: a kind added to the array
+      // without a branch here now announces itself instead of borrowing whichever branch happens
+      // to be last. `verifySubscriptionPayment` already ended this way - the order function was
+      // the odd one out, and nobody noticed while there were only two kinds and `else` happened
+      // to be right.
       if (kind === 'renewal') {
         const agency = await requireOwnedAgency(db, agencyId, uid);
         agencyName = String(agency.name || '').trim();
-      } else {
+      } else if (kind === 'new_agencies') {
         // ⚠ THE NAMES ARE CHECKED BEFORE A CUSTOMER PAYS, and again inside the transaction
         // that creates them. This check is the courtesy - refusing after money has moved is not
         // acceptable - and the one in verification is the guarantee, because an agency could be
         // created by another tab between the two.
         agencyNames = await validateNames(request.data?.agencyNames,
           () => db.collection('agencies').where('ownerId', '==', uid).get());
+      } else if (kind === 'live_check') {
+        // Nothing to validate: no agency, no names, and the amount is LIVE_CHECK_PAISE.
+      } else {
+        throw new HttpsError('failed-precondition',
+          `Order kind "${kind}" is listed in ORDER_KINDS but has no branch in `
+          + 'createSubscriptionOrder. Add one rather than letting it inherit the branch of another.');
       }
 
       const quantity = kind === 'new_agencies' ? agencyNames.length : 1;
