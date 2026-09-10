@@ -25,6 +25,77 @@ service cloud.firestore {
     }
 
     /**
+     * DELEGATED ACCESS TO AN AGENCY (AUDIT G37).
+     *
+     * An agency may be used by someone other than its owner: `email` names one login, and
+     * `sharedWithEmails` names several. Both grant READ AND WRITE - rates, estimates, bills.
+     * This is deliberate and is how agencies are handed to customers.
+     *
+     * \u26a0 CASE-INSENSITIVE, WHICH IT WAS NOT. The comparison was `==` against the raw token,
+     * and one live agency stores its grant in capitals (UTPAREKH@GMAIL.COM). That match held
+     * only while the provider happened to report the same capitalisation - a re-registration or
+     * a switch to Google sign-in normalising to lower case would have silently locked a
+     * customer out, with the symptom "I cannot see my agency" and nothing anywhere to explain
+     * it. Folding both sides can only ever WIDEN the match, so no working grant can break.
+     *
+     * \u26a0 AN EMPTY CALLER EMAIL MATCHES NOTHING, checked explicitly. Without the guard, a
+     * token carrying no email would compare '' against an agency with no `email` field - which
+     * `get('email', '')` also renders as '' - and every such agency would be world-writable to
+     * any signed-in account. The default that makes the code tidy is the one that opens it.
+     */
+    function callerEmailLower() {
+      return (isSignedIn() && request.auth.token.email is string)
+        ? request.auth.token.email.lower()
+        : '';
+    }
+
+    function isOwnerOf(agency) {
+      return isSignedIn() && agency.ownerId == request.auth.uid;
+    }
+
+    function emailGrants(agency) {
+      return callerEmailLower() != ''
+             && agency.get('email', '') is string
+             && agency.get('email', '').lower() == callerEmailLower();
+    }
+
+    /**
+     * \u26a0 THE LIST CANNOT BE FULLY CASE-FOLDED. Rules have no way to map over a list, so a
+     * stored entry in capitals cannot be lowered for comparison. Both forms of the CALLER's
+     * address are tried, which covers a lower-cased stored entry meeting an upper-cased token -
+     * the common direction - and leaves the reverse uncovered.
+     *
+     * That gap is currently theoretical: ZERO of the twelve live agencies use this field. It is
+     * a second grant mechanism that nothing has ever written, kept because removing a grant
+     * belongs in its own decision rather than in a case-folding fix.
+     */
+    function sharedGrants(agency) {
+      return callerEmailLower() != ''
+             && agency.get('sharedWithEmails', []) is list
+             && (callerEmailLower() in agency.get('sharedWithEmails', [])
+                 || request.auth.token.email in agency.get('sharedWithEmails', []));
+    }
+
+    /**
+     * \u26a0 THE GRANT FIELDS ARE THE OWNER'S ALONE TO CHANGE (AUDIT G37).
+     *
+     * Permission to update is tested against `existing()`, and the only field that was
+     * immutable was `ownerId`. So a DELEGATED user - who by definition holds write access -
+     * could rewrite the very field that granted it. The next write is checked against the NEW
+     * value, so editing that field revoked their own access ON SAVE, irreversibly: undoing it
+     * is another write, and they no longer have one. Only the owner could restore it.
+     *
+     * Nothing chose that. It fell out of a rule that constrained one field and stopped.
+     *
+     * The owner is unaffected in both directions: they may still grant, revoke and re-grant
+     * freely, and they cannot lock themselves out because `ownerId` is immutable.
+     */
+    function grantsUnchanged() {
+      return incoming().get('email', '') == existing().get('email', '')
+             && incoming().get('sharedWithEmails', []) == existing().get('sharedWithEmails', []);
+    }
+
+    /**
      * A TIME VALUE, IN ANY FORM THE APP LEGITIMATELY WRITES.
      *
      * ⚠ `timestamp` IS THE ONE THAT WAS MISSING, AND ITS ABSENCE BROKE CREATION ENTIRELY.
@@ -391,13 +462,29 @@ service cloud.firestore {
     }
 
     match /agencies/{agencyId} {
-      allow get, list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isSuperAdmin() || (('email' in resource.data) && resource.data.email == request.auth.token.email) || (('sharedWithEmails' in resource.data) && request.auth.token.email in resource.data.sharedWithEmails));
+      allow get, list: if isSignedIn() && (isOwnerOf(existing())
+                                           || isSuperAdmin()
+                                           || emailGrants(existing())
+                                           || sharedGrants(existing()));
       allow create: if isSignedIn() && incoming().ownerId == request.auth.uid && isValidAgency(incoming());
       // ⚠ THE SECOND CLAUSE IS ownerId IMMUTABILITY, NOT PERMISSION - and `isSuperAdmin()`
       // in it was an OWNERSHIP-TRANSFER capability nobody asked for, reading like a
       // permission check. Nothing in src/ ever writes ownerId on update; it is set once at
       // create, from the signed-in uid. It is now immutable (AUDIT G1).
-      allow update: if isSignedIn() && (existing().ownerId == request.auth.uid || (('email' in existing()) && existing().email == request.auth.token.email) || (('sharedWithEmails' in existing()) && request.auth.token.email in existing().sharedWithEmails)) && (incoming().ownerId == existing().ownerId || !('ownerId' in existing())) && isValidAgency(incoming());
+      allow update: if isSignedIn()
+                    // WHO MAY WRITE AT ALL - tested against the document as it stands.
+                    && (isOwnerOf(existing()) || emailGrants(existing()) || sharedGrants(existing()))
+                    // ownerId immutability (G1).
+                    && (incoming().ownerId == existing().ownerId || !('ownerId' in existing()))
+                    // \u26a0 AND THE GRANT FIELDS ARE THE OWNER'S ALONE (G37). See grantsUnchanged.
+                    //
+                    // This refuses exactly one thing that used to be permitted: a delegated user
+                    // changing `email` or `sharedWithEmails`. It refuses nothing else, because
+                    // every client write to this collection is `updateDoc` or
+                    // `transaction.update` - both merge, so an untouched field arrives in
+                    // `incoming()` bearing its existing value and compares equal.
+                    && (isOwnerOf(existing()) || grantsUnchanged())
+                    && isValidAgency(incoming());
       // ⚠ DELETE IS REFUSED OUTRIGHT (AUDIT F72).
       //
       // No caller exists - nothing in src/ deletes an agency - and an agency owns every AT,

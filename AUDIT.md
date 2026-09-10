@@ -11232,3 +11232,35 @@ the same reasoning applies here to six customers.
 
 Not changed here: this entry is a record of the mechanism, and a rules change belongs in a
 deploy someone is watching.
+
+**THE TWO RULES CHANGES, AND WHAT THE SECOND ONE REFUSES.**
+
+**Case-folding** (`callerEmailLower`, `emailGrants`) can only widen a match, so no working
+grant can break. It closes the fragility above: `UTPAREKH@GMAIL.COM` now matches whatever case
+the provider reports.
+
+`sharedWithEmails` **cannot be fully folded** — rules have no way to map over a list, so a
+stored entry in capitals cannot be lowered. Both forms of the *caller's* address are tried,
+covering a lower-cased entry meeting an upper-cased token; the reverse stays uncovered. Zero of
+the twelve agencies use the field, so the gap is theoretical, and removing an unused grant
+belongs in its own decision rather than in a case-folding fix.
+
+**The delegate constraint** (`grantsUnchanged`) refuses **exactly one thing that used to be
+permitted: a delegated user changing `email` or `sharedWithEmails`.** It refuses nothing else,
+and that is checkable rather than hopeful — **every client write to `agencies` is `updateDoc` or
+`transaction.update`**, both of which merge, so an untouched field arrives in `incoming()`
+carrying its existing value and compares equal. There is no `setDoc` without merge anywhere in
+`src/`. A delegated user's ordinary saves — editing details, advancing `lastJobNumbers` on job
+creation — are unaffected.
+
+**None of the six could be mid-edit in a way that starts failing**, because the only newly
+refused write is one none of them has a reason to make and which, if it succeeded, would lock
+them out. The rule refuses the action whose success was the injury.
+
+**Verified by a model, and the limit is stated.** `scripts/admin/model-agency-rules.js`
+transcribes the predicates into JavaScript and runs 23 cases across read and update. All behave
+as intended. ⚠ **It validates the logic, not Firestore's evaluation of it** — `get(key, default)`
+semantics, list equality and short-circuit order are Firestore's, and only the emulator can
+confirm those. The emulator needs Java, which is not installed here. Saying which of the two was
+checked matters more than the green result: a harness that overstates its reach is the defect
+G33 records.
