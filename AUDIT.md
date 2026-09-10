@@ -12705,3 +12705,150 @@ where G54 now leaves it.
 **The check that finds it is the one G54's table uses: remove the element, re-render, and count the
 pixels that moved by 3:1.** An element that fails that at its largest size fails it at every size.
 For a mark of five paths it is five renders.
+
+
+## G56. Agency Settings in four tabs - and the edits a tab would have thrown away
+
+Agency Settings had a two-tab bar (Agency setup / Manage subscription) with AT periods and
+Estimate Master stacked below the agency form. That long page is why Estimate Master was collapsed
+and the AT list sat behind "Expand & Manage". The bar now carries four tabs:
+
+1. **Agency setup** - profile, DISCOM, bank, letterhead
+2. **AT / Tender periods** - AtSettings, with divisions and allotments nested per AT
+3. **Estimate Master** - the rate sections
+4. **Manage subscription**
+
+The agency and AT selectors moved above the tabs, because tabs 2 and 3 are scoped by them. They
+are hidden on Manage subscription, which is about the account (G38).
+
+### THE URL DECIDES THE TAB
+
+The tab is derived from `?section=` on every render (`lib/settingsLinks.ts`), never held in state.
+react-router re-derives search params only when the query string changes, so a tab held in state
+cannot follow a link to the URL already in the address bar. Every deep link already used this
+vocabulary: `at` / `divisions` / `allotments` go to tab 2, `estimate-master` to tab 3, the new
+`subscription` to tab 4, and anything else to tab 1. A tab click replaces the whole query, so a
+consumed `atId` does not reopen its AT on a refresh.
+
+### WHAT CHANGED ABOUT COLLAPSING, AND WHAT DID NOT
+
+- **Estimate Master's outer collapse is removed.** Its stated reason was that most visits to the
+  page were not about rates - a reason about sharing a page.
+- **Its five sections still open closed.** Their reason was the screen's own: the frequent case is
+  reading one rate in one section. A refusal that names a section now opens it with `?open=`.
+- **"Expand & Manage" is removed.** It was a page-length collapse, and users had already reported
+  not finding where to create a tender.
+- **One AT open at a time is kept.** Its reason was never length: an operator partway through a
+  change could not tell which tender they were changing. With no `atId` in the link, the booking AT
+  now opens on arrival.
+
+### A MARKER ON THE TAB FOR EVERY REFUSAL, FROM THE FUNCTION THAT REFUSES
+
+Moving a warning into a tab hides it from the other three tabs. A tab whose content can clear a
+refusal says so on the tab itself, and **it asks the same function the refusing screen asks, with
+the same arguments, so the marker and the refusal cannot disagree.**
+
+| Tab | Marked when | Function | Refused by |
+|---|---|---|---|
+| Agency setup | details missing | `missingForEstimate`, `missingForTaxInvoice` | estimate print, tax invoice |
+| AT / Tender periods | intake not open | `isIntakeOpen(activeAtMaster, agencyAts, viewingAllTenders)` | New Job |
+| Estimate Master | **any AT, closed included,** has no rates | `atRatesReadiness` | estimates, bills |
+| Estimate Master | any AT holds the wrong schedule - the section is named on the tab | `validateEstimateMaster` | estimates, bills |
+
+- **Every AT, not only the active one, and closed ones too.** Estimates and bills price from the
+  job's own AT (`atForJob`), so an older tender without rates refuses work while the active one
+  looks fine. Closing a tender does not close its jobs. The Estimate Master tab lists every tender
+  the marker counted, so arriving always explains the marker that sent you.
+- **The wrong-schedule check runs only on ATs that have rates.** That is the refusals' own order:
+  they return on no rates before asking about sections.
+
+**Not marked:**
+- **Scrap charge and circle limit.** Neither needs Estimate Master loaded, but both are questions
+  about one job - a scrap job's core type and kVA (`resolveScrapCharge`), an inspected job's rating
+  (`checkJobCircleLimit`). A tab bar has no job to ask about.
+- **Subscription.** TrialBanner already stands on every screen.
+
+### STAYING MOUNTED WAS NOT ENOUGH
+
+Tabs mount on first visit and are then only hidden, so a tab click unmounts nothing. The old
+Estimate Master collapse did unmount - hiding it discarded unsaved rates.
+
+**That was half the guarantee.** Three editors re-seeded their fields whenever a context object
+changed identity, and `updateAgency` / `updateAtMaster` replace those objects on every save
+anywhere:
+
+| Editor | Keyed on | So this discarded unsaved edits |
+|---|---|---|
+| EstimateMaster loader | `activeAgency`, `selectedAt` | saving the profile, or any change to the AT being edited |
+| EditAgencyForm sync | `agency`, `activeAtMaster` | saving rates or a percentage on the active AT |
+| AtDivisions | `at`, `activeAgency` | saving that AT's rates, or the profile |
+
+On the long page this needed Estimate Master expanded at the time. With tabs - type rates, go to
+Agency setup, save, come back - it would have been the ordinary workflow. **Each is now keyed on the
+data it copies:** `loadKey` (agency id, tender id, the rate rows), the 38 profile fields the sync
+effect copies (checked against the setters: 38 copied, 38 listed), and the prefixes. A save that
+changes those rows still reloads, which is what clears `editedSections` after Save, by design.
+
+The same shape was in the URL parameters. `at`, `open`, `atId` and the inner-tab section were
+re-applied on every re-render while they stayed in the URL, which snapped a choice back after any
+tender save. Each is now applied once per value.
+
+### DEEP LINKS THAT LANDED WRONG
+
+- **NewJob's prefix gaps.** The no-AT branch built its link from `activeAtMaster.id` inside
+  `if (!activeAtMaster)`, so it threw before the dialog could open. **It was reachable:** the OGP
+  save calls it before `handleSubmit`'s own no-AT guard. The two branches also had each other's
+  links. No-AT now sends `?section=at`; no-prefix sends `?section=divisions&atId=…`.
+- **The trial banner's Subscribe button** was `<a href="/agency-settings">`: a full reload of the
+  app, landing on Agency setup. Two defects in the control that takes payment. It is now a router
+  link to `?section=subscription`.
+- **Four rate refusals now name their tender.** They checked the job's AT but linked to plain
+  `?section=estimate-master` - the right tab, on whichever AT was active. `estimateMasterLink` adds
+  `at=`, plus `open=` when the refusal names a section. The scrap-charge link opens no section,
+  because the missing charge can belong to more than one job's section.
+
+### THE DIVISIONS COPY IS REMOVED
+
+EditAgencyForm's Divisions & Prefixes tab was a pointer to the real grid, which is now one tab away
+- two places for one fact, and its "below" was wrong. Its state also fed the save's division
+circle offices; that derivation moved into the save unchanged, from the same live prefix list with
+the same fallback.
+
+### VERIFIED, AND NOT
+
+Passed:
+- `tsc --noEmit`
+- `vite build`
+- `scripts/admin/hooks-after-return.js`
+- 12 assertions on `settingsTabFor` and `estimateMasterLink`
+- the built CSS hides `[hidden]` with `display:none!important`
+
+**Not run in a browser.** The app needs a signed-in session, so tab switching, the markers and the
+unsaved-edit paths are verified by reading, not by use.
+
+### DECIDED ON REVIEW
+
+- **Closed ATs are marked.** The first cut marked open ATs only. But a closed tender still refuses
+  bills for its own jobs - neither `atRatesReadiness` nor `validateEstimateMaster` reads status - so
+  omitting it hid a live refusal because the tender was retired, while its jobs were not. Both
+  checks now run over every AT of the agency. The tab's list says which are closed, and that
+  Estimate Master shows them read-only until reopened.
+- **Section faults on core types an agency never books stay marked.** The marker probes all four
+  sections, while a refusal asks only about the core types on the MR in hand. A stored fault is a
+  stored fault, and suppressing it would mean the app deciding which core types an agency "really"
+  uses. Instead the marker names the section - "Wrong schedule: Wound Core" - so someone who does
+  not book that type can dismiss it knowingly rather than be puzzled by it.
+- **Switching tender discards unsaved edits. Recorded here, not fixed.** It predates this change,
+  and it is a different problem: a tender switch changes what the editor is editing, so keeping the
+  edits would be worse. **But it does not warn.** None of the controls that change what Estimate
+  Master shows asks first:
+  - its own "Rates for" selector (`setSelectedAtId`);
+  - an "Open it" link, or any link carrying `at=`;
+  - the context-bar and sidebar AT selectors, "Book jobs against this AT", and creating a tender.
+    These change the active AT, which Estimate Master follows unless a tender was picked in its
+    own selector.
+
+  The screen's only two `confirm()`s guard deleting a row and adopting a template. **The silent
+  discard is the part worth fixing, and it is small:** `editedSections` already knows whether
+  anything is unsaved, so the selector can confirm before switching. The active-AT controls live
+  outside this component, and would need that state lifted to reach them.

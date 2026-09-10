@@ -7,7 +7,8 @@ import { AtSettings } from './AtSettings';
  * THE TENDERS SECTION OF AGENCY SETTINGS — the setup chain, stated.
  *
  * NOT A PAGE. Tenders are part of agency setup, not a destination of their own, so this
- * renders as a section of the Agency Settings page above `AtSettings`. It was briefly a
+ * renders in the AT / Tender periods tab of Agency Settings, above `AtSettings` (AUDIT G56).
+ * It was briefly a
  * route (`/at-masters`); that route now redirects here, carrying its query string, because
  * setup-gap dialogs and bookmarks pointed at it.
  *

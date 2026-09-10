@@ -12,6 +12,7 @@ import { pricingModelForJob } from '../lib/ugvclSchedules';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc, getMrDateIso, getAgencyStateCode } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
+import { estimateMasterLink } from '../lib/settingsLinks';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
@@ -1240,7 +1241,8 @@ export default function BillingSystem() {
           'Until then, every amount comes from the agency or the shipped defaults and has not been checked against this tender.',
         ],
         actionLabel: 'Open Estimate Master',
-        actionTo: '/agency-settings?section=estimate-master',
+        // On the tender that refused - this bill's own - not whichever is active (AUDIT G56).
+        actionTo: estimateMasterLink(atForThisBill),
       });
       return true;
     }
@@ -1265,7 +1267,8 @@ export default function BillingSystem() {
           'Nothing is repaired automatically: only someone with the tender can say which schedule belongs in this section.',
         ],
         actionLabel: 'Open Estimate Master',
-        actionTo: '/agency-settings?section=estimate-master',
+        // On the tender that refused, with the misfiled section open (AUDIT G56).
+        actionTo: estimateMasterLink(atForThisMr, health.section),
       });
       return true;
     }
@@ -1306,7 +1309,9 @@ export default function BillingSystem() {
       position: `Blocked action: ${action}`,
       detail: scrapChargeErrors,
       actionLabel: 'Open Estimate Master',
-      actionTo: '/agency-settings?section=estimate-master',
+      // On this bill's tender (AUDIT G56). No section is opened: the missing charge can belong
+      // to more than one scrap job's section, and opening one of them would point at a guess.
+      actionTo: estimateMasterLink(selectedJobsData[0] ? (atForJob(selectedJobsData[0], atMasters) ?? activeAtMaster) : activeAtMaster),
     });
     return true;
   };

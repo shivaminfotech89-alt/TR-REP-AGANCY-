@@ -516,7 +516,11 @@ export default function NewJob() {
         problem: 'Job numbers cannot be generated until an AT (tender period) is set up and selected. The prefix and the number sequence both come from it.',
         detail: ['Add an AT under Agency Settings, then select it as the active AT.'],
         actionLabel: 'Set Up AT',
-        actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
+        // ⚠ NO atId - there is no AT to name (AUDIT G56). This link used to be built from
+        // `activeAtMaster.id` inside `if (!activeAtMaster)`, so it threw before the dialog could
+        // open - and the OGP save reaches this before handleSubmit's own no-AT guard. It was
+        // also the prefix gap's link: the two branches below had each other's routes.
+        actionTo: '/agency-settings?section=at',
         unsavedWarning: draftWarning,
         onBeforeNavigate: saveIntakeDraft });
       return true;
@@ -540,7 +544,9 @@ export default function NewJob() {
           'Each division needs a prefix per core type - they generate separate number sequences.',
         ],
         actionLabel: 'Configure Prefixes',
-        actionTo: '/agency-settings?section=at',
+        // Prefixes are edited on the AT's Divisions tab, so the link opens this AT there
+        // rather than landing on the tender list with nothing open (AUDIT G56).
+        actionTo: `/agency-settings?section=divisions&atId=${encodeURIComponent(activeAtMaster.id)}&division=${encodeURIComponent(commonData.division)}&coreType=${encodeURIComponent(coreType)}`,
         unsavedWarning: draftWarning,
         onBeforeNavigate: saveIntakeDraft });
       return true;

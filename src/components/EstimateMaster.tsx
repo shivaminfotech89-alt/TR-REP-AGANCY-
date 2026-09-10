@@ -530,11 +530,36 @@ export default function EstimateMaster() {
    */
   const tenderHasFixedRates = hasScheduleB(scheduleSetForAt(selectedAt));
 
-  /** `?at=<id>` selects a tender on arrival - see the AT creation flow in AtSettings. */
+  /**
+   * `?at=<id>` selects a tender on arrival - see the AT creation flow in AtSettings.
+   * `?open=<SECTION>` opens that section's table: a refusal that names a section sends the
+   * operator here with it already open (settingsLinks.estimateMasterLink).
+   *
+   * ⚠ EACH IS APPLIED ONCE PER VALUE (AUDIT G56). This screen stays mounted while Agency
+   * Settings shows another tab, the parameters stay in the URL while this tab is showing, and
+   * `agencyAts` changes on every tender save. Re-applying on each change snapped the dropdown
+   * back to the linked tender after the operator had chosen another - and, the loader being
+   * keyed on the tender, reloaded the grids with it.
+   */
   const [emParams] = useSearchParams();
+  const appliedAtParam = useRef<string | null>(null);
+  const appliedOpenParam = useRef<string | null>(null);
   useEffect(() => {
     const wanted = emParams.get('at');
-    if (wanted && agencyAts.some(t => t.id === wanted)) setSelectedAtId(wanted);
+    // A tender the context has not loaded yet is retried when `agencyAts` arrives.
+    if (wanted !== appliedAtParam.current && (!wanted || agencyAts.some(t => t.id === wanted))) {
+      appliedAtParam.current = wanted;
+      if (wanted) setSelectedAtId(wanted);
+    }
+    const open = emParams.get('open');
+    if (open !== appliedOpenParam.current) {
+      appliedOpenParam.current = open;
+      if (open === 'CRGO') setOpenCrgo(true);
+      if (open === 'AMORPHOUS') setOpenAmorphous(true);
+      if (open === 'WOUND_CORE') setOpenWoundCore(true);
+      if (open === 'OVERHAULING') setOpenOverhauling(true);
+      if (open === 'CIRCLE_LIMITS') setOpenCircleLimits(true);
+    }
   }, [emParams, agencyAts]);
 
   /**
@@ -576,6 +601,27 @@ export default function EstimateMaster() {
     if (src.startsWith('published:')) return { kind: 'published' as const, id: src.slice('published:'.length) };
     return { kind: 'own' as const };
   }, [selectedAt]);
+
+  /**
+   * WHAT THE LOADER BELOW COPIES, AS DATA RATHER THAN AS OBJECTS (AUDIT G56).
+   *
+   * ⚠ IT WAS KEYED ON OBJECT IDENTITY, AND EVERY SAVE ANYWHERE REPLACES THOSE OBJECTS.
+   * `updateAgency` and `updateAtMaster` each put a new object into context, so saving the
+   * agency's bank details or a tender's percentage re-ran the loader, re-seeded all five grids
+   * from storage and cleared `editedSections` - discarding a half-typed rate table that had
+   * nothing to do with the save. On the long page that needed this section expanded at the
+   * time. With Agency Settings in tabs this screen stays mounted behind the others, so it would
+   * have been the ordinary workflow: type rates, go to Agency setup, save, come back to the
+   * stored figures.
+   *
+   * Keyed on the agency, the tender, and the rows the loader reads. A save that changes those
+   * rows still reloads - which is what clears `editedSections` after Save, by design - and
+   * choosing another tender still reloads, because that is a different schedule.
+   */
+  const loadKey = useMemo(
+    () => JSON.stringify([activeAgency?.id ?? null, selectedAt?.id ?? null, rateHolder, globalDefaultEstimateMaster ?? null]),
+    [activeAgency?.id, selectedAt?.id, rateHolder, globalDefaultEstimateMaster],
+  );
 
   useEffect(() => {
     if (activeAgency) {
@@ -636,7 +682,7 @@ export default function EstimateMaster() {
         setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
       }
     }
-  }, [activeAgency, selectedAt, globalDefaultEstimateMaster, rateHolder]);
+  }, [loadKey]);
 
   if (!activeAgency) {
     return (
@@ -689,8 +735,8 @@ export default function EstimateMaster() {
   /**
    * Sections the operator has changed while this agency has been open, SURVIVING A SAVE.
    *
-   * `editedSections` cannot serve this. The loader effect depends on `activeAgency`, and
-   * `updateAgency` replaces that object - so saving re-runs the effect, which clears
+   * `editedSections` cannot serve this. The loader effect is keyed on the rows it copies
+   * (loadKey), and a save changes those rows - so saving re-runs the effect, which clears
    * `editedSections` by design ("a fresh load is not an edit"). That is right for
    * publishPlanFor, which asks "is the screen ahead of storage"; after a save it is not.
    *

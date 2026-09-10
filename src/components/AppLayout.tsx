@@ -109,8 +109,7 @@ export default function AppLayout({ user }: { user: User }) {
     /**
      * A SHORTCUT, NOT A SECOND HOME (AUDIT F79).
      *
-     * This points at the Agency Settings section, which already expands and scrolls to the
-     * rates. It deliberately does NOT render EstimateMaster at its own route: that would
+     * This points at the Estimate Master tab of Agency Settings (AUDIT G56). It deliberately does NOT render EstimateMaster at its own route: that would
      * mount a 2,600-line component in two places, and every deep link to the rates - three
      * setup-gap dialogs, the Dashboard, the AT seed panel - would then have two possible
      * destinations that could drift apart. One component, one place it lives, two ways in.

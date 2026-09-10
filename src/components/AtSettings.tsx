@@ -62,7 +62,6 @@ export function AtSettings() {
   /** The new AT's document id, so "Set rates" can name the tender rather than assume it. */
   const [seedReportAtId, setSeedReportAtId] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isExpanded, setIsExpanded] = useState(false);
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
 
   /**
@@ -241,20 +240,47 @@ export function AtSettings() {
    */
   const [openAtId, setOpenAtId] = useState<string | null>(null);
 
+  /**
+   * WHAT IS OPEN ON ARRIVAL (AUDIT G56).
+   *
+   * A deep link that names an AT opens it, on the inner tab the link asks for. Without one, the
+   * AT the app is booking jobs against opens: this list is its own tab now, so arriving means
+   * you came to work on tenders, and a list with nothing open cost a click on every visit.
+   *
+   * ⚠ EACH IS APPLIED ONCE, NOT ON EVERY RUN. This screen stays mounted while Agency Settings
+   * shows another tab, the link's parameters stay in the URL while this tab is showing, and
+   * `atMasters` changes on every tender save. Re-applying on each run - which the old effect
+   * did - snapped the inner tab back to Allotments, or reopened the linked AT, over whatever
+   * the operator had moved to. The default is once per agency; a link is once per value.
+   */
+  const appliedDeepLink = useRef<string | null>(null);
+  const arrivalOpenedFor = useRef<string | null>(null);
   useEffect(() => {
-    if (!deepLinkAtId && deepLinkSection !== 'allotments' && deepLinkSection !== 'divisions' && deepLinkSection !== 'at') return;
-    setIsExpanded(true);                       // open the AT Masters section
-    if (deepLinkSection === 'allotments') setActiveAtTab('allotments');
-    if (deepLinkSection === 'divisions') setActiveAtTab('divisions');
-    // OPENS THE NAMED AT WITHOUT MAKING IT ACTIVE. This used to call
-    // setActiveAtMasterId, because the allotments panel followed the active AT - so
-    // following a link from the Allotment widget silently repointed New Job and everything
-    // else that reads activeAtMaster. A link that shows you something must not change what
-    // the app is doing.
-    if (deepLinkAtId && atMasters.some(a => a.id === deepLinkAtId)) {
-      setOpenAtId(deepLinkAtId);
+    const agencyId = activeAgency?.id ?? null;
+    const linkKey = (deepLinkAtId || deepLinkSection === 'allotments' || deepLinkSection === 'divisions')
+      ? `${deepLinkSection ?? ''}|${deepLinkAtId ?? ''}`
+      : null;
+    if (!linkKey) appliedDeepLink.current = null;
+    if (linkKey && linkKey !== appliedDeepLink.current) {
+      // An AT the context has not loaded yet is retried when `atMasters` arrives.
+      if (deepLinkAtId && !atMasters.some(a => a.id === deepLinkAtId)) return;
+      if (deepLinkSection === 'allotments') setActiveAtTab('allotments');
+      if (deepLinkSection === 'divisions') setActiveAtTab('divisions');
+      // OPENS THE NAMED AT WITHOUT MAKING IT ACTIVE. This used to call
+      // setActiveAtMasterId, because the allotments panel followed the active AT - so
+      // following a link from the Allotment widget silently repointed New Job and everything
+      // else that reads activeAtMaster. A link that shows you something must not change what
+      // the app is doing.
+      if (deepLinkAtId) setOpenAtId(deepLinkAtId);
+      appliedDeepLink.current = linkKey;
+      arrivalOpenedFor.current = agencyId;
+      return;
     }
-  }, [deepLinkAtId, deepLinkSection, atMasters]);
+    if (!agencyId || arrivalOpenedFor.current === agencyId) return;
+    if (!activeAtMaster || activeAtMaster.agencyId !== agencyId) return;
+    setOpenAtId(activeAtMaster.id);
+    arrivalOpenedFor.current = agencyId;
+  }, [deepLinkAtId, deepLinkSection, atMasters, activeAgency?.id, activeAtMaster?.id]);
   
   const [editingAtId, setEditingAtId] = useState<string | null>(null);
   const [editFormData, setEditFormData] = useState<{
@@ -398,8 +424,8 @@ export function AtSettings() {
           counter they had not asked about, and not about the rate schedule that refuses
           every estimate and every bill they will try to produce against the new tender.
 
-          The route out links to this same page with ?section=estimate-master, which the
-          settings page consumes to EXPAND the collapsed rates section and scroll to it. */}
+          The route out links to this same page with ?section=estimate-master, which Agency
+          Settings reads to show its Estimate Master tab on this AT (AUDIT G56). */}
       {/* Gated on the LIVE document, not on the panel being open. Belt and braces with the
           condition above: if the panel is ever kept alive for another reason, this half must
           still not claim something that has stopped being true. */}
@@ -477,7 +503,6 @@ export function AtSettings() {
   const [addFormNonce, setAddFormNonce] = useState(0);
 
   const openAddFormFromHeader = () => {
-    setIsExpanded(true);
     openAddForm();
     setAddFormNonce(n => n + 1);
   };
@@ -751,27 +776,6 @@ export function AtSettings() {
           <span>Add AT</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => setIsExpanded(!isExpanded)}
-          className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border transition-all ${
-            isExpanded 
-              ? 'bg-slate-100 text-slate-700 hover:bg-slate-200 border-slate-300' 
-              : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100 border-indigo-200 shadow-2xs'
-          }`}
-        >
-          {isExpanded ? (
-            <>
-              <ChevronUp className="w-3.5 h-3.5" />
-              <span>Minimise</span>
-            </>
-          ) : (
-            <>
-              <ChevronDown className="w-3.5 h-3.5" />
-              <span>Expand & Manage</span>
-            </>
-          )}
-        </button>
         </div>
       </div>
 
@@ -805,45 +809,9 @@ export function AtSettings() {
         );
       })()}
 
-      {!isExpanded && (
-        <div className="pt-3">
-          {activeAtMaster ? (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-xs">
-              <div className="space-y-0.5">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-slate-900">{activeAtMaster.atNumber}</span>
-                  {activeAtMaster.name && <span className="text-slate-500 font-normal">({activeAtMaster.name})</span>}
-                  <span className="px-1.5 py-0.2 bg-emerald-100 text-emerald-800 rounded font-bold text-[10px]">
-                    Active
-                  </span>
-                </div>
-                <div className="text-slate-500 text-[11px] flex items-center gap-2">
-                  <span>{formatDDMMYYYY(activeAtMaster.startDate)} - {formatDDMMYYYY(activeAtMaster.endDate)}</span>
-                  <span>•</span>
-                  {/* SIGNED, ALWAYS. "7%" and "-7%" differ by fourteen points on every line
-                      of every estimate, and a reader who cannot see the base figure cannot
-                      tell them apart from the effect. The sign is the whole meaning.
-                      Also: no `?? 4` here any more - an AT with no percentage says so
-                      rather than borrowing a plausible one. */}
-                  <span>
-                    AT %:{' '}
-                    {typeof activeAtMaster.atPercentage === 'number'
-                      ? `${activeAtMaster.atPercentage >= 0 ? '+' : ''}${activeAtMaster.atPercentage}% ${activeAtMaster.atPercentage >= 0 ? 'above' : 'below'} schedule`
-                      : 'not set'}
-                  </span>
-                </div>
-              </div>
-              <span className="text-[11px] text-indigo-600 font-semibold self-end sm:self-center">
-                Click "Expand & Manage" to edit or add periods
-              </span>
-            </div>
-          ) : (
-            <div className="text-xs text-slate-500 p-2">
-              No AT period currently active. Click "Expand & Manage" to add or configure AT periods.
-            </div>
-          )}
-        </div>
-      )}
+      {/* THE MINIMISED SUMMARY IS GONE WITH "EXPAND & MANAGE" (AUDIT G56). It showed the active
+          AT and told the operator to expand the section to do anything with it. The tender list
+          is its own tab now, so it is always the full list, with the booking AT open on arrival. */}
 
       {/* THE CARRY-FORWARD CONFIRMATION — the figure, and the tender it closes. */}
       {/* CONFIRM — names what is about to go, and what it is not. */}
@@ -965,8 +933,7 @@ export function AtSettings() {
         </div>
       )}
 
-      {/* Expanded View */}
-      {isExpanded && (
+      {/* The tender list. Never collapsed: it is its own tab of Agency Settings (AUDIT G56). */}
         <div className="pt-4 space-y-4">
           {agencyAts.length === 0 ? (
             <p className="text-sm text-slate-500 py-2">No AT periods defined yet for this agency.</p>
@@ -1255,15 +1222,7 @@ export function AtSettings() {
           )}
 
           {/* Add Form & Buttons */}
-          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3">
-            <button
-              type="button"
-              onClick={() => setIsExpanded(false)}
-              className="px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
-            >
-              Minimise Table
-            </button>
-
+          <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-end gap-3">
             {!showAddForm ? (
               <button 
                 onClick={openAddForm} 
@@ -1464,7 +1423,6 @@ export function AtSettings() {
             </form>
           )}
         </div>
-      )}
     </div>
   );
 }

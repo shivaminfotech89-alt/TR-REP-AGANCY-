@@ -4,6 +4,7 @@ import { useTrialGate, describeEnd, TRIAL_LENGTH_LABEL } from '../lib/trialGate'
 import { serverNow } from '../lib/serverClock';
 import { formatPrice } from '../lib/pricing';
 import { Clock, AlertTriangle } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 /**
  * THE TRIAL COUNTDOWN, AND THE WARNING THAT MATTERS MOST (AUDIT G49).
@@ -66,12 +67,15 @@ export function TrialBanner() {
           </>
         )}
       </span>
-      <a
-        href="/agency-settings"
+      {/* ⚠ A ROUTER LINK TO THE SUBSCRIPTION TAB (AUDIT G56). This was `<a href="/agency-settings">`:
+          a full reload of the whole app, landing on Agency setup rather than on the tab that sells
+          the subscription - two defects in the one control on this banner that takes payment. */}
+      <Link
+        to="/agency-settings?section=subscription"
         className="shrink-0 bg-slate-900 hover:bg-slate-800 text-white font-bold px-3 py-1.5 rounded"
       >
         Subscribe &mdash; {formatPrice()}
-      </a>
+      </Link>
     </div>
   );
 }

@@ -22,6 +22,7 @@ import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as ch
 import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
+import { estimateMasterLink } from '../lib/settingsLinks';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
@@ -392,7 +393,8 @@ export default function EstimateGenerate() {
           'Until then, any figure shown comes from the agency or the shipped defaults and has not been checked against this tender.',
         ],
         actionLabel: 'Open Estimate Master',
-        actionTo: '/agency-settings?section=estimate-master',
+        // On the tender that refused - this MR's own - not whichever is active (AUDIT G56).
+        actionTo: estimateMasterLink(atForThisMrOverall()),
       });
       return true;
     }
@@ -418,7 +420,8 @@ export default function EstimateGenerate() {
           'Nothing here is repaired automatically: only someone with the tender can say which schedule belongs in this section.',
         ],
         actionLabel: 'Open Estimate Master',
-        actionTo: '/agency-settings?section=estimate-master',
+        // On the tender that refused, with the misfiled section open (AUDIT G56).
+        actionTo: estimateMasterLink(atForThisMr, health.section),
       });
       return true;
     }

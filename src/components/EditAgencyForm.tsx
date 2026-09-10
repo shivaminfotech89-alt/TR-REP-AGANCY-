@@ -8,7 +8,7 @@ import { AgencyMark, AgencyMarkColour, MARK_COLOURS, COLOUR_LABEL,
          markFor, agenciesUsingMark, deriveMonogram, normaliseMonogram } from '../lib/agencyMark';
 import {
   Loader2, FileUp, Check, Building2,
-  CreditCard, Landmark, GitBranch, Eye, HelpCircle, ShieldCheck, MapPin,
+  CreditCard, Landmark, Eye, HelpCircle, ShieldCheck, MapPin,
   Lock, Unlock, AlertTriangle, RotateCcw, FileText
 } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
@@ -43,7 +43,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
 
 
   // Active Tab for intuitive categorization
-  const [activeTab, setActiveTab] = useState<'agency' | 'discom' | 'bank' | 'divisions' | 'preview'>('agency');
+  const [activeTab, setActiveTab] = useState<'agency' | 'discom' | 'bank' | 'preview'>('agency');
 
   // Agency (Supplier) Details
   const [agencyName, setAgencyName] = useState(agency.name || '');
@@ -143,9 +143,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [accountNumber, setAccountNumber] = useState(agency.accountNumber || '');
   const [ifscCode, setIfscCode] = useState(agency.ifscCode || '');
 
-  // Divisions & Prefixes
-  const [divisions, setDivisions] = useState<any[]>([]);
-
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [updatePopupData, setUpdatePopupData] = useState<{
     agencyName: string;
@@ -197,50 +194,34 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setMarginLeftMm(agency.letterheadMarginLeftMm ?? 12);
     setMarginRightMm(agency.letterheadMarginRightMm ?? 12);
     setShowPageNumbers(agency.showPageNumbers !== false);
-
-    // Parse divisions from the LIVE prefix source, not unconditionally from the agency
-    // record. When an AT carries prefixes the agency copy may be stale or absent, and a
-    // panel listing the stale one would be a confident wrong answer - the exact shape
-    // this audit keeps finding. `circle` is still read from the agency: division circle
-    // offices are routing data, not tender data, and are not stored on the AT.
-    // Allotments resolve PER CELL, unlike prefixes which resolve as a whole object:
-    // NewJob.tsx:1223-1226 takes the AT's number for that division+core type and falls
-    // back to the agency's only when it is absent or zero. Mirrored here so a displayed
-    // quota is the one the intake check will actually apply, and `from` records which
-    // side it came from so the panel can say so.
-    const resolveAllotment = (name: string, core: string) => {
-      const atVal = Number((activeAtMaster as any)?.allotments?.[name]?.[core]);
-      if (atVal) return { value: atVal, from: 'at' as const };
-      const agVal = Number(agency.allotments?.[name]?.[core]);
-      if (agVal) return { value: agVal, from: 'agency' as const };
-      return { value: 0, from: 'none' as const };
-    };
-
-    const divs: any[] = [];
-    Object.entries(livePrefixes).forEach(([name, prefixData]: [string, any]) => {
-      const circle = agency.divisionCircles?.[name] || agency.circleOfficeName || '';
-      // A prefix stored as a bare string is the oldest shape. getNextJobNoInfo uses it
-      // for EVERY core type, so the panel shows it on every row and flags it, rather
-      // than showing it against CRGO alone and implying the others are unset.
-      const flat = typeof prefixData === 'string';
-      divs.push({
-        name,
-        circle,
-        legacyFlatPrefix: flat,
-        prefixCRGO: flat ? prefixData : (prefixData['CRGO'] || ''),
-        prefixAmorphous: flat ? prefixData : (prefixData['Amorphous'] || ''),
-        prefixWoundCore: flat ? prefixData : (prefixData['Wound Core'] || ''),
-        prefixLSTC: flat ? prefixData : (prefixData['LSTC'] || ''),
-        prefixOH: flat ? prefixData : (prefixData['OH'] || ''),
-        allotCRGO: resolveAllotment(name, 'CRGO'),
-        allotAmorphous: resolveAllotment(name, 'Amorphous'),
-        allotWoundCore: resolveAllotment(name, 'Wound Core') });
-    });
-
-    // No blank placeholder row any more. It existed so the operator had something to type
-    // into; with the section read-only it would render as a division that does not exist.
-    setDivisions(divs);
-  }, [agency, activeAtMaster]);
+    // ⚠ KEYED ON THE FIELDS COPIED ABOVE, NOT ON THE AGENCY OBJECT (AUDIT G56).
+    //
+    // `updateAgency` and `updateAtMaster` put a new object into context on every save, and this
+    // effect used to re-run on that - re-seeding every field on this form and discarding
+    // whatever had been typed and not saved. Saving a tender's rates or percentage did it too,
+    // because `activeAtMaster` was a dependency, for the read-only Divisions copy removed in the
+    // same change. With Agency Settings in tabs those saves happen on another tab while this
+    // form stays mounted, so the loss would have been the ordinary workflow.
+    //
+    // A change to one of these fields from elsewhere still re-seeds, and should: the stored
+    // value moved, and a form still showing the old one would save it back.
+    //
+    // ⚠ THIS LIST MUST MATCH THE SETTERS ABOVE. A field copied above but missing here would
+    // stop following its stored value; one listed here but not copied does nothing.
+  }, [
+    agency.id,
+    agency.name, agency.address, agency.agencyState, agency.agencyStateCode, agency.legalName,
+    agency.gstin, agency.pan, agency.phone, agency.email, agency.msmeNo, agency.gpValidationMonths,
+    agency.discomName, agency.discomGstin, agency.discomPan, agency.discomAddress, agency.discomState,
+    agency.discomStateCode, agency.serviceSacCode,
+    agency.circleOfficeName, agency.circleAuthority, agency.divisionAuthority,
+    agency.estimateCcTemplate, agency.billCcTemplate, agency.forwardingSubject,
+    agency.amorphousClauseText, agency.amorphousNoteLtCoil, agency.amorphousNoteRadiator,
+    agency.bankName, agency.bankBranch, agency.accountNumber, agency.ifscCode,
+    agency.letterheadUrl, agency.letterheadMode, agency.letterheadHeaderHeightMm,
+    agency.letterheadFooterHeightMm, agency.letterheadMarginLeftMm, agency.letterheadMarginRightMm,
+    agency.showPageNumbers,
+  ]);
 
   // handleAddDivision / handleRemoveDivision removed with the inputs. The division set
   // is defined by the AT's prefixes, so adding or removing one here would have written a
@@ -286,9 +267,15 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       // stored on the AT, and `AtDivisions` has no field for them - this form is their
       // only editor. Merged over the stored map rather than replacing it, so a division
       // absent from the live prefix list keeps the circle it already had.
-      divisions.forEach(d => {
-        const divName = String(d.name || '').trim();
-        if (divName) divisionCircles[divName] = (d.circle || circleOfficeName || divName).trim();
+      //
+      // Derived here, at save, from the same live prefix list the removed Divisions copy was
+      // built from (AUDIT G56), with the same circle fallback it used - so the circles written
+      // are exactly the ones that copy used to supply, without this form holding a second
+      // rendering of AT data in its state.
+      Object.keys(livePrefixes).forEach(name => {
+        const divName = String(name || '').trim();
+        const circle = agency.divisionCircles?.[name] || agency.circleOfficeName || '';
+        if (divName) divisionCircles[divName] = (circle || circleOfficeName || divName).trim();
       });
 
       // Counter-key seeding, unchanged, over the same set as before: the AGENCY's stored
@@ -494,18 +481,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
           }`}
         >
           <CreditCard className="w-3.5 h-3.5 mr-1.5" /> Bank & Payment
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('divisions')}
-          className={`px-3 py-2 text-xs font-bold uppercase tracking-wider rounded-t-lg transition-colors flex items-center whitespace-nowrap ${
-            activeTab === 'divisions'
-              ? 'bg-blue-600 text-white'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <GitBranch className="w-3.5 h-3.5 mr-1.5" /> Divisions & Prefixes
         </button>
 
         <button
@@ -1182,40 +1157,12 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         </div>
       )}
 
-      {/* ================= TAB 4: DIVISIONS & PREFIXES ================= */}
-      {/*
-        REDUCED TO A POINTER. This tab used to render the whole read-only divisions and
-        prefixes panel - a full mirror of AT-scoped data, three levels down inside an
-        agency-level form, where it read as a second editor that happened not to work.
-
-        The mirror now sits in "This AT Period" directly beneath the grid that writes it
-        (AtDivisions), where the edit route is the button above it and no explanation is
-        needed. Duplicating it here would recreate the confusion in a second place.
-      */}
-      {activeTab === 'divisions' && (
-        <div className="space-y-4 animate-in fade-in duration-150">
-          <div className="bg-slate-50 border border-slate-200 rounded-lg p-5">
-            <h4 className="text-xs font-bold uppercase tracking-widest text-slate-800 flex items-center">
-              <GitBranch className="w-4 h-4 mr-1.5 text-blue-600" /> Divisions &amp; Prefixes
-            </h4>
-            <p className="text-[13px] text-slate-600 mt-2 leading-relaxed max-w-2xl">
-              These are <strong>not agency settings</strong>. Divisions, job number prefixes
-              and allotment quotas are issued with a tender, so they belong to an AT period
-              and are edited in <strong>This AT Period</strong> below.
-            </p>
-            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed max-w-2xl">
-              The agency record does keep a read-only fallback copy, used only when the
-              active AT has no divisions of its own. It is shown there, beside the grid that
-              writes it, rather than here.
-            </p>
-            <p className="text-[11px] text-slate-500 mt-2 leading-relaxed max-w-2xl">
-              Each division's <strong>circle office</strong> is agency routing data rather
-              than tender data, and is edited on the AT divisions panel alongside them.
-            </p>
-          </div>
-        </div>
-      )}
-
+      {/* TAB 4, DIVISIONS & PREFIXES, IS GONE (AUDIT G56). It had already been reduced from a
+          read-only mirror to a pointer, and the pointer was still a second place for one fact,
+          one tab away from the grid that writes it. By then its directions were wrong as well:
+          "This AT Period below" is a tab of Agency Settings, not a section below this form.
+          Division circle offices, which it described, are still written on save - see
+          handleUpdateAgency. */}
 
       {/* ================= TAB 5: LIVE PREVIEWS ================= */}
       {activeTab === 'preview' && (

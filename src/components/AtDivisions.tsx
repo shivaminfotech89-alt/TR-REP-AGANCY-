@@ -14,6 +14,11 @@ export function AtDivisions({ at }: { at: AtMaster }) {
   const [divisions, setDivisions] = useState<any[]>([]);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
 
+  // ⚠ KEYED ON THE PREFIXES THIS COPIES, NOT ON THE OBJECTS HOLDING THEM (AUDIT G56).
+  // `updateAtMaster` and `updateAgency` put a new object into context on every save, and this
+  // effect used to re-run on that: saving this tender's rates, or the agency's bank details,
+  // re-seeded the grid and discarded prefixes typed here but not yet saved. With Agency
+  // Settings in tabs those saves happen on another tab while this one stays mounted.
   useEffect(() => {
     const divs: any[] = [];
     const sourcePrefixes = at.prefixes && Object.keys(at.prefixes).length > 0 
@@ -46,7 +51,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
     // writes a real division and a real job-number prefix for a tender that never had
     // one. Same family as the seeded DISCOM identity (AUDIT O7). Start empty and say so.
     setDivisions(divs);
-  }, [at, activeAgency]);
+  }, [at.id, JSON.stringify(at.prefixes ?? null), JSON.stringify(activeAgency?.prefixes ?? null)]);
 
   const handleAddDivision = () => {
     setDivisions([...divisions, { name: '', prefixCRGO: '', prefixAmorphous: '', prefixWoundCore: '', prefixLSTC: '', prefixOH: '' }]);

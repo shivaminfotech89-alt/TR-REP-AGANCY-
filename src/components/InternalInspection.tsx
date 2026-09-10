@@ -14,6 +14,7 @@ import { triggerUniversalPrint } from '../lib/printUtils';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 import { getJobFullEstimate, checkJobCircleLimit, coreTypeHasCircleLimit } from '../lib/estimateCalc';
 import { atForJob, matchesAtScope } from '../lib/AgencyContext';
+import { estimateMasterLink } from '../lib/settingsLinks';
 import { OtherTenderNote } from './OtherTenderNote';
 import { classifyCoreType } from './SingleJobEstimateReport';
 
@@ -854,7 +855,8 @@ export default function InternalInspection() {
                 'Set it under Estimate Master - Circle Authority Estimate Approval Limit.',
               ],
               actionLabel: 'Open Estimate Master',
-              actionTo: '/agency-settings?section=estimate-master',
+              // On this job's tender, with the circle limits open (AUDIT G56).
+              actionTo: estimateMasterLink(atForJob(job, atMasters) ?? activeAtMaster, 'CIRCLE_LIMITS'),
             })}
             className="block text-[9px] font-semibold text-slate-500 italic underline hover:text-slate-800"
             title="Click to set the circle approval limit"
