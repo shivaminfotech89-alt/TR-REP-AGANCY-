@@ -6872,6 +6872,125 @@ for pricing, which is what they should be.**
 
 ---
 
+### O56. The unsaved-edits flag reports edits that do not exist - and the screen acts on it
+
+**A defect in its own right, not a step in O55.** The check is wrong whether or not a warning is
+ever built on it.
+
+`editedSections` is meant to say "the operator changed this section since it was loaded". It is set
+by `markEdited`, which also adds the section to `touchedRef` - the list of sections changed this
+session, which survives a save. The flag is cleared only by a reload, and the list only by changing
+agency. Two paths leave them claiming an edit that does not exist:
+
+- **Cancel - certain.** `handleCancelSection` re-seeds the section from storage and clears neither.
+  This predates G56.
+- **A save that leaves the stored rows as they were - possible.** Edit a cell, type the original
+  value back, and save: if `loadKey` does not change, nothing reloads and the flag stays. Before
+  G56, every save replaced the context object and the reload cleared the flag whatever was written.
+  Whether `loadKey` changes here depends on key order, because it compares with `JSON.stringify`
+  (see the last note below).
+
+What reads the false "edited" today, all in `EstimateMaster.tsx`, taking a cancelled section:
+
+| Where | What it does |
+|---|---|
+| The stored-vs-showing band (`cause`) | Says **"Showing your N edited row(s) - not saved"** and **"Nothing is written until you click Save."** The true cause is `normalised` - rows filled in for display - whose band would name the rows not in storage instead. |
+| `publishPlanFor` | Treats the section as edited, so it publishes the rows **on screen** rather than the rows **stored**. The confirmation reads **"Publishing your N edited row(s)"**, including rows the normaliser added that nobody stored or chose. |
+| "Apply to my agencies" (`buildSectionPayload`) | Sends the cancelled section to the other ATs. Its own refusal - "Nothing to apply ... No section has been changed" - exists to stop exactly that kind of write, and the stale list gets past it. The modal still shows override counts before anything is written. |
+
+**A signal of change raised by an act, instead of by a difference in the data, is trusted until it
+is wrong and ignored after.** This is the same shape as the template version that bumped on every
+republish, including a typo in the notes (`publishAtTemplate`, `AgencyContext.tsx`, "THE VERSION
+BUMPS ONLY WHEN THE RATES MOVE"). Adopters were prompted to take updates that changed nothing, which
+teaches them to dismiss the one prompt that will matter. A confirm built on this flag would do the
+same to operators. That fix stopped trusting the act and compared the data (`sectionsDiffer`).
+
+**The fix - recorded, not built, not decided:**
+- **Minimal.** Clear the section's flag in `handleCancelSection` and after a successful save. Remove
+  a cancelled section from `touchedRef` unless it was saved earlier this session. That last clause is
+  where the minimal fix gets fiddly: the list has to remember saves separately from pending edits.
+- **Derived - recommended.** Do what the version-bump fix did. Keep each section's rows as loaded,
+  after normalising, and call a section edited when the screen differs from that snapshot. Compare
+  the way `lib/compareSections.ts` does, never with `JSON.stringify`. Cancel, a typed-back cell and a
+  no-change save are then right by construction, with nothing to remember to clear. `touchedRef`
+  becomes "saved this session, or differs now".
+
+**Noticed while recording this, NOT verified:**
+- **Saving one section may reload all five.** "Save Rates" is per section, but `loadKey` covers every
+  section's rows, so a save that changes one section re-seeds all five grids - and would discard
+  unsaved edits in the other four. If so, this predates G56, which kept the reload on a save of rates.
+- **`loadKey` compares with `JSON.stringify`,** which the version-bump comment warns against, because
+  Firestore does not preserve key order. Its failure there is an extra reload, not a missed one: rows
+  replaced by equal content in a different key order would reload and clear the flag. That is safe
+  for saves on other tabs, which do not touch the rate arrays.
+- **The template publish guard checks the touched list when it is non-empty,** and all five sections
+  otherwise, while a template carries all five. A stale touched list would narrow what the guard
+  checks.
+
+---
+
+### O55. Switching tender in Estimate Master discards unsaved rate edits, and says nothing
+
+Queued, not built. Found during G56; it predates G56.
+
+The loader is keyed on the tender (`loadKey`), so anything that changes `selectedAt` re-seeds all
+five grids from storage and clears `editedSections`. **Discarding is correct.** A tender switch
+changes what the editor is editing, and edits typed against one schedule carried onto another
+would be worse. **The defect is that it happens without a word.** The screen's only two
+`confirm()`s guard deleting a row and adopting a template.
+
+It splits into two halves of different size, and different direction.
+
+**Half 1 - the screen's own controls. Small; do it when `EstimateMaster.tsx` is next open.**
+
+Covers the "Rates for" selector (`setSelectedAtId`) and links carrying `at=` (the `?at=` effect).
+
+**Blocked by O56.** The check this warning would rest on, `editedSections`, reports edits that do
+not exist. A confirm built on it would fire on nothing, and operators would learn to click through
+it - worse than no warning. O56 is a defect in its own right, wrong whether or not this warning is
+ever built, and it has to be fixed first.
+
+With O56 fixed, Half 1 is two changes:
+1. **Confirm in the selector's `onChange`** when any section is unsaved, naming the sections and
+   both tenders. Cancel keeps the current selection.
+2. **The `at=` path runs in an effect, where a confirm is the wrong tool** - it would fire on
+   arrival, not on a click. With sections unsaved it should leave the selection alone and say the
+   link asked for AT X; the operator switches with the selector, which confirms.
+
+**Half 2 - the active-AT controls. Larger; not built.**
+
+These change the active AT, which Estimate Master follows while no tender has been picked in its
+own selector (`selectedAt = chosen || globalActiveAtMaster || ...`):
+- the sidebar tender selector (`AppLayout`);
+- the AT selector above the Agency Settings tabs (`AgencySettings`);
+- "Book jobs against this AT", and creating a tender (`AtSettings`).
+
+**Route A - lift the unsaved state into context, so those controls can confirm. Decided against.**
+It puts Estimate Master's editing state into the sidebar and two other screens: three components
+outside the editor learning its internals, to guard a rare case. That is the wrong direction for
+the size of the problem.
+
+**Route B - stop following the active AT once there are edits. PREFERRED.** It is about one line,
+no state crosses a component boundary, and the existing divergence note already handles the
+divergence it creates. Its cost is smaller than Route A's. In `markEdited`, pin the selection when
+none was chosen: `setSelectedAtId(selectedAt.id)`.
+After that, an active-AT change elsewhere no longer changes what this screen edits. The edits
+survive, and the existing divergence note (`divergedFromActive`) says the screen and the app now
+point at different tenders. Nothing outside `EstimateMaster` changes: about one line, plus a test.
+- **Cost:** an operator who switches the active AT *meaning* to see the other tender's rates stays
+  on the pinned one until they use the selector.
+- **Why that is acceptable:** it is visible, not silent, and it matches F79's rule that this
+  selector changes only what the screen shows.
+- **Depends on Half 1, and so on O56.** The selector's confirm is how a pinned operator gets off
+  the pinned tender.
+
+**Uncovered by both routes: changing agency.** It also discards unsaved rate edits, silently.
+Route A, as scoped, lifts state only to the active-AT controls. Route B cannot apply: the edits
+belong to one agency's tender, and pinning a tender does not survive the agency being replaced.
+Recorded; no route chosen.
+
+---
+
 ### O54. The Admin Panel has no `?tab=` deep link, and nothing yet needs one
 
 Recorded as available rather than missing. The estimate screen gained `?tab=sent|approvals`
@@ -12848,7 +12967,7 @@ unsaved-edit paths are verified by reading, not by use.
     These change the active AT, which Estimate Master follows unless a tender was picked in its
     own selector.
 
-  The screen's only two `confirm()`s guard deleting a row and adopting a template. **The silent
-  discard is the part worth fixing, and it is small:** `editedSections` already knows whether
-  anything is unsaved, so the selector can confirm before switching. The active-AT controls live
-  outside this component, and would need that state lifted to reach them.
+  The screen's only two `confirm()`s guard deleting a row and adopting a template. **Queued as
+  O55**, with what each half would take. The first estimate made here was wrong: it said
+  `editedSections` already knows whether anything is unsaved. It reports edits that do not exist,
+  which is recorded as its own defect in O56.
