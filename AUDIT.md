@@ -13125,3 +13125,63 @@ stale ones - so it is a separate change.
 - **Any refusal it adds is one a publish with nothing touched already met.**
 
 `tsc --noEmit`, `vite build` and the hooks guard pass. Not run in a browser.
+
+
+## G59. The hooks guard was blind to its own subject, and reported clean
+
+`scripts/admin/hooks-after-return.js` exists because of G47: a hook below an early return throws
+React #310 on a cold load. **It reported "None" while EstimateMaster carried three hooks below
+`if (!activeAgency) { return (...) }`** - `useState` at 733, `useRef` at 748 and `useMemo` at 1429
+(G57). That is the exact crash shape, in a file the guard exists to protect.
+
+It had two blind spots, both in its pattern matching:
+- **It counted an early return only on the same line as its `if`** - never a braced block, and never
+  a `return` on the line after its `if`.
+- **It matched a hook only as `use[A-Z]\w*\s*\(`**, so a hook with type arguments -
+  `useState<Record<string, boolean>>(` - was not a hook.
+
+This is the third check in this project blind to its own subject, after the negative control that
+perturbed nothing (G33) and the comparator that read a field which did not exist. **A guard in that
+state is worse than none. It does not stay silent: it reports clean, and the report is read as
+evidence.**
+
+### REBUILT ON THE PARSER, NOT ON PATTERNS
+
+It now reads each file with the TypeScript parser `tsc` uses, instead of counting braces:
+- **A component** is a capitalised function - declared, or assigned to a capitalised const,
+  including through `memo` or `forwardRef`.
+- **An early return** is any top-level statement of the body that contains a `return` outside a
+  nested function, wherever the `if` and the `return` sit on the page.
+- **A hook** is a call to `useX` or `React.useX`, with or without type arguments.
+
+It also scans every `.tsx` under `src/` (47 files), not only `src/components`, because components
+live in `src/lib` and `src/App.tsx` too. It accepts file paths as arguments.
+
+### IT PROVES IT CAN SEE BEFORE IT SAYS "None"
+
+Every run starts with a self-test, and exits 1 without scanning if any part fails:
+1. **Five synthetic components:**
+   - a braced return, then a typed hook;
+   - a same-line return;
+   - a `return` on the line after an unbraced `if`;
+   - an arrow component through `memo`, then `React.useRef<T>`;
+   - one that must NOT be flagged, whose returns sit only inside callbacks.
+2. **A probe in every real component** that has an early return with code after it - 26 today. The
+   probe is a typed hook, inserted on the line below the returning statement. The self-test asserts
+   the inserted line is where it was put, then asserts the guard reports it.
+
+**Both parts are needed; the real probes alone would not have been enough.** Two blinded copies of
+the new guard, each reintroducing one old blind spot, both fail the self-test. But the copy blind to
+braced returns failed only the synthetic cases, never a real probe. No real component has a braced
+early return today, so a guard blind to them finds no return to plant a probe beneath. **A
+self-test built only from the current code can only test the shapes the current code contains.**
+
+### VERIFIED
+
+- **Current tree:** the self-test passes (5 synthetic cases, 26 probes), and the scan reports
+  **None in 47 files**, in about 1.5 seconds.
+- **The pre-G57 EstimateMaster (`a103263~1`):** it reports the early return at line 688 and **hooks at
+  733, 748 and 1429** - the three the old guard missed - and exits 1.
+- **Two blinded copies, one per old blind spot:** both exit 1 with SELF-TEST FAILED.
+- **Not wired into anything.** Like every harness here, it runs when someone runs it; the project
+  has no CI.

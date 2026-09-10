@@ -468,9 +468,10 @@ export default function EstimateMaster() {
    * job beneath it - so this is a real case, not a hypothetical.
    *
    * ⚠ ABOVE THE EARLY RETURN (AUDIT G57). This `useMemo` sat below `if (!activeAgency) { return }`,
-   * the React #310 shape G47 recorded - invisible to scripts/admin/hooks-after-return.js, which
-   * recognises an early return only on the same line as its `if`, and a hook only without type
-   * arguments (`useState<T>(` does not match). Two hooks that followed it were missed the same way.
+   * the React #310 shape G47 recorded - invisible to scripts/admin/hooks-after-return.js as it then
+   * was, which saw an early return only on the same line as its `if`, and a hook only without type
+   * arguments. Two hooks that followed it were missed the same way. The guard was rebuilt on the
+   * TypeScript parser in G59, with a self-test that plants this shape before it scans.
    */
   const applyCandidateAts = useMemo(() => {
     const uid = activeAgency?.ownerId;
