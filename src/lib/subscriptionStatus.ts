@@ -31,6 +31,34 @@ export type SubscriptionRecord = {
   invoicePending?: boolean;
   lastPaymentDate?: number;
   origin?: string;
+
+  /**
+   * ⚠ CANCELLATION IS A DIFFERENT AXIS FROM PROVENANCE, WHICH IS WHY IT IS NOT A FIFTH STATUS
+   * (AUDIT G40). `active`, `granted` and `admin` say how a subscription CAME TO BE. Cancelled
+   * says how it ENDED - and something that was granted and then cancelled is both, so folding
+   * them into one field would force a choice between two facts that are both true.
+   *
+   * The practical outcome of a cancellation is an expiry in the past, which the vocabulary
+   * already handles. What it did not carry was WHY, and a subscription that ran out and one
+   * that was ended are different facts even though both are expired.
+   */
+  cancelledAt?: number;
+  cancelledBy?: string;
+  cancelReason?: string;
+
+  /**
+   * ⚠ PAID, BUT NOT BY THE GATEWAY. Recorded by the vendor against a cheque, a UTR or a cash
+   * receipt. It counts as revenue - money was received - and it must stay distinguishable from
+   * a Razorpay payment, because only one of the two has a gateway record behind it to reconcile
+   * against. A single "paid" flag would lose that, and the loss would only surface at a
+   * reconciliation nobody could complete.
+   */
+  manualPayment?: boolean;
+  paymentReference?: string;
+  recordedBy?: string;
+
+  /** Present only on a gateway-verified payment. The presence IS the verification. */
+  razorpayPaymentId?: string;
 };
 
 export type SubscriptionKey = 'none' | 'admin' | 'expired' | 'granted' | 'active';
@@ -43,8 +71,19 @@ export type SubscriptionClass = {
   tone: string;
   /** Whether an expiry DATE exists to show. False for `admin` and `none`. */
   hasExpiry: boolean;
-  /** Whether money was actually taken for this. False for `granted` and `admin`. */
+  /**
+   * Whether money was received. TRUE for a manual payment as well as a gateway one - the
+   * question this answers is "is this revenue", and a cheque is.
+   */
   wasPaid: boolean;
+  /**
+   * Whether a GATEWAY record exists behind it. False for a manual payment even though that is
+   * still revenue. `wasPaid && !verified` is exactly the set a reconciliation has to chase by
+   * hand, which is why the two are separate booleans and not one.
+   */
+  verified: boolean;
+  /** Ended deliberately rather than lapsing. Only meaningful when `key === 'expired'`. */
+  cancelled: boolean;
 };
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -53,6 +92,10 @@ export function classifySubscription(
   sub: SubscriptionRecord | null | undefined,
   now: number,
 ): SubscriptionClass {
+  const cancelled = !!sub?.cancelledAt;
+  const paidSomehow = sub?.status === 'active';
+  const verified = !!sub?.razorpayPaymentId && !sub?.manualPayment;
+
   if (!sub) {
     return {
       key: 'none',
@@ -60,6 +103,8 @@ export function classifySubscription(
       tone: 'bg-slate-100 text-slate-600 border-slate-300',
       hasExpiry: false,
       wasPaid: false,
+      verified: false,
+      cancelled: false,
     };
   }
 
@@ -72,17 +117,36 @@ export function classifySubscription(
       tone: 'bg-violet-100 text-violet-800 border-violet-300',
       hasExpiry: false,
       wasPaid: false,
+      verified: false,
+      cancelled: false,
     };
   }
 
   const expiry = Number(sub.expiryDate || 0);
-  if (expiry && expiry < now) {
+  /**
+   * ⚠ `<= now`, NOT `< now`, AND `cancelled` FORCES IT REGARDLESS.
+   *
+   * Cancelling writes `expiryDate: now` - that is the whole of what "cancel" means here, since
+   * `expired` is derived rather than stored. With a strict `<` the two were equal at that
+   * instant, so a subscription rendered ACTIVE at the exact moment it was cancelled and only
+   * flipped a millisecond later. A test using the value the code actually writes is what found
+   * it; one using `now - 1` would have passed and shipped it.
+   *
+   * `cancelled ||` makes the intent independent of clock arithmetic altogether: an ended
+   * subscription is ended, whatever the comparison says about the boundary.
+   */
+  if (cancelled || (expiry && expiry <= now)) {
     return {
       key: 'expired',
-      word: 'EXPIRED',
+      // ⚠ THE WORD SAYS WHICH, THE KEY DOES NOT. Cancelled and lapsed resolve to the same
+      // practical state and the same handling, so they share a key; but they are different
+      // facts and the row must not present an ended subscription as one that ran out.
+      word: cancelled ? 'CANCELLED' : 'EXPIRED',
       tone: 'bg-red-100 text-red-800 border-red-300',
       hasExpiry: true,
-      wasPaid: sub.status === 'active',
+      wasPaid: paidSomehow,
+      verified,
+      cancelled,
     };
   }
 
@@ -93,15 +157,22 @@ export function classifySubscription(
       tone: 'bg-blue-100 text-blue-800 border-blue-300',
       hasExpiry: true,
       wasPaid: false,
+      verified: false,
+      cancelled: false,
     };
   }
 
   return {
     key: 'active',
-    word: 'ACTIVE',
+    // ⚠ THE BADGE SAYS THE PAYMENT WAS MANUAL. It is revenue either way, and it is not the
+    // same kind of record: one can be reconciled against a gateway statement and one has to be
+    // chased through a cheque book.
+    word: sub.manualPayment ? 'ACTIVE (MANUAL)' : 'ACTIVE',
     tone: 'bg-green-100 text-green-800 border-green-300',
     hasExpiry: true,
     wasPaid: true,
+    verified,
+    cancelled: false,
   };
 }
 

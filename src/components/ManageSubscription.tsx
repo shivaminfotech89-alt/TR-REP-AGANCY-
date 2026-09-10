@@ -219,7 +219,14 @@ export default function ManageSubscription() {
                       className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white font-bold text-[11px] px-3 py-1.5 rounded-lg"
                     >
                       {busyId === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <CreditCard className="w-3 h-3" />}
-                      {busyId === r.id ? 'Opening…' : 'Renew a year'}
+                      {/* ⚠ "RENEW" ON AN AGENCY THAT WAS NEVER BILLED ARGUES AGAINST ITS OWN
+                          USE (AUDIT G40). The path works - createSubscriptionOrder needs only
+                          an owned agency, and verifySubscriptionPayment CREATES the document
+                          when none exists - but a row reading NOT BILLED beside a button
+                          reading "Renew a year" tells its reader there is nothing to renew, and
+                          they do not press it. The capability was reachable and unreachable at
+                          the same time, through wording alone. */}
+                      {busyId === r.id ? 'Opening…' : cls.key === 'none' ? 'Subscribe' : 'Renew a year'}
                     </button>
                   </td>
                 </tr>

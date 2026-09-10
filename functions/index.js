@@ -31,6 +31,7 @@ import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 import { makeCreateSubscriptionOrder, makeVerifySubscriptionPayment } from './subscription.js';
 import { makeCreateAgency } from './createAgency.js';
+import { makeAdminSubscriptionAction } from './adminSubscription.js';
 import { isSuperAdmin as callerIsSuperAdmin } from './adminIdentity.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -186,3 +187,11 @@ export const verifySubscriptionPayment = makeVerifySubscriptionPayment(db);
  * is no slot and no interval between paying and receiving (AUDIT G38).
  */
 export const createAgency = makeCreateAgency(db);
+
+/**
+ * CANCEL, GRANT DAYS, MARK PAID. See ./adminSubscription.js.
+ *
+ * subscriptions/{agencyId} is write-denied to every client, so an admin action on one cannot
+ * be a client write however privileged the caller - it has to come through a function.
+ */
+export const adminSubscriptionAction = makeAdminSubscriptionAction(db);

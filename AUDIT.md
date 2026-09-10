@@ -11422,3 +11422,80 @@ client holds the same seed code and would produce an identical object — proved
 `verify-seed-equality` — but local state should be the server's account of what was written, not
 the client's assertion about it. Without `createdAt`, which is a `serverTimestamp` sentinel and
 would put a `FieldValue` where React state expects a date (A5).
+
+
+## G40. Three admin actions, and a capability that argued against its own use
+
+**THE LABEL THAT MADE A WORKING PATH UNREACHABLE.** Every row in Manage Subscription offered
+"Renew a year" — including rows reading **NOT BILLED**. The path worked:
+`createSubscriptionOrder` requires only an owned agency and never checks for a subscription, and
+`verifySubscriptionPayment` reads `prev = exists ? data : {}` and then `tx.set`s, which **creates**
+the document when none exists. Paying on an unbilled agency has always produced a correct
+`active` subscription.
+
+But a row saying NOT BILLED beside a button saying *Renew* tells its reader there is nothing to
+renew, and they do not press it. **The capability was reachable and unreachable at the same time,
+through wording alone** — and no test, type or rule could have caught that, because every one of
+them would have found the path working. It now reads **Subscribe** when `key === 'none'`.
+
+Worth naming as its own class: a defect where the mechanism is correct and the affordance denies
+it. It looks like a missing feature from outside and like a working feature from inside, and the
+two views never meet.
+
+---
+
+**THE THREE ACTIONS.** Cancel, grant days, mark paid — through `adminSubscriptionAction`,
+admin-only from the verified token. They could not be client writes whatever the caller's
+privileges: `subscriptions/{agencyId}` is `allow write: if false` for everyone, because that
+total denial is the only construction that makes "only the server may write this" true in
+Firestore (G29). The buttons that used to stand there wrote to the customer's **agency** document
+across accounts, were disabled by G1, and were then relabelled *"Server-written"* — which
+described the obstacle rather than removing it.
+
+**CANCEL SETS THE EXPIRY TO NOW AND CHANGES NOTHING ELSE.** `expired` is not a stored value in
+this system — it is what `classifySubscription` derives from an expiry in the past — so moving
+the expiry *is* the whole of cancelling. Writing `status: 'cancelled'` as well would create a
+fifth provenance for something that resolves to an existing state, and the two would disagree the
+moment one was updated and the other was not.
+
+**But cancellation is a different axis from provenance, and that is why it is a flag.** `active`,
+`granted` and `admin` say how a subscription **came to be**; cancelled says how it **ended**. A
+granted subscription that was cancelled is both, so folding them into one field would force a
+choice between two facts that are both true. The original status therefore survives a
+cancellation — overwriting it would destroy the answer to *"what was this before it ended"* in
+order to record that it ended.
+
+`cancelledAt`, `cancelledBy` and a **required** `cancelReason` carry the rest, and the badge reads
+**CANCELLED** rather than EXPIRED. Same key, same handling, different word: *a subscription that
+ran out and one that was ended are different facts even though both are expired.*
+
+**MARK PAID IS REVENUE AND IS NOT VERIFIED, AND THOSE ARE TWO BOOLEANS.** A cheque is money
+received, so `wasPaid` is true and the revenue count includes it. But only a gateway payment has
+a record to reconcile against, so `verified` is false. **`wasPaid && !verified` is precisely the
+set somebody has to chase through a cheque book**, and a single "paid" flag would erase that — a
+loss that surfaces only at a reconciliation nobody can finish. The reference (cheque number, UTR,
+"cash, receipt 14") is **required by the server**, because a manual payment without one is a
+grant wearing the word "paid". The metric card names the manual share rather than folding it in.
+
+**GRANT DAYS extends from the existing expiry when that is ahead**, identically to a paid
+renewal. Two ways of adding time that compute the end date differently would be a defect waiting
+for the first person to compare them.
+
+---
+
+**THE BOUNDARY BUG, AND WHY THE TEST FOUND IT.**
+
+`cancel` writes `expiryDate: now`. The expiry test was `expiry < now`. At the instant of
+cancellation those are **equal**, so the branch did not fire and a subscription rendered
+**ACTIVE at the exact moment it was cancelled**, flipping only a millisecond later.
+
+It was caught because the test case used **the value the code actually writes** — `expiryDate:
+now`, `cancelledAt: now` — rather than a comfortable `now - 86400000`. A test written with
+yesterday's date passes and ships the defect. **The boundary is the case; anything either side of
+it is the easy part.**
+
+Fixed as `cancelled || (expiry && expiry <= now)`. The `<=` corrects the arithmetic; the
+`cancelled ||` makes the intent independent of clock arithmetic altogether, which is the more
+durable half — an ended subscription is ended, whatever a comparison says about the boundary.
+Twelve cases now cover the vocabulary, including a cancelled grant (not revenue) and a cancelled
+paid subscription (still revenue).

@@ -13,6 +13,7 @@ import { formatPrice, gstBreakdown } from '../lib/pricing';
 import {
   classifySubscription, daysRemaining, type SubscriptionRecord,
 } from '../lib/subscriptionStatus';
+import { SubscriptionActions } from './SubscriptionActions';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
 import { 
   ShieldCheck, Users, Building2, CreditCard, LifeBuoy, Settings, 
@@ -164,6 +165,9 @@ export default function AdminPanel() {
    * read is in flight would reintroduce the same lie for a second per page load.
    */
   const [subsByAgency, setSubsByAgency] = useState<Record<string, SubscriptionRecord> | null>(null);
+  const [subActionNote, setSubActionNote] = useState<string | null>(null);
+  /** Bumped after an admin action so the rows re-read rather than showing what they showed. */
+  const [subReload, setSubReload] = useState(0);
   const [razorpaySettings, setRazorpaySettings] = useState<RazorpaySettings>({
     enabled: true,
     testMode: true,
@@ -248,7 +252,7 @@ export default function AdminPanel() {
 
   useEffect(() => {
     fetchAdminData();
-  }, [currentUser?.email]);
+  }, [currentUser?.email, subReload]);
 
   if (!isSuperAdminEmail) {
     return (
@@ -469,8 +473,17 @@ export default function AdminPanel() {
             <span className="text-xl font-black text-slate-900">
               {subsByAgency === null ? '—' : Object.values(subsByAgency).filter(sb => classifySubscription(sb, Date.now()).wasPaid).length}
             </span>
+            {/* ⚠ THE MANUAL SHARE IS NAMED, NOT FOLDED IN. A cheque is revenue and belongs
+                in the count - but `wasPaid && !verified` is exactly the set that has to be
+                reconciled by hand against a cheque book rather than a gateway statement, and a
+                single number would hide how much work that is. */}
             <span className="text-[11px] text-slate-500 font-semibold block">
-              {subsByAgency === null ? 'Not read' : `of ${totalAgenciesCount} agencies`}
+              {subsByAgency === null ? 'Not read' : (() => {
+                const paid = Object.values(subsByAgency)
+                  .map(sb => classifySubscription(sb, Date.now())).filter(c => c.wasPaid);
+                const manual = paid.filter(c => !c.verified).length;
+                return `of ${totalAgenciesCount} agencies${manual ? ` \u00b7 ${manual} recorded manually` : ''}`;
+              })()}
             </span>
           </div>
         </div>
@@ -874,6 +887,15 @@ export default function AdminPanel() {
             </div>
           </div>
 
+          {subActionNote && (
+            <div className="flex items-start gap-2 bg-green-50 border border-green-300 rounded-lg px-3 py-2">
+              <CheckCircle2 className="w-4 h-4 text-green-700 shrink-0 mt-0.5" />
+              <p className="text-[11px] font-bold text-green-900 flex-1">{subActionNote}</p>
+              <button type="button" onClick={() => setSubActionNote(null)}
+                className="text-[11px] font-bold text-green-800 shrink-0">Dismiss</button>
+            </div>
+          )}
+
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead>
@@ -934,6 +956,20 @@ export default function AdminPanel() {
                         {cls.key === 'granted' && !unread && (
                           <span className="block text-[10px] text-slate-400 mt-0.5">no invoice behind it</span>
                         )}
+                        {/* ⚠ CANCELLED AND LAPSED SHARE A STATE AND ARE NOT THE SAME FACT. The
+                            badge says which; this says why, because a year later that is the
+                            only place the answer exists. */}
+                        {cls.cancelled && !unread && (
+                          <span className="block text-[10px] text-red-700 mt-0.5">
+                            ended: {sub?.cancelReason || 'no reason recorded'}
+                          </span>
+                        )}
+                        {/* Revenue with nothing to reconcile it against. */}
+                        {cls.wasPaid && !cls.verified && !unread && (
+                          <span className="block text-[10px] text-amber-700 mt-0.5">
+                            ref {sub?.paymentReference || '(none)'} &mdash; no gateway record
+                          </span>
+                        )}
                         {sub?.invoicePending && (
                           <span className="block text-[10px] text-amber-700 mt-0.5">invoice pending</span>
                         )}
@@ -977,20 +1013,19 @@ export default function AdminPanel() {
                         )}
                       </td>
                       <td className="p-3 text-right">
-                        {/* ⚠ DISABLED, NOT REMOVED (AUDIT G1). These wrote to the customer's
-                            AGENCY document across accounts, which the tightened rules no
-                            longer permit - and the fields they wrote are read by nothing
-                            (O34). Left visible and inert so the panel still shows what is
-                            recorded, and labelled so the next reader does not meet a button
-                            that fails with `permission-denied` and diagnose it as a bug. */}
-                        <div className="flex items-center justify-end gap-1.5">
-                          <span
-                            title="Subscriptions are written by the payment function and by the founding-grant script, into subscriptions/{agencyId} — a collection no client may write, including this one (AUDIT G29). The status shown in this row is read from there. Editing it from here would mean reopening a write path the rules deliberately closed."
-                            className="text-[10px] font-bold uppercase tracking-wide text-slate-500 bg-slate-100 border border-slate-300 px-2.5 py-1.5 rounded-lg"
-                          >
-                            Server-written
-                          </span>
-                        </div>
+                        {/* ⚠ THESE GO THROUGH A CALLABLE, NOT A CLIENT WRITE (AUDIT G40). The
+                            buttons that stood here wrote to the customer's AGENCY document
+                            across accounts and were disabled by G1; they were then relabelled
+                            "Server-written", which described the obstacle rather than removing
+                            it. `subscriptions/{agencyId}` is write-denied to every client, so
+                            the only way an admin action can land is a function that checks the
+                            verified token - which is what adminSubscriptionAction does. */}
+                        <SubscriptionActions
+                          agencyId={agency.id}
+                          agencyName={agency.name || '(unnamed)'}
+                          sub={sub}
+                          onDone={(msg) => { setSubActionNote(msg); setSubReload(x => x + 1); }}
+                        />
                       </td>
                     </tr>
                   );
