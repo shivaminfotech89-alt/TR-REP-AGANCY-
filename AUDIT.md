@@ -11997,3 +11997,71 @@ keeps recording, in miniature, inside a single function.
 
 A check now asserts that every member of `ORDER_KINDS` has a branch in **both** functions, and
 that both end in a throw. Three kinds, six branches, two terminal throws.
+
+
+## G46. A rule that worked because nobody had six agencies
+
+`subscriptions` was readable by its owner via a lookup on the agency:
+
+```
+allow get, list: if isSuperAdmin()
+                    || (isSignedIn()
+                        && exists(/databases/$(database)/documents/agencies/$(agencyId))
+                        && get(/databases/$(database)/documents/agencies/$(agencyId)).data.ownerId == request.auth.uid);
+```
+
+**Two document-access calls per row, against a Firestore limit of ten per query evaluation.**
+
+`ManageSubscription` runs a LIST. So the tab worked at four agencies (eight calls) and **failed
+entirely at six** — not a truncated result, not a partial page: the whole query denied, every row
+rendering `NOT READ`. The screen whose purpose is answering *"what do I owe and when"* would have
+answered nothing, for the customers with the most to owe.
+
+**Live counts when it was found:** 4, 3, 2, 1, 1, 1, 1. The largest owner was two agencies below
+the ceiling.
+
+### THE SHAPE
+
+**A rule whose correctness depends on how much data exists.** It is not wrong today and it was
+never right — it had a capacity, nothing declared it, and nothing would have announced crossing
+it except a customer reporting that their subscriptions had disappeared.
+
+That is the same shape as the hardcoded truths in the G32–G36 sweep, one level down: not a claim
+that goes false at a moment, but a **guarantee that holds only while a quantity stays small.**
+And it is harder to see than a stale notice, because there is nothing to read — the rule says
+what it means, does what it says, and has a limit that appears in neither.
+
+The tell was available and unremarkable: **`get()` inside a rule that serves a list.** A
+per-document lookup is fine for a `get` and a trap for a `list`, and nothing in the syntax
+distinguishes the two.
+
+### THE FIX, AND WHY IT IS SAFE RATHER THAN MERELY CHEAPER
+
+    allow get, list: if isSuperAdmin()
+                        || (isSignedIn() && resource.data.ownerId == request.auth.uid);
+
+Zero document-access calls. Every row is decided on its own data, so **the verdict cannot depend
+on the number of rows** — the ceiling is not raised, it is removed.
+
+The obvious objection is that this reads a **copy** of ownership rather than the authoritative
+value, and a copy is a second source of truth. It is safe here for one specific reason:
+**`agencies.ownerId` is immutable.** G1 pinned it — `incoming().ownerId == existing().ownerId` on
+every update, and the rules refuse an agency delete outright. **A value that can never change
+cannot be denormalised wrongly.**
+
+⚠ **So this depends on G1 and must be reverted if G1 is.** If `ownerId` ever becomes mutable, a
+subscription's copy becomes capable of being stale and the lookup has to come back. That coupling
+is noted on both sides, because a one-way note is only found by whoever happens to read the right
+entry — which is never the person about to break it.
+
+**Checked against live data before changing, because this narrows access:** all 13 subscriptions
+carry an `ownerId`, and **every one equals its agency's**. Zero missing, zero disagreeing. A
+single subscription without the field would have locked its owner out.
+
+**And a LIST now requires the query to filter on `ownerId`** — which `ManageSubscription` already
+does, and the Admin Panel's unfiltered list is covered by `isSuperAdmin()` above it. Both readers
+checked rather than assumed.
+
+Six cases added to `model-agency-rules.js`, including an owner with **six** subscriptions — the
+count that used to fail. The model cannot count Firestore's calls, so what it asserts is that the
+predicate needs no lookup at all.

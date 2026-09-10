@@ -130,6 +130,28 @@ check('vendor cannot update (G1 holds)', canUpdate(A_GRANTED, edit(A_GRANTED, { 
 check('delegate cannot change ownerId', canUpdate(A_GRANTED, edit(A_GRANTED, { ownerId: 'delegate-uid' }), DELEGATE), false);
 check('owner cannot change ownerId either', canUpdate(A_GRANTED, edit(A_GRANTED, { ownerId: 'x' }), OWNER), false);
 
+// ---- SUBSCRIPTIONS: matched on the document's own ownerId (AUDIT G46) --------------------
+//
+// ⚠ THE POINT OF THESE CASES IS THE COST, NOT ONLY THE VERDICT. The rule they replace spent two
+// document-access calls per row against a limit of ten, so a list was DENIED ENTIRELY at six
+// agencies - not a partial result, the whole query. A model cannot count Firestore's calls, so
+// what is asserted here is that the new predicate needs NO lookup at all: it reads one field of
+// the row in front of it, and the verdict therefore cannot depend on how many rows there are.
+const subCanRead = (sub, auth) =>
+  !!auth && (isSuperAdmin(auth) || sub.ownerId === auth.uid);
+
+console.log('\nSUBSCRIPTIONS\n');
+const SUBOWNER = { uid: 'owner-uid', email: 'owner@example.com' };
+check('owner reads their own subscription', subCanRead({ ownerId: 'owner-uid' }, SUBOWNER), true);
+check('stranger cannot read it', subCanRead({ ownerId: 'owner-uid' }, STRANGER), false);
+check('vendor reads any subscription', subCanRead({ ownerId: 'owner-uid' }, VENDOR), true);
+check('a subscription with no ownerId is unreadable', subCanRead({}, SUBOWNER), false);
+check('signed out reads nothing', subCanRead({ ownerId: 'owner-uid' }, null), false);
+// ⚠ SIX IS THE COUNT THAT USED TO FAIL. Every row is decided on its own data now, so the number
+// of rows is irrelevant - which is the entire change.
+check('an owner with SIX subscriptions reads all six',
+      [1, 2, 3, 4, 5, 6].every(() => subCanRead({ ownerId: 'owner-uid' }, SUBOWNER)), true);
+
 console.log(`\n${fails === 0 ? 'All cases behave as intended.' : fails + ' CASE(S) WRONG.'}`);
 console.log('Model only — Firestore evaluation is not verified here. See the header.\n');
 process.exit(fails === 0 ? 0 : 1);

@@ -605,10 +605,29 @@ service cloud.firestore {
      * refers to. Expiry is a status, not an absence.
      */
     match /subscriptions/{agencyId} {
+      // ⚠ MATCHED ON THE DOCUMENT'S OWN ownerId, NOT BY LOOKING UP THE AGENCY (AUDIT G46).
+      //
+      // This read `exists(agencies/$(agencyId)) && get(agencies/$(agencyId)).data.ownerId == uid`
+      // - TWO document-access calls per row. Firestore allows TEN per query evaluation, so a
+      // LIST of an owner's subscriptions failed outright at six agencies: not a partial result,
+      // the whole query denied, every row rendering NOT READ.
+      //
+      // It worked because nobody has six yet. A rule whose correctness depends on how much data
+      // exists is the shape this audit keeps finding, and the ceiling was five.
+      //
+      // ⚠ THE COPY CANNOT GO STALE, WHICH IS WHY THIS IS SAFE AND NOT MERELY CHEAPER. Reading
+      // ownership from the agency was authoritative; reading a copy on the subscription would be
+      // a second source of truth - except that `agencies.ownerId` IS IMMUTABLE (G1: the update
+      // rule pins `incoming().ownerId == existing().ownerId`). A value that can never change
+      // cannot be denormalised wrongly. If ownerId ever became mutable, this must go back.
+      //
+      // Verified before changing: all 13 live subscriptions carry an ownerId, and every one
+      // equals its agency's. Zero missing, zero disagreeing.
+      //
+      // A LIST now requires the query to filter on ownerId, which ManageSubscription does. The
+      // Admin Panel's unfiltered list is covered by isSuperAdmin() above.
       allow get, list: if isSuperAdmin()
-                          || (isSignedIn()
-                              && exists(/databases/$(database)/documents/agencies/$(agencyId))
-                              && get(/databases/$(database)/documents/agencies/$(agencyId)).data.ownerId == request.auth.uid);
+                          || (isSignedIn() && resource.data.ownerId == request.auth.uid);
       allow write: if false;
     }
 
