@@ -12065,3 +12065,80 @@ checked rather than assumed.
 Six cases added to `model-agency-rules.js`, including an owner with **six** subscriptions — the
 count that used to fail. The model cannot count Firestore's calls, so what it asserts is that the
 predicate needs no lookup at all.
+
+
+## G47. A blank page with no error, latent for two weeks, exposed by fixing the routing
+
+`/agency-settings` rendered the tab bar and nothing below it on refresh. No console error, no
+network failure, no thrown exception visible anywhere — and the data was fine throughout.
+
+**`AgencySettings.tsx` called three hooks after an early return.**
+
+```
+103:  if (loading) return <Loader2 … />;
+125:  const [estimateOpen, setEstimateOpen] = useState(false);
+183:  const [settingsParams] = useSearchParams();
+184:  useEffect(() => { … });
+```
+
+React requires the same hooks in the same order on every render. The render that took the
+loading branch called fourteen; the next called seventeen; React threw **"Rendered more hooks
+than during the previous render"** — minified **#310**. The component died *during render*, so
+nothing below it mounted.
+
+### WHY IT LOOKED LIKE THREE DIFFERENT BUGS
+
+The symptom was indistinguishable from an agency that would not load, and it was diagnosed
+twice against the wrong cause:
+
+- first as the **missing SPA rewrite** — ruled out by `curl`: `/agency-settings` returns
+  `200 text/html`, and a missing rewrite gives a Vercel 404, not a blank page;
+- then as the **`activeAgency` gating from G39** — ruled out by probing the *deployed* bundle for
+  `registerCreatedAgencies`, which is present;
+- then as the **8-field new agencies lacking a field some section gates on** — ruled out by
+  reading every gate: `EditAgencyForm` guards all twenty-odd fields it reads, and Region B's
+  "no AT period" notice is the correct render for an agency without one.
+
+Every one of those was a real, plausible mechanism for a blank page. **The wrong diagnoses were
+not careless; they were the available hypotheses, and each cost a round trip.** What ended it was
+the console — and the console only spoke because the operator went and got it.
+
+⚠ **The lesson is about the "no console error" report.** That was true and it was the most
+misleading fact available: a minified React error is not a red `TypeError` with a stack in
+application code, and it is easy to look at the console, see nothing recognisable, and report it
+clean. **"No error" and "no error I recognised" are different claims**, and diagnosis proceeded
+for two rounds on the stronger one.
+
+### WHY IT SURVIVED TWO WEEKS
+
+The early return is from the initial commit (11 Aug); both later hooks arrived on 26 Aug. So this
+was broken for a fortnight.
+
+**It only crashes when the branch is taken on the first render.** Navigating to Agency Settings
+in-session finds `loading` already `false`, so the first render calls every hook and stays
+consistent forever. A **cold load** renders once with `loading` true and once without.
+
+⚠ **And a cold load of that URL was impossible until G36.** Before the SPA rewrite, refreshing
+`/agency-settings` returned a Vercel 404 and never reached React at all. **Fixing the routing
+exposed a render bug that the routing had been hiding** — the previous defect was masking this
+one, and repairing the outer one was what made the inner one reachable.
+
+That is worth holding onto: **a fix can promote a latent bug to a live one**, and the new failure
+looks like a regression in the thing just fixed. It was blamed on `vercel.json` first for exactly
+that reason.
+
+### THE CHECK, AND ITS OWN FALSE START
+
+`scripts/admin/hooks-after-return.js` finds hooks that follow an early return in a component
+body. It runs clean now and fails loudly on a reintroduced offender.
+
+⚠ **The first two attempts at this check were worse than useless.** A grep for returns and hooks
+reported **nine files**; matching on two-space indentation still reported nine. Both counted
+returns inside module-level helpers, inside `useMemo` callbacks and inside event handlers —
+`atPercentageHint`, `inheritedScheduleRate`, `scopedJobs`. Of nine, **one was real.**
+
+A check that reports eight false positives gets switched off, and switching it off is a rational
+response to it. So the working version tracks brace depth from each component's opening brace and
+considers only statements at depth 1 of that function — and its **negative control inserts a
+`useState` directly after the early return and asserts the inserted line is present before
+believing the failure**, which is G33's rule applied rather than remembered.

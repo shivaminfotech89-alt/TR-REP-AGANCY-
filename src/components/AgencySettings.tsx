@@ -100,6 +100,46 @@ export default function AgencySettings() {
   // the agencies in the transaction that records the payment, and every other detail is
   // entered afterwards per agency. Nothing on this page creates an agency any more.
 
+  /**
+   * ⚠ EVERY HOOK RUNS BEFORE THE EARLY RETURN BELOW, AND MUST KEEP DOING SO (AUDIT G47).
+   *
+   * `useState` for the rates section and the `?section=` effect used to sit BELOW
+   * `if (loading) return <Loader2 />`. React requires the same hooks in the same order on
+   * every render: the render that took the loading branch called fourteen, the next called
+   * seventeen, and React threw "Rendered more hooks than during the previous render"
+   * (minified #310). The component died during render, so nothing below the tab bar
+   * mounted - which looked exactly like an agency that would not load.
+   *
+   * ⚠ IT ONLY CRASHED ON A COLD LOAD. Navigating here in-session finds `loading` already
+   * false, so the first render calls every hook and stays consistent forever. A refresh
+   * renders once with `loading` true and once without. That is why it survived two weeks:
+   * the failing path was unreachable until the SPA rewrite (G36) made refreshing this URL
+   * possible at all - before that, a refresh was a Vercel 404 and never reached React.
+   *
+   * A guard against this runs in scripts/admin/hooks-after-return.js.
+   */
+  const [estimateOpen, setEstimateOpen] = useState(false);
+
+  const [settingsParams] = useSearchParams();
+  useEffect(() => {
+    const section = settingsParams.get('section');
+    if (!section) return;
+    const id = section === 'estimate-master' ? 'estimate-master-section' : 'at-masters-section';
+    // ⚠ A DEEP LINK TO THE RATES MUST OPEN THEM, not merely scroll to a closed header.
+    //
+    // Three setup-gap dialogs send a BLOCKED estimate or bill here - EstimateGenerate and
+    // BillingSystem refuse to issue when the AT has no rates, and this is the route they
+    // offer out. Landing that on a collapsed header is a worse dead end than the one the
+    // collapse was meant to fix: the operator arrives at the answer and cannot see it.
+    if (section === 'estimate-master') setEstimateOpen(true);
+    // After paint: the sections below render conditionally on activeAgency, so the element
+    // does not exist on the first pass.
+    const t = window.setTimeout(() => {
+      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 250);
+    return () => window.clearTimeout(t);
+  }, [settingsParams, activeAgency?.id]);
+
   if (loading) return <Loader2 className="w-6 h-6 animate-spin mx-auto mt-10 text-blue-600" />;
 
   /**
@@ -122,7 +162,6 @@ export default function AgencySettings() {
    * expanded, it buries everything above it. Collapsed, the header has to carry enough that
    * nobody expands it just to find out what state it is in.
    */
-  const [estimateOpen, setEstimateOpen] = useState(false);
 
   /**
    * WHAT THE COLLAPSED HEADER SAYS. Derived exactly as the Estimate Master banner derives
@@ -180,25 +219,6 @@ export default function AgencySettings() {
     return { tone: 'ok' as const, label: 'Entered for this tender', detail: `Entered against this tender and used to price only its jobs.` };
   })();
 
-  const [settingsParams] = useSearchParams();
-  useEffect(() => {
-    const section = settingsParams.get('section');
-    if (!section) return;
-    const id = section === 'estimate-master' ? 'estimate-master-section' : 'at-masters-section';
-    // ⚠ A DEEP LINK TO THE RATES MUST OPEN THEM, not merely scroll to a closed header.
-    //
-    // Three setup-gap dialogs send a BLOCKED estimate or bill here - EstimateGenerate and
-    // BillingSystem refuse to issue when the AT has no rates, and this is the route they
-    // offer out. Landing that on a collapsed header is a worse dead end than the one the
-    // collapse was meant to fix: the operator arrives at the answer and cannot see it.
-    if (section === 'estimate-master') setEstimateOpen(true);
-    // After paint: the sections below render conditionally on activeAgency, so the element
-    // does not exist on the first pass.
-    const t = window.setTimeout(() => {
-      document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, 250);
-    return () => window.clearTimeout(t);
-  }, [settingsParams, activeAgency?.id]);
 
   return (
     // 900px, not 672px. The form is two-column by construction (grid-cols-1
