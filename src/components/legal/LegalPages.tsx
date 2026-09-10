@@ -2,6 +2,7 @@ import React from 'react';
 import { LegalLayout, Section, SellerBlock } from './LegalLayout';
 import { SELLER, isPlaceholder } from '../../lib/seller';
 import { SUBSCRIPTION_INCLUSIVE_INR, gstBreakdown, formatPrice } from '../../lib/pricing';
+import { Walkthrough, SHOTS } from './Walkthrough';
 
 /**
  * THE PUBLIC POLICY PAGES (AUDIT G41).
@@ -22,12 +23,48 @@ const UPDATED = '10 September 2026';
 
 export function PricingPage() {
   const { taxable, tax, ratePercent } = gstBreakdown();
+
+  /**
+   * WHICH SCREENSHOTS EXIST.
+   *
+   * ⚠ PROBED RATHER THAN ASSUMED, AND THE CONTENT TYPE IS THE TEST - NOT THE STATUS CODE.
+   *
+   * The SPA rewrite (G36) sends every unmatched path to index.html, so a MISSING screenshot does
+   * not 404: it returns 200 with `text/html`. `r.ok` alone would therefore report every absent
+   * file as present, and each slot would render an <img> pointing at an HTML document - a broken
+   * image icon on a sales page, which looks like a broken product.
+   *
+   * That is the rewrite behaving exactly as designed and breaking a naive existence check, which
+   * is worth knowing anywhere else in this codebase that asks "is this file there".
+   *
+   * A slot with no file shows a named placeholder saying which file it wants, so a half-supplied
+   * page says so rather than looking finished.
+   */
+  const [availableShots, setAvailableShots] = React.useState<Set<string>>(new Set());
+  React.useEffect(() => {
+    let live = true;
+    Promise.all(SHOTS.map(s =>
+      fetch(`/walkthrough/${s.file}`, { method: 'HEAD' })
+        .then(r => (r.ok && (r.headers.get('content-type') || '').startsWith('image') ? s.file : null))
+        .catch(() => null),
+    )).then(found => {
+      if (live) setAvailableShots(new Set(found.filter(Boolean) as string[]));
+    });
+    return () => { live = false; };
+  }, []);
   return (
     <LegalLayout title="Pricing" updated={UPDATED}>
       <p>
         {SELLER.product} is a subscription service for transformer repair agencies. One
         subscription covers one agency for one year.
       </p>
+
+      {/* ⚠ THE DOCUMENTS COME BEFORE THE PRICE, DELIBERATELY (AUDIT G48). A prospect reaching
+          this page has been asked for Rs 5,900 and has seen nothing the software makes. Leading
+          with the figure asks them to judge a number against nothing; leading with the printed
+          bill lets them recognise their own division's paperwork first and read the price after.
+          The price is two screens down and has not moved anywhere else. */}
+      <Walkthrough available={availableShots} />
 
       <div className="border border-slate-300 rounded-lg p-4 bg-slate-50">
         <p className="text-2xl font-black text-slate-900">{formatPrice()}</p>
@@ -107,10 +144,30 @@ export function TermsPage() {
           in advance and the subscription runs for twelve months from the date of payment, or
           from the existing expiry date where one is renewed before it lapses.
         </p>
+        {/* ⚠ THIS CLAUSE CLAIMED SOMETHING NOTHING ENFORCES (AUDIT G48). It read "When a
+            subscription lapses, access to that agency's workspace may be suspended." No screen
+            in this application reads a subscription - not NewJob, EstimateGenerate,
+            BillingSystem, MrLedger, DispatchChallan, AppLayout or Dashboard - so an expired
+            subscription changes nothing and the app works identically.
+
+            That is the stale-truth shape from G32-G36, in a document a payment processor
+            reviewed, and written by the same hand that recorded the pattern.
+
+            ⚠ IT IS REWORDED RATHER THAN ENFORCED, DELIBERATELY. A clause describing unbuilt
+            behaviour is the worst of both: it does not warn a customer accurately, because "may
+            be suspended" describes something that cannot happen, and it does not bind the vendor
+            usefully, because a right reserved and never exercised is not a right anybody relied
+            on. Saying what the product does today is honest now and can be updated under the
+            thirty-day notice clause above if suspension is ever built.
+
+            ⚠ AND IT DOES NOT RESERVE A RIGHT TO SUSPEND "IN FUTURE", which was the tempting
+            middle. That would be the same defect with a tense change - another sentence about
+            behaviour that does not exist. */}
         <p>
-          Subscriptions do not renew automatically. When a subscription lapses, access to that
-          agency&rsquo;s workspace may be suspended. Your data is not deleted on lapse and remains
-          exportable; see clause 5.
+          Subscriptions do not renew automatically. When a subscription lapses it is simply no
+          longer current, and you will be asked to renew it. Your work stays where it is: nothing
+          is deleted, and everything remains readable, printable and exportable &mdash; see
+          clause 5.
         </p>
         <p>
           We may change the price with at least thirty days&rsquo; notice by email. A change does

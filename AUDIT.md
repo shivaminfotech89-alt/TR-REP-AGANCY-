@@ -12142,3 +12142,80 @@ response to it. So the working version tracks brace depth from each component's 
 considers only statements at depth 1 of that function — and its **negative control inserts a
 `useState` directly after the early return and asserts the inserted line is present before
 believing the failure**, which is G33's rule applied rather than remembered.
+
+
+## G48. A price with no route to what it buys, and a terms clause nothing enforced
+
+### WHAT A FIRST-TIME USER SAW
+
+Signed in, no agency. `AppLayout:553` fires and every screen shows the same thing:
+
+> **No Active Agency** — You need to select or create an agency before you can manage jobs.
+> [Go to Settings]
+
+**The full sidebar is visible and nothing is hidden** — twelve modules, all clickable, all
+landing on those eight words. Agency Settings then offers *One agency, ₹5,900 for the year*.
+
+So the app showed **twelve module names, one sentence repeated twelve times, and a price.** Not a
+screenshot, not a document, not a number. **The most informative thing a prospect saw was the
+sidebar — a list of words.**
+
+⚠ **And `/pricing`, the one public page that says what the money buys, was linked from nowhere
+inside the signed-in app.** It exists, it is reachable, it carries the price and the GST split —
+and a person being asked for ₹5,900 had no route to it. That is not a missing feature; it is a
+missing link, and it went unnoticed because the page was built for a payment processor's reviewer
+rather than for a customer.
+
+Fixed in three places: the interstitial now says what an agency IS and links to the walkthrough,
+and the Add Agency cards carry *"See what you get"* beside the price.
+
+### THE DOCUMENTS COME BEFORE THE PRICE
+
+The walkthrough leads `/pricing` — above the figure, not below it. A prospect reaching that page
+has already been asked for ₹5,900 and has seen nothing the software makes; leading with the
+number asks them to judge it against nothing.
+
+**The printed A4 output is the product**, which is an unusual property and worth exploiting. A
+contractor's real question is *"will this produce the bill my division accepts?"*, and a picture
+of the bill answers it better than a live demo would — with no login, no fabricated data and no
+cleanup. The order is estimate → invoice → guarantee → inspection, which is the sequence a job
+moves through and the sequence a contractor recognises.
+
+**A missing screenshot renders as a named gap**, saying which file it wants, rather than as a
+broken image. Same rule as the placeholder address on `/contact` (G41): a page that looks
+finished while half its images are absent invites shipping it.
+
+⚠ **AND THE EXISTENCE CHECK TESTS THE CONTENT TYPE, NOT THE STATUS CODE.** The SPA rewrite (G36)
+sends every unmatched path to `index.html`, so a missing screenshot **does not 404 — it returns
+200 with `text/html`.** `r.ok` alone would report every absent file as present. That is the
+rewrite behaving exactly as designed and breaking a naive existence check, and it applies
+anywhere else in this codebase that asks *"is this file there"*.
+
+The spec lives in `docs/`, not beside the images: **everything under `public/` is served**, and a
+file at `/walkthrough/README.md` listing which fields were blurred is a small favour to anyone
+curious about what was hidden.
+
+### THE TERMS CLAUSE
+
+`/terms` §2 read: *"When a subscription lapses, access to that agency's workspace may be
+suspended."*
+
+**Nothing enforces it.** Checked every working screen — `NewJob`, `EstimateGenerate`,
+`BillingSystem`, `MrLedger`, `DispatchChallan`, `AppLayout`, `Dashboard` — and **not one reads a
+subscription.** An expired subscription changes nothing; the app works identically. All nine
+founding grants expire in March 2028 and nothing will happen then either.
+
+That is the stale-truth shape from the G32–G36 sweep, **in a document a payment processor
+reviewed, written by the same hand that recorded the pattern** — three commits after cataloguing
+it. Recognising a shape does not immunise against producing it.
+
+**Reworded rather than enforced**, and the reasoning is the operator's: a clause describing
+unbuilt behaviour is the worst of both. It does not warn a customer accurately, because *"may be
+suspended"* describes something that cannot happen; and it does not bind the vendor usefully,
+because a right reserved and never exercised is not a right anybody relied on.
+
+⚠ **It also does not reserve the right "in future"**, which was the tempting middle — that is the
+same defect with a tense change, another sentence about behaviour that does not exist. It now
+says what happens: the subscription is no longer current, you are asked to renew, and your work
+stays readable, printable and exportable. All true today, and updatable under the thirty-day
+notice clause if suspension is ever built.

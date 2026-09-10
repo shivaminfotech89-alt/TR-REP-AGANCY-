@@ -555,7 +555,26 @@ export default function AppLayout({ user }: { user: User }) {
                 <div className="bg-white p-6 rounded-xl shadow-xl border border-amber-200 max-w-md w-full text-center">
                    <Building2 className="w-12 h-12 text-amber-500 mx-auto mb-4" />
                    <h3 className="text-lg font-bold text-slate-900 mb-2">No Active Agency</h3>
-                   <p className="text-sm text-slate-600 mb-6">You need to select or create an agency before you can manage jobs.</p>
+                   {/* ⚠ THIS IS THE SCREEN A PROSPECT ACTUALLY MEETS, AND IT SAID EIGHT WORDS
+                       (AUDIT G48). A first-time user signs in, lands here, clicks any of the
+                       twelve sidebar modules and gets this same message at every one of them -
+                       then Agency Settings asks for Rs 5,900.
+
+                       Nothing anywhere in the signed-in app mentioned /pricing, which is the one
+                       page that says what the money buys. Someone being asked to pay had no route
+                       to the explanation. That is not a missing feature, it is a missing link. */}
+                   <p className="text-sm text-slate-600 mb-2">
+                     An agency is the workspace your jobs, inspections, estimates and bills live
+                     in. Create one to start, or open an existing one from Settings.
+                   </p>
+                   <p className="text-xs text-slate-500 mb-6">
+                     Not sure yet?{' '}
+                     <a href="/pricing" className="text-blue-700 underline font-semibold">
+                       See what the app produces
+                     </a>{' '}
+                     &mdash; the estimates, bills and inspection reports it prints, and what a
+                     subscription costs.
+                   </p>
                    <Link to="/agency-settings" className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm">
                      <Settings className="w-4 h-4 mr-2" /> Go to Settings
                    </Link>

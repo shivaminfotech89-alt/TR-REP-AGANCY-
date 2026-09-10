@@ -167,6 +167,18 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
       )}
 
       {mode === 'ask' && (
+        <>
+        {/* ⚠ A PRICE WITH NO ROUTE TO WHAT IT BUYS (AUDIT G48). These two cards were the first
+            and only place a prospect saw Rs 5,900, and nothing beside them said what the app
+            produces. The walkthrough is one link away and was reachable from nowhere inside the
+            signed-in app. */}
+        <p className="text-[11px] text-slate-600 mb-1">
+          New here?{' '}
+          <a href="/pricing" className="text-blue-700 underline font-semibold">
+            See what you get
+          </a>{' '}
+          &mdash; the estimate sheets, tax invoices and inspection reports this prints.
+        </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <button type="button" onClick={() => start(false)}
             className="text-left border border-slate-300 rounded-lg p-3 hover:border-blue-500 hover:bg-blue-50">
@@ -181,6 +193,7 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
             </span>
           </button>
         </div>
+        </>
       )}
 
       {mode === 'names' && (
