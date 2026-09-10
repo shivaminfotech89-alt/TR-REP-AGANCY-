@@ -12447,3 +12447,64 @@ and needs no validation against a list it was just added to.
 the window too, at the cost of an **impure updater**: React may invoke an updater more than once,
 and a state setter inside one runs with it. Correct-looking, and the kind of thing that produces a
 duplicated write under StrictMode and nowhere else.
+
+
+## G52. A fix that was diagnosed, proposed, and never built — then reported as done
+
+Creating an agency produced: *"That agency could not be selected because this session does not
+have it loaded. Nothing has changed. Reload to pick it up."*
+
+That is G39's own guard, refusing an agency the session **had** just loaded.
+
+`AgencyContext.fetchData`:
+
+```js
+setAgencies(enrichedAgencies);          // queued, not applied
+…
+setActiveAgencyId(enrichedAgencies[0].id);   // guard reads `agencies` from the closure → []
+```
+
+The guard compares against `agencies` from the render's closure. On a cold load that is `[]`, so
+**every freshly fetched id is refused**, `activeAgencyId` stays null, and the user is told the
+agency does not exist while looking at a database that contains it.
+
+### THE PART WORTH RECORDING IS NOT THE BUG
+
+**This was diagnosed in G39.** The report named the call site, named the cause — *"`setAgencies`
+queues a state update; it does not change `agencies` synchronously"* — and proposed exactly the
+fix now applied: *"Give `fetchData` the list it just fetched. `setActiveAgencyId(id,
+enrichedAgencies)` — an optional second argument naming the list to validate against."* It was
+option (2) of three, chosen with reasons.
+
+**Then it was not built.** The conversation moved to a different symptom, and the proposal was
+left as prose.
+
+**And G51 then reported it closed.** G51 fixed the *other* stale-closure window — the one in
+`registerCreatedAgencies` — and its summary said the fix "closes both". It did not. One was fixed
+and one had been *described*, and a description that reads like a decision is easy to file as a
+completed thing.
+
+⚠ **So the hazard is: a correct diagnosis is not a fix, and a proposal written in the past tense
+reads like one.** The G39 report says "the guard is right in intent and wrong in what it validates
+against" and then describes the remedy fluently enough that revisiting the file feels redundant.
+Nothing in the repository disagreed — the code was not marked, no check covered it, and the only
+record that it remained undone was a paragraph in an audit entry about something else.
+
+This is the second time in this session that analysis has been mistaken for work. The first was
+the negative control that reported PASS without perturbing anything (G33). Both share a shape:
+**the artefact that was supposed to prove the work happened was itself the thing that did not
+happen.**
+
+### THE FIX
+
+`setActiveAgencyId(id, knownAgencies?)`. A caller reacting to a click passes nothing and is
+validated against state, which is correct — the list on screen is the list in state. A caller that
+has just fetched or created agencies passes what it holds.
+
+The guard keeps its teeth: an id absent from the supplied list is still refused, and clearing the
+selection is still always allowed. Modelled across both moments rather than reasoned about.
+
+`addAgency` carried the identical shape and is **dead code** — `AddAgencyFlow` replaced it in G38,
+and nothing calls it. It was given the parameter anyway rather than left alone: an unreachable
+function with a latent stale read is a trap for whoever wires it back up, and "nothing calls it"
+is a fact with a shelf life.

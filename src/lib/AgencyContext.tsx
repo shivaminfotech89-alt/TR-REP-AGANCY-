@@ -1072,7 +1072,11 @@ export function getCircleLimitsEstimateMaster(
 interface AgencyContextType {
   agencies: Agency[];
   activeAgency: Agency | null;
-  setActiveAgencyId: (id: string) => void;
+  /**
+   * Select an agency. `knownAgencies` lets a caller that has just fetched or created one supply
+   * the list to validate against - React state will not have caught up. See the implementation.
+   */
+  setActiveAgencyId: (id: string, knownAgencies?: Agency[]) => void;
   loading: boolean;
   isSuperAdmin: boolean;
   globalDefaultEstimateMaster: GlobalDefaultEstimateMaster | null;
@@ -1198,8 +1202,29 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    *
    * The pointer is only accepted if it names something this context can actually render.
    */
-  const setActiveAgencyId = (id: string | null) => {
-    if (id && !agencies.some(a => a.id === id)) {
+  const setActiveAgencyId = (id: string | null, knownAgencies?: Agency[]) => {
+    /**
+     * ⚠ THE CALLER MAY SUPPLY THE LIST TO VALIDATE AGAINST, AND `fetchData` MUST (AUDIT G52).
+     *
+     * The guard compares against `agencies` from this render's closure. That is right for a
+     * caller reacting to a click - the dropdown, the switcher - where the list on screen is the
+     * list in state.
+     *
+     * It is WRONG for a caller that has just obtained a newer list. `fetchData` calls
+     * `setAgencies(enrichedAgencies)` and then, two lines later, selects one of them: React has
+     * not processed the update, so `agencies` here is still the PREVIOUS value - `[]` on a cold
+     * load - and every freshly fetched id is refused. The user is then told the agency "could
+     * not be selected because this session does not have it loaded", about an agency the session
+     * had just loaded.
+     *
+     * ⚠ THIS WAS DIAGNOSED IN G39 AND NOT FIXED. The report named the site, named the cause and
+     * proposed exactly this parameter; the conversation moved to a different symptom and the fix
+     * was never built. G51 then closed the OTHER stale-closure window - the one in
+     * `registerCreatedAgencies` - and the summary said it "closed both". It did not. One was
+     * fixed and one was described.
+     */
+    const list = knownAgencies ?? agencies;
+    if (id && !list.some(a => a.id === id)) {
       console.warn('[agency] refused a pointer to an unknown agency', id);
       setAgencyPointerNotice(
         'That agency could not be selected because this session does not have it loaded. '
@@ -1379,7 +1404,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         let currentActiveAgId = activeAgencyId;
         if (enrichedAgencies.length > 0 && !enrichedAgencies.find(a => a.id === activeAgencyId)) {
           currentActiveAgId = enrichedAgencies[0].id;
-          setActiveAgencyId(currentActiveAgId);
+          // ⚠ THE LIST JUST FETCHED, NOT REACT STATE. `setAgencies` above has not been processed
+          // yet, so the guard's own view of `agencies` is the previous one - empty on a cold
+          // load. Passing what we hold is the difference between selecting the agency and
+          // telling the user it does not exist.
+          setActiveAgencyId(currentActiveAgId, enrichedAgencies);
         }
 
         // 3. Fetch AT Masters
@@ -1840,13 +1869,16 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       // what comes BACK: the document the function returns deliberately carries no `createdAt`,
       // so a FieldValue sentinel never reaches React state.
       setAgencies(prev => [...prev, { id: newRefId, ...newAgency }]);
+      // ⚠ SAME STALE READ AS fetchData HAD, in a function nothing calls any more - AddAgencyFlow
+      // replaced it in G38. Left reachable it would refuse its own new agency the moment someone
+      // wired it back up, so it passes the list explicitly too rather than sitting as a trap.
       // Activate the agency just created. The old guard was `if (!activeAgencyId)` -
       // "is anything stored" where it meant "is this the one being worked on". Creating
       // a second agency while another was active left the first one active, so an AT
       // added next was written with the WRONG agencyId: a successful write, filtered out
       // of the new agency's list and appearing under the old one. Same guard shape as
       // F20 in atMasters (see the pattern note on scope-specific guards).
-      setActiveAgencyId(newRefId);
+      setActiveAgencyId(newRefId, [...agencies, { id: newRefId, ...newAgency } as Agency]);
       return newRefId;
     } catch (err) {
       handleFirestoreError(err, OperationType.CREATE, 'agencies');
