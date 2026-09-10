@@ -3817,6 +3817,9 @@ Measured before adopting it, from the SVG geometry:
 
 The pins are the weakest element at 28px and the one thing the user is checking on screen.
 
+*This table describes the mark before G54 redrew it. It measured elements, not the frame - the
+artwork used 48% of the tile's width - and it never measured the tank fill (G55).*
+
 ### The tile is load-bearing, which inverts the obvious instinct
 
 The instinct with a logo that dissolves into its background is to make it transparent. **That
@@ -12598,3 +12601,107 @@ specifically to stop a reader believing the branch is independent of inspection 
 comment that reasoning gets hung on - and the number in it drifts silently while the sentence
 around it stays true. This session has now found the same shape three times: a stale census, a
 negative control that proved nothing, and a diagnosis filed as a fix.
+
+
+## G54. The mark was never too detailed - it was too small in its own frame
+
+G25 replaced the badge with `public/favicon.svg` and measured its **elements**. It did not measure
+the **frame**: the artwork used **48% of the tile's width, with 26% padding on each side** (16.5u
+of 64). Each thin element in G25's table was thin partly because the whole mark was drawn at half
+the size its tile allowed.
+
+**So the redraw is a rescale first.** Same file, same path: the tab icon, the manifest and all 8
+`APP_MARK` sites follow with no code change.
+
+1. **Artwork scaled to a 10% safe area** - 1.65x across: 31u to 51u, 6.5u padding per side.
+2. **Tank outline only.** The fill was 1.41:1 on the tile and changed no pixel by 3:1 at any size;
+   that is recorded on its own as G55.
+3. **Six pins kept**, now 5u, recoloured `#60A5FA` to `#93C5FD`, the tank stroke's own colour. The
+   old pin blue sat **1.41:1 against the stroke it joins** - too close to separate from it, too far
+   apart to merge with it.
+4. **Bolt redrawn, fill only, thinnest limb at least 6u.** Its `#F59E0B` outline was 1.29:1 against
+   its own fill and made up 69% of the bolt's ink at 16px, 82% at 64px.
+
+### MEASURED, BEFORE AND AFTER
+
+Rasterised with skia (`@napi-rs/canvas`, the engine Chrome draws tab icons with), natively at each
+size. **"Reads" counts the pixels an element changes by 3:1 or more** - render with it, render
+without it, compare - the WCAG non-text threshold. Peak ratio in brackets.
+
+| | 16px | 28px | 32px | 64px |
+|---|---|---|---|---|
+| artwork width (31u -> 51u) | 7.8 -> 12.8px | 13.6 -> 22.3px | 15.5 -> 25.5px | 31 -> 51px |
+| padding per side (16.5u -> 6.5u) | 4.1 -> 1.6px | 7.2 -> 2.8px | 8.3 -> 3.3px | 16.5 -> 6.5px |
+| tank stroke (3u -> 5u) | 0.75 -> 1.25px | 1.31 -> 2.19px | 1.5 -> 2.5px | 3 -> 5px |
+| pin, thick x protrusion (3x6u -> 5x6.5u) | 0.75x1.5 -> 1.25x1.6px | 1.3x2.6 -> 2.2x2.8px | 1.5x3 -> 2.5x3.3px | 3x6 -> 5x6.5px |
+| bolt, thinnest limb (3.05u -> 6.76u) | 0.76 -> 1.69px | 1.33 -> 2.96px | 1.52 -> 3.38px | 3.05 -> 6.76px |
+| bolt outline (1.5u -> none) | 0.38px -> - | 0.66px -> - | 0.75px -> - | 1.5px -> - |
+| **pin pixels that read** | **0 (1.68) -> 8 (4.71)** | 8 (4.07) -> 30 (5.74) | 24 (3.00) -> 40 (5.74) | 60 (4.07) -> 144 (5.74) |
+| tank stroke pixels that read | 12 -> 28 | 71 -> 108 | 76 -> 156 | 250 -> 566 |
+| bolt pixels that read | 5 (5.91) -> 8 (5.78) | 18 (8.18) -> 20 (6.21) | 24 (8.38) -> 32 (6.21) | 93 (8.76) -> 126 (6.21) |
+| tank fill pixels that read | 0 of 48 -> no fill | 0 of 118 -> - | 0 of 165 -> - | 0 of 509 -> - |
+
+Thinnest limb treats the bolt as what its six vertices make it, two overlapping triangles, and
+takes the smaller inscribed-circle diameter.
+
+**At 16px the old mark had no pin pixel reaching 3:1.** G25 already named the pins the weakest
+element at 28px; in the browser tab they were not there at all.
+
+### 1.65x FITS ACROSS, NOT DOWN
+
+The scale was taken from the width. Down, the old artwork was 39u with its pins, and **1.65x would
+make it 64.4u in a 64u tile.** So the safe area is held on all four sides and the vertical gives:
+the pins protrude 6.5u rather than a scaled 9.9u, and the tank's outer proportion goes from 1.15:1
+to 1.34:1.
+
+### WHAT IT DOES NOT BUY
+
+- **The bolt barely moved on count at 28px** - 18 to 20 readable pixels - and its peak fell from
+  8.2:1 to 6.2:1, because the old bolt sat on the dark fill and the new one sits on the tile. It is
+  now thick enough to survive, every limb over 1.6px at 16px, but it was never the weak element the
+  pins were.
+- **At 16px the bolt is a yellow mass, not a zig-zag, and that is accepted.** A first draft leaned
+  into a diagonal bar; three upright drawings followed, and all three resolve to the same mass in
+  the roughly 5 x 5 pixels available. Attempts that converge are a limit of the size, not of the
+  drawing. A yellow mass in the right place still separates this mark from a generic tile, and
+  from 28px up the shape reads as a bolt.
+- The tank stroke's inner edge drops from 8.1:1 to 5.7:1 without the fill behind it (G55).
+- `public/` is not content-hashed (see `APP_MARK` in `ui.ts`), and browsers keep favicons in a
+  cache of their own. An open tab may show the old mark until that expires.
+
+
+## G55. A fill no size reveals - 36 solid pixels that carried nothing
+
+Until G54 the tank was filled `#1E293B` on the `#1E3A8A` tile: **1.41:1.** At 16px the fill path
+paints **36 fully solid pixels**, a 6 x 6 block and the largest single shape in the mark, and not
+one pixel it touched ever moved 3:1 from what it would otherwise have been.
+
+| | 16px | 28px | 32px | 64px |
+|---|---|---|---|---|
+| solid pixels the fill path paints on its own | **36** | 120 | 168 | 672 |
+| pixels it changes in the finished mark | 48 | 118 | 165 | 509 |
+| ...of those, changed by 3:1 or more | **0** | **0** | **0** | **0** |
+| strongest change it makes anywhere | 1.41:1 | 1.41:1 | 1.41:1 | 1.41:1 |
+
+(48 exceeds 36 at 16px because antialiased edge pixels change too. Once the stroke and bolt are
+painted over it, 12 pixels at 16px show pure fill.)
+
+### WHY NOTHING FOUND IT
+
+G25's table measured stroke width, pin size and bolt outline, and **all three are faults of size**:
+each improves as the render grows, so each is found by asking what the mark looks like smaller.
+Contrast between two flat colours is not a fault of size. **The fill's strongest effect is 1.41:1
+at every size in the table**, because the ratio does not depend on how many pixels carry it.
+
+So the habit that finds thin strokes - enlarge it and see what is there - **cannot find this
+class**. Enlarged, the fill is still present, still looks like a deliberate dark panel, and still
+draws no edge the stroke does not already draw. It did not fail by disappearing when small. It
+did nothing at any size, and a larger view presents that as design.
+
+It was not entirely inert: behind the stroke it raised the inner edge from 5.7:1 to 8.1:1. That is
+extra contrast on a stroke that already reads at 5.7:1 against the tile on its outer edge, which is
+where G54 now leaves it.
+
+**The check that finds it is the one G54's table uses: remove the element, re-render, and count the
+pixels that moved by 3:1.** An element that fails that at its largest size fails it at every size.
+For a mark of five paths it is five renders.
