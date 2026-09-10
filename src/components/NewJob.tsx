@@ -33,6 +33,7 @@ import {
   Scale
 } from 'lucide-react';
 import { useAgency, getCircleLimitsEstimateMaster, isIntakeOpen } from '../lib/AgencyContext';
+import { guaranteeMonthsFor } from '../lib/guaranteePeriod';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
@@ -205,7 +206,23 @@ export default function NewJob() {
   const navigate = useNavigate();
   const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState, setActiveAtMasterId, viewingAllTenders } = useAgency();
 
-  const gpValidationMonths = activeAgency?.gpValidationMonths ?? 18;
+  /**
+   * THE GUARANTEE PERIOD FOR A ROW (AUDIT G42).
+   *
+   * ⚠ IT DECIDES WHETHER A GP JOB MAY BE SAVED, so moving its source changes what is acceptable
+   * at intake - which is why it was measured before it moved. All fourteen agencies were on 18
+   * (twelve explicitly, three by fallback) and not one on anything else; all six live GP jobs
+   * pass identically before and after. Zero changed.
+   *
+   * ⚠ AND THAT SAMPLE IS SMALL. Six GP jobs, all in MEGHA - a test record excluded from the
+   * founding grant. The result is real; it is not "verified across 64 jobs".
+   *
+   * Resolved PER ROW, because `coreType` is per transformer and clause 38.2 is per core type.
+   * From the AT, because a tender term belongs to the tender: an agency-level figure would
+   * survive a rollover and apply the previous tender's terms to this tender's work.
+   */
+  const guaranteeMonthsForCore = (coreType: string | null | undefined) =>
+    guaranteeMonthsFor(activeAtMaster, coreType);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
@@ -1117,7 +1134,7 @@ ${intakeGate.reason}`);
           setModalAlertMessage(err);
           return;
         }
-        const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths);
+        const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType));
         if (!gpCalc || !gpCalc.isValidDate) {
           const err = `Invalid Last Date of Repaired for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter a valid date.`;
           setErrorMsg(err);
@@ -1125,7 +1142,7 @@ ${intakeGate.reason}`);
           return;
         }
         if (!gpCalc.isWithinWarranty) {
-          const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${gpValidationMonths}-month Guarantee Period and cannot be booked as a GP repair.`;
+          const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${guaranteeMonthsForCore(t.coreType)}-month Guarantee Period and cannot be booked as a GP repair.`;
           setErrorMsg(err);
           setModalAlertMessage(err);
           return;
@@ -1215,13 +1232,13 @@ ${intakeGate.reason}`);
             return;
           }
           if (!t.prevDeliveryDate || !t.prevDeliveryDate.trim()) {
-            const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${gpValidationMonths}-Month Guarantee Period before saving.`;
+            const err = `Last Date of Repaired is required for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter the Last Repaired Date to verify the ${guaranteeMonthsForCore(t.coreType)}-Month Guarantee Period before saving.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
             return;
           }
-          const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths);
+          const gpCalc = calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType));
           if (!gpCalc || !gpCalc.isValidDate) {
             const err = `Invalid Last Date of Repaired for GP Transformer #${i + 1} (Job #${t.jobNo}). Please enter a valid date.`;
             setErrorMsg(err);
@@ -1230,7 +1247,7 @@ ${intakeGate.reason}`);
             return;
           }
           if (!gpCalc.isWithinWarranty) {
-            const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${gpValidationMonths}-month Guarantee Period and cannot be booked as a GP repair.`;
+            const err = `Cannot Save GP Job! Transformer #${i + 1} (Job #${t.jobNo}) was last repaired on ${formatDDMMYYYY(gpCalc.repairedDateStr)} and expired on ${formatDDMMYYYY(gpCalc.expiryDateStr)} (${gpCalc.elapsedMonthsText} elapsed). It exceeds the ${guaranteeMonthsForCore(t.coreType)}-month Guarantee Period and cannot be booked as a GP repair.`;
             setErrorMsg(err);
             setModalAlertMessage(err);
             setLoading(false);
@@ -1571,7 +1588,7 @@ ${intakeGate.reason}`);
           const newJobRef = doc(collection(db, 'jobs'));
             // Previous AT & GP Warranty Metadata (Computed directly from row's Last Repaired Date & Agency GP Validation setting)
             const rowGpCalc = (commonData.repairType === 'GP' && t.prevDeliveryDate) 
-              ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths) 
+              ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType)) 
               : null;
 
             const jobData = {
@@ -1599,7 +1616,7 @@ ${intakeGate.reason}`);
               atId: activeAtMaster!.id,
               
               // Previous AT & Auto-Calculated GP Warranty Metadata
-              gpGuaranteeMonths: commonData.repairType === 'GP' ? gpValidationMonths : null,
+              gpGuaranteeMonths: commonData.repairType === 'GP' ? guaranteeMonthsForCore(t.coreType) : null,
               lastRepairedDate: t.prevDeliveryDate || '',
               prevDeliveryDate: t.prevDeliveryDate || '',
               gpExpiryDate: rowGpCalc?.expiryDateStr || '',
@@ -2403,7 +2420,7 @@ ${intakeGate.reason}`);
                   const isLegacyEntry = !isLinkedFromSaved && (t.gpSource === 'legacy' || noSuggestions);
                   const monthsElapsed = elapsedMonthsBetween(t.prevDeliveryDate || '', commonData.dateOfIssue);
                   const rowGpCalc = t.prevDeliveryDate
-                    ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, gpValidationMonths)
+                    ? calculateGpWarranty(t.prevDeliveryDate, commonData.dateOfIssue, guaranteeMonthsForCore(t.coreType))
                     : null;
 
                   if (isLinkedFromSaved) {
@@ -2424,8 +2441,8 @@ ${intakeGate.reason}`);
                             <div className="flex flex-wrap items-center gap-1.5">
                               <span className="font-bold">
                                 {rowGpCalc?.isWithinWarranty
-                                  ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months.`
-                                  : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months, so this must be booked as OGP, not GP.`}
+                                  ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months.`
+                                  : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months, so this must be booked as OGP, not GP.`}
                               </span>
                               <span className="text-[10px] px-1.5 py-0.2 bg-white/80 font-mono tabular-nums font-bold rounded border border-black/10">
                                 Job #{t.prevJobNo || t.jobNo}
@@ -2537,8 +2554,8 @@ ${intakeGate.reason}`);
                             )}
                             <span>
                               {rowGpCalc.isWithinWarranty
-                                ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months.`
-                                : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${gpValidationMonths} months, so this must be booked as OGP, not GP.`}
+                                ? `Within guarantee period. Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months.`
+                                : `Delivered ${formatDDMMYYYY(t.prevDeliveryDate || '')}, ${monthsElapsed ?? 0} months ago. Guarantee period is ${guaranteeMonthsForCore(t.coreType)} months, so this must be booked as OGP, not GP.`}
                             </span>
                           </div>
                           <div className="text-[11px] font-mono tabular-nums opacity-90">
@@ -2789,7 +2806,10 @@ ${intakeGate.reason}`);
                     const atInfo = pj.prevAtNo 
                       ? pj.prevAtNo 
                       : (pj.atId ? (atMasters.find(a => a.id === pj.atId)?.atNumber || atMasters.find(a => a.id === pj.atId)?.name) : '');
-                    const pjCalc = delivDateRaw ? calculateGpWarranty(delivDateRaw, commonData.dateOfIssue, gpValidationMonths) : null;
+                    // ⚠ A SAVED JOB'S OWN STAMP WINS. `pj` is a previous repair, and its guarantee is the one
+                    // its tender set - not whatever the current tender says (AUDIT G42).
+                    const pjMonths = guaranteeMonthsFor(activeAtMaster, pj.coreType, pj.gpGuaranteeMonths);
+                    const pjCalc = delivDateRaw ? calculateGpWarranty(delivDateRaw, commonData.dateOfIssue, pjMonths) : null;
 
                     return (
                       <div
@@ -2820,7 +2840,7 @@ ${intakeGate.reason}`);
                               <span className={`text-[10px] px-2 py-0.5 rounded font-bold ${
                                 pjCalc.isWithinWarranty ? 'bg-emerald-100 text-emerald-900 border border-emerald-300' : 'bg-amber-100 text-amber-900 border border-amber-300'
                               }`}>
-                                {pjCalc.isWithinWarranty ? `✓ Within ${gpValidationMonths}M Warranty` : `⚠️ Exceeded ${gpValidationMonths}M`}
+                                {pjCalc.isWithinWarranty ? `✓ Within ${pjMonths}M Warranty` : `⚠️ Exceeded ${pjMonths}M`}
                               </span>
                             )}
                           </div>

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
+import { guaranteeMonthsFor } from '../lib/guaranteePeriod';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
          RepairWithinLimitConsent, activeConsent } from '../lib/estimateCalc';
@@ -123,7 +124,15 @@ export default function BillingSystem() {
   const [forwardingTo, setForwardingTo] = useState('');
   const [forwardingSub, setForwardingSub] = useState('');
   const [forwardingCc, setForwardingCc] = useState('');
-  const [certMonthsText, setCertMonthsText] = useState('Twelve/Eighteen');
+  /**
+   * ⚠ certMonthsText IS GONE (AUDIT G42). It was a FREE-TEXT BOX defaulting to
+   * "Twelve/Eighteen", typed by an operator, printed onto a SIGNED GUARANTEE CERTIFICATE - a
+   * commitment about how long a repair is warranted, entered as prose with nothing checking it
+   * against the tender, the core type, or the two other places the same period was stated.
+   *
+   * The period now comes from the AT, per core type, resolved by guaranteeMonthsFor.
+   */
+  // (derived below, once selectedJobsData exists - see certGuaranteeMonths)
   const [showEditLetterModal, setShowEditLetterModal] = useState(false);
   const [saveAsDefaultAgency, setSaveAsDefaultAgency] = useState(false);
 
@@ -354,6 +363,17 @@ export default function BillingSystem() {
     () => selectedJobsWithGp.filter(j => !isGpJob(j)),
     [selectedJobsWithGp]
   );
+
+  /**
+   * THE GUARANTEE PERIOD THIS BILL'S CERTIFICATE WILL STATE (AUDIT G42).
+   *
+   * ⚠ FROM THE FIRST SELECTED JOB'S CORE TYPE, and that is a real limitation worth naming: one
+   * certificate covers a whole MR, and an MR can mix core types. Today every core type in the
+   * tender carries the same 18 months, so the choice cannot produce a wrong figure - but it
+   * would the moment two core types differed, and the honest place to record that is here
+   * rather than in a comment nobody reads after it has broken.
+   */
+  const certGuaranteeMonths = guaranteeMonthsFor(activeAtMaster, selectedJobsData[0]?.coreType);
 
   /** GP jobs in this MR - excluded from the bill, counted so the numbers reconcile. */
   const selectedMrGpJobs = useMemo(
@@ -3239,7 +3259,7 @@ export default function BillingSystem() {
                   </div>
 
                   <p className="text-xs text-black leading-loose text-justify font-medium">
-                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certMonthsText || 'Twelve/Eighteen'} months from the date to delivery.
+                    We hereby Certify that the materials and spares mentioned in the Estimate of Transformers mentioned in our <strong className="font-bold">BILL NO. {billNo}</strong> Dated <strong className="font-bold">{formatDDMMYYYY(billDate)}</strong> are Replaced and Fitted, the above Transformers are guaranteed by {certGuaranteeMonths} months from the date of delivery.
                   </p>
 
                   <div className="text-right mt-10">
@@ -3548,7 +3568,14 @@ export default function BillingSystem() {
                         Guarantee Card
                       </h4>
                       <p className="text-[8.5px] leading-tight text-justify">
-                        We guarantee the satisfactory performance of the above repaired transformers for {activeAgency?.gpValidationMonths || 18} months for 11 KV and 12 months for 22 KV from date of delivery.
+                        {/* ⚠ BOTH FIGURES STAY, AND THAT IS THE POINT (AUDIT G42). Deriving a single number here
+                            was the obvious move and would have been wrong: this app has NO VOLTAGE FIELD on a job -
+                            InternalInspection renders "(assumed - voltage class not set)" - so printing one number
+                            asserts 11 KV for a transformer whose voltage was never recorded. The sentence as it
+                            stands is accurate, matches A/T clause 38.2, and says nothing false. A number that is
+                            right only while an assumption holds is the hardcoded-truth shape; this is that shape
+                            AVOIDED rather than committed. */}
+                        We guarantee the satisfactory performance of the above repaired transformers for {certGuaranteeMonths} months for 11 KV and 12 months for 22 KV from date of delivery.
                       </p>
                     </div>
                     <div className="pt-2 text-center">
@@ -3743,9 +3770,18 @@ export default function BillingSystem() {
                 <input type="text" value={forwardingSub} onChange={e => setForwardingSub(e.target.value)} className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white" />
               </div>
 
+              {/* ⚠ NO LONGER TYPED (AUDIT G42). This was a text input whose value went onto a
+                  signed guarantee certificate. It is stated here so the operator can see what
+                  will print, and it is not editable here: the period is a tender term, set on
+                  the AT per core type in Divisions & Core Prefixes. */}
               <div>
-                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Guarantee Certificate Period (Months)</label>
-                <input type="text" value={certMonthsText} onChange={e => setCertMonthsText(e.target.value)} placeholder="e.g. Twelve/Eighteen" className="w-full px-3 py-2 text-sm border rounded bg-slate-50 focus:bg-white" />
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Guarantee Certificate Period</label>
+                <div className="w-full px-3 py-2 text-sm border rounded bg-slate-100 text-slate-700">
+                  {certGuaranteeMonths} months
+                  <span className="block text-[10px] text-slate-500">
+                    From the AT, by core type. Change it in Divisions &amp; Core Prefixes.
+                  </span>
+                </div>
               </div>
 
               <div>

@@ -66,6 +66,13 @@ export interface Agency {
   prefixes: Record<string, string | Record<string, string>>;
   lastJobNumbers: Record<string, number>;
   allotments?: Record<string, Record<string, number>>;
+  /**
+   * ⚠ SUPERSEDED BY `AtMaster.guaranteeMonths` (AUDIT G42), AND KEPT FOR THE RECORDS THAT HAVE
+   * IT. Twelve agencies store 18 and three store nothing; not one stores anything else, so the
+   * move to the AT changed no outcome. It is no longer READ for a new job - the tender decides -
+   * and it is not offered on the agency form. Left on the type because deleting a field twelve
+   * live documents carry would make those documents fail a validator for no gain.
+   */
   gpValidationMonths?: number;
   
   // Agency / Supplier Profile (Tax & Identity)
@@ -244,6 +251,41 @@ export interface AtMaster {
    * a tender does. See getAtPercentage.
    */
   atPercentage?: number;
+
+  /**
+   * THE GUARANTEE PERIOD, IN MONTHS, PER CORE TYPE (AUDIT G42).
+   *
+   * ⚠ ON THE AT BECAUSE IT IS A TENDER TERM. A/T 1819 clause 38.2 states it; another A/T may
+   * state differently. It was on the AGENCY - one figure for everything, forever - which means
+   * it would have survived a rollover unchanged and applied the previous tender's terms to this
+   * tender's work. That is the F84 shape: a value that outlives the thing that set it.
+   *
+   * ⚠ AND `job.gpGuaranteeMonths` IS STILL STAMPED AT SAVE, which is what makes this safe across
+   * a rollover in the other direction. A unit dispatched under 1819 keeps 1819's guarantee even
+   * after 1819 closes, because the answer travels with the job rather than being looked up later
+   * against whatever tender happens to be current.
+   *
+   * Keyed by the coreType string as jobs store it: 'CRGO', 'Amorphous', 'Wound Core', 'OH'.
+   * Absent means 18 - see `guaranteeMonthsFor`.
+   */
+  guaranteeMonths?: Record<string, number>;
+
+  /**
+   * WHERE JOB NUMBERING STARTS, per division and core type (AUDIT G42).
+   *
+   * ⚠ A SEED, NOT A SETTING. `lastJobNumbers` holds the LAST USED number and the suggestion is
+   * `last + 1`, so an agency joining a tender part-way and starting at 47 stores 46 here. The
+   * conversion lives in exactly one place (`seedFromStartingNumber`) because an off-by-one that
+   * appears in two is the kind that ships.
+   *
+   * ⚠ IT STOPS MATTERING THE MOMENT A JOB IS SAVED. The save recomputes the counter from the
+   * real job numbers it just wrote, monotonically, so after the first save this value is inert.
+   * The form disables it then and says why - a field that quietly does nothing is read as broken.
+   *
+   * Same key shape as `lastJobNumbers`: `<division>` or `<division>_<CORE>`.
+   */
+  startingJobNumbers?: Record<string, number>;
+
   allotments?: Record<string, Record<string, number>>;
   allotmentHistory?: AllotmentRecord[];
   prefixes?: Record<string, string | Record<string, string>>;

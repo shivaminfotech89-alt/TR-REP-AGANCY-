@@ -11595,3 +11595,126 @@ The stale `Version 2.5 • August 2026` header is gone with the modal: a version
 deleted from the login page for encoding a fact nothing updated, surviving on the document where
 being out of date matters most. It is a single "Last updated" date that somebody must change
 when they change the text.
+
+
+## G42. Three answers to how long a repair is guaranteed, and a seed that is not a setting
+
+**THE GUARANTEE PERIOD HAD THREE INDEPENDENT SOURCES, TWO OF WHICH PRINTED ON THE SAME BILL.**
+
+    the certificate    certMonthsText, FREE TEXT defaulting to "Twelve/Eighteen", typed by an
+                       operator onto a signed guarantee certificate
+    the Guarantee Card agency.gpValidationMonths
+    the Dashboard      a hardcoded eighteenMonthsMs
+
+A number that decides whether a repair is free is not a number three screens should each have
+their own opinion about. The free-text box is the worst of the three: **a commitment about how
+long a repair is warranted, entered as prose**, with nothing checking it against the tender, the
+core type, or the two other places the same period was stated.
+
+It is now one resolver reading one source. **The source is the AT, because the guarantee is a
+tender term** — A/T 1819 clause 38.2 sets it and another A/T may set another. On the agency it
+would survive a rollover and quietly apply the previous tender's terms to this tender's work,
+which is the F84 shape. And `job.gpGuaranteeMonths` is still stamped at save, which is what makes
+it safe in the other direction: a unit dispatched under 1819 keeps 1819's guarantee after 1819
+closes, because the answer travels with the job.
+
+**The Dashboard's flat eighteen went with them.** Leaving it while the guarantee became a tender
+term would have kept a third opinion — which is precisely how the first two came to disagree.
+
+---
+
+### THE HARDCODED-TRUTH SHAPE AVOIDED RATHER THAN COMMITTED
+
+The Guarantee Card prints *"18 months for 11 KV and 12 months for 22 KV"*. The obvious move was
+to derive a single number from the job's core type and print that. **It would have been wrong.**
+
+**This app has no voltage field on a job.** `InternalInspection` renders *"(assumed — voltage
+class not set)"*. So printing one number asserts 11 KV for a transformer whose voltage was never
+recorded — a figure that is right only while an assumption holds, on a signed document, with
+nothing to catch it when the assumption fails.
+
+The sentence as it stands is accurate, matches clause 38.2 exactly, and says nothing false. It
+is kept. **This is the shape the stale-truth sweep exists to remove, recognised before it was
+created rather than after** — and worth recording as such, because every other instance in this
+audit was found afterwards.
+
+### LSTC / PAT DEFERRED, WITH THE COST OF DOING IT WRITTEN DOWN
+
+Clause 38.2 gives SDT/PAT six months. **This app has no such core type.** LSTC exists only as a
+job-number prefix; no live division has a `prefixLSTC`; not one of the 64 live jobs carries it.
+A six-month default keyed to something nothing can select **would be a setting that does
+nothing** — the sweep's whole subject, arriving new.
+
+What it would take, so this is a decision and not an omission: LSTC as a real core type in the
+intake form and the pricing paths, a prefix field on the division form beside the existing
+three, and then the six-month default follows from the core type it attaches to. Said on the
+form itself, not only here.
+
+---
+
+### WHAT THE MOVE CHANGED FOR LIVE DATA — MEASURED FIRST, AND THE SAMPLE IS SMALL
+
+`gpValidationMonths` decides whether a GP job may be **saved**, so moving its source changes what
+is acceptable at intake. Measured before moving:
+
+- **All fourteen agencies were on 18** — twelve explicitly, three by fallback. **Not one on
+  anything else.**
+- **All six live GP jobs** pass identically before and after. **Zero changed.**
+
+**⚠ AND THAT SAMPLE IS SIX GP JOBS IN ONE AGENCY — `MEGHA`, a test record excluded from the
+founding grant.** The result is real and it is not "verified across 64 jobs". The live GP path
+has only ever been exercised on test data, and this entry says so on purpose: a later reader
+finding "zero changed" should know what it was zero across.
+
+**TWO GP JOBS HAVE NO ANSWER AND NEVER DID.** `MSBT-6` and `MSBT-12` carry no
+`prevDeliveryDate` and no `gpGuaranteeMonths`. The window was never evaluated for them and no
+term was stamped, so *"was this repair within its guarantee?"* has **no stored answer** — not a
+wrong one, none. They predate the validation, this change neither caused nor worsened it, and
+they are the records that would be unanswerable if anyone ever asked. Recorded because a gap
+nobody has written down is a gap nobody will find.
+
+---
+
+### THE STARTING JOB NUMBER IS A SEED, AND THE −1 IS REAL
+
+`lastJobNumbers[key]` holds the **last used** number; `predictNextJobNo` returns `last + 1`; an
+absent counter reads 0 so the first job is 1. **An agency joining a tender part-way and starting
+at 47 types 47 and the code stores 46.** Storing 47 would make its first job 48.
+
+That conversion lives in `seedFromStartingNumber` and nowhere else, because an off-by-one that
+appears in two places is the kind that ships.
+
+**It is inert once the counter has moved, and the field says so.** The save recomputes
+`lastJobNumbers` from the real job numbers it writes, monotonically, so after the first job a
+starting number cannot change anything. The input **disables itself**, shows the last issued
+number, and explains in its tooltip that a starting number only seeds an unused counter.
+**A control that quietly stops working is read as broken** — a disabled field that explains
+itself is better than an editable one that does nothing.
+
+A wrong starting number cannot corrupt anything: the counter only moves forward, and a
+suggestion that collides with an existing job number is refused at save (`NewJob:1286–1343`,
+with a deliberate exception for a GP unit returning under guarantee).
+
+**⚠ AND THE COUNTER KEY COMES FROM `getCounterKey`, NOT A SECOND COPY OF IT.** The first draft
+derived `${div}_${ct.toUpperCase().replace(' ', '_')}` by hand, which produces the identical
+string for all four core types today. That is exactly the parallel-implementation shape
+`AgencyContext` warns about three lines above `getCounterKey` itself — and the failure it would
+cause is silent: a seed written under a key nothing reads, and numbering that restarts from 1.
+
+---
+
+### THE PRINTED DOCUMENTS: TWO SUBTREES MOVED, NOT ONE
+
+The prediction was one — the certificate. **Two changed**, and the second was foreseeable:
+
+    CHANGED  BillingSystem.tsx#1   1997 -> 1981 bytes   the guarantee certificate
+    CHANGED  BillingSystem.tsx#2  22840 -> 23574 bytes  the tax invoice, which carries the
+                                                        Guarantee Card
+    byte-identical 11   changed 2   new 0   removed 0
+
+The second moved because the Guarantee Card's expression changed from
+`activeAgency?.gpValidationMonths || 18` to `certGuaranteeMonths`. **Both render 18 today** — no
+AT carries `guaranteeMonths` yet and every agency was on 18 — so the printed output is unchanged
+in value while the source is not. The harness hashes source, which is why it reported the change
+correctly and why the prediction was wrong: I counted the documents whose *text* I was editing,
+not the subtrees whose *source* I was touching.

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
+import { DEFAULT_GUARANTEE_MONTHS } from '../lib/guaranteePeriod';
 import { isGpJob } from '../lib/estimateCalc';
 import { computeOilBalance, describeOil } from '../lib/oilBalance';
 import { CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
@@ -450,7 +451,18 @@ export default function Dashboard() {
   // Guarantee Monitoring
   const guaranteeStats = useMemo(() => {
     const now = Date.now();
-    const eighteenMonthsMs = 18 * 30.4375 * 24 * 60 * 60 * 1000;
+    /**
+     * ⚠ PER JOB, NOT A FLAT EIGHTEEN (AUDIT G42). This counted every dispatched unit against a
+     * hardcoded 18 months while the certificate printed free text an operator typed and the
+     * Guarantee Card printed the agency's setting - three independent answers to one question,
+     * two of them on the same bill. Leaving this literal while the guarantee became a tender
+     * term would have kept a third opinion, which is exactly how the first two came to disagree.
+     *
+     * `gpGuaranteeMonths` is stamped on a job at save, so a unit keeps the terms of the tender
+     * it was repaired under. Falls back to 18 for jobs saved before it was stamped - two live GP
+     * jobs are in that state, and they are recorded rather than papered over.
+     */
+    const monthsMs = (months) => months * 30.4375 * 24 * 60 * 60 * 1000;
     let activeGuaranteeCount = 0;
 
     // ⚠ ACROSS ALL TENDERS, not `filteredJobs` (AUDIT F85). A unit dispatched under 26-27 is
@@ -467,7 +479,10 @@ export default function Dashboard() {
         const dispatchTime = dispatchStamp
           ? new Date(dispatchStamp).getTime()
           : (j.updatedAt ? new Date(j.updatedAt).getTime() : now);
-        if (now - dispatchTime <= eighteenMonthsMs) {
+        const jobMonths = Number(j.gpGuaranteeMonths) > 0
+          ? Number(j.gpGuaranteeMonths)
+          : DEFAULT_GUARANTEE_MONTHS;
+        if (now - dispatchTime <= monthsMs(jobMonths)) {
           activeGuaranteeCount++;
         }
       }
