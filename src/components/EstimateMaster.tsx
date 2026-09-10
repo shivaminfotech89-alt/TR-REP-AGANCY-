@@ -1280,7 +1280,14 @@ export default function EstimateMaster() {
     // The same guard the old publish path used: never publish a section that is on screen
     // only because a fallback resolved it. Publishing a card this AT does not actually
     // store is how one wrong schedule reaches everyone who copies it.
-    if (blockPublishIfFallbackResolved(touchedSections().length ? touchedSections() : (['CRGO','AMORPHOUS','WOUND_CORE','OVERHAULING','CIRCLE_LIMITS'] as const).slice() as any)) return;
+    //
+    // ⚠ ALL FIVE, ALWAYS (AUDIT G58). This guarded only the sections touched this session whenever
+    // any were, while a template carries all five (buildFullTemplatePayload). So editing one
+    // section narrowed the check to that section, and an untouched section that was empty or held
+    // the wrong schedule went into the template unguarded. A template is adopted wholesale, so it
+    // is guarded wholesale. Apply still guards only what it sends, because it sends only what
+    // changed.
+    if (blockPublishIfFallbackResolved([...SECTION_KEYS])) return;
     setIsSaving(true);
     try {
       /**

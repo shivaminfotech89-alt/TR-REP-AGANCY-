@@ -13096,3 +13096,32 @@ Not verified:
   through `cloneRows`, and that `editedNow` tracks the screen. The app was not run in a browser; it
   needs a signed-in session.
 - **Still open: O55** - switching tender discards edits without a word. Its Half 1 is now unblocked.
+
+
+## G58. The publish guard checked the sections you touched; the template carries all five
+
+`handlePublishTemplate` guarded `touchedSections()` whenever there were any, and all five sections
+only when there were none. The template it publishes is built by `buildFullTemplatePayload`, which
+**always carries all five**. So editing one section narrowed the check to that section, and an
+untouched section that was fallback-resolved went into the template unguarded:
+- **An empty stored section.** `publishPlanFor` had nothing stored to publish, so it published what
+  was on screen - rows substituted from another section or the shipped defaults.
+- **A stored section holding the wrong schedule** was published as stored.
+
+A template is adopted wholesale, onto every AT that copies it. That is the blast radius the guard
+exists for.
+
+**It now guards all five, always.** Apply is unchanged: it sends only the sections that changed, so
+it guards only those.
+
+This was O56's third lead. It is a different cause from G57 - genuine edits narrowed it, not only
+stale ones - so it is a separate change.
+
+**It refuses nothing live.** Read-only, 2026-09-11, using the guard's own functions
+(`storedSectionForRates`, `checkMasterSection`): **0 of 13 ATs would be refused.**
+- **How it ran outside the browser.** `estimateCalc` pulls in the estimate report component, pdf.js
+  and the Firebase client, so it was replaced by the one thing the check imports from it:
+  `SCRAP_ITEM_CODE_BY_CORE_CLASS`, lifted verbatim from the source.
+- **Any refusal it adds is one a publish with nothing touched already met.**
+
+`tsc --noEmit`, `vite build` and the hooks guard pass. Not run in a browser.
