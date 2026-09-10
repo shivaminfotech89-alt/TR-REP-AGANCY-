@@ -12219,3 +12219,121 @@ same defect with a tense change, another sentence about behaviour that does not 
 says what happens: the subscription is no longer current, you are asked to renew, and your work
 stays readable, printable and exportable. All true today, and updatable under the thirty-day
 notice clause if suspension is ever built.
+
+
+## G49. A 72-hour trial, and the clock it is measured against
+
+A prospect could not see the app before paying ₹5,900 (G48). The trial is the answer, and
+**nothing about it existed**: no working screen read a subscription, so an expired one changed
+nothing.
+
+### 72 HOURS, NOT THREE DAYS
+
+"3 days" from a signup at 11pm is a different trial from one at 9am — calendar days would give
+one prospect 73 hours and another 96. The expiry is a **timestamp**, computed on the server, and
+the screens show that timestamp rather than a count of days. A customer can check it against
+their own memory of when they started; "expires soon" gives them nothing to check.
+
+### THE CLOCK, WHICH IS THE PART THAT WOULD HAVE GONE WRONG QUIETLY
+
+The comparison is `Date.now()` — the **device's** clock. A machine an hour fast ends a 72-hour
+trial an hour early, 1.4% of it, and the customer has no way to know why. For an eighteen-month
+grant that is noise. For three days it is a prospect cut off mid-task.
+
+**There is no server time already on hand**, which is worth recording because every obvious
+candidate fails:
+
+- `serverTimestamp()` is a **write-only sentinel** — it resolves during a write and is not
+  readable as a value without performing one;
+- the subscription's `expiryDate` **is** server-derived, so the *endpoint* is trustworthy — it is
+  the comparison that is not;
+- Firestore snapshots carry no server time;
+- the auth token has a server-issued `issuedAtTime`, but reading it does not say when it was
+  issued *relative to now* without forcing a refresh, which is a network call.
+
+So the anchor is the one thing every HTTP response already carries: the **`Date` header**, which
+is CORS-safelisted and therefore readable. One HEAD request at startup measures the offset;
+midpoint of the round trip, residual error in milliseconds against a 72-hour window. Measured
+against the live site while writing this, a correctly-set machine differed by **one second**.
+
+**And when the probe fails, the comparison leans the customer's way** by an hour. Erring towards
+a free hour costs nothing; erring the other way costs the customer. The favour applies **only**
+when unanchored — a blanket hour of grace on a measured clock would just be a 73-hour trial
+described as 72.
+
+### A SOFT GATE, SAID PLAINLY
+
+The gate runs in the browser and the rules do not enforce it. That is a choice, and the
+alternative was costed rather than dismissed:
+
+**A rule enforcing it needs `get(/subscriptions/$(agencyId))` — one document-access call per
+document written. Firestore allows twenty per transaction or batched write. `NewJob` writes an
+entire MR in one transaction, and the largest live MR is eighteen jobs.** So a rules-level gate
+would work today and refuse a twenty-transformer intake — **the exact ceiling removed in G46,
+reintroduced on purpose.**
+
+And the person it defends against does not exist. Someone who bypasses a paywall through the
+Firestore console was never going to spend ₹5,900. **The gate would buy real security against
+nobody and cost a hard cap on real work.** Written into `trialGate.ts` in as many words, so
+nobody later assumes it is a boundary.
+
+⚠ **It defaults to ALLOWING writes while loading and on a failed read.** A gate that refuses
+while it does not yet know locks out paying customers on a slow connection. The two errors do not
+cost the same: a trial leaking a few writes costs nothing; a paid customer refused at Save loses
+work. **Absence of an answer is not an answer** — G28's rule for display, applied to a decision.
+
+### THE ENTRY POINTS WERE MEASURED, NOT GUESSED
+
+Eleven components write, with no service layer. The first list of save handlers had **six of ten
+names wrong** — `handleSave` where the code said `handleSubmit`, one name where
+`EstimateGenerate` has three write paths and `MrLedger` has five. Probing produced **seventeen
+entry points across ten files**; editing the guessed list would have gated four screens and
+silently missed thirteen paths, **which is worse than not gating at all because it would look
+done**.
+
+The guard sits at the **top of each handler, before any work**, not at the write: a trial ending
+while a form is half-filled must not take the entry and then discard it.
+
+**Agency Settings, AT Settings, Divisions, Allotments and Estimate Master stay writable** —
+verified, not assumed. A trial that refuses to let someone finish configuring the thing they are
+evaluating is worse than no trial.
+
+### 'trial' IS A FIFTH PROVENANCE
+
+Not `granted` with a reason. They differ in duration (72 hours against eighteen months), in
+meaning (a prospect who has bought nothing against a vendor commitment to an existing customer),
+and in a number that will be wanted: **how many trials became payments is answerable with a
+status and unanswerable with a free-text reason.** And `grant_days` on a trial would silently
+convert it to a grant, losing the fact that it started as one.
+
+⚠ **Tested before the expiry branch, as `admin` is** — not for `admin`'s reason (a trial *has* an
+expiry) but so an ended trial keeps saying **TRIAL ENDED** rather than collapsing into the generic
+**EXPIRED**. Those are different facts: a prospect who never paid against a customer whose renewal
+lapsed — and only the second is still allowed to write. Placed after the expiry branch, `canWrite`
+would come from the wrong branch and the gate would let an ended trial through. Thirteen cases
+assert it, including a trial ending at the exact instant of comparison.
+
+### ONE TRIAL PER ACCOUNT, AND A HOLE LEFT OPEN ON PURPOSE
+
+Checked server-side: **ever**, not "one active" — an expired trial still counts, and agencies
+cannot be deleted by a client so the record cannot be cleared. Plus no trial for an account that
+already owns an agency.
+
+Those two checks look redundant and are not: an account with no agency normally has no
+subscription either, **but `deleteIfEmpty` lets the vendor remove an agency and does not remove
+its subscription**, which would otherwise leave the account eligible for a second trial.
+
+⚠ **A fresh Google account defeats all of it, and that is accepted rather than defended.**
+Stopping it needs a card on file or phone verification, both of which defeat the point of a
+trial. The friction of a new account plus re-entering an AT, divisions and rates already exceeds
+what a second 72-hour look is worth. **A defence that does not hold is worse than a stated
+limit** — it invites reliance on something that is not there.
+
+### A COMPOSITE INDEX AVOIDED
+
+The first version queried `where ownerId == uid AND where status == 'trial'` — two equality
+filters, which needs a **composite index**. This project has no `firestore.indexes.json`, and a
+missing index fails at **runtime** with `FAILED_PRECONDITION` and a console URL. **The first
+prospect ever to click Start Trial would have met an error nobody had seen.** One equality filter
+now, with the status checked in code: an account holds a handful of subscriptions, and the check
+depends on no configuration.

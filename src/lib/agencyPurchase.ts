@@ -110,9 +110,25 @@ export async function purchaseAgencies(names: string[]): Promise<PurchaseResult>
  * is a request to be exempted - and it is the shape every admin-mode vulnerability takes.
  */
 export async function createAgenciesAsAdmin(names: string[]): Promise<PurchaseResult> {
+  return callCreateAgency(names, false);
+}
+
+/**
+ * START THE FREE TRIAL (AUDIT G49).
+ *
+ * ⚠ THE `trial: true` FLAG IS A REQUEST, NOT A GRANT. The function decides: it refuses if this
+ * account has ever had a trial, if it already owns an agency, or if more than one name is given.
+ * A browser asking for a free agency is exactly the claim that must not be believed, and the
+ * three checks are server-side for that reason.
+ */
+export async function startFreeTrial(name: string): Promise<PurchaseResult> {
+  return callCreateAgency([name], true);
+}
+
+async function callCreateAgency(names: string[], trial: boolean): Promise<PurchaseResult> {
   const clean = names.map(n => n.trim()).filter(Boolean);
   const call = httpsCallable(functionsClient(), 'createAgency');
-  const res: any = await call({ agencyNames: clean });
+  const res: any = await call({ agencyNames: clean, trial });
   const d = res?.data || {};
   return {
     createdNames: d.createdNames || clean,

@@ -1,5 +1,6 @@
 
 import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
 import { useSearchParams } from 'react-router-dom';
@@ -52,6 +53,16 @@ const ROWS_PER_PAGE = 22;
 
 export default function EstimateGenerate() {
   const { activeAgency, activeAtMaster, atMasters, updateAgency, updateAtMaster, viewingAllTenders } = useAgency();
+  /**
+   * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
+   * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
+   * an intake at twenty transformers, and why the person it would stop was never a customer.
+   *
+   * It defaults to allowing writes while loading and on a failed read: refusing while it does
+   * not yet know would lock out a paying customer on a slow connection, and the two errors do
+   * not cost the same.
+   */
+  const __trial = useTrialGate(activeAgency?.id);
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -493,6 +504,12 @@ export default function EstimateGenerate() {
   };
 
   const handleSaveEstimateDates = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!selectedMrNo || selectedJobsData.length === 0 || !auth.currentUser) return;
     setSavingEstimateDates(true);
     setSavedSuccessMsg('');
@@ -854,6 +871,12 @@ export default function EstimateGenerate() {
      by the send - see recordConsentForJob. The send only refuses when one is missing. */
 
   const handleConfirmSendEstimate = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!sendTargetMr || !sendRefNo.trim() || !sendDate || !auth.currentUser) {
       alert('Please enter both Reference No and Send Date');
       return;
@@ -1008,6 +1031,12 @@ export default function EstimateGenerate() {
 
   // Confirm Approval Received
   const handleConfirmApproval = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!apprTargetMr || !apprNo.trim() || !apprDate || !auth.currentUser) {
       alert('Please enter Approval Number and Approval Date');
       return;

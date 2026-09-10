@@ -33,6 +33,7 @@ import {
   Scale
 } from 'lucide-react';
 import { useAgency, getCircleLimitsEstimateMaster, isIntakeOpen } from '../lib/AgencyContext';
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { guaranteeMonthsFor, hasNoGuarantee } from '../lib/guaranteePeriod';
 import { LetterheadHeader } from './LetterheadHeader';
 import { formatDDMMYYYY } from '../lib/utils';
@@ -205,6 +206,16 @@ export function calculateGpWarranty(
 export default function NewJob() {
   const navigate = useNavigate();
   const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState, setActiveAtMasterId, viewingAllTenders } = useAgency();
+  /**
+   * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
+   * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
+   * an intake at twenty transformers, and why the person it would stop was never a customer.
+   *
+   * It defaults to allowing writes while loading and on a failed read: refusing while it does
+   * not yet know would lock out a paying customer on a slow connection, and the two errors do
+   * not cost the same.
+   */
+  const __trial = useTrialGate(activeAgency?.id);
 
   /**
    * THE GUARANTEE PERIOD FOR A ROW (AUDIT G42).
@@ -1047,6 +1058,12 @@ export default function NewJob() {
   }, [activeAtMaster, activeAgency, commonData.division]);
 
   const handleSubmit = (e: React.FormEvent) => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     /**
      * ⚠ THE INTAKE RULE ASSERTED WHERE THE WRITE IS (AUDIT G3).
      *

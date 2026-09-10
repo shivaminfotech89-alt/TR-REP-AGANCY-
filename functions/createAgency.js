@@ -36,6 +36,15 @@ import { nameKey, validateNames } from './agencyNames.js';
 
 const REGION = 'us-central1';
 
+/**
+ * THE TRIAL: 72 HOURS FROM CREATION (AUDIT G49).
+ *
+ * ⚠ HOURS, NOT CALENDAR DAYS. "3 days" from a signup at 11pm is a different trial from one at
+ * 9am - calendar days would give one prospect 73 hours and another 96. The expiry is a timestamp
+ * computed here on the SERVER's clock, and the screens show that timestamp rather than "3 days".
+ */
+const TRIAL_HOURS = 72;
+
 export function makeCreateAgency(db) {
   return onCall({ region: REGION }, async (request) => {
     // ---- 1. signed in
@@ -51,11 +60,59 @@ export function makeCreateAgency(db) {
     // refused by exactly the same test as one coming through the app.
     const admin = isSuperAdmin(request.auth.token?.email);
 
-    // ---- 3. REFUSE ANYONE ELSE. This creates agencies for free.
-    if (!admin) {
+    // ---- 3. WHO MAY CREATE WITHOUT PAYING: the vendor, or a first-time trial.
+    const wantsTrial = request.data?.trial === true;
+
+    if (!admin && !wantsTrial) {
       throw new HttpsError('permission-denied',
         'Agencies are created by buying them: choose Add Agency, name them, and pay. '
-        + 'This endpoint creates agencies without payment and is the vendor\'s alone.');
+        + 'This endpoint creates agencies without payment.');
+    }
+
+    if (!admin && wantsTrial) {
+      // ⚠ ONE TRIAL PER ACCOUNT, EVER - not one ACTIVE trial. An expired trial still counts,
+      // which is why this queries by status with no date filter. Agencies cannot be deleted by
+      // any client (`allow delete: if false`), so the record cannot be cleared to earn another.
+      //
+      // ⚠ THIS CHECK IS NOT REDUNDANT WITH THE AGENCY CHECK BELOW, though it looks it: an
+      // account with no agency normally has no subscription either, since subscriptions are
+      // per agency and agencies cannot be deleted by a client. The gap is `deleteIfEmpty` -
+      // the vendor CAN remove an agency through it, and it does not remove the subscription.
+      // A deleted trial agency would otherwise leave the account eligible for a second trial.
+      //
+      // ⚠ AND A FRESH GOOGLE ACCOUNT DEFEATS THIS. That is accepted rather than defended:
+      // stopping it needs a card on file or phone verification, both of which defeat the point
+      // of a trial. The friction of a new account plus re-entering an AT, divisions and rates is
+      // already higher than a second 72-hour look is worth. A defence that does not hold is
+      // worse than a stated limit.
+      // ⚠ ONE EQUALITY FILTER, NOT TWO, AND THE STATUS IS CHECKED IN CODE. A query with
+      // `where ownerId == x` AND `where status == 'trial'` needs a COMPOSITE INDEX, this project
+      // has no firestore.indexes.json, and a missing index fails at RUNTIME with
+      // FAILED_PRECONDITION and a console URL - so the first prospect ever to click Start Trial
+      // would meet an error nobody had seen. An account holds a handful of subscriptions; reading
+      // them and filtering here costs nothing and depends on no configuration.
+      const ownSubs = await db.collection('subscriptions').where('ownerId', '==', uid).get();
+      const hadTrial = ownSubs.docs.some(d => (d.data() || {}).status === 'trial');
+      if (hadTrial) {
+        throw new HttpsError('failed-precondition',
+          'This account has already had its free trial. Add an agency by buying one - the price '
+          + 'and what it includes are on the Pricing page.');
+      }
+
+      // ⚠ NO TRIAL FOR AN ACCOUNT THAT ALREADY HOLDS AN AGENCY. Someone who has paid does not
+      // need one, and without this a paying customer could mint a free agency alongside.
+      const existingAgencies = await db.collection('agencies')
+        .where('ownerId', '==', uid).limit(1).get();
+      if (!existingAgencies.empty) {
+        throw new HttpsError('failed-precondition',
+          'A free trial is for a first agency. This account already has one, so add the next by '
+          + 'buying it.');
+      }
+
+      // ⚠ ONE AGENCY ON A TRIAL, NOT UP TO TEN. The batch cap belongs to a purchase.
+      if ((request.data?.agencyNames || []).length > 1) {
+        throw new HttpsError('invalid-argument', 'A trial covers one agency.');
+      }
     }
 
     // ---- 4. the names
@@ -98,21 +155,34 @@ export function makeCreateAgency(db) {
         const document = buildNewAgencyDocument({ name: nm }, uid);
         tx.create(ref, { ...document, createdAt: FieldValue.serverTimestamp() });
         createdDocs.push({ id: ref.id, document });
+        // ⚠ 'trial' IS A FIFTH PROVENANCE, NOT `granted` WITH A REASON. A trial and a founding
+        // grant differ in duration (72 hours against eighteen months), in meaning (a prospect who
+        // has bought nothing against a vendor commitment to an existing customer), and in a
+        // number that will be wanted: how many trials became payments is answerable with a status
+        // and unanswerable with a free-text reason. G28's rule - provenances stay distinct.
+        const isTrial = !admin;
         tx.set(db.collection('subscriptions').doc(ref.id), {
           agencyId: ref.id,
           agencyName: nm,
           ownerId: uid,
           ownerEmail: email,
-          status: 'admin',
+          status: isTrial ? 'trial' : 'admin',
           planAmount: 0,
           currency: 'INR',
           startDate: now,
           // ⚠ NULL, NOT A DATE. Nothing was bought, so there is no year to run out. Writing
           // `now + 365 days` would invent an expiry no payment supports, and it would render
           // as an ordinary subscription quietly counting down. Absence is the fact.
-          expiryDate: null,
-          createdByAdmin: true,
-          grantReason: 'Created by the vendor. No payment, and no expiry.',
+          // ⚠ NULL FOR ADMIN, A REAL TIMESTAMP FOR A TRIAL. An admin agency bought nothing so
+          // there is no term to run out; a trial bought nothing either but is deliberately
+          // time-boxed. Computed from the SERVER's clock, so the endpoint is trustworthy even
+          // though the browser comparing against it may not be - see lib/serverClock.ts.
+          expiryDate: isTrial ? now + TRIAL_HOURS * 60 * 60 * 1000 : null,
+          trialHours: isTrial ? TRIAL_HOURS : null,
+          createdByAdmin: !isTrial,
+          grantReason: isTrial
+            ? `Free trial, ${TRIAL_HOURS} hours from creation.`
+            : 'Created by the vendor. No payment, and no expiry.',
         });
         createdIds.push(ref.id);
       }
@@ -135,7 +205,8 @@ export function makeCreateAgency(db) {
       createdAgencyIds: createdIds,
       createdNames: names,
       createdAgencies: createdDocs,
-      admin: true,
+      admin,
+      trial: !admin,
     };
   });
 }

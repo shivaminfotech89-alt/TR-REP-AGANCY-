@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { guaranteeMonthsFor, normaliseCoreLabel } from '../lib/guaranteePeriod';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
@@ -56,6 +57,16 @@ export function numberToIndianWords(num: number): string {
 
 export default function BillingSystem() {
   const { activeAgency, activeAtMaster, atMasters, updateAgency, viewingAllTenders } = useAgency();
+  /**
+   * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
+   * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
+   * an intake at twenty transformers, and why the person it would stop was never a customer.
+   *
+   * It defaults to allowing writes while loading and on a failed read: refusing while it does
+   * not yet know would lock out a paying customer on a slow connection, and the two errors do
+   * not cost the same.
+   */
+  const __trial = useTrialGate(activeAgency?.id);
   const [searchParams, setSearchParams] = useSearchParams();
   const params = useParams<{ mrNo?: string }>();
   const navigate = useNavigate();
@@ -1544,6 +1555,12 @@ export default function BillingSystem() {
 
   // Confirm Send Bill
   const handleConfirmSendBill = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!sendTargetMr || !sendBillNo.trim() || !sendBillRefNo.trim() || !sendBillDate || !auth.currentUser) {
       alert('Please fill Bill No, Dispatch Reference No and Sent Date');
       return;
@@ -1686,6 +1703,12 @@ export default function BillingSystem() {
 
   // Confirm Mark as Paid
   const handleConfirmPaid = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!paidTargetMr || !paymentRefNo.trim() || !paymentDate || !auth.currentUser) {
       alert('Please fill Payment Reference / UTR No and Payment Date');
       return;

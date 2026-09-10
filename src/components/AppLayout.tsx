@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Routes, Route, Link, useLocation, Navigate } from 'react-router-dom';
 import { useAgency, isIntakeOpen, ALL_TENDERS } from '../lib/AgencyContext';
+import { TrialBanner } from './TrialBanner';
 import { useTheme } from '../lib/ThemeContext';
 import { auth } from '../lib/firebase';
 import { User, signOut } from 'firebase/auth';
@@ -581,6 +582,11 @@ export default function AppLayout({ user }: { user: User }) {
                 </div>
              </div>
           )}
+          {/* ⚠ ABOVE THE CONTENT, ON EVERY SCREEN, AND ONLY FOR A TRIAL (AUDIT G49). It
+              renders nothing for a paying customer - a banner everyone sees is noise, and noise
+              is how the one that matters gets skipped. */}
+          <TrialBanner />
+
           <Routes>
             <Route path="/" element={<Dashboard />} />
             <Route path="/mr-ledger" element={<MrLedger />} />

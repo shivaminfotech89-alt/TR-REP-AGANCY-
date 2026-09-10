@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { inspectionFor } from '../lib/inspectionLink.js';
 import { useAgency, isUnassigned, isIntakeOpen } from "../lib/AgencyContext";
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { db, auth, handleFirestoreError, OperationType } from "../lib/firebase";
 import * as XLSX from "xlsx";
 import {
@@ -82,6 +83,8 @@ const defaultGrossFor = (barrels: number) => barrels * FRESH_LITRES_PER_BARREL;
 
 export default function OilInward() {
   const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
+  /** ⚠ A SOFT GATE, NOT A BOUNDARY - see lib/trialGate.ts. */
+  const __trial = useTrialGate(activeAgency?.id);
 
   /**
    * NEW OIL ENTRIES OBEY THE TENDER GATE (AUDIT F83). Oil already recorded under this
@@ -315,6 +318,11 @@ export default function OilInward() {
   };
 
   const handleSave = async (e: React.FormEvent) => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     // ⚠ THE GATE IS IN THE HANDLER, not only on the button. Hiding a control is what the
     // operator sees; this is what happens. An edit is always allowed - correcting oil
     // already recorded under this tender is work on an existing record (AUDIT F83).

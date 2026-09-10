@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, atClause, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { CARD, LABEL, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
@@ -179,6 +180,16 @@ function LockedMrHeaderField({ label, mix, reason }: {
 
 export default function MrLedger() {
   const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders } = useAgency();
+  /**
+   * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
+   * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
+   * an intake at twenty transformers, and why the person it would stop was never a customer.
+   *
+   * It defaults to allowing writes while loading and on a failed read: refusing while it does
+   * not yet know would lock out a paying customer on a slow connection, and the two errors do
+   * not cost the same.
+   */
+  const __trial = useTrialGate(activeAgency?.id);
   const [loading, setLoading] = useState(true);
   /**
    * WORK THAT BELONGS TO NO TENDER (AUDIT F82).
@@ -483,6 +494,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
   // Add new transformer row to editing MR
   const handleAddTransformerToMr = () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!editingMr) return;
 
     /**
@@ -572,6 +589,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
   // Remove transformer from editing MR
   const handleRemoveTransformerFromMr = (index: number) => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!editingMr) return;
     const targetJob = editingMr.jobs[index];
     
@@ -603,6 +626,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
   // Save Full MR Updates to Firestore
   const handleSaveFullMr = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!editingMr || !auth.currentUser || !activeAgency) return;
 
     /**
@@ -890,6 +919,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
   // Cancel entire MR (releases job numbers for reuse and blocks downstream processing)
   const handleCancelEntireMr = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!cancelConfirmMr || !auth.currentUser || !activeAgency) return;
     
     setIsCancellingMr(true);
@@ -930,6 +965,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
   // Reactivate a Cancelled MR
   const handleReactivateMr = async (group: MrGroup) => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (!auth.currentUser || !activeAgency) return;
     setIsReactivatingMr(true);
     try {

@@ -4,6 +4,7 @@ import { useAgency } from '../lib/AgencyContext';
 import { formatPrice } from '../lib/pricing';
 import {
   MAX_AGENCIES, priceFor, localNameProblems, purchaseAgencies, createAgenciesAsAdmin,
+  startFreeTrial,
 } from '../lib/agencyPurchase';
 import {
   CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined,
@@ -42,6 +43,7 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
   const { agencies, registerCreatedAgencies } = useAgency();
 
   const [mode, setMode] = useState<'ask' | 'names'>('ask');
+  const [isTrial, setIsTrial] = useState(false);
   const [names, setNames] = useState<string[]>(['']);
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<
@@ -62,8 +64,9 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
   const removeRow = (i: number) =>
     setNames(prev => (prev.length <= 1 ? prev : prev.filter((_, k) => k !== i)));
 
-  const start = (multiple: boolean) => {
+  const start = (multiple: boolean, trial = false) => {
     setNames(multiple ? ['', ''] : ['']);
+    setIsTrial(trial);
     setMode('names');
     setNote(null);
   };
@@ -105,7 +108,10 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
     setBusy(true);
     setNote(null);
     try {
-      if (isAdmin) {
+      if (isTrial) {
+        const r = await startFreeTrial(filled[0]);
+        finish(r.createdNames, r.createdAgencies, false, false);
+      } else if (isAdmin) {
         const r = await createAgenciesAsAdmin(filled);
         finish(r.createdNames, r.createdAgencies, false, false);
       } else {
@@ -180,6 +186,19 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
           &mdash; the estimate sheets, tax invoices and inspection reports this prints.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* ⚠ THE TRIAL IS OFFERED FIRST AND ONLY TO A NON-ADMIN. A vendor creating agencies
+              for themselves does not want a 72-hour clock on one, and the server would refuse
+              anyway once they own an agency. */}
+          {!isAdmin && (
+            <button type="button" onClick={() => start(false, true)}
+              className="text-left border-2 border-indigo-400 bg-indigo-50 rounded-lg p-3 hover:border-indigo-600 sm:col-span-2">
+              <span className="block text-sm font-bold text-indigo-900">Try it free for 72 hours</span>
+              <span className="block text-[11px] text-indigo-800 mt-0.5">
+                One agency, everything working, no card. After 72 hours your work stays readable
+                and printable &mdash; recording new work needs a subscription. One trial per account.
+              </span>
+            </button>
+          )}
           <button type="button" onClick={() => start(false)}
             className="text-left border border-slate-300 rounded-lg p-3 hover:border-blue-500 hover:bg-blue-50">
             <span className="block text-sm font-bold text-slate-900">One agency</span>
@@ -239,7 +258,11 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
 
           <div className="flex items-center justify-between gap-3 flex-wrap border-t border-slate-100 pt-3">
             <div className="text-sm">
-              {isAdmin ? (
+              {isTrial ? (
+                <span className="font-bold text-indigo-800">
+                  Free for 72 hours &mdash; no card, no charge
+                </span>
+              ) : isAdmin ? (
                 <span className="font-bold text-violet-800">
                   {filled.length} to create &mdash; no payment (vendor account)
                 </span>
@@ -253,7 +276,7 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
               )}
             </div>
             <div className="flex gap-2">
-              <button type="button" onClick={() => { setMode('ask'); setNames(['']); }}
+              <button type="button" onClick={() => { setMode('ask'); setNames(['']); setIsTrial(false); }}
                 className="text-xs font-bold text-slate-600 px-3 py-2">Back</button>
               <button
                 type="button"
@@ -262,7 +285,10 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
                 className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-300 text-white font-bold text-xs px-4 py-2.5 rounded-lg"
               >
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <CreditCard className="w-4 h-4" />}
-                {busy ? 'Working…' : isAdmin ? 'Create' : `Pay ${formatPrice(priceFor(filled.length))}`}
+                {busy ? 'Working…'
+                  : isTrial ? 'Start the free trial'
+                  : isAdmin ? 'Create'
+                  : `Pay ${formatPrice(priceFor(filled.length))}`}
               </button>
             </div>
           </div>

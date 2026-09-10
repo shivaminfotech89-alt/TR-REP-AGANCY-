@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAgency, atClause } from '../lib/AgencyContext';
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
 import { 
@@ -36,6 +37,16 @@ import { triggerUniversalPrint } from '../lib/printUtils';
 
 export default function DispatchChallan() {
   const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
+  /**
+   * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
+   * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
+   * an intake at twenty transformers, and why the person it would stop was never a customer.
+   *
+   * It defaults to allowing writes while loading and on a failed read: refusing while it does
+   * not yet know would lock out a paying customer on a slow connection, and the two errors do
+   * not cost the same.
+   */
+  const __trial = useTrialGate(activeAgency?.id);
   const [allJobs, setAllJobs] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
@@ -394,6 +405,12 @@ export default function DispatchChallan() {
   }, [selectedJobs]);
 
   const handleDispatch = async () => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     if (selectedJobIds.size === 0) return;
     if (!challanNo.trim() || !vehicleNo.trim()) {
         alert("Please enter Challan No and Vehicle No.");

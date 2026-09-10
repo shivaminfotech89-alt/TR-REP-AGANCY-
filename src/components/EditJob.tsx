@@ -4,11 +4,22 @@ import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from '../lib/firebase';
 import { ArrowLeft, Loader2, Scale } from 'lucide-react';
 import { getCircleLimitsEstimateMaster, useAgency } from '../lib/AgencyContext';
+import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { auth } from '../lib/firebase';
 
 export default function EditJob() {
   const { activeAgency } = useAgency();
+  /**
+   * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
+   * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
+   * an intake at twenty transformers, and why the person it would stop was never a customer.
+   *
+   * It defaults to allowing writes while loading and on a failed read: refusing while it does
+   * not yet know would lock out a paying customer on a slow connection, and the two errors do
+   * not cost the same.
+   */
+  const __trial = useTrialGate(activeAgency?.id);
   const { jobId } = useParams();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
@@ -63,6 +74,12 @@ export default function EditJob() {
   const circleLimitInfo = getCircleLimitForJob(formData.capacityKva, formData.starRating, circleMaster);
 
   const handleSubmit = async (e: React.FormEvent) => {
+    // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
+    // is half-filled must not take the entry and then discard it.
+    if (!__trial.canWrite) {
+      alert(trialRefusal(__trial.expiryDate));
+      return;
+    }
     e.preventDefault();
     if (!jobId || isDispatched) {
       alert('Delivered/Dispatched jobs cannot be edited.');

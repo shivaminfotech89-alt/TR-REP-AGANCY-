@@ -61,7 +61,8 @@ export type SubscriptionRecord = {
   razorpayPaymentId?: string;
 };
 
-export type SubscriptionKey = 'none' | 'admin' | 'expired' | 'granted' | 'active';
+export type SubscriptionKey =
+  'none' | 'admin' | 'trial' | 'trial_ended' | 'expired' | 'granted' | 'active';
 
 export type SubscriptionClass = {
   key: SubscriptionKey;
@@ -84,6 +85,16 @@ export type SubscriptionClass = {
   verified: boolean;
   /** Ended deliberately rather than lapsing. Only meaningful when `key === 'expired'`. */
   cancelled: boolean;
+  /**
+   * ⚠ WHETHER NEW WORK MAY BE RECORDED. The one question every gated screen asks, answered here
+   * so eleven components cannot each decide it differently - which is how G42's three guarantee
+   * periods came to disagree.
+   *
+   * False only for a trial that has ended. A lapsed PAID subscription is deliberately left
+   * writable: the customer has paid before, the relationship is different, and locking them out
+   * over a missed renewal is a different product decision that has not been made.
+   */
+  canWrite: boolean;
 };
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -105,6 +116,8 @@ export function classifySubscription(
       wasPaid: false,
       verified: false,
       cancelled: false,
+      // No subscription, and an admin agency: both may write. Only an ENDED TRIAL may not.
+      canWrite: true,
     };
   }
 
@@ -119,7 +132,46 @@ export function classifySubscription(
       wasPaid: false,
       verified: false,
       cancelled: false,
+      // No subscription, and an admin agency: both may write. Only an ENDED TRIAL may not.
+      canWrite: true,
     };
+  }
+
+  /**
+   * ⚠ TRIAL IS TESTED BEFORE THE EXPIRY BRANCH, EXACTLY AS `admin` IS (AUDIT G49).
+   *
+   * Not for `admin`'s reason - a trial HAS an expiry - but so that an ended trial keeps saying
+   * TRIAL ENDED rather than collapsing into the generic EXPIRED. Those are different facts: one
+   * is a prospect who never paid, the other a customer whose renewal lapsed, and the second is
+   * still allowed to write while the first is not.
+   *
+   * If this sat after the expiry branch, an ended trial would render EXPIRED, `canWrite` would
+   * come from the wrong branch, and the gate would let it through. The ordering is the guard, and
+   * nothing about the code makes that visible - which is why it is asserted in a test.
+   */
+  if (sub.status === 'trial') {
+    const ended = hasEnded(sub.expiryDate, now);
+    return ended
+      ? {
+          key: 'trial_ended',
+          word: 'TRIAL ENDED',
+          tone: 'bg-amber-100 text-amber-900 border-amber-400',
+          hasExpiry: true,
+          wasPaid: false,
+          verified: false,
+          cancelled: false,
+          canWrite: false,
+        }
+      : {
+          key: 'trial',
+          word: 'TRIAL',
+          tone: 'bg-indigo-100 text-indigo-800 border-indigo-300',
+          hasExpiry: true,
+          wasPaid: false,
+          verified: false,
+          cancelled: false,
+          canWrite: true,
+        };
   }
 
   const expiry = Number(sub.expiryDate || 0);
@@ -147,6 +199,9 @@ export function classifySubscription(
       wasPaid: paidSomehow,
       verified,
       cancelled,
+      // ⚠ A LAPSED PAID SUBSCRIPTION STAYS WRITABLE. Deliberate: they have paid before, and
+      // locking them out over a missed renewal is a product decision nobody has made.
+      canWrite: true,
     };
   }
 
@@ -159,6 +214,7 @@ export function classifySubscription(
       wasPaid: false,
       verified: false,
       cancelled: false,
+      canWrite: true,
     };
   }
 
@@ -173,7 +229,24 @@ export function classifySubscription(
     wasPaid: true,
     verified,
     cancelled: false,
+    canWrite: true,
   };
+}
+
+/**
+ * Has an expiry passed? Shared by the trial branch and the expiry branch so the two cannot
+ * disagree about the boundary - `<=`, for the reason recorded at the expiry branch.
+ */
+function hasEnded(expiryDate: number | null | undefined, now: number): boolean {
+  const e = Number(expiryDate || 0);
+  return !!e && e <= now;
+}
+
+/** Hours left, rounded down. Null when there is no expiry. Never negative. */
+export function hoursRemaining(sub: SubscriptionRecord | null | undefined, now: number): number | null {
+  const e = Number(sub?.expiryDate || 0);
+  if (!e) return null;
+  return Math.max(0, Math.floor((e - now) / (60 * 60 * 1000)));
 }
 
 /** Whole days from now until expiry. Null when there is no expiry to count to. */
