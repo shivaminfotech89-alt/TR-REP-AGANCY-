@@ -15,6 +15,32 @@ import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExt
 import { getJobFullEstimate, checkJobCircleLimit, coreTypeHasCircleLimit } from '../lib/estimateCalc';
 import { atForJob, matchesAtScope } from '../lib/AgencyContext';
 import { OtherTenderNote } from './OtherTenderNote';
+import { classifyCoreType } from './SingleJobEstimateReport';
+
+/**
+ * HV COILS PER LIMB, BY CONSTRUCTION.
+ *
+ * Amorphous and CRGO Wound Core have ONE LIMB PER PHASE and no separate LV winding, so a
+ * phase has exactly one HV coil - the maximum damaged count on any phase is 1, and across
+ * the transformer 3. A stacked CRGO core carries four coils per limb, which is where the
+ * long-standing default of '4' comes from.
+ *
+ * ⚠ THIS IS A DEFAULT, NOT A MIGRATION. It applies to a fresh form and to a record with no
+ * stored value; a record that already holds one keeps it. Eleven live Amorphous / Wound Core
+ * jobs carry a stored '4', and ten of them record more than one damaged coil on some phase
+ * (ASU-1, ASU-3 and SBT-31 read 4/4/4). Forcing the cap onto those records does not change
+ * any figure - `hvCoilLimb` is not in the money chain, which is `totCoil` x `wtOfCoil` - but
+ * the save-time range check below reads it, and the check aborts the WHOLE MR rather than
+ * one job. The eleven would stop saving, and so would anything sharing their MR.
+ *
+ * ⚠ AND THE COUNTS CANNOT BE CORRECTED IN ISOLATION. `wtOfCoil` on those records is a
+ * per-SECTION weight that operators multiplied back up by four, so capping the count at 3
+ * without redefining the weight would cut the charged kilograms fourfold on exactly the jobs
+ * where the kilograms are currently right. Count and weight move together or not at all -
+ * and that decision waits on the 2026 tender's amorphous section (AUDIT G53).
+ */
+const hvCoilsPerLimb = (coreType?: string): string =>
+  ['AMORPHOUS', 'WOUND_CORE'].includes(classifyCoreType(coreType || 'CRGO')) ? '1' : '4';
 
 export interface InternalData {
   windingType: string;
@@ -190,7 +216,7 @@ export default function InternalInspection() {
         initialForms[j.id] = {
           windingType: existingInsp.data.windingType || 'AL',
           condition: existingInsp.data.condition || 'Repairable',
-          hvCoilLimb: existingInsp.data.hvCoilLimb || '4',
+          hvCoilLimb: existingInsp.data.hvCoilLimb || hvCoilsPerLimb(j.coreType),
           damR,
           damY,
           damB,
@@ -221,7 +247,7 @@ export default function InternalInspection() {
         initialForms[j.id] = {
           windingType: 'AL',
           condition: 'Repairable',
-          hvCoilLimb: '4',
+          hvCoilLimb: hvCoilsPerLimb(j.coreType),
           damR: '',
           damY: '',
           damB: '',
@@ -350,7 +376,7 @@ export default function InternalInspection() {
         job.externalInspectionDate || extInspDate,
         internalInspectionDate,
         data.windingType || 'AL',
-        data.hvCoilLimb || '4',
+        data.hvCoilLimb || hvCoilsPerLimb(job.coreType),
         data.damR || '0',
         data.damY || '0',
         data.damB || '0',
@@ -1048,7 +1074,7 @@ export default function InternalInspection() {
                                 {transCore}
                               </td>
                               <td className="border border-black p-0.5 font-bold">{data.windingType || 'AL'}</td>
-                              <td className="border border-black p-0.5">{data.hvCoilLimb || '4'}</td>
+                              <td className="border border-black p-0.5">{data.hvCoilLimb || hvCoilsPerLimb(job.coreType)}</td>
                               
                               {/* HV Coil Group Columns */}
                               <td className="border-b border-black border-l-2 border-r border-black p-0.5 font-mono">{data.damR || '0'}</td>

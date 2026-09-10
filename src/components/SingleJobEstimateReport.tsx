@@ -459,7 +459,7 @@ export function buildSingleJobEstimateData(
   // only (no charge).
   //
   // ⚠ THESE CORE TYPES DO HAVE AN INTERNAL INSPECTION. This comment used to assert they do
-  // not, which is what made the branch look independent of inspection data. All 16 Amorphous
+  // not, which is what made the branch look independent of inspection data. All 17 Amorphous
   // and Wound Core jobs in the database carry one, and this branch DEPENDS on it twice over:
   // the winding material selects the Schedule-B row, and the damaged phase count is the
   // quantity on the per-coil rows.

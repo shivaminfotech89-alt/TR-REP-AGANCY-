@@ -12508,3 +12508,93 @@ selection is still always allowed. Modelled across both moments rather than reas
 and nothing calls it. It was given the parameter anyway rather than left alone: an unreachable
 function with a latent stale read is a trap for whoever wires it back up, and "nothing calls it"
 is a fact with a shelf life.
+
+
+## G53. A field that was a cap, not a figure - and the difference decided the change
+
+Amorphous and CRGO Wound Core transformers have **one limb per phase and no separate LV
+winding**: HV is at most three coils, LV is zero. That is a physical fact about the machine,
+supplied by the operator, and the app did not know it.
+
+`hvCoilLimb` - HV coils per limb - **defaulted to `'4'` for every job regardless of core type**,
+which is the stacked-CRGO figure. Six of the seventeen live single-winding jobs carry a hand-typed
+`1`: the default had been fighting the operator, and the operator had been winning six times out
+of seventeen.
+
+The default is now `1` for those two core types, at all four sites that produce it - the load
+fallback, the fresh form, the Excel export and the printed sheet.
+
+### WHAT THE FIELD ACTUALLY DOES, WHICH IS NOT WHAT ITS NAME SUGGESTS
+
+`hvCoilLimb` reaches money **nowhere**. The chain is `totWt = totCoil x wtOfCoil` with
+`totCoil = damR + damY + damB`; the limb count is not in it. What the field does is three other
+things:
+
+1. cap entry per phase (`renderIntegerField`'s `max`) - and it **rejects rather than clamps**, so
+   a cap change never silently rewrites a stored number;
+2. feed a **save-time range check**;
+3. print on the inspection sheet.
+
+So "force it to 1" moves no figure on any live job. **Rs 0.** That was worth establishing rather
+than assuming, because the obvious worry - that a count and a weight were compensating for each
+other - is real elsewhere in this same area and simply does not apply to this field.
+
+### THE COST WAS NOT A FIGURE. IT WAS A LOCK.
+
+The save-time range check reads the **stored** limb and refuses `damR/Y/B` above it. Had the
+forced `1` been applied to existing records, **ten of the eleven stored-`4` jobs would have
+stopped saving** - ASU-1, ASU-3 and SBT-31 read 4/4/4 - and the check aborts **the whole MR, not
+the offending job**, so a CRGO job merely sharing an MR would have been locked out with them.
+
+Nothing would have been corrupted and nothing would have been mispriced. The records would simply
+have become unopenable, which is a worse outcome than the wrong number they currently hold,
+because the wrong number is at least visible and fixable.
+
+**So the change is a default, not a migration.** A record holding a value keeps it. The ten stale
+counts stay wrong, on purpose, and stay listed here:
+
+    AMKLL-9 2/2/2   AMSBT-2 2/2/2   AMSBT-3 1/2/2   ASU-1 4/4/4   ASU-2 2/4/4
+    ASU-3   4/4/4   MWSBT-1 0/0/4   MWSBT-2 1/2/2   SBT-31 4/4/4  WSU-1 0/0/2
+
+    (AMSBT-1, at 1/1/1, is the one stored-4 record already consistent with a limb of 1.)
+
+### WHY THE COUNTS CANNOT BE CORRECTED YET
+
+The tempting follow-on - cap the count at 3 and be done - **would underbill by exactly the factor
+the bug overbills by.** On the stored-`4` records, `wtOfCoil` is a per-SECTION weight that the
+operator divided the winding into and the calculation multiplied back up: ASU-3 reads 4/4/4 at
+2.36 kg for 28.32 kg total, which is about right for a 200 kVA winding. ASU-4, at limb `1`, reads
+12.5 kg - a whole-limb weight. **The same field holds two different meanings across the
+population.** Capping the count without redefining the weight would cut the charged kilograms
+fourfold on precisely the jobs where the kilograms are currently correct.
+
+Count and weight move together or not at all. That is held pending the 2026 tender's amorphous
+section, because the schedule and the physical fact disagree and the schedule has not been read:
+
+- Schedule-A's heading covers both constructions in one table - "CRGO (STACK/Wound/DRY/PAT/SDT) /
+  **Amorphous Core** DIST. TRANSFORMERS" - and item 13 (LT coil) carries no qualification.
+- The amorphous clause text, verbatim, includes "Re-insulation/replacement of **all the LV
+  windings**".
+- And an explicit note: "In case of damage of **LT coil** if any, the damaged coil should be
+  replaced at the same cost i.e. without any extra charge."
+
+**All three are 2020 text.** The 2026 block reuses `AMORPHOUS_ESTIMATE_TEXT` from 2020 and it
+prints only on the fixed-rate path, so it has never appeared on a 2026 estimate. **2026's own
+amorphous wording has not been seen, and 2020's is not evidence about it.**
+
+Under 2026 there is no Schedule-B, so these core types take the **itemised** path, where item 13A
+fires from `totWtLv > 0` with **no core-type condition at all**. No live job has been charged it -
+all seventeen sit on `UGVCL-2020`, which is fixed-rate - so the exposure is **latent and armed**,
+not realised. Fifteen of the seventeen already carry an LV per-coil weight, and nine have an LV
+coil marked damaged, on a winding that does not exist.
+
+### AND THE COMMENT SAID SIXTEEN
+
+`SingleJobEstimateReport:462` asserted "All 16 Amorphous and Wound Core jobs in the database carry
+[an internal inspection]" - a census that was true when written and is 17 now. It is corrected.
+
+**A count in a comment is a measurement with no expiry date printed on it.** That line exists
+specifically to stop a reader believing the branch is independent of inspection data, so it is a
+comment that reasoning gets hung on - and the number in it drifts silently while the sentence
+around it stays true. This session has now found the same shape three times: a stale census, a
+negative control that proved nothing, and a diagnosis filed as a fix.
