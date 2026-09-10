@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { stateCodeFromGstin, gstinScopeError } from '../lib/utils';
+import { auth } from '../lib/firebase';
 import { useAgency } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { AgencyMarkTile } from './AgencyMarkTile';
@@ -81,6 +82,19 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [pan, setPan] = useState(agency.pan || '');
   const [phone, setPhone] = useState(agency.phone || '');
   const [email, setEmail] = useState(agency.email || '');
+
+  /**
+   * IS THE PERSON LOOKING AT THIS THE OWNER, OR A DELEGATED USER? (AUDIT G37)
+   *
+   * ⚠ THE TWO SEE THE SAME SCREEN AND FACE DIFFERENT CONSEQUENCES ON ONE FIELD. The rules
+   * keep `ownerId` immutable, so an owner who mangles the access email can always set it again.
+   * A delegated user editing the same field revokes their OWN access on save and cannot undo
+   * it: the next write is checked against the new value, which is no longer theirs.
+   *
+   * Used only to decide whether to warn. It is not a permission - what may actually be written
+   * is decided by firestore.rules, and this screen does not gate on it.
+   */
+  const isOwner = !!auth.currentUser && agency.ownerId === auth.currentUser.uid;
   const [msmeNo, setMsmeNo] = useState(agency.msmeNo || '');
   const [gpValidationMonths, setGpValidationMonths] = useState(agency.gpValidationMonths ?? 18);
 
@@ -325,7 +339,9 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       checkChange('Agency State Code', agency.agencyStateCode, agencyStateCode);
       checkChange('Agency Address', agency.address, address);
       checkChange('Phone Number', agency.phone, phone);
-      checkChange('Email Address', agency.email, email);
+      // ⚠ THE SUMMARY MUST NOT SAY "Email Address" EITHER. This line is what the save
+      // confirmation lists, and it is the last chance to notice that access is being moved.
+      checkChange('Access email (who can use this agency)', agency.email, email);
       checkChange('MSME / Udyam No', agency.msmeNo, msmeNo);
       checkChange('GP Validation (Months)', agency.gpValidationMonths ?? 18, gpValidationMonths);
 
@@ -708,17 +724,48 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 />
               </div>
 
+              {/* ⚠ THIS FIELD IS AN ACCESS GRANT, NOT A CONTACT DETAIL (AUDIT G37).
+                  firestore.rules:394 and :400 let any signed-in account whose login email
+                  equals this value READ AND WRITE this agency - its rates, its estimates, its
+                  bills. Six live agencies are delegated to their customers this way, and that
+                  is the intended mechanism.
+
+                  It was labelled "Email Address", placeholder "info@agency.com", which reads as
+                  a contact detail and nothing else. A customer tidying their details could
+                  clear it and lock themselves out, or retype it as their accountant's address
+                  and hand over their tender rates - with no warning at either step.
+
+                  Only what the field SAYS ABOUT ITSELF has changed. The value, the state and
+                  the write are untouched. */}
               <div>
                 <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
-                  Email Address
+                  Access email
                 </label>
+                <p className="text-[11px] text-slate-500 mb-1">
+                  The login that can use this agency, besides the owner.
+                </p>
                 <input
                   type="email"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   className="w-full px-3 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                  placeholder="e.g. info@agency.com"
+                  placeholder="the account that signs in to use this agency"
                 />
+                <p className="mt-1 text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-300 rounded px-2 py-1.5">
+                  Not a contact address. Whoever signs in with this email can view and change
+                  this agency&rsquo;s rates, estimates and bills.{' '}
+                  <strong>Clearing it removes their access; changing it hands the agency to
+                  someone else.</strong>
+                </p>
+                {/* ⚠ SHOWN ONLY TO A DELEGATED USER, because for them the mistake cannot be
+                    undone from this screen - the owner keeps access through the immutable
+                    ownerId, and they do not. */}
+                {!isOwner && (
+                  <p className="mt-1 text-[11px] font-bold text-red-900 bg-red-50 border border-red-300 rounded px-2 py-1.5">
+                    You are using this agency through this email. Changing or clearing it will
+                    lock you out immediately, and only the owner can restore it.
+                  </p>
+                )}
               </div>
 
               <div>

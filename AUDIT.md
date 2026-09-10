@@ -11134,3 +11134,101 @@ alone leaves detection intact. Writing `buildCommand` and `outputDirectory` by h
 something that works and self-updates with something that can silently disagree with
 `vite.config` — a second source of truth for no gain, which is the pattern this audit keeps
 recording the cost of.
+
+
+## G37. How agencies are delegated — an access grant labelled "Email Address"
+
+**`agency.email` is a capability, not a contact detail.** `firestore.rules:394` and `:400`:
+
+    allow get, list: … || (('email' in resource.data) && resource.data.email == request.auth.token.email) || …
+    allow update:    … || (('email' in existing())     && existing().email     == request.auth.token.email) || …
+
+Any signed-in account whose login email equals that value can **read and write the agency** —
+its rates, its estimates, its bills. This is how agencies are handed to customers, it is
+deliberate, and **six of twelve live agencies depend on it**:
+
+    DYNAMIC TRAMSFORMER          dynamictransformer@gmail.com
+    IDEAL ENGINEERING COMPANY    idealengineering2022@gmail.com
+    PATEL ELECTRICALS            patelelectricals83@gmail.com
+    ZENITH TRANSFORMERS          zenithtransformers@gmail.com
+    UPENDRA                      UTPAREKH@GMAIL.COM
+    GUJARAT ENERGY TRANSMISSION  getahm2016@gmail.com
+
+None is the owner's login. `sharedWithEmails` is a second grant of the same kind, used by
+nothing.
+
+**IT IS NOT G1 RELAXED, AND THE DISTINCTION IS THE POINT.** G1 removed `isSuperAdmin()` from
+every agency write because *a vendor who can edit a customer's rates, estimates or bills is a
+liability rather than a capability: if the figures are wrong, the customer cannot say it was not
+us.* This mechanism has the opposite structure. **The owner grants access deliberately, to a
+named address, on their own document.** The vendor takes nothing and cannot add themselves —
+`isSuperAdmin()` is absent from the update rule entirely. One is a party helping themselves;
+the other is a party being invited. Both were about who may write an agency, and only one of
+them is a hole.
+
+What it shares with G1 is the reason it needed writing down: **it is a permission that lives in
+a field, and a field looks like data.**
+
+---
+
+### WHAT IT WAS LABELLED
+
+`Email Address`, placeholder `e.g. info@agency.com`, sitting between the phone number and the
+MSME registration number. Nothing on the screen said it granted anything.
+
+So a customer tidying their details could **clear it and lock themselves out**, or **retype it
+as their accountant's address and hand over their tender rates** — two irreversible outcomes
+from a field that presented itself as a contact detail. The change summary on save said
+`Email Address` too, so the last chance to notice said nothing either.
+
+It now reads **Access email — "the login that can use this agency, besides the owner"**, with
+the consequences stated: *clearing it removes their access; changing it hands the agency to
+someone else.* The value, the state and the write are untouched. Only what the field claims
+about itself has changed.
+
+---
+
+### WHO CAN CHANGE IT — and the asymmetry nobody had noticed
+
+The update rule tests permission against **`existing()`**, and constrains exactly one field:
+`incoming().ownerId == existing().ownerId`. **`email` and `sharedWithEmails` are not
+constrained at all.** So:
+
+| party | can edit the access email? | what happens |
+|---|---|---|
+| **owner** | yes | may revoke or re-grant freely. **Always safe** — access comes from `ownerId`, which is immutable, so they cannot lock themselves out. |
+| **delegated user** | **yes** | they hold write access, so they may rewrite the field that grants it. |
+| vendor | **no** | `isSuperAdmin()` is absent from `allow update`. G1 holds. |
+
+**The delegated user is the dangerous case, and it is self-inflicted and irreversible.** The
+next write is checked against the *new* value. So a delegated user who edits that field — to
+correct a typo, to "update the contact address", to anything — **revokes their own access on
+save**, and cannot undo it, because undoing it is another write. Only the owner can restore it.
+They can also grant a third party by putting a stranger's address there, or by appending to
+`sharedWithEmails`, which nothing constrains.
+
+The owner cannot be locked out by any of this. That asymmetry is correct and is the one thing
+the rules already get right here.
+
+**A red warning is now shown to the delegated user only** — not because the owner's edit is
+harmless, but because for the owner it is recoverable and for the delegate it is not, and a
+warning shown to everyone equally is one nobody reads.
+
+---
+
+### A FRAGILITY WORTH KNOWING ABOUT
+
+**The comparison is exact and case-sensitive.** Firestore rules have `.lower()`; neither clause
+uses it. `UPENDRA` stores `UTPAREKH@GMAIL.COM` in capitals, and the grant holds only while that
+account's auth token reports the same capitalisation. It reportedly works today — so it does —
+but nothing makes it robust: a re-registration, a provider change, or a switch to Google sign-in
+normalising to lower case would silently break one customer's access, and the symptom would be
+"I can't see my agency" with nothing anywhere to explain it.
+
+Case-folding both sides can only ever **widen** the match — no currently-working grant can stop
+working — so it is a safe change whenever it is made. It is exactly the defect
+`functions/adminIdentity.js` was written to avoid for the vendor's own email, one file away, and
+the same reasoning applies here to six customers.
+
+Not changed here: this entry is a record of the mechanism, and a rules change belongs in a
+deploy someone is watching.
