@@ -11076,3 +11076,61 @@ through is by definition the thing nobody was thinking about.**
 
 Left open deliberately, with the decision recorded rather than taken: closing it wrong is a
 lockout, and closing it right needs the inventory first.
+
+
+## G36. Every shared link was broken, and the ones that mattered most were the help links
+
+The app is client-side routed. Vercel had no `vercel.json`, so any path other than `/` was
+looked up as a file, not found, and answered with **404 — NOT_FOUND** before React Router
+existed. Refreshing on any screen did it. So did every bookmark, and every URL anyone sent
+anyone else.
+
+**THE PART THAT MAKES THIS MORE THAN A REFRESH BUG.** Seven internal links carry a query string,
+and five of them are the **setup-gap links**:
+
+    /agency-settings?section=estimate-master     Dashboard, AtMasters
+    /agency-settings?section=at                  AppLayout, AgencySettings, NewJob
+    /estimates/new?tab=sent                      Dashboard
+    /estimates/new?tab=approvals                 Dashboard
+
+Both parameters are genuinely read — `AgencySettings` expands the named accordion, and
+`EstimateGenerate` lands on the named stage — so these are not decorative.
+
+Those `?section=` links appear **when an agency has no rates configured**: they exist precisely
+because someone is stuck and cannot price a job. Forwarding that URL to ask for help is what a
+stuck person does next, and the recipient got a 404 instead of the screen that fixes it. **The
+link is generated at the exact moment its recipient most needs it to work.**
+
+Two compatibility routes made the reach wider than the route table suggests. `/estimate-master`
+and `/at-masters` are `<Navigate>` entries that preserve `location.search`, kept so old bookmarks
+keep working — and a cold load of an old bookmark 404'd before the redirect could run. **The
+shims for stale URLs were themselves unreachable from a stale URL.** `AppLayout` also has
+`<Route path="*">` sending unknown paths home, which never got the chance to run either.
+
+**THE FIX, AND THE TRAP NEXT TO IT.** One rule:
+
+    { "rewrites": [ { "source": "/(.*)", "destination": "/index.html" } ] }
+
+⚠ **`rewrites`, NOT `routes`.** Vercel evaluates redirects → headers → **filesystem** →
+rewrites → 404. Because rewrites run *after* the filesystem check, a path matching a real file
+never reaches the rule: `favicon.svg`, `manifest.json`, `robots.txt` and every hashed asset
+under `/assets/` are served normally. Exclusions are unnecessary by construction.
+
+The legacy `routes` field — which most older SPA-on-Vercel answers still recommend — runs
+**before** the filesystem. `{"src": "/(.*)", "dest": "/index.html"}` would genuinely swallow the
+favicon, the manifest and every JS and CSS bundle, returning HTML with a `text/html` content
+type wherever a script or an icon was expected. With `routes` you must add an explicit
+`{"handle": "filesystem"}` first; with `rewrites` you get that for free.
+
+**And the symptoms would not point at the config.** A blank page, a missing tab icon, an install
+prompt that cannot parse its manifest — every one of those reads as a build problem. Someone
+would go looking at Vite, at the asset pipeline, at the manifest's contents, and find nothing
+wrong with any of them, because nothing is. That is the whole reason this is written down:
+the failure mode of the *wrong* fix is a long search in the wrong file.
+
+**No build configuration in the file, deliberately.** Vercel is auto-detecting the Vite setup and
+has been deploying successfully; a `vercel.json` overrides only the keys it names, so `rewrites`
+alone leaves detection intact. Writing `buildCommand` and `outputDirectory` by hand would replace
+something that works and self-updates with something that can silently disagree with
+`vite.config` — a second source of truth for no gain, which is the pattern this audit keeps
+recording the cost of.
