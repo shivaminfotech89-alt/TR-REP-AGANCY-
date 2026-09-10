@@ -59,6 +59,14 @@ const EXCLUDE = {
   '9REEEUHthjCNs4sYVEmm': { was: 'ADMIN',   why: 'not a trading name' },
   'jbHxk62WV0ENsmZgrjZd': { was: 'suchit',  why: "the operator's own first name" },
   'Mc3OI4IkViEHlYdiBafA': { was: 'MEGHA',   why: 'bare given name; its AT percentages were test values' },
+
+  // ⚠ NOT FOUNDING AGENCIES - created 10 Sep 2026, after billing existed, and they already
+  // carry `status: 'admin'` subscriptions written by createAgency. A founding grant is for
+  // agencies that PREDATE billing; these postdate it by every measure. The script would refuse
+  // to overwrite their existing subscriptions anyway, so listing them here changes no outcome -
+  // it records the judgement instead of leaving the guard to stop the run every time.
+  'iS0pGXunmSq3jiH5POPW': { was: 'drishiv transformer tech', why: 'created after billing; already has an admin subscription' },
+  'TFicx8HhpcPZ4e1MrzK8': { was: 'Narayan Transformer',      why: 'created after billing; already has an admin subscription' },
 };
 
 /** Confirmed by the operator as real agencies. */
