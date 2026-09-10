@@ -1593,12 +1593,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       //    artefact the server will run - and refuses unless all three hash identically.
       // ⚠ THE AGENCY IS CREATED BY A CLOUD FUNCTION, NOT BY THIS LINE (AUDIT G33).
       //
-      // The client cannot gate its own creation. A Firestore rule can READ
-      // `entitlements/{uid}.agencySlots > 0` and permit a write, but it cannot DECREMENT one -
-      // rules evaluate a write, they do not perform one - so a rule-only gate lets a single
-      // paid slot create unlimited agencies, every create passing the same check against the
-      // same untouched counter. Check-and-decrement has to be one transaction, and only the
-      // server can run one.
+      // The client cannot gate its own creation, and there is no longer a slot to gate on
+      // (AUDIT G38): agencies are named and paid for together, and the server creates them in
+      // the transaction that records the payment. This path remains for the VENDOR, who
+      // creates without paying - the function reads the verified auth token and refuses
+      // anyone else.
       //
       // The function assembles the document with the SAME COMPILED CODE this file used to run
       // inline (agency-seed.generated.mjs, from lib/agencySeed.ts), so what a new agency

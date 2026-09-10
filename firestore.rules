@@ -269,6 +269,12 @@ service cloud.firestore {
              // "only a function may set this", because the Admin SDK bypasses rules rather than
              // passing them as a privileged principal. The field the gate reads must live where
              // no client can reach it. Collapsed while zero documents carried either spelling.
+             // ⚠ CONTACT DETAILS, AND DELIBERATELY NOT `email` (AUDIT G38). `email` above
+             // is an ACCESS GRANT - whoever signs in with it can write this agency. These two
+             // are ordinary data: they belong on a GST invoice and in a support ticket, and
+             // they grant nothing. That nothing in this file reads them IS the point.
+             (!('contactEmail' in data) || (data.contactEmail is string && data.contactEmail.size() <= 200)) &&
+             (!('contactPhone' in data) || (data.contactPhone is string && data.contactPhone.size() <= 40)) &&
              (!('sharedWithEmails' in data) || (data.sharedWithEmails is list)) &&
              (!('members' in data) || (data.members is map || data.members is list)) &&
              (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 150)) &&
@@ -537,7 +543,7 @@ service cloud.firestore {
     }
 
     /**
-     * MONEY. TWO COLLECTIONS NO CLIENT MAY WRITE, EVER (AUDIT G27, G28).
+     * MONEY. COLLECTIONS NO CLIENT MAY WRITE, EVER (AUDIT G27, G28, G38).
      *
      * ⚠ `allow write: if false` IS THE WHOLE MECHANISM, AND IT IS NOT A STRICTER VERSION OF
      * A NORMAL RULE. A Firestore rule CANNOT express "only a Cloud Function may write this".
@@ -603,24 +609,6 @@ service cloud.firestore {
                           || (isSignedIn()
                               && exists(/databases/$(database)/documents/agencies/$(agencyId))
                               && get(/databases/$(database)/documents/agencies/$(agencyId)).data.ownerId == request.auth.uid);
-      allow write: if false;
-    }
-
-    /**
-     * HOW MANY AGENCIES AN ACCOUNT MAY CREATE. Keyed by uid, because at the moment agency
-     * creation is gated there IS no agency id yet - the document is about to be made. Keying
-     * this by agency would be unusable at exactly the moment it is consulted.
-     *
-     * ⚠ THE GATE ITSELF IS THE createAgency FUNCTION, NOT THIS DOCUMENT. A rule can read
-     * `agencySlots > 0` and permit a create, but nothing makes the slot get CONSUMED - rules
-     * cannot decrement, so one paid slot would create unlimited agencies. Check-and-decrement
-     * has to happen in one transaction, which only the server can do. This collection exists
-     * so the server has somewhere unforgeable to keep the count, and so the client can SHOW
-     * the operator how many they have left.
-     */
-    match /entitlements/{uid} {
-      allow get: if isSuperAdmin() || (isSignedIn() && request.auth.uid == uid);
-      allow list: if isSuperAdmin();
       allow write: if false;
     }
 

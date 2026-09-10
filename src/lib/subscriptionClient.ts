@@ -33,7 +33,7 @@ const functionsClient = () => (fns ??= getFunctions(app, REGION));
 
 const CHECKOUT_SRC = 'https://checkout.razorpay.com/v1/checkout.js';
 
-export type OrderKind = 'renewal' | 'new_agency';
+export type OrderKind = 'renewal' | 'new_agencies';
 
 export type CreatedOrder = {
   orderId: string;
@@ -43,6 +43,9 @@ export type CreatedOrder = {
   kind: OrderKind;
   agencyId: string;
   agencyName: string;
+  /** For a purchase: the names the server validated and will create. */
+  agencyNames?: string[];
+  quantity?: number;
 };
 
 export type VerifiedPayment = {
@@ -52,6 +55,9 @@ export type VerifiedPayment = {
   alreadyProcessed: boolean;
   expiryDate: number | null;
   invoicePending: boolean;
+  /** For a purchase: what the server actually created, reported by the server. */
+  createdAgencyIds?: string[];
+  createdNames?: string[];
 };
 
 /**
@@ -160,9 +166,16 @@ function loadCheckoutScript(): Promise<void> {
 }
 
 /** Ask the server for an order. The amount is the server's, not ours. */
-export async function createOrder(kind: OrderKind, agencyId?: string): Promise<CreatedOrder> {
+export async function createOrder(
+  kind: OrderKind,
+  agencyId?: string,
+  agencyNames?: string[],
+): Promise<CreatedOrder> {
   const call = httpsCallable(functionsClient(), 'createSubscriptionOrder');
-  const res: any = await call({ kind, agencyId: agencyId || '' });
+  // ⚠ NO AMOUNT AND NO COUNT. The server multiplies its own constant by the number of names
+  // it has validated. A client that could name its own price, or its own quantity, is the whole
+  // vulnerability - and an order endpoint accepting either is the usual way it appears.
+  const res: any = await call({ kind, agencyId: agencyId || '', agencyNames: agencyNames || [] });
   const d = res?.data || {};
   if (!d.orderId || !d.keyId) {
     throw new Error('The server did not return a usable order. Nothing was charged.');
@@ -212,7 +225,8 @@ export function payWithRazorpay(
         name: 'TransRegister',
         description: order.kind === 'renewal'
           ? `Annual subscription — ${order.agencyName}`
-          : 'Annual subscription — new agency',
+          : `Annual subscription — ${order.quantity || 1} new `
+            + `${(order.quantity || 1) === 1 ? 'agency' : 'agencies'}`,
         prefill: {
           name: who.name || '',
           email: who.email || '',
@@ -254,6 +268,8 @@ export function payWithRazorpay(
               alreadyProcessed: !!d.alreadyProcessed,
               expiryDate: d.expiryDate ?? null,
               invoicePending: !!d.invoicePending,
+              createdAgencyIds: d.createdAgencyIds || [],
+              createdNames: d.createdNames || [],
             });
           } catch (e: any) {
             // ⚠ THE MONEY HAS ALREADY MOVED BY THE TIME WE ARE HERE. Whatever went wrong, the

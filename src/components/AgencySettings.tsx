@@ -9,7 +9,9 @@ import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { LetterheadCalibrator } from './LetterheadCalibrator';
-import SubscriptionPanel from './SubscriptionPanel';
+import AddAgencyFlow from './AddAgencyFlow';
+import ManageSubscription from './ManageSubscription';
+import { AgencySubscriptionBadge } from './AgencySubscriptionBadge';
 
 /** The four Gujarat DISCOMs. Names only - see AUDIT O7 for why no registration
  *  details are attached to these. */
@@ -26,7 +28,15 @@ export default function AgencySettings() {
   // agency's tender period (AUDIT F20 was exactly that leak).
   const agencyAtsForContext = atMasters.filter(at => at.agencyId === activeAgency?.id);
   const [showAddForm, setShowAddForm] = useState(false);
-  const [newAgencyName, setNewAgencyName] = useState('');
+  /**
+   * ⚠ A TAB, BECAUSE SUBSCRIPTION IS A DIFFERENT SUBJECT FROM AGENCY SETUP (AUDIT G38).
+   *
+   * Everything else on this page is about ONE agency - the one selected in the context bar.
+   * Subscription is about the ACCOUNT: every agency it owns, and which of them expires first.
+   * Those two scopes fought when the subscription lived in a box at the top, because the box
+   * inherited the page's single-agency scope and could only ever answer for one of them.
+   */
+  const [settingsTab, setSettingsTab] = useState<'agency' | 'subscription'>('agency');
   /** Required at creation, no default. Stores the NAME only - GSTIN, PAN and address are
    *  entered by the agency from its own tender paperwork. */
   const [discomName, setDiscomName] = useState('');
@@ -84,143 +94,11 @@ export default function AgencySettings() {
     setDivisions(newDivs);
   };
 
-  const handleAddAgency = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    // SCOPE LIMIT - the creation form collects GSTIN optionally, so it is checked here too.
-    // The authoritative enforcement is at save in EditAgencyForm and again in
-    // missingForTaxInvoice, so an agency that acquired a non-Gujarat GSTIN by any route
-    // still cannot issue an invoice. See D6.
-    const scopeError = gstinScopeError(gstin);
-    if (scopeError) {
-      alert(scopeError);
-      return;
-    }
-
-    const validation = validateDivisionPrefixes(divisions);
-    if (!validation.isValid) {
-      alert(`Cannot create agency due to division prefix validation error:\n\n${validation.errors.join('\n')}`);
-      return;
-    }
-
-    setIsSubmitting(true);
-    try {
-      const prefixes: Record<string, Record<string, string>> = {};
-      const allotments: Record<string, Record<string, number>> = {};
-      const lastJobNumbers: Record<string, number> = {};
-      
-      divisions.forEach(d => {
-        if (d.name.trim() && d.prefixCRGO.trim()) {
-          const divName = d.name.trim();
-          prefixes[divName] = {
-            'CRGO': d.prefixCRGO.trim(),
-            'Amorphous': (d.prefixAmorphous || '').trim(),
-            'Wound Core': (d.prefixWoundCore || '').trim(),
-            'LSTC': (d.prefixLSTC || '').trim(),
-            'OH': (d.prefixOH || '').trim(),
-          };
-          allotments[d.name.trim()] = {
-            'CRGO': Number(d.allotmentCRGO) || 0,
-            'Amorphous': Number(d.allotmentAmorphous) || 0,
-            'Wound Core': Number(d.allotmentWoundCore) || 0,
-          };
-          lastJobNumbers[d.name.trim()] = 0;
-          lastJobNumbers[d.name.trim() + '_OH'] = 0;
-        }
-      });
-
-      await addAgency({
-        // ⚠ TRIMMED ON SAVE, NOT ON CHANGE. Two live agencies are stored as
-        // "DYNAMIC TRAMSFORMER " and "ZENITH TRANSFORMERS " because this line wrote the input
-        // verbatim (AUDIT G29). Trimming in the onChange handler instead would make the field
-        // impossible to use - you could never type the space in "ZENITH TRANSFORMERS", because
-        // it would be eaten the moment it was typed. The trim belongs at the write.
-        //
-        // Note that division names three blocks above were ALREADY trimmed. The knowledge was
-        // in this file; it just had not been applied to the field that names the agency.
-        name: newAgencyName.trim(),
-        letterheadUrl: letterheadBase64,
-        letterheadMode,
-        letterheadHeaderHeightMm: headerHeightMm,
-        letterheadFooterHeightMm: footerHeightMm,
-        letterheadMarginLeftMm: marginLeftMm,
-        letterheadMarginRightMm: marginRightMm,
-        // NOT seeded. An agency's own registration state is a fact about that agency and
-        // the app has no way to know it - a seeded '24' asserted Gujarat registration for
-        // every agency (AUDIT O8). The state CODE is derived from the agency's own GSTIN
-        // (its first two digits), so it cannot disagree with the GSTIN; the state NAME is
-        // entered. Both start empty.
-        agencyState: '',
-        agencyStateCode: '',
-        // DISCOM IDENTITY IS NOT SEEDED. It used to be pre-filled with UGVCL's real
-        // registration - name, GSTIN, PAN, address, circle office - so every new agency
-        // was created carrying another company's tax identity, and printed it. Because
-        // the values were WRITTEN they were truthy, so no fallback fired and nothing
-        // marked them as unchosen (AUDIT O7).
-        //
-        // discomName comes from the required select on the creation form. GSTIN, PAN and
-        // address are entered by the agency from its own tender paperwork - deliberately
-        // NOT prefilled from a built-in table, because only UGVCL's is verified and only
-        // because it happened to be in this codebase.
-        discomName: discomName.trim(),
-        discomGstin: '',
-        discomPan: '',
-        discomAddress: '',
-        discomState: 'Gujarat',
-        // Not agency-specific: all four DISCOMs are Gujarat entities, and this drives the
-        // CGST/SGST vs IGST determination rather than appearing on the document.
-        discomStateCode: '24',
-        serviceSacCode: '998719',
-        circleOfficeName: '',
-        // AUTHORITY TITLES AND THE CC TEMPLATE ARE NOT SEEDED.
-        //
-        // These were UGVCL's specific wording written into every agency regardless of which
-        // of the four DISCOMs it had selected. Unlike discomState / discomStateCode /
-        // serviceSacCode - which FOLLOW from that required choice and are correct for all
-        // four Gujarat entities - these are one DISCOM's phrasing presented as everyone's.
-        //
-        // They are the shape this audit keeps finding: a value that looks configured, never
-        // blocks, and prints. The estimate and tax-invoice gates now require them
-        // (missingForEstimate, missingForTaxInvoice), so they are asked for rather than
-        // assumed, and the render fallbacks that used to re-supply them are gone.
-        forwardingSubject: 'Submiting Inspection Report & Estimate of Transformer',
-        gpValidationMonths: 18,
-        prefixes,
-        lastJobNumbers,
-        allotments,
-        address,
-        gstin,
-        pan,
-        bankName,
-        accountNumber,
-        ifscCode,
-        email,
-        phone
-      });
-      
-      setShowAddForm(false);
-      setNewAgencyName('');
-      setAddress('');
-      setGstin('');
-      setPan('');
-      setBankName('');
-      setAccountNumber('');
-      setIfscCode('');
-      setEmail('');
-      setPhone('');
-      setLetterheadBase64('');
-      setDivisions([{
-        name: '', prefixCRGO: '', prefixAmorphous: '', prefixWoundCore: '',
-        prefixLSTC: '', prefixOH: '', allotmentCRGO: '', allotmentAmorphous: '', allotmentWoundCore: ''
-      }]);
-      setDiscomName('');
-    } catch (err) {
-      console.error(err);
-      alert('Failed to add agency');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+  // ⚠ handleAddAgency IS GONE (AUDIT G38). It assembled a whole agency - DISCOM, GSTIN,
+  // bank details, letterhead, divisions - from this page's form and called addAgency.
+  // Creation is now a purchase: names are collected by AddAgencyFlow, the server creates
+  // the agencies in the transaction that records the payment, and every other detail is
+  // entered afterwards per agency. Nothing on this page creates an agency any more.
 
   if (loading) return <Loader2 className="w-6 h-6 animate-spin mx-auto mt-10 text-blue-600" />;
 
@@ -330,12 +208,39 @@ export default function AgencySettings() {
     // which fits the pairs this form is actually made of (GSTIN/PAN, bank/IFSC,
     // DISCOM/circle office). Region B breaks out wider still - see its own note.
     <div className="max-w-[900px] mx-auto space-y-5">
-      {/* ⚠ SCOPED TO THE ACTIVE AGENCY, WHICH IS WHY IT SITS WITH THE CONTEXT BAR RATHER THAN
-          IN THE FORMS BELOW. A subscription belongs to one agency; showing it inside a form
-          that edits agency details would invite the reading that it is a field being edited.
-          It is not editable from here at all - `subscriptions/{agencyId}` is server-written
-          (AUDIT G29), and this panel only reads it. */}
-      <SubscriptionPanel />
+      <div className="flex gap-1 border-b border-slate-200">
+        {([['agency', 'Agency setup'], ['subscription', 'Manage subscription']] as const).map(([k, label]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setSettingsTab(k)}
+            className={`px-4 py-2 text-xs font-bold rounded-t-lg -mb-px border-b-2 ${
+              settingsTab === k
+                ? 'border-blue-600 text-blue-800 bg-blue-50'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {settingsTab === 'subscription' && <ManageSubscription />}
+
+      {settingsTab === 'agency' && (<>
+      {/* ⚠ NO SUBSCRIPTION BOX HERE, AND NO AGENCY-SLOTS CARD. Both stood at the top of this
+          page and both are gone (AUDIT G38).
+
+          The subscription box was a second answer to a question the Manage Subscription tab
+          answers properly: it showed ONE agency's state, on a page whose whole subject is the
+          agency you have selected, so an owner with four agencies had to switch between them to
+          learn what they owed. The tab shows all of them at once, sorted by expiry.
+
+          The slots card sold an abstract credit. Agencies are now named and paid for together,
+          so there is no credit to hold and nothing to show a balance of.
+
+          What survives is the STATUS, inline beside the agency name in the context bar below -
+          one word about the agency you are looking at, where the name already is. */}
       {/* ============================ CONTEXT BAR ============================
           The SCOPE everything below sits in, not a section you edit. "Switch Agency" was
           a card list, which implied it was content; it is the frame.
@@ -356,8 +261,14 @@ export default function AgencySettings() {
             another. */}
         <div className="flex flex-col gap-3">
           <div className="flex-1 min-w-0">
-            <label className="block text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
-              Agency
+            {/* ⚠ THE SUBSCRIPTION STATE LIVES HERE NOW - inline, beside the name, one word.
+                It was a card twice this size at the top of the page (AUDIT G38). What is
+                actually useful before working in an agency is whether it is paid for, and that
+                is a badge rather than a panel. It renders nothing while it does not know: a
+                failed read shows no chip rather than a reassuring one. */}
+            <label className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-slate-400 mb-1">
+              <span>Agency</span>
+              <AgencySubscriptionBadge agencyId={activeAgency?.id} />
             </label>
             <div className="flex items-center gap-2">
               <select
@@ -423,196 +334,13 @@ export default function AgencySettings() {
           an agency makes a new FRAME rather than editing anything inside the current one.
           Rendered only while open - a permanently visible "Add New Agency" card sitting
           between the frame and "This Agency" implied it was part of one or the other. */}
-      {showAddForm && (
-      <div className="bg-white p-2.5 sm:p-3 rounded-lg border border-l-2 border-l-blue-500 border-blue-200">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h2 className="text-lg font-bold text-slate-900">Add New Agency</h2>
-            <p className="text-[11px] text-slate-500 mt-0.5">
-              Creates a separate agency. Nothing is copied from {activeAgency?.name || 'the current agency'} -
-              its estimate master is seeded from the published shared default.
-            </p>
-          </div>
-        </div>
-
-          <form onSubmit={handleAddAgency} className="space-y-6 border-t border-slate-100 pt-4">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Agency Name</label>
-              <input required type="text" value={newAgencyName} onChange={e => setNewAgencyName(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" />
-            </div>
-
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">
-                DISCOM <span className="text-red-500">*</span>
-              </label>
-              <select
-                required
-                value={discomName}
-                onChange={e => setDiscomName(e.target.value)}
-                className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50"
-              >
-                <option value="">Select the DISCOM this agency works with…</option>
-                {DISCOM_OPTIONS.map(d => <option key={d} value={d}>{d}</option>)}
-              </select>
-              <p className="text-[11px] text-slate-500 mt-1">
-                Name only. Enter the DISCOM's GSTIN, PAN and address afterwards in Edit
-                Agency, from your own tender paperwork - they are not pre-filled, and the
-                tax invoice and estimate will not generate until they are set.
-              </p>
-            </div>
-
-            <div className="border-t border-slate-200 pt-6 mt-6">
-              <h3 className="text-sm font-bold uppercase tracking-widest text-slate-800 mb-4">Company Profile (Billing Details)</h3>
-
-              <div className="space-y-5">
-                <div>
-                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">Identity</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="md:col-span-2">
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Company Address</label>
-                      <textarea value={address} onChange={e => setAddress(e.target.value)} rows={3} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Full address" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Email</label>
-                      <input type="email" value={email} onChange={e => setEmail(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Email Address" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Phone Number</label>
-                      <input type="text" value={phone} onChange={e => setPhone(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Phone Number" />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">Tax details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">GSTIN</label>
-                      <input type="text" value={gstin} onChange={e => setGstin(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="GST Number" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">PAN Number</label>
-                      <input type="text" value={pan} onChange={e => setPan(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="PAN Number" />
-                    </div>
-                  </div>
-                </div>
-
-                <div>
-                  <h4 className="text-[11px] font-bold uppercase tracking-widest text-slate-400 mb-2">Bank details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Bank Name</label>
-                      <input type="text" value={bankName} onChange={e => setBankName(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Bank Name" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">Account Number</label>
-                      <input type="text" value={accountNumber} onChange={e => setAccountNumber(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="Account Number" />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-bold uppercase tracking-widest text-slate-500 mb-1">IFSC Code</label>
-                      <input type="text" value={ifscCode} onChange={e => setIfscCode(e.target.value)} className="w-full px-4 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-slate-50" placeholder="IFSC Code" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="pt-2">
-              {/* LETTERHEAD IS NOT SET UP HERE - one entry point only.
-                  It used to appear twice: once on this create panel and once in the agency
-                  form. Two calibrators for one stored value is a mirror in the other
-                  direction - whichever was saved last won, and neither said so. The form
-                  is the right home because a letterhead is tuned against the real
-                  document, which needs the agency to exist first. */}
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Letterhead and print margins are configured after the agency is created -
-                open <strong>This Agency</strong> and use the Letterhead section there.
-              </p>
-            </div>
-            
-            <div>
-              <div className="flex justify-between items-end mb-2 border-b border-slate-100 pb-2">
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-500">Divisions & Prefixes</label>
-                <button type="button" onClick={handleAddDivision} className="text-[10px] font-bold uppercase tracking-widest text-blue-600 hover:text-blue-800 flex items-center bg-blue-50 px-2 py-1 rounded">
-                  <Plus className="w-3 h-3 mr-1" /> Add Division
-                </button>
-              </div>
-              <div className="space-y-3">
-                {divisions.map((div, index) => (
-                  <div key={index} className="flex items-start space-x-3 p-3 bg-slate-50 border border-slate-200 rounded">
-                    <div className="flex-1 space-y-2">
-                      <input 
-                        required 
-                        type="text" 
-                        value={div.name} 
-                        onChange={e => handleDivisionChange(index, 'name', e.target.value)} 
-                        className="w-full px-4 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" 
-                        placeholder="Division Name (e.g. SABARMATI)" 
-                      />
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                        <div>
-                          <label className="block text-[9px] uppercase font-bold text-slate-500 mb-0.5">CRGO Prefix *</label>
-                          <input 
-                            required 
-                            type="text" 
-                            value={div.prefixCRGO} 
-                            onChange={e => handleDivisionChange(index, 'prefixCRGO', e.target.value)} 
-                            className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" 
-                            placeholder="e.g. 21 IS" 
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] uppercase font-bold text-slate-500 mb-0.5">Amorphous Prefix</label>
-                          <input 
-                            type="text" 
-                            value={div.prefixAmorphous} 
-                            onChange={e => handleDivisionChange(index, 'prefixAmorphous', e.target.value)} 
-                            className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" 
-                            placeholder="e.g. AM21 IS" 
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] uppercase font-bold text-slate-500 mb-0.5">Wound Core Prefix</label>
-                          <input 
-                            type="text" 
-                            value={div.prefixWoundCore} 
-                            onChange={e => handleDivisionChange(index, 'prefixWoundCore', e.target.value)} 
-                            className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" 
-                            placeholder="e.g. WC21 IS" 
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[9px] uppercase font-bold text-slate-500 mb-0.5">LSTC Prefix</label>
-                          <input 
-                            type="text" 
-                            value={div.prefixLSTC} 
-                            onChange={e => handleDivisionChange(index, 'prefixLSTC', e.target.value)} 
-                            className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white" 
-                            placeholder="e.g. LS21 IS" 
-                          />
-                        </div>
-                      </div>
-                    </div>
-                    {divisions.length > 1 && (
-                      <button type="button" onClick={() => handleRemoveDivision(index)} className="p-2 mt-1 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded transition-colors">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-slate-100 flex justify-end space-x-2">
-              <button type="button" onClick={() => setShowAddForm(false)} className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-slate-500 hover:bg-slate-100 rounded transition-colors">Cancel</button>
-              <button type="submit" disabled={isSubmitting} className="px-4 py-2 text-xs font-bold uppercase tracking-widest bg-blue-600 text-white rounded hover:bg-blue-700 transition-colors flex items-center">
-                {isSubmitting && <Loader2 className="w-3 h-3 mr-2 animate-spin" />} Save Agency
-              </button>
-            </div>
-          </form>
-      </div>
-
-      )}
+      {/* ⚠ NAMES ONLY, AND PAID FOR BEFORE CREATION (AUDIT G38). This was a full
+          creation form - name, DISCOM, letterhead, GSTIN - which made sense when creating
+          an agency was free and singular. Asking for all of it five times before a customer
+          is allowed to pay does not, and those details are exactly what someone wants to
+          get right slowly rather than inside a purchase flow. They are filled in afterwards,
+          per agency, in the form that already exists for editing one. */}
+      {showAddForm && <AddAgencyFlow onDone={() => setShowAddForm(false)} />}
 
       {/* ======================= REGION A: THIS AGENCY =======================
           Agency-level settings. NONE of this depends on an AT period - it stays available
@@ -776,6 +504,7 @@ export default function AgencySettings() {
           removed here - see AUDIT.md F28. Nothing replaced them: the orphaned-job case
           they nominally served is empty (0 of 44), and the button's actual behaviour was
           to reassign every job of the signed-in owner to whichever agency was active. */}
+      </>)}
     </div>
   );
 }

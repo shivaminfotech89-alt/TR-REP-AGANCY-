@@ -179,7 +179,10 @@ export const createSubscriptionOrder = makeCreateSubscriptionOrder(db);
 export const verifySubscriptionPayment = makeVerifySubscriptionPayment(db);
 
 /**
- * AGENCY CREATION, GATED. See ./createAgency.js - a rule can read an entitlement but cannot
- * decrement one, so check-and-decrement has to be a transaction, which only the server can run.
+ * AGENCY CREATION WITHOUT PAYMENT - the vendor's path only. See ./createAgency.js.
+ *
+ * A paying customer never reaches it: they name their agencies, pay for all of them at once,
+ * and verifySubscriptionPayment creates them in the transaction that records the payment. There
+ * is no slot and no interval between paying and receiving (AUDIT G38).
  */
 export const createAgency = makeCreateAgency(db);

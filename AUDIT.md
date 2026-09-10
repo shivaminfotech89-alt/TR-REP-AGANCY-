@@ -11264,3 +11264,83 @@ semantics, list equality and short-circuit order are Firestore's, and only the e
 confirm those. The emulator needs Java, which is not installed here. Saying which of the two was
 checked matters more than the green result: a harness that overstates its reach is the defect
 G33 records.
+
+
+## G38. The slot goes, and two boxes with it
+
+**THE SLOT WAS AN INTERVAL, AND EVERYTHING THAT COULD GO WRONG LIVED IN IT.**
+
+A `new_agency` order used to buy an abstract credit held on `entitlements/{uid}` until it was
+spent creating an agency. The defect was not the counter — it was the **stretch of time between
+paying and receiving**. A credit can be held for months, leaked by a failed decrement, counted
+twice, expire ambiguously, or sit stranded on an account nobody remembers buying it for. Each of
+those needed a rule, a screen and a support answer, and none of them was the feature.
+
+Naming the agencies **at purchase** removes the interval. There is no moment where money has
+been taken and nothing yet says what for; the invoice can list what was bought; and the
+subscription year runs from **the same instant for every agency on the order** rather than from
+whenever each credit happened to be spent — which is what makes a single receipt's line items
+agree with each other. `entitlements` is deleted outright rather than left empty: an unwritten
+collection with a rule and a UI reading `agencySlots` is the hardcoded-truth shape from the
+G32–G36 sweep, sitting there reading zero forever until somebody wires it up.
+
+**ALL OR NONE, AND THE IDEMPOTENCY KEY IS WHAT MAKES IT RECOVERABLE.** Up to ten agencies are
+created inside the transaction that records the payment — ~150 KiB across 22 writes, against
+Firestore's 500-write and 10 MiB limits, so the cap is a **blast-radius limit rather than a
+technical one**: ₹59,000 is already a large thing to get wrong, and someone typing thirty names
+has misunderstood and should meet a refusal rather than a bill.
+
+The property that matters is the ordering. `payments/{razorpay_payment_id}` is written **inside
+the same transaction**, so if creation four of five fails the rollback takes the payment record
+with it: the payment is never marked processed and a retry re-runs the whole thing cleanly.
+Partial creation cannot happen, and neither can money recorded against agencies that do not
+exist. A name clash found inside the transaction **refuses the whole batch rather than skipping
+one** — a silent skip would charge for five and deliver four, which is worse than a refusal that
+names the clash and leaves the payment retryable.
+
+**NAMES ARE CHECKED TWICE, AND THE SECOND ONE IS THE GUARANTEE.** Before checkout because
+refusing after money has moved is not acceptable, and again inside the transaction because
+another tab could create a clashing agency in between. Uniqueness is **per owner, not global**:
+two unrelated contractors may both legitimately be "PATEL ELECTRICALS", and refusing the second
+for a stranger's reason would be refusing a real customer. Within one owner's list two identical
+names are indistinguishable in the switcher — nothing tells the rows apart, and their monograms
+collide too. Zero collisions exist today, so the rule was closable without touching any record.
+
+**THE TWO BOXES.**
+
+The **standalone Subscription box** answered a question badly. It sat at the top of Agency
+Settings and inherited that page's scope — the one agency selected in the context bar — so an
+owner with four agencies had to switch between them to learn what they owed. It restated the
+context bar's scope in a card twice its size. The **Manage Subscription tab** answers it
+properly: every agency the account owns, one row each, **sorted by expiry soonest first** rather
+than alphabetically, because the screen's subject is a deadline and an alphabetical list buries
+an expiry eleven days away behind four that are not. A summary line — *"4 agencies · next expiry
+in 23 days (ZENITH TRANSFORMERS)"* — answers in one line the question that brought the reader
+there, instead of making them do the arithmetic across four dates.
+
+The **agency-slots card** sold the credit that no longer exists.
+
+What survives is the **status, inline beside the agency name** — one word, where the name
+already is. It renders **nothing while it does not know**: no document, no badge, and a failed
+read shows no chip rather than a reassuring one. A status chip is exactly the shape that invites
+G28's defect, so it was built to stay silent rather than to guess. The countdown appears only
+inside 45 days: a badge reading "310 days left" beside every name is noise that trains the eye to
+skip the badge, and then the one saying 9 days is skipped too.
+
+**ADD AGENCY ASKS FOR NAMES AND NOTHING ELSE.** It was a full creation form — DISCOM, GSTIN,
+bank details, letterhead, divisions — which made sense when creating an agency was free and
+singular. Asking for all of it **five times before a customer is allowed to pay** does not, and
+those details are precisely what someone wants to get right slowly rather than inside a purchase
+flow. They are entered afterwards, per agency, in the form that already exists for editing one.
+
+**THE VENDOR PATH IS THE SAME SCREEN AND A DIFFERENT SERVER DECISION.** `createAgency` is now
+admin-only and refuses everyone else outright — an endpoint that creates agencies for free must
+not be reachable by the accounts that are meant to pay. The client sends **no flag** saying who
+is calling; the function reads the verified auth token. If the exemption ever moved, the screen
+would be wrong and the server would still be right, which is the correct direction for that
+mistake to point.
+
+**AND `contactEmail` / `contactPhone` ARRIVE GRANTING NOTHING**, which is the entire reason they
+exist separately from `email`. `email` is an access grant (G37): whoever signs in with it can
+write the agency. These two are ordinary data for an invoice and a support ticket. **That
+nothing in `firestore.rules` reads them is the point**, not an omission.

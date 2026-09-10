@@ -36,6 +36,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
 import { defineSecret, defineString } from 'firebase-functions/params';
 import { FieldValue } from 'firebase-admin/firestore';
+import { buildNewAgencyDocument } from './agency-seed.generated.mjs';
+import { nameKey, validateNames } from './agencyNames.js';
 
 /** The key secret. Never returned, never logged, never written to Firestore. */
 const RAZORPAY_KEY_SECRET = defineSecret('RAZORPAY_KEY_SECRET');
@@ -77,8 +79,23 @@ const AMOUNT_PAISE = PRICE_INCLUSIVE_INR * 100;
 /** One subscription year. Renewals extend from the existing expiry, not from today. */
 const SUBSCRIPTION_DAYS = 365;
 
-/** What an order may be for. A renewal names an agency; a new slot cannot, as none exists yet. */
-const ORDER_KINDS = ['renewal', 'new_agency'];
+/**
+ * WHAT AN ORDER MAY BE FOR.
+ *
+ * ⚠ THERE IS NO SLOT ANY MORE (AUDIT G38). A `new_agency` order used to buy an abstract
+ * credit, held on `entitlements/{uid}` until it was spent creating an agency. That interval was
+ * the problem: a credit is state that exists between paying and using, and everything that can
+ * go wrong lives in it - held for months, leaked by a failed decrement, counted twice, expiring
+ * ambiguously, stranded on an account nobody remembers buying it for. Each of those needed a
+ * rule, a screen and a support answer.
+ *
+ * Naming the agencies AT PURCHASE removes the interval. There is no moment where money has been
+ * taken and nothing yet says what for; the invoice can list what was bought; and the
+ * subscription year runs from the same instant for every agency on the order rather than from
+ * whenever each credit happened to be spent.
+ */
+const ORDER_KINDS = ['renewal', 'new_agencies'];
+
 
 const REGION = 'us-central1';
 
@@ -125,10 +142,21 @@ export function makeCreateSubscriptionOrder(db) {
 
       const agencyId = String(request.data?.agencyId || '').trim();
       let agencyName = '';
+      let agencyNames = [];
+
       if (kind === 'renewal') {
         const agency = await requireOwnedAgency(db, agencyId, uid);
         agencyName = String(agency.name || '').trim();
+      } else {
+        // ⚠ THE NAMES ARE CHECKED BEFORE A CUSTOMER PAYS, and again inside the transaction
+        // that creates them. This check is the courtesy - refusing after money has moved is not
+        // acceptable - and the one in verification is the guarantee, because an agency could be
+        // created by another tab between the two.
+        agencyNames = await validateNames(request.data?.agencyNames,
+          () => db.collection('agencies').where('ownerId', '==', uid).get());
       }
+
+      const quantity = kind === 'renewal' ? 1 : agencyNames.length;
 
       const keyId = RAZORPAY_KEY_ID.value();
       const keySecret = RAZORPAY_KEY_SECRET.value();
@@ -145,7 +173,10 @@ export function makeCreateSubscriptionOrder(db) {
       // could name its own price would be the whole vulnerability, and an order endpoint that
       // accepts an amount is the most common way it appears.
       const body = {
-        amount: AMOUNT_PAISE,
+        // ⚠ STILL NOT FROM THE REQUEST. The COUNT comes from the validated name list and the
+        // unit price from the constant; the client sends neither an amount nor a quantity it
+        // could inflate. Three agencies is 3 x 5,900, computed here.
+        amount: AMOUNT_PAISE * quantity,
         currency: CURRENCY,
         // ⚠ RAZORPAY CAPS `receipt` AT 40 CHARACTERS, and the first version of this line
         // produced 42: `renewal:` (8) + a 20-character Firestore id + `:` + a 13-digit
@@ -157,8 +188,13 @@ export function makeCreateSubscriptionOrder(db) {
         // application's own payment_orders document, and the receipt is only a short label for
         // reconciliation in Razorpay's dashboard. Base-36 for the timestamp, and the tail of
         // the id, which is the part that actually distinguishes one Firestore id from another.
-        receipt: `${kind === 'renewal' ? 'rnw' : 'new'}_${String(agencyId || uid).slice(-10)}_${Date.now().toString(36)}`,
-        notes: { kind, uid, agencyId, agencyName, email },
+        receipt: `${kind === 'renewal' ? 'rnw' : 'new'}${quantity}_${String(agencyId || uid).slice(-10)}_${Date.now().toString(36)}`,
+        // ⚠ THE NAMES ARE NOT PUT IN `notes`. Razorpay caps notes at 15 keys and 256
+        // characters per value, so three long agency names would breach it - and the failure
+        // would land at the gateway, as a rejected order, rather than anywhere that explains
+        // itself. They live in this application's own payment_orders document, which is where
+        // verification reads them from anyway.
+        notes: { kind, uid, agencyId, agencyName, email, count: String(quantity) },
       };
 
       let order;
@@ -193,9 +229,14 @@ export function makeCreateSubscriptionOrder(db) {
         kind,
         agencyId: agencyId || '',
         agencyName,
+        // ⚠ WHAT WAS BOUGHT, RECORDED BEFORE PAYMENT. Verification reads these back from
+        // here and never from the browser - which is what stops a one-agency order being
+        // redeemed for five, or a renewal order being redeemed as a creation.
+        agencyNames,
+        quantity,
         uid,
         email,
-        amountPaise: AMOUNT_PAISE,
+        amountPaise: AMOUNT_PAISE * quantity,
         currency: CURRENCY,
         createdAt: Date.now(),
         status: 'created',
@@ -203,12 +244,14 @@ export function makeCreateSubscriptionOrder(db) {
 
       return {
         orderId: String(order.id),
-        amountPaise: AMOUNT_PAISE,
+        amountPaise: AMOUNT_PAISE * quantity,
         currency: CURRENCY,
         keyId,
         kind,
         agencyId: agencyId || '',
         agencyName,
+        agencyNames,
+        quantity,
       };
     },
   );
@@ -259,6 +302,7 @@ export function makeVerifySubscriptionPayment(db) {
       const now = Date.now();
       const kind = String(order.kind || '');
       const agencyId = String(order.agencyId || '');
+      const orderedNames = Array.isArray(order.agencyNames) ? order.agencyNames : [];
 
       // ---- 3. ONE TRANSACTION: idempotency, then the effect.
       //
@@ -266,7 +310,14 @@ export function makeVerifySubscriptionPayment(db) {
       // retry, a double-click, a refresh - and without this the second one would extend the
       // subscription by another year for a single payment. `create` fails if the document
       // exists, so the second attempt loses the race rather than both succeeding.
+      const createdIds = [];
       const result = await db.runTransaction(async (tx) => {
+        // ⚠ CLEARED ON EVERY ATTEMPT. A Firestore transaction callback CAN RUN MORE THAN
+        // ONCE when it hits contention, and an array declared outside it accumulates across
+        // attempts - so a retried batch of three would report six ids, half of them from a
+        // rolled-back attempt that wrote nothing. The writes are safe either way; the report
+        // to the customer is what would have lied.
+        createdIds.length = 0;
         const payRef = db.collection('payments').doc(paymentId);
         if ((await tx.get(payRef)).exists) {
           return { alreadyProcessed: true };
@@ -305,16 +356,74 @@ export function makeVerifySubscriptionPayment(db) {
             // it would lose money already taken.
             invoicePending: true,
           }, { merge: true });
-        } else if (kind === 'new_agency') {
-          // A slot to create one agency. The decrement happens in createAgency, in its own
-          // transaction, because only a check-and-decrement in one call can stop a single
-          // slot creating several agencies.
-          tx.set(db.collection('entitlements').doc(uid), {
-            uid,
-            email,
-            agencySlots: FieldValue.increment(1),
-            updatedAt: now,
-          }, { merge: true });
+        } else if (kind === 'new_agencies') {
+          // ---- THE AGENCIES THEMSELVES, CREATED HERE AND NOWHERE ELSE.
+          //
+          // ⚠ ALL OF THEM OR NONE, AND THE IDEMPOTENCY KEY IS WHAT MAKES THAT RECOVERABLE.
+          // `payments/{paymentId}` is written inside THIS transaction, below. So if creation
+          // four of five fails, the whole transaction rolls back - including the payment
+          // record - the payment is never marked processed, and a retry re-runs the entire
+          // thing cleanly. Partial creation cannot happen, and neither can the state where
+          // money is recorded against agencies that do not exist.
+          //
+          // ⚠ THE NAMES ARE RE-CHECKED AGAINST THE DATABASE AT THIS INSTANT. They were
+          // checked before payment, but another tab could have created a clashing agency in
+          // between. Reading inside the transaction is what makes the check and the create
+          // atomic; checking outside it would leave exactly the window it is meant to close.
+          const owned = await tx.get(db.collection('agencies').where('ownerId', '==', uid));
+          const taken = new Set(owned.docs.map(d => nameKey((d.data() || {}).name)));
+
+          if (orderedNames.length === 0) {
+            throw new HttpsError('failed-precondition',
+              `Order ${orderId} recorded no agency names. Nothing can be created from it.`);
+          }
+
+          for (const nm of orderedNames) {
+            if (taken.has(nameKey(nm))) {
+              // ⚠ REFUSES THE WHOLE BATCH RATHER THAN SKIPPING ONE. A silent skip would
+              // charge for five and deliver four, which is worse than a refusal a person can
+              // act on - and the refusal leaves the payment unprocessed, so it can be retried
+              // after the clash is resolved.
+              throw new HttpsError('already-exists',
+                `An agency called "${nm}" already exists on this account, so nothing was `
+                + `created. Your payment is recorded and can be applied once the name is `
+                + `changed - quote payment ${paymentId}.`);
+            }
+            taken.add(nameKey(nm));
+          }
+
+          for (const nm of orderedNames) {
+            const ref = db.collection('agencies').doc();
+            // The SAME compiled seed the browser uses (agency-seed.generated.mjs), so what a
+            // new agency contains does not depend on which path created it (AUDIT G32).
+            tx.create(ref, {
+              ...buildNewAgencyDocument({ name: nm }, uid),
+              createdAt: FieldValue.serverTimestamp(),
+            });
+            tx.set(db.collection('subscriptions').doc(ref.id), {
+              agencyId: ref.id,
+              agencyName: nm,
+              ownerId: uid,
+              ownerEmail: email,
+              status: 'active',
+              // What one agency cost, not what the whole order cost. A subscription is per
+              // agency, and an invoice line is per agency.
+              planAmount: PRICE_INCLUSIVE_INR,
+              currency: String(order.currency || CURRENCY),
+              startDate: now,
+              // ⚠ THE SAME INSTANT FOR EVERY AGENCY ON THE ORDER. One payment, one service
+              // period - which is also what makes the invoice's line items agree with each
+              // other. The old slot model started each year whenever its credit happened to be
+              // spent, so a single receipt could cover five different periods.
+              expiryDate: now + SUBSCRIPTION_DAYS * 24 * 60 * 60 * 1000,
+              origin: 'purchase',
+              razorpayOrderId: orderId,
+              razorpayPaymentId: paymentId,
+              lastPaymentDate: now,
+              invoicePending: true,
+            });
+            createdIds.push(ref.id);
+          }
         } else {
           throw new HttpsError('failed-precondition', `Order ${orderId} has no usable kind.`);
         }
@@ -334,13 +443,15 @@ export function makeVerifySubscriptionPayment(db) {
 
         tx.update(orderSnap.ref, { status: 'paid', paidAt: now, paymentId });
 
-        return { alreadyProcessed: false, expiryDate };
+        return { alreadyProcessed: false, expiryDate, created: [...createdIds] };
       });
 
       return {
         ok: true,
         kind,
         agencyId,
+        createdAgencyIds: result.created || [],
+        createdNames: orderedNames,
         alreadyProcessed: !!result.alreadyProcessed,
         expiryDate: result.expiryDate ?? null,
         // Stated plainly so the screen can say it rather than implying an invoice is coming
