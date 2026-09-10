@@ -22,6 +22,8 @@ import { checkMasterSection, storedSection, storedSectionForRates, MasterSection
 import { scheduleSrForMasterCode, variantAxisForMasterCode } from '../lib/scheduleItemMap';
 import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetForAt, SCHEDULES, hasScheduleB } from '../lib/ugvclSchedules';
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
+import { sameContent } from '../lib/compareSections';
+import { rateHolderFor, seedSection, planReseed, sectionIsEdited, cloneRows } from '../lib/estimateMasterSeed';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
@@ -173,211 +175,8 @@ function variantMarker(itemCode: string): string | null {
     : 'Varies by capacity';
 }
 
-function mergeDefaultRates(items: EstimateItem[]): EstimateItem[] {
-  return items.map((item: any) => ({
-    ...item,
-    rates: {
-      ...defaultRates,
-      ...item.rates
-    }
-  }));
-}
-
-function normalizeCircleLimitsData(items: EstimateItem[] | undefined, defaultData: EstimateItem[]): EstimateItem[] {
-  if (!items || items.length === 0) {
-    return JSON.parse(JSON.stringify(defaultData));
-  }
-
-  const itemMap = new Map<string, EstimateItem>();
-  items.forEach(it => {
-    const code = (it.itemCode || '').trim().toLowerCase();
-    if (code) itemMap.set(code, it);
-  });
-
-  const result: EstimateItem[] = [];
-  const processedCodes = new Set<string>();
-
-  defaultData.forEach(defItem => {
-    const code = (defItem.itemCode || '').trim().toLowerCase();
-    processedCodes.add(code);
-    const existing = itemMap.get(code);
-
-    if (existing) {
-      result.push({
-        itemCode: existing.itemCode || defItem.itemCode,
-        itemName: existing.itemName && existing.itemName.trim() !== '' ? existing.itemName : defItem.itemName,
-        unit: existing.unit || 'Rs.',
-        fixedRate: null,
-        rates: { ...defaultRates, ...defItem.rates, ...(existing.rates || {}) }
-      });
-    } else {
-      result.push(JSON.parse(JSON.stringify(defItem)));
-    }
-  });
-
-  items.forEach(it => {
-    const code = (it.itemCode || '').trim().toLowerCase();
-    if (code && !processedCodes.has(code)) {
-      result.push({
-        ...it,
-        unit: it.unit || 'Rs.',
-        rates: it.rates ? { ...defaultRates, ...it.rates } : { ...defaultRates }
-      });
-    }
-  });
-
-  return result;
-}
-
-function normalizeAmorphousOrWoundCoreData(items: EstimateItem[] | undefined, defaultData: EstimateItem[]): EstimateItem[] {
-  if (!items || items.length === 0) {
-    return JSON.parse(JSON.stringify(defaultData));
-  }
-  
-  // Check if it's the old CRGO array mistakenly stored as Wound Core / Amorphous
-  const isLegacyCrgo = items.some(it => {
-    const name = (it.itemName || '').toLowerCase();
-    return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
-  });
-
-  // Check if it's the old 10-item placeholder with 0 rates
-  const isOldPlaceholder = items.length <= 10 && items.every(it => (!it.fixedRate || it.fixedRate === 0) && (!it.rates || Object.values(it.rates).every(v => v === null || v === 0)));
-  
-  if (isLegacyCrgo || isOldPlaceholder) {
-    return JSON.parse(JSON.stringify(defaultData));
-  }
-
-  const itemMap = new Map<string, EstimateItem>();
-  items.forEach(it => {
-    const code = (it.itemCode || '').trim().toLowerCase();
-    if (code) itemMap.set(code, it);
-  });
-
-  const result: EstimateItem[] = [];
-  const processedCodes = new Set<string>();
-
-  defaultData.forEach(defItem => {
-    const code = (defItem.itemCode || '').trim().toLowerCase();
-    processedCodes.add(code);
-    const existing = itemMap.get(code);
-
-    if (existing) {
-      let fRate = existing.fixedRate;
-      if (fRate === undefined || fRate === null || fRate === 0) {
-        if (defItem.fixedRate) {
-          fRate = defItem.fixedRate;
-        } else if (existing.rates) {
-          const ratesObj = existing.rates as any;
-          const nonNull = Object.entries(ratesObj).find(([k, v]) => v !== null && !isNaN(Number(v)) && Number(v) > 0);
-          if (nonNull) fRate = Number(nonNull[1]);
-        }
-      }
-
-      // Merge rates
-      const mergedRates = { ...defaultRates, ...defItem.rates, ...(existing.rates || {}) };
-
-      let resolvedUnit = existing.unit;
-      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each') || resolvedUnit.toLowerCase().includes('coil weight')) {
-        resolvedUnit = 'QTY';
-      }
-
-      result.push({
-        itemCode: existing.itemCode || defItem.itemCode,
-        itemName: existing.itemName && existing.itemName.trim() !== '' ? existing.itemName : defItem.itemName, // Do not change user's saved description
-        unit: resolvedUnit, // Unit set to QTY
-        fixedRate: fRate !== undefined && fRate !== null && !isNaN(Number(fRate)) && Number(fRate) > 0 ? Number(fRate) : (defItem.fixedRate || 0),
-        rates: mergedRates
-      });
-    } else {
-      result.push(JSON.parse(JSON.stringify(defItem)));
-    }
-  });
-
-  items.forEach(it => {
-    const code = (it.itemCode || '').trim().toLowerCase();
-    if (code && !processedCodes.has(code)) {
-      let resolvedUnit = it.unit;
-      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each')) {
-        resolvedUnit = 'QTY';
-      }
-      result.push({
-        ...it,
-        unit: resolvedUnit,
-        fixedRate: it.fixedRate !== undefined && it.fixedRate !== null ? Number(it.fixedRate) : 0,
-        rates: it.rates ? { ...defaultRates, ...it.rates } : { ...defaultRates }
-      });
-    }
-  });
-
-  return result;
-}
-
-function normalizeOverhaulingData(items: EstimateItem[] | undefined, defaultData: EstimateItem[]): EstimateItem[] {
-  if (!items || items.length === 0) {
-    return JSON.parse(JSON.stringify(defaultData));
-  }
-
-  const itemMap = new Map<string, EstimateItem>();
-  items.forEach(it => {
-    const code = (it.itemCode || '').trim().toLowerCase();
-    if (code) itemMap.set(code, it);
-  });
-
-  const result: EstimateItem[] = [];
-  const processedCodes = new Set<string>();
-
-  defaultData.forEach(defItem => {
-    const code = (defItem.itemCode || '').trim().toLowerCase();
-    processedCodes.add(code);
-    const existing = itemMap.get(code);
-
-    if (existing) {
-      let fRate = existing.fixedRate;
-      if (fRate === undefined || fRate === null || fRate === 0) {
-        if (defItem.fixedRate) {
-          fRate = defItem.fixedRate;
-        } else if (existing.rates) {
-          const ratesObj = existing.rates as any;
-          const nonNull = Object.entries(ratesObj).find(([k, v]) => v !== null && !isNaN(Number(v)) && Number(v) > 0);
-          if (nonNull) fRate = Number(nonNull[1]);
-        }
-      }
-
-      let resolvedUnit = existing.unit;
-      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each') || resolvedUnit.toLowerCase().includes('transformer')) {
-        resolvedUnit = 'QTY';
-      }
-
-      result.push({
-        ...defItem,
-        ...existing,
-        unit: resolvedUnit,
-        fixedRate: fRate !== undefined && fRate !== null ? Number(fRate) : (defItem.fixedRate || 0),
-        rates: existing.rates ? { ...defItem.rates, ...existing.rates } : { ...defItem.rates }
-      });
-    } else {
-      result.push(JSON.parse(JSON.stringify(defItem)));
-    }
-  });
-
-  items.forEach(it => {
-    const code = (it.itemCode || '').trim().toLowerCase();
-    if (code && !processedCodes.has(code)) {
-      let resolvedUnit = it.unit;
-      if (!resolvedUnit || resolvedUnit.toLowerCase().includes('each') || resolvedUnit.toLowerCase().includes('transformer')) {
-        resolvedUnit = 'QTY';
-      }
-      result.push({
-        ...it,
-        unit: resolvedUnit,
-        fixedRate: it.fixedRate !== undefined && it.fixedRate !== null ? Number(it.fixedRate) : 0,
-        rates: it.rates ? { ...defaultRates, ...it.rates } : { ...defaultRates }
-      });
-    }
-  });
-
-  return result;
-}
+// mergeDefaultRates and the three section normalisers moved, unchanged, to
+// lib/estimateMasterSeed.ts, beside the seeding that uses them (AUDIT G57).
 
 export default function EstimateMaster() {
   const { 
@@ -572,23 +371,11 @@ export default function EstimateMaster() {
    * ⚠ Not `selectedAt ?? activeAgency`. That would show the agency's rates only when
    * NO AT is selected, and blank sections whenever an AT held some but not all of them -
    * which is precisely the state every migrated AT could be left in.
+   *
+   * The resolution itself lives in lib/estimateMasterSeed (rateHolderFor), because Cancel must
+   * use exactly the same one - its reading the agency directly was the defect G57 fixes.
    */
-  const rateHolder = useMemo(() => {
-    const pick = (k: keyof AtMaster & keyof Agency) => {
-      const fromAt = (selectedAt as any)?.[k];
-      if (Array.isArray(fromAt) && fromAt.length > 0) return fromAt;
-      return (activeAgency as any)?.[k];
-    };
-    return {
-      estimateMasterCRGO: pick('estimateMasterCRGO' as any),
-      estimateMasterAmorphous: pick('estimateMasterAmorphous' as any),
-      estimateMasterWoundCore: pick('estimateMasterWoundCore' as any),
-      estimateMasterOverhauling: pick('estimateMasterOverhauling' as any),
-      estimateMasterCircleLimits: pick('estimateMasterCircleLimits' as any),
-      // The pre-sections CRGO field never moved onto the AT and never will - nothing has
-      // written it since D4. Agency only.
-      estimateMaster: (activeAgency as any)?.estimateMaster };
-  }, [selectedAt, activeAgency]);
+  const rateHolder = useMemo(() => rateHolderFor(selectedAt, activeAgency), [selectedAt, activeAgency]);
 
   /**
    * WHAT THE OPERATOR IS LOOKING AT, in one value. Absent ratesSource means NO RATES YET.
@@ -603,86 +390,101 @@ export default function EstimateMaster() {
   }, [selectedAt]);
 
   /**
-   * WHAT THE LOADER BELOW COPIES, AS DATA RATHER THAN AS OBJECTS (AUDIT G56).
+   * ⚠ THE SCREEN AND THE TENDER NEVER HOLD THE SAME OBJECTS (AUDIT G57).
    *
-   * ⚠ IT WAS KEYED ON OBJECT IDENTITY, AND EVERY SAVE ANYWHERE REPLACES THOSE OBJECTS.
-   * `updateAgency` and `updateAtMaster` each put a new object into context, so saving the
-   * agency's bank details or a tender's percentage re-ran the loader, re-seeded all five grids
-   * from storage and cleared `editedSections` - discarding a half-typed rate table that had
-   * nothing to do with the save. On the long page that needed this section expanded at the
-   * time. With Agency Settings in tabs this screen stays mounted behind the others, so it would
-   * have been the ordinary workflow: type rates, go to Agency setup, save, come back to the
-   * stored figures.
+   * Every edit handler copies the section array shallowly and then changes rows IN PLACE -
+   * `data[index].rates[kva] = ...`. That is only safe while no row on screen is also a row in
+   * context. A save used to hand context the screen's own arrays; if nothing reloaded
+   * afterwards, the next keystroke changed the tender's in-memory rates, and estimates and bills
+   * in the same session priced from rates nobody had saved.
    *
-   * Keyed on the agency, the tender, and the rows the loader reads. A save that changes those
-   * rows still reloads - which is what clears `editedSections` after Save, by design - and
-   * choosing another tender still reloads, because that is a different schedule.
+   * Before G56 every save reloaded the screen from fresh copies, which hid this. The reload was
+   * wrong for its own reasons and G56 was right to remove it, but it was load-bearing and
+   * nothing said so. The guarantee is now explicit instead: rows enter the screen through
+   * seedSection (always a copy), and leave it through cloneRows (saveRatesToActiveAt,
+   * publishPlanFor).
+   *
+   * WHAT RELOADS, AND WHEN. `loadedRef` holds each section as it was last loaded. On any context
+   * change, planReseed re-seeds only the sections whose stored rows actually moved - compared with
+   * sameContent, never JSON.stringify - so saving one section no longer discards unsaved edits in
+   * the other four. Changing tender or agency reloads all five, because the screen is then editing
+   * a different schedule (O55 records that this happens without a warning).
+   *
+   * Declared above the early return below, with every other hook here (G47).
    */
-  const loadKey = useMemo(
-    () => JSON.stringify([activeAgency?.id ?? null, selectedAt?.id ?? null, rateHolder, globalDefaultEstimateMaster ?? null]),
-    [activeAgency?.id, selectedAt?.id, rateHolder, globalDefaultEstimateMaster],
-  );
+  const sectionContext = `${activeAgency?.id ?? ''}|${selectedAt?.id ?? ''}`;
+  const loadedRef = useRef<{ context: string | null; rows: Partial<Record<SectionKey, EstimateItem[]>> }>({ context: null, rows: {} });
+
+  /** Puts freshly seeded rows on screen and records them as loaded - two copies, sharing nothing. */
+  const writeLoadedSection = (section: SectionKey, rows: EstimateItem[]) => {
+    loadedRef.current.rows[section] = cloneRows(rows);
+    const screen = cloneRows(rows);
+    if (section === 'CRGO') setCrgoData(screen);
+    else if (section === 'AMORPHOUS') setAmorphousData(screen);
+    else if (section === 'WOUND_CORE') setWoundCoreData(screen);
+    else if (section === 'OVERHAULING') setOverhaulingData(screen);
+    else setCircleLimitsData(screen);
+  };
 
   useEffect(() => {
-    if (activeAgency) {
-      // Load CRGO
-      if (rateHolder.estimateMasterCRGO && rateHolder.estimateMasterCRGO.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(rateHolder.estimateMasterCRGO))));
-      } else if (globalDefaultEstimateMaster?.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
-      } else if (rateHolder.estimateMaster && rateHolder.estimateMaster.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(rateHolder.estimateMaster))));
-      } else {
-        setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
-      }
-
-      // Load Amorphous
-      let currentAmorphous: EstimateItem[] = [];
-      if (rateHolder.estimateMasterAmorphous && rateHolder.estimateMasterAmorphous.length > 0) {
-        currentAmorphous = normalizeAmorphousOrWoundCoreData(rateHolder.estimateMasterAmorphous, defaultAmorphousEstimateData);
-      } else if (globalDefaultEstimateMaster?.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
-        currentAmorphous = normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData);
-      } else {
-        currentAmorphous = JSON.parse(JSON.stringify(defaultAmorphousEstimateData));
-      }
-      setAmorphousData(currentAmorphous);
-      // A fresh load is not an edit. Cleared here so `editedSections` means exactly
-      // "the operator changed this since it was loaded".
-      setEditedSections({});
-
-      // Load Wound Core
-      const isLegacyWc = (arr?: EstimateItem[]) => !arr || arr.length === 0 || arr.some(it => {
-        const name = (it.itemName || '').toLowerCase();
-        return name.includes('dismental') || name.includes('washer ring') || name.includes('hv metal') || name.includes('lv metal');
-      });
-
-      if (rateHolder.estimateMasterWoundCore && rateHolder.estimateMasterWoundCore.length > 0 && !isLegacyWc(rateHolder.estimateMasterWoundCore)) {
-        setWoundCoreData(normalizeAmorphousOrWoundCoreData(rateHolder.estimateMasterWoundCore, currentAmorphous));
-      } else if (globalDefaultEstimateMaster?.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0 && !isLegacyWc(globalDefaultEstimateMaster.estimateMasterWoundCore)) {
-        setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, currentAmorphous));
-      } else {
-        setWoundCoreData(JSON.parse(JSON.stringify(currentAmorphous)));
-      }
-
-      // Load Overhauling
-      if (rateHolder.estimateMasterOverhauling && rateHolder.estimateMasterOverhauling.length > 0) {
-        setOverhaulingData(normalizeOverhaulingData(rateHolder.estimateMasterOverhauling, defaultOverhaulingEstimateData));
-      } else if (globalDefaultEstimateMaster?.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
-        setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
-      } else {
-        setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
-      }
-
-      // Load Circle Approval Limits
-      if (rateHolder.estimateMasterCircleLimits && rateHolder.estimateMasterCircleLimits.length > 0) {
-        setCircleLimitsData(normalizeCircleLimitsData(rateHolder.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
-      } else if (globalDefaultEstimateMaster?.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
-        setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
-      } else {
-        setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
-      }
+    if (!activeAgency) return;
+    const contextChanged = loadedRef.current.context !== sectionContext;
+    if (contextChanged) loadedRef.current = { context: sectionContext, rows: {} };
+    for (const { section, rows } of planReseed(rateHolder, globalDefaultEstimateMaster, loadedRef.current.rows, contextChanged)) {
+      writeLoadedSection(section, rows);
     }
-  }, [loadKey]);
+  }, [sectionContext, rateHolder, globalDefaultEstimateMaster]);
+
+  /**
+   * WHICH SECTIONS DIFFER FROM WHAT WAS LOADED - derived on every change, never remembered (O56).
+   *
+   * Recomputed whenever a section's screen state changes; `loadedRef` only ever changes together
+   * with the screen state it describes, so the two cannot drift.
+   */
+  const editedNow = useMemo((): Record<SectionKey, boolean> => ({
+    CRGO: sectionIsEdited(crgoData, loadedRef.current.rows.CRGO),
+    AMORPHOUS: sectionIsEdited(amorphousData, loadedRef.current.rows.AMORPHOUS),
+    WOUND_CORE: sectionIsEdited(woundCoreData, loadedRef.current.rows.WOUND_CORE),
+    OVERHAULING: sectionIsEdited(overhaulingData, loadedRef.current.rows.OVERHAULING),
+    CIRCLE_LIMITS: sectionIsEdited(circleLimitsData, loadedRef.current.rows.CIRCLE_LIMITS),
+  }), [crgoData, amorphousData, woundCoreData, overhaulingData, circleLimitsData]);
+
+  /** Sections saved on THIS tender since it was opened here - see touchedSections. */
+  const savedRef = useRef<{ context: string | null; sections: Set<SectionKey> }>({ context: null, sections: new Set() });
+
+  /**
+   * THE ATs THIS USER COULD COPY RATES TO.
+   *
+   * ACROSS AGENCIES, not just this one - an owner with several agencies now has several
+   * tenders, and copying a schedule between tenders is the useful action. Copying between
+   * AGENCY documents writes to the fallback rung, which would silently re-price every
+   * tender that has no schedule of its own.
+   *
+   * Carries the agency name because an AT number does not identify an AT: "2026-27" exists
+   * under two different agencies in live data.
+   *
+   * CLOSED TENDERS ARE OFFERED BUT MARKED, never silently included. Copying rates into a
+   * retired tender re-prices the jobs still under it, and AARATI's only AT is Closed with a
+   * job beneath it - so this is a real case, not a hypothetical.
+   *
+   * ⚠ ABOVE THE EARLY RETURN (AUDIT G57). This `useMemo` sat below `if (!activeAgency) { return }`,
+   * the React #310 shape G47 recorded - invisible to scripts/admin/hooks-after-return.js, which
+   * recognises an early return only on the same line as its `if`, and a hook only without type
+   * arguments (`useState<T>(` does not match). Two hooks that followed it were missed the same way.
+   */
+  const applyCandidateAts = useMemo(() => {
+    const uid = activeAgency?.ownerId;
+    const ownedAgencyIds = new Set(agencies.filter(a => a.ownerId === uid).map(a => a.id));
+    return atMasters
+      .filter(t => t.id !== selectedAt?.id && t.ownerId === uid && ownedAgencyIds.has(t.agencyId))
+      .map(t => ({
+        id: t.id,
+        label: t.atNumber || t.name || t.id,
+        agencyName: agencies.find(a => a.id === t.agencyId)?.name || '(unknown agency)',
+        closed: String(t.status || '').toLowerCase() === 'closed',
+        ratesSource: String((t as any).ratesSource || '') || null }))
+      .sort((a, b) => a.agencyName.localeCompare(b.agencyName) || a.label.localeCompare(b.label));
+  }, [atMasters, agencies, activeAgency, selectedAt]);
 
   if (!activeAgency) {
     return (
@@ -718,54 +520,43 @@ export default function EstimateMaster() {
   };
 
   /**
-   * WHICH SECTIONS THE OPERATOR HAS ACTUALLY TOUCHED.
+   * ⚠ "EDITED" IS A COMPARISON, NOT A FLAG (AUDIT G57, closing O56).
    *
-   * Deliberately NOT "the loaded data differs from what is stored" - that is true of
-   * almost every section almost always, because the load path normalises: it merges
-   * default rows in, reorders to default order, forces units to QTY and backfills
-   * fixedRate. Using "differs from stored" as the edit test would classify every section
-   * as edited and the distinction would do nothing.
+   * It used to be `editedSections`, set by `markEdited` on an operator action and cleared only
+   * by a reload. Cancel and a no-change save left it set, so it reported edits that did not
+   * exist - and three things acted on that: the stored-vs-showing band said "not saved" about a
+   * cancelled section, publishPlanFor published on-screen rows as "your edited rows", and
+   * "Apply to my agencies" got past its own "Nothing to apply" refusal and wrote a section
+   * nobody had changed into other tenders.
    *
-   * This is set only where an operator action changes a section: cell edits, add, delete,
-   * the resets, and the Amorphous -> Wound Core sync. It is cleared when the agency's data
-   * is (re)loaded and after a successful save.
+   * A signal of change raised by an act instead of by the data is trusted until it is wrong and
+   * ignored after - the shape of the template version that bumped on metadata-only republishes.
+   * That was fixed by comparing the data; so is this. `editedNow` (above the early return) asks
+   * whether a section's screen rows differ from what was loaded.
+   *
+   * It is NOT "differs from what is stored": the load path normalises - merging default rows,
+   * reordering, forcing units to QTY, backfilling fixedRate - so almost every section differs
+   * from storage almost always. The comparison is against the normalised rows as loaded.
    */
-  const [editedSections, setEditedSections] = useState<Record<string, boolean>>({});
+
+  /** Records sections saved on this tender, for touchedSections. */
+  const noteSaved = (sections: SectionKey[]) => {
+    if (savedRef.current.context !== sectionContext) savedRef.current = { context: sectionContext, sections: new Set() };
+    sections.forEach(sec => savedRef.current.sections.add(sec));
+  };
 
   /**
-   * Sections the operator has changed while this agency has been open, SURVIVING A SAVE.
+   * Sections changed on THIS tender this session: saved since it was opened here, or differing
+   * from what was loaded now. The ordinary workflow is edit, Save All, then apply to other
+   * tenders, so a saved change has to keep counting after the save re-seeds its section.
    *
-   * `editedSections` cannot serve this. The loader effect is keyed on the rows it copies
-   * (loadKey), and a save changes those rows - so saving re-runs the effect, which clears
-   * `editedSections` by design ("a fresh load is not an edit"). That is right for
-   * publishPlanFor, which asks "is the screen ahead of storage"; after a save it is not.
-   *
-   * But "which sections did I change" is a different question, and the answer must outlive
-   * the save - the ordinary workflow is edit, Save All, then apply to the other agencies.
-   * Keyed on agency id so switching agencies resets it and switching back does not
-   * resurrect a stale set.
+   * Keyed on agency AND tender. It was keyed on the agency alone, so switching tender and
+   * applying could send sections saved on a different tender - read from this one.
    */
-  const touchedRef = useRef<{ agencyId: string | null; sections: Set<string> }>({ agencyId: null, sections: new Set() });
-  const noteTouched = (...sections: string[]) => {
-    const id = activeAgency?.id ?? null;
-    if (touchedRef.current.agencyId !== id) touchedRef.current = { agencyId: id, sections: new Set() };
-    sections.forEach(sec => touchedRef.current.sections.add(sec));
-  };
   const touchedSections = (): SectionKey[] =>
-    (activeAgency?.id && touchedRef.current.agencyId === activeAgency.id)
-      ? SECTION_KEYS.filter(k => touchedRef.current.sections.has(k))
-      : [];
-  const markEdited = (...sections: string[]) => {
-    noteTouched(...sections);
-    return setEditedSections(prev => {
-      const next = { ...prev };
-      sections.forEach(sec => { next[sec] = true; });
-      return next;
-    });
-  };
+    SECTION_KEYS.filter(k => editedNow[k] || (savedRef.current.context === sectionContext && savedRef.current.sections.has(k)));
 
   const setSectionData = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS', newData: EstimateItem[]) => {
-    markEdited(section);
     if (section === 'CRGO') setCrgoData(newData);
     else if (section === 'AMORPHOUS') setAmorphousData(newData);
     else if (section === 'WOUND_CORE') setWoundCoreData(newData);
@@ -913,7 +704,6 @@ export default function EstimateMaster() {
 
   // Reset Circle Limits to Official UGVCL Clause 4.0 Standard Schedule
   const handleResetCircleLimitsToDefault = () => {
-    markEdited(...['CIRCLE_LIMITS']);
     setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
     setEditingSection('CIRCLE_LIMITS');
     setOpenCircleLimits(true);
@@ -978,7 +768,6 @@ export default function EstimateMaster() {
     const wasRate = woundCoreData[targetIdx]?.rates?.['25'] ?? woundCoreData[targetIdx]?.fixedRate;
     const nowRate = source.rates?.['25'] ?? source.fixedRate;
 
-    markEdited('WOUND_CORE');
     const next = [...woundCoreData];
     next[targetIdx] = JSON.parse(JSON.stringify(source));
     setWoundCoreData(next);
@@ -1065,6 +854,8 @@ export default function EstimateMaster() {
       }
 
       await saveRatesToActiveAt(updatePayload);
+      // Only a save that changed something counts as a change - a no-change save is not one.
+      if (editedNow[section]) noteSaved([section]);
       setEditingSection(null);
       setPendingSaveSection(null);
       setSyncSuccessMsg(`✓ Saved ${section} rates for AT "${selectedAt?.atNumber || selectedAt?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
@@ -1103,7 +894,7 @@ export default function EstimateMaster() {
           ? (selectedAt as any).estimateMasterCircleLimits
           : activeAgency?.estimateMasterCircleLimits)
       : storedSectionForRates(selectedAt, activeAgency, section as MasterSection);
-    const edited = Boolean(editedSections[section]);
+    const edited = editedNow[section];
 
     // Rows on screen whose code is absent from storage - the normaliser's additions.
     const storedCodes = new Set(
@@ -1123,7 +914,10 @@ export default function EstimateMaster() {
       section,
       edited,
       useStored,
-      payload: useStored ? (stored as EstimateItem[]) : shown,
+      // A COPY either way (AUDIT G57). This payload is written into other tenders (Apply) and into
+      // templates (Publish), and context keeps what it is given - the screen's own rows here would
+      // let a later keystroke change another tender's in-memory rates.
+      payload: cloneRows(useStored ? (stored as EstimateItem[]) : shown),
       storedCount: Array.isArray(stored) ? stored.length : 0,
       shownCount: shown.length,
       autoAdded };
@@ -1305,8 +1099,14 @@ export default function EstimateMaster() {
     if (!selectedAt) {
       throw new Error('No AT is selected, so there is nowhere to save these rates. Rates belong to a tender.');
     }
+    // ⚠ A COPY, NEVER THE SCREEN'S OWN ARRAYS (AUDIT G57). Context keeps what it is given; given
+    // the screen's arrays, the next in-place edit would change the tender's in-memory rates -
+    // which estimates and bills in this session price from - before anyone saved it.
+    const copied = Object.fromEntries(
+      Object.entries(payload).map(([k, v]) => [k, Array.isArray(v) ? cloneRows(v) : v]),
+    );
     await updateAtMaster(selectedAt.id, {
-      ...payload,
+      ...copied,
       ratesSource: 'own',
       ratesUpdatedAt: Date.now(),
       ...editStamp() } as any);
@@ -1333,6 +1133,8 @@ export default function EstimateMaster() {
         estimateMasterOverhauling: overhaulingData,
         estimateMasterCircleLimits: circleLimitsData };
       await saveRatesToActiveAt(payload);
+      // Save All writes five sections; only the ones that differed were changed (AUDIT O31).
+      noteSaved(SECTION_KEYS.filter(k => editedNow[k]));
       setEditingSection(null);
       setSyncSuccessMsg(`✓ Saved all five sections for AT "${selectedAt?.atNumber || selectedAt?.name}" (${activeAgency.name}). No other AT, agency or user is affected.`);
       setTimeout(() => setSyncSuccessMsg(null), 5000);
@@ -1411,34 +1213,8 @@ export default function EstimateMaster() {
    * the whole purpose of the dialog is to say what this destroys. A dialog that cannot yet
    * say it must not offer the button.
    */
-  /**
-   * THE ATs THIS USER COULD COPY RATES TO.
-   *
-   * ACROSS AGENCIES, not just this one - an owner with several agencies now has several
-   * tenders, and copying a schedule between tenders is the useful action. Copying between
-   * AGENCY documents writes to the fallback rung, which would silently re-price every
-   * tender that has no schedule of its own.
-   *
-   * Carries the agency name because an AT number does not identify an AT: "2026-27" exists
-   * under two different agencies in live data.
-   *
-   * CLOSED TENDERS ARE OFFERED BUT MARKED, never silently included. Copying rates into a
-   * retired tender re-prices the jobs still under it, and AARATI's only AT is Closed with a
-   * job beneath it - so this is a real case, not a hypothetical.
-   */
-  const applyCandidateAts = useMemo(() => {
-    const uid = activeAgency?.ownerId;
-    const ownedAgencyIds = new Set(agencies.filter(a => a.ownerId === uid).map(a => a.id));
-    return atMasters
-      .filter(t => t.id !== selectedAt?.id && t.ownerId === uid && ownedAgencyIds.has(t.agencyId))
-      .map(t => ({
-        id: t.id,
-        label: t.atNumber || t.name || t.id,
-        agencyName: agencies.find(a => a.id === t.agencyId)?.name || '(unknown agency)',
-        closed: String(t.status || '').toLowerCase() === 'closed',
-        ratesSource: String((t as any).ratesSource || '') || null }))
-      .sort((a, b) => a.agencyName.localeCompare(b.agencyName) || a.label.localeCompare(b.label));
-  }, [atMasters, agencies, activeAgency, selectedAt]);
+  // `applyCandidateAts` - the ATs this user could copy rates to - is declared above the early
+  // return, with the other hooks (AUDIT G57).
 
   const openApplyToMyAgencies = async () => {
     if (!selectedAt) {
@@ -1600,50 +1376,19 @@ export default function EstimateMaster() {
   // sections into `public_config` and re-seeded the shared baseline - the second publish
   // path. See handleConfirmSaveSection above for why one is all there can be.
 
+  /**
+   * CANCEL RESTORES THE TENDER'S ROWS - through the loader's own seeding, never its own copy of it.
+   *
+   * ⚠ THIS READ `activeAgency.estimateMaster*` DIRECTLY (AUDIT G57). It predated rates moving onto
+   * the tender (F73) and was never moved with them, so on a tender with rates of its own Cancel
+   * put the AGENCY's rows on screen - and Save All, Apply and Publish then wrote them into this
+   * tender, other tenders and templates. Its Wound Core fallback also differed from the loader's
+   * (the shipped Wound Core default rather than the Amorphous rows).
+   *
+   * Seeding from the current holder also updates the snapshot, so the section reads unedited.
+   */
   const handleCancelSection = (section: 'CRGO' | 'AMORPHOUS' | 'WOUND_CORE' | 'OVERHAULING' | 'CIRCLE_LIMITS') => {
-    if (section === 'CRGO') {
-      if (activeAgency.estimateMasterCRGO && activeAgency.estimateMasterCRGO.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMasterCRGO))));
-      } else if (globalDefaultEstimateMaster?.estimateMasterCRGO && globalDefaultEstimateMaster.estimateMasterCRGO.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(globalDefaultEstimateMaster.estimateMasterCRGO))));
-      } else if (activeAgency.estimateMaster && activeAgency.estimateMaster.length > 0) {
-        setCrgoData(mergeDefaultRates(JSON.parse(JSON.stringify(activeAgency.estimateMaster))));
-      } else {
-        setCrgoData(JSON.parse(JSON.stringify(defaultEstimateData)));
-      }
-    } else if (section === 'AMORPHOUS') {
-      if (activeAgency.estimateMasterAmorphous && activeAgency.estimateMasterAmorphous.length > 0) {
-        setAmorphousData(normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterAmorphous, defaultAmorphousEstimateData));
-      } else if (globalDefaultEstimateMaster?.estimateMasterAmorphous && globalDefaultEstimateMaster.estimateMasterAmorphous.length > 0) {
-        setAmorphousData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterAmorphous, defaultAmorphousEstimateData));
-      } else {
-        setAmorphousData(JSON.parse(JSON.stringify(defaultAmorphousEstimateData)));
-      }
-    } else if (section === 'WOUND_CORE') {
-      if (activeAgency.estimateMasterWoundCore && activeAgency.estimateMasterWoundCore.length > 0) {
-        setWoundCoreData(normalizeAmorphousOrWoundCoreData(activeAgency.estimateMasterWoundCore, defaultWoundCoreEstimateData));
-      } else if (globalDefaultEstimateMaster?.estimateMasterWoundCore && globalDefaultEstimateMaster.estimateMasterWoundCore.length > 0) {
-        setWoundCoreData(normalizeAmorphousOrWoundCoreData(globalDefaultEstimateMaster.estimateMasterWoundCore, defaultWoundCoreEstimateData));
-      } else {
-        setWoundCoreData(JSON.parse(JSON.stringify(defaultWoundCoreEstimateData)));
-      }
-    } else if (section === 'OVERHAULING') {
-      if (activeAgency.estimateMasterOverhauling && activeAgency.estimateMasterOverhauling.length > 0) {
-        setOverhaulingData(normalizeOverhaulingData(activeAgency.estimateMasterOverhauling, defaultOverhaulingEstimateData));
-      } else if (globalDefaultEstimateMaster?.estimateMasterOverhauling && globalDefaultEstimateMaster.estimateMasterOverhauling.length > 0) {
-        setOverhaulingData(normalizeOverhaulingData(globalDefaultEstimateMaster.estimateMasterOverhauling, defaultOverhaulingEstimateData));
-      } else {
-        setOverhaulingData(JSON.parse(JSON.stringify(defaultOverhaulingEstimateData)));
-      }
-    } else if (section === 'CIRCLE_LIMITS') {
-      if (activeAgency.estimateMasterCircleLimits && activeAgency.estimateMasterCircleLimits.length > 0) {
-        setCircleLimitsData(normalizeCircleLimitsData(activeAgency.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
-      } else if (globalDefaultEstimateMaster?.estimateMasterCircleLimits && globalDefaultEstimateMaster.estimateMasterCircleLimits.length > 0) {
-        setCircleLimitsData(normalizeCircleLimitsData(globalDefaultEstimateMaster.estimateMasterCircleLimits, defaultCircleLimitsEstimateData));
-      } else {
-        setCircleLimitsData(JSON.parse(JSON.stringify(defaultCircleLimitsEstimateData)));
-      }
-    }
+    writeLoadedSection(section, seedSection(section, rateHolder, globalDefaultEstimateMaster));
     setEditingSection(null);
   };
 
@@ -1739,7 +1484,9 @@ export default function EstimateMaster() {
                 // through editing describes a state they are in the middle of leaving;
                 // reporting only `data` hides the misfiling this panel exists to surface.
                 const showing = checkMasterSection(sectionKey as MasterSection, data);
-                const differs = JSON.stringify(stored || []) !== JSON.stringify(data || []);
+                // sameContent, not JSON.stringify: stored rows arrive in Firestore's key order and
+                // screen rows in the normaliser's, so a naive comparison always differs (G57).
+                const differs = !sameContent(stored || [], data || []);
 
                 // WHY the displayed list differs from storage - tested, not assumed.
                 //
@@ -1753,7 +1500,7 @@ export default function EstimateMaster() {
                 // reordering, forcing units to QTY and backfilling fixedRate.
                 //
                 // Three distinguishable causes, in order of seriousness:
-                const edited = Boolean(editedSections[sectionKey]);
+                const edited = editedNow[sectionKey];
                 const fallbackResolved = !stored || stored.length === 0 || health.blocking;
                 const storedCodes = new Set(
                   (stored || []).map(it => String(it.itemCode ?? '').trim().toLowerCase()).filter(Boolean)

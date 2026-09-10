@@ -6874,6 +6874,10 @@ for pricing, which is what they should be.**
 
 ### O56. The unsaved-edits flag reports edits that do not exist - and the screen acts on it
 
+> **FIXED in G57**, together with the first two leads below, which shared its cause. The third
+> lead, the publish guard, is a different cause and is G58. G57 also found what this entry did not:
+> Cancel restored the agency's rows, and the screen and the tender shared objects.
+
 **A defect in its own right, not a step in O55.** The check is wrong whether or not a warning is
 ever built on it.
 
@@ -6945,12 +6949,11 @@ It splits into two halves of different size, and different direction.
 
 Covers the "Rates for" selector (`setSelectedAtId`) and links carrying `at=` (the `?at=` effect).
 
-**Blocked by O56.** The check this warning would rest on, `editedSections`, reports edits that do
-not exist. A confirm built on it would fire on nothing, and operators would learn to click through
-it - worse than no warning. O56 is a defect in its own right, wrong whether or not this warning is
-ever built, and it has to be fixed first.
+**Unblocked - O56 is fixed (G57).** The unsaved check this warning rests on is now a comparison:
+`editedNow`, the screen against what was loaded. A confirm built on it fires only on a real
+difference.
 
-With O56 fixed, Half 1 is two changes:
+Half 1 is two changes:
 1. **Confirm in the selector's `onChange`** when any section is unsaved, naming the sections and
    both tenders. Cancel keeps the current selection.
 2. **The `at=` path runs in an effect, where a confirm is the wrong tool** - it would fire on
@@ -6972,8 +6975,8 @@ the size of the problem.
 
 **Route B - stop following the active AT once there are edits. PREFERRED.** It is about one line,
 no state crosses a component boundary, and the existing divergence note already handles the
-divergence it creates. Its cost is smaller than Route A's. In `markEdited`, pin the selection when
-none was chosen: `setSelectedAtId(selectedAt.id)`.
+divergence it creates. Its cost is smaller than Route A's. When any section first reads edited
+(`editedNow`, G57), pin the selection if none was chosen: `setSelectedAtId(selectedAt.id)`.
 After that, an active-AT change elsewhere no longer changes what this screen edits. The edits
 survive, and the existing divergence note (`divergedFromActive`) says the screen and the app now
 point at different tenders. Nothing outside `EstimateMaster` changes: about one line, plus a test.
@@ -12971,3 +12974,125 @@ unsaved-edit paths are verified by reading, not by use.
   O55**, with what each half would take. The first estimate made here was wrong: it said
   `editedSections` already knows whether anything is unsaved. It reports edits that do not exist,
   which is recorded as its own defect in O56.
+
+
+## G57. Estimates and bills priced from rates nobody had saved - held off by a reload G56 removed
+
+### THE SCREEN AND THE TENDER HELD THE SAME OBJECTS
+
+Every Estimate Master edit handler copies a section's array shallowly, then changes its rows in
+place: `const data = [...getSectionData(section)]; data[index].rates[kva] = ...`. Saving handed
+context the screen's own arrays: `updatePayload.estimateMasterCRGO = crgoData`, into
+`updateAtMaster`, which keeps `{ ...a, ...atData }`.
+
+**From then until something replaced the screen's rows, the screen and the tender in context were
+the same objects.** The next keystroke changed the tender's in-memory rates before anyone saved it:
+- **Estimates and bills in the same session priced from them.** `getEstimateMasterForCore` reads
+  the AT's rows from context; it copies each row but keeps its `rates` object.
+- **The stored-vs-showing band and the publish plan read them as stored.**
+
+Nothing reached Firestore, and a page reload undid it. **This is a data path, not a display bug:**
+a figure on a printed estimate or bill could be one nobody saved.
+
+**Apply had the same sharing towards the tenders it wrote.** Its payload was the screen's rows for an
+edited section. `applyRatesToOwnAts` put them into each target AT in context, so later keystrokes
+changed other tenders' in-memory rates. No reload ever stood in that path; it existed from the
+day apply between ATs shipped.
+
+### G56 REMOVED A RELOAD THAT WAS ACCIDENTALLY PREVENTING IT
+
+Before G56 the loader was keyed on object identity, and every save replaces the context object. So
+every save reloaded the screen from fresh copies, and shared rows never lasted long enough to be
+edited. **That reload was wrong for its own reasons** - it discarded unsaved edits whenever
+anything anywhere was saved - **and G56 was right to remove it. But it was load-bearing, and
+nothing recorded that.**
+
+G56 keyed the reload on `JSON.stringify` of the rows. A save that changed nothing no longer reloaded,
+so the screen kept the arrays it had just handed to context. The window was narrow. The first save
+in a session usually still reloaded, because rows saved from the screen serialise in a different
+key order from rows fetched from Firestore. **A comparison bug in one direction was masking a
+sharing bug in the other.**
+
+**The rule now, and where it is enforced.** Rows enter the screen only through `seedSection`, which
+always returns copies. They leave it only through `cloneRows`, in two places:
+- `saveRatesToActiveAt`;
+- `publishPlanFor`, whose payload Apply writes into other tenders and Publish into templates.
+
+### FIXED TOGETHER, BECAUSE THEY SHARE A CAUSE
+
+Fixing any one of these alone leaves the symptom reachable by another route - which is how a
+partial fix reads as done.
+
+| Defect | Cause | Now |
+|---|---|---|
+| **Cancel restored the agency's rows, not the tender's** | `handleCancelSection` read `activeAgency.estimateMaster*`; it predates F73 and never moved with the rates. Save All, Apply and Publish then carried those rows onward. | Cancel seeds through the loader's own `seedSection`, tender first (`rateHolderFor`) |
+| "Edited" reported edits that did not exist (O56) | a flag set by an act, cleared only by a reload | `sectionIsEdited`: the screen differs from what was loaded, by `sameContent` |
+| Saving one section discarded unsaved edits in the other four | any change re-seeded all five sections | `planReseed` re-seeds only sections whose stored rows moved |
+| `JSON.stringify` in the reload | key order read as change | `sameContent`, as `compareSections`' header requires |
+| The stored-vs-showing band's `differs` | `JSON.stringify(stored) !== JSON.stringify(data)` - true whenever key orders differ | `sameContent` |
+
+- **"Changed this session"** - what Apply refuses without, and what it sends - is now the sections
+  saved on this tender this session plus those differing now. A no-change save does not count. It
+  is keyed on agency AND tender; keyed on agency alone, switching tender and applying could send
+  sections saved on a different tender.
+- **The seeding moved to `lib/estimateMasterSeed.ts`** with the four normalisers. The normalisers
+  moved unchanged: 176 lines, compared mechanically with the committed file.
+- **The publish guard narrowing** (O56's third lead) is a different cause. It narrows on genuine
+  edits too, and is G58.
+
+### A HOOK ORDER FAULT THE GUARD COULD NOT SEE
+
+EstimateMaster had `if (!activeAgency) { return (...) }` at line 687, with three hooks after it:
+`useState` at 733, `useRef` at 748 and `useMemo` at 1429. That is the React #310 shape G47 recorded.
+`scripts/admin/hooks-after-return.js` reported "None", for two reasons:
+- **It recognises an early return only on the same line as its `if`**, not a braced block.
+- **Its hook pattern, `use[A-Z]\w*\s*\(`, does not match a hook with type arguments** -
+  `useState<Record<string, boolean>>(`.
+
+The fault was latent, not live: Agency Settings renders Estimate Master only while an agency is
+selected. The first two hooks went with `editedSections`, and `applyCandidateAts` moved above the
+return. A scan with both blind spots closed finds no other instance in `src/components`. **The guard
+itself is unchanged and still has both blind spots** - recorded here, not fixed.
+
+### THE CENSUS: NO AT SHOWS SIGNS OF A CANCELLED SECTION
+
+Read-only, against the live database, 2026-09-11.
+- **13 ATs across 7 owners.** Apply needs a second AT under the same owner: **3 owners and 9 ATs
+  could have received one.**
+- **No AT's last rates write is an apply.** An apply stamps `ratesSource: 'own'` and
+  `ratesUpdatedAt`, without the edit stamp a save writes.
+- **Six ATs carry the migration stamp** from 2026-08-26 06:48 UTC, 26 minutes before apply between ATs
+  shipped, and have had no rates write since.
+- **The limit: an apply followed by a save or an adoption leaves no stamp.** Three exposed ATs had
+  such a later write, so they are covered by content comparison instead:
+  - SAMOR 2026-27 and ADMIN 2026-28/AT/1819 adopted templates, which rewrite all five sections;
+  - SAMOR 25903 was saved, and all five of its sections match a template, its agency and its
+    sibling AT.
+- **The one Save-after-Cancel candidate, PATEL 1087** (a single-AT owner, so Apply could not reach
+  it). Its CRGO equals its agency's. Both templates differ from it only in 17 cells at 100 kVA, and
+  both were published after its last save.
+
+All of it is test data, wiped before launch.
+
+### VERIFIED, AND NOT
+
+Passed:
+- `tsc --noEmit`, `vite build` and the hooks guard - though see its blind spots above.
+- **25 tests on `lib/estimateMasterSeed.ts`:**
+  - tender first, and Cancel restoring the tender's rows;
+  - the same loaded content as the pre-G57 loader, on seven fixtures;
+  - no shared row or `rates` object in any section;
+  - save then keystroke;
+  - single-section reload, key order, and cross-tab saves;
+  - "edited" as a comparison.
+- **Negative controls.** Four broken copies of the module each fail the suite: the agency read
+  first, `JSON.stringify` in the reload, reload-all-on-any-change, and a `cloneRows` that shares.
+  G33 is why that was checked.
+
+Not verified:
+- **The tests are not in the repository.** It has no test runner; they were bundled with esbuild and
+  run from outside it.
+- **The component wiring is checked by reading, not by running:** that every save and payload goes
+  through `cloneRows`, and that `editedNow` tracks the screen. The app was not run in a browser; it
+  needs a signed-in session.
+- **Still open: O55** - switching tender discards edits without a word. Its Half 1 is now unblocked.

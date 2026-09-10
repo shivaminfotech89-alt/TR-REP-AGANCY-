@@ -74,8 +74,8 @@ export default function AgencySettings() {
    * ⚠ STAYING MOUNTED IS NOT THE WHOLE GUARANTEE. Each of those screens also re-seeds its fields
    * from context, and context objects are replaced on every save anywhere - so a save on one tab
    * re-seeded the others. Each is now keyed on the data it copies rather than on those objects:
-   * loadKey in EstimateMaster, the sync effect's dependency list in EditAgencyForm, and the
-   * prefix effect in AtDivisions.
+   * the per-section snapshot in EstimateMaster (G57, which replaced G56's whole-screen loadKey),
+   * the sync effect's dependency list in EditAgencyForm, and the prefix effect in AtDivisions.
    */
   const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<SettingsTab>>(() => new Set([settingsTab]));
   useEffect(() => {
