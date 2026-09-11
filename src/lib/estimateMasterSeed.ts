@@ -24,6 +24,7 @@ import {
   defaultOverhaulingEstimateData,
   defaultCircleLimitsEstimateData,
   defaultRates,
+  withMissingDefaultsInPlace,
   type EstimateItem,
 } from './estimateData';
 import { sameContent } from './compareSections';
@@ -325,9 +326,15 @@ export function seedSection(section: SeedSection, holder: RateHolder, globalDefa
   switch (section) {
     case 'CRGO': {
       const own = holder.estimateMasterCRGO, shared = g?.estimateMasterCRGO, legacy = holder.estimateMaster;
-      rows = has(own) ? mergeDefaultRates(cloneRows(own))
-        : has(shared) ? mergeDefaultRates(cloneRows(shared))
-        : has(legacy) ? mergeDefaultRates(cloneRows(legacy))
+      // ⚠ MISSING DEFAULT ROWS ARE SHOWN, BESIDE THEIR SIBLINGS (AUDIT G64). Pricing has always added any default
+      // row a stored master lacks (getEstimateMasterForCore); the grid did not, so such a row was priced but
+      // invisible - unreachable by the agency that would want to override it. This is how 12A(a1) / 12A(b1) reach
+      // the existing masters: shown here and written by the next Save, with no bulk write. The panel under the
+      // section already names rows "not in storage".
+      const fill = (rs: EstimateItem[]) => mergeDefaultRates(withMissingDefaultsInPlace(cloneRows(rs), defaultEstimateData));
+      rows = has(own) ? fill(own)
+        : has(shared) ? fill(shared)
+        : has(legacy) ? fill(legacy)
         : cloneRows(defaultEstimateData);
       break;
     }

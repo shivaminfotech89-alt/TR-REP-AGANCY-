@@ -256,6 +256,40 @@ export function withMissingDefaults(
   return [...saved, ...missing.map(d => JSON.parse(JSON.stringify(d)) as EstimateItem)];
 }
 
+/**
+ * THE SAME ROWS AS withMissingDefaults, EACH PLACED BESIDE ITS SIBLINGS (AUDIT G64).
+ *
+ * A missing default row goes directly after the nearest EARLIER default row the list holds; failing that,
+ * directly before the nearest LATER one; failing both, at the end. So 12A(b1) lands under 12A(b) in a stored
+ * master that predates it, rather than after the last row where nobody scanning the coil rows would see it.
+ *
+ * Rows the defaults do not know keep their places. Nothing missing returns `saved` itself. Inserted rows are
+ * copies. Used for CRGO, where the grid, the Excel export and the multi-job sheet all list rows in this order;
+ * the other sections keep withMissingDefaults.
+ */
+export function withMissingDefaultsInPlace(
+  saved: EstimateItem[] | undefined | null,
+  defaults: EstimateItem[]
+): EstimateItem[] {
+  if (!saved || saved.length === 0) return defaults;
+  const code = (i: EstimateItem) => (i.itemCode || '').trim().toLowerCase();
+  const present = new Set(saved.map(code).filter(Boolean));
+  if (defaults.every(d => !code(d) || present.has(code(d)))) return saved;
+  const out = [...saved];
+  const indexOf = (c: string) => out.findIndex(r => code(r) === c);
+  defaults.forEach((d, di) => {
+    const c = code(d);
+    if (!c || present.has(c)) return;
+    let at = -1;
+    for (let k = di - 1; k >= 0 && at === -1; k--) { const i = indexOf(code(defaults[k])); if (i !== -1) at = i + 1; }
+    for (let k = di + 1; k < defaults.length && at === -1; k++) { const i = indexOf(code(defaults[k])); if (i !== -1) at = i; }
+    if (at === -1) at = out.length;
+    out.splice(at, 0, JSON.parse(JSON.stringify(d)) as EstimateItem);
+    present.add(c);
+  });
+  return out;
+}
+
 export function getCircleLimitForJob(
   capacityKva: string | number,
   ratingOrLevel: string | undefined,
@@ -371,7 +405,20 @@ export const defaultEstimateData: EstimateItem[] = [
   { itemCode: "11A", itemName: "LV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 156.00, "16": 156.00, "25": 156.00, "63": 156.00 } },
   { itemCode: "11B", itemName: "LV Connector", unit: "QTY", rates: { ...defaultRates, "10": 149.00, "16": 149.00, "25": 149.00, "63": 149.00 } },
   { itemCode: "12A(a)", itemName: "HV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
+  // THE HV S.E. ROWS (AUDIT G64) - each directly under its without-S.E. sibling, so the two read as a pair.
+  //
+  // ⚠ AN OVERRIDE EQUAL TO THE 2020 FIGURE IS SILENTLY DISCARDED, AND THESE ARE THE ROWS THAT INVITE OVERRIDES.
+  // resolveRate reads a cell equal to UGVCL-2020's own figure for the row - 213 aluminium, 407 copper - as a COPY
+  // and prices the job's tender's Schedule-A instead. On a UGVCL-2026 AT an agency that types 213 into 12A(b1),
+  // meaning "our rate is 213", is priced 215. Every master row has this flaw; these two are the rows added so an
+  // agency can override the S.E. rate. Not fixed here: the copy test needs an explicit override marker.
+  //
+  // ⚠ NO LV S.E. ROWS - 13A(a1) / 13A(b1) - BY DECISION. The inspection records S.E. for the HV winding only
+  // (G61), so nothing would read them and a rate typed there would be silently ignored. An absent row is better
+  // than one that discards an override. Do not complete the set until LV S.E. can be recorded.
+  { itemCode: "12A(a1)", itemName: "HV Wdg. (Not Miss) -CU S.E.", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 163.00, "16": 163.00, "25": 163.00, "63": 163.00 } },
+  { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates, "10": 213.00, "16": 213.00, "25": 213.00, "63": 213.00 } },
   { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates, "10": 34.00, "16": 34.00, "25": 34.00, "63": 34.00 } },
   { itemCode: "13A(a)", itemName: "LV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 149.00, "16": 149.00, "25": 149.00, "63": 149.00 } },

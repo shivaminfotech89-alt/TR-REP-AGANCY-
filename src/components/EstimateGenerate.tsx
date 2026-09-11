@@ -28,7 +28,7 @@ import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import SingleJobEstimateReport, { classifyWindingMaterial } from './SingleJobEstimateReport';
-import { builderCodeForMasterRow } from '../lib/scheduleItemMap';
+import { lineForMasterRow } from '../lib/scheduleItemMap';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { paginateRows } from '../lib/pagination';
@@ -658,10 +658,11 @@ export default function EstimateGenerate() {
    * by changing what the builder emits, because the builder's `itemCode` is printed on the
    * single-job estimate as "As Per AT Sr" and is not ours to renumber:
    *
-   *  - COIL ROWS. The master carries one row per winding material ('12A(a)' copper,
-   *    '12A(b)' aluminium); the builder emits ONE line, coded '12A', for the material the
-   *    job actually used. builderCodeForMasterRow lands it on that material's row and
-   *    returns null for the other, so the charge appears exactly once.
+   *  - COIL ROWS. The master carries one row per tender row - per winding material, and for
+   *    the HV coil per S.E. answer too ('12A(a)', '12A(a1)', '12A(b)', '12A(b1)'). The builder
+   *    emits ONE line, coded '12A', carrying the Schedule-A row it was priced as.
+   *    lineForMasterRow lands it on the row with that code, so the charge appears exactly
+   *    once, on the row the printed estimate names (AUDIT G64).
    *  - AMORPHOUS LABOUR. Schedule-B's two lines - Repairing Charge and Labour Charge - are
    *    both emitted with `itemCode: entry.sr`, the capacity's code. Matching on the code
    *    alone would put Repairing Charge on the capacity row correctly and then leave the
@@ -686,11 +687,11 @@ export default function EstimateGenerate() {
       if (labour) return labour;
     }
 
+    // BY TENDER ROW, NOT BY MATERIAL (AUDIT G64). A coil master row takes the line printed with ITS Schedule-A
+    // code, so an S.E. job's HV coil lands on 12A(b1) and a without-S.E. one on 12A(b) - the row the printed
+    // estimate's Sr. No. names. Matching by material alone put both on 12A(b), contradicting the sheet.
     const material = classifyWindingMaterial(internalInspMap[job.id]?.windingType);
-    const code = builderCodeForMasterRow(masterCode, material);
-    if (!code) return undefined;
-    return lines.find((l: any) =>
-      String(l.itemCode ?? '').toLowerCase() === code.toLowerCase() && l.desc !== 'Labour Charge');
+    return lineForMasterRow(masterCode, lines, material);
   };
 
   /**

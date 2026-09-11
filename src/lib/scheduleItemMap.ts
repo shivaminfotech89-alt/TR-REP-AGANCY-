@@ -86,13 +86,28 @@ export const SCHEDULE_ITEM_MAP: ScheduleItemMapping[] = [
   // F51). The master's codes are irregular - '13b(b)' lower-cases the 'b' that '13A(a)'
   // capitalises - and they are reproduced here exactly as stored, not tidied.
   //
-  // ⚠ NO S.E. OR ORIGINALS-MISSING ROWS HERE, BY DECISION (2026-09-11, AUDIT O20). Schedule-A holds
-  // sixteen coil rows per tender; the master holds these four without-S.E. rows. That is not an
-  // unfinished set. Pricing reads Schedule-A whenever the master has no row, so an S.E. job prices
-  // 12A-b1 / 13A-b1 correctly without one - and every row added is another cell that can disagree
-  // with the tender. Do not "complete" it.
+  // ⚠ THE HV S.E. PAIR IS HERE. THE LV S.E. PAIR AND THE ORIGINALS-MISSING ROWS ARE NOT. BOTH BY DECISION (AUDIT G64).
+  //
+  // HV S.E. - 12A(a1) / 12A(b1). The master is where an agency records its own rates; with S.E. read from
+  // Schedule-A alone, the one rate the tender prices differently was the only one an agency could not touch.
+  // This reverses O20's "no S.E. rows" decision (2026-09-11). The S.E. lookup names ONLY these codes - never
+  // 12A(a) / 12A(b), and never the generic '12A', whose 163 would read as an override of 213 (proved before
+  // building).
+  //
+  // ⚠ THE COPY TEST DISCARDS AN OVERRIDE EQUAL TO THE 2020 FIGURE, AND THESE ARE THE ROWS THAT INVITE ONE. A cell
+  // holding 213 (407 copper) reads as a copy and the job's own tender's Schedule-A prices instead: on a
+  // UGVCL-2026 AT, an agency typing 213 meaning "our rate is 213" is priced 215. See resolveRate.
+  //
+  // LV S.E. - 13A(a1) / 13A(b1) - ABSENT. The inspection records S.E. for the HV winding only (G61), so nothing
+  // would read these rows, and a rate typed into one would be silently ignored. An absent row is better than a
+  // row that discards an override. Do not complete the set until LV S.E. can be recorded.
+  //
+  // ORIGINALS MISSING - 12B / 13B - ABSENT. Nothing records whether originals are missing (O21), so nothing
+  // would read those either.
   { masterCode: '12A(a)',   masterName: 'HV Wdg. (Not Miss) -CU', sr: '12A-a', srName: 'HT coil: Copper per kg, without S.E.' },
+  { masterCode: '12A(a1)',  masterName: 'HV Wdg. (Not Miss) -CU S.E.', sr: '12A-a1', srName: 'HT coil: Copper per kg, with S.E.' },
   { masterCode: '12A(b)',   masterName: 'HV Wdg. (Not Miss) -AL', sr: '12A-b', srName: 'HT coil: Aluminium per kg, without S.E.' },
+  { masterCode: '12A(b1)',  masterName: 'HV Wdg. (Not Miss) -AL S.E.', sr: '12A-b1', srName: 'HT coil: Aluminium per kg, with S.E.' },
   { masterCode: '13A(a)',   masterName: 'LV Wdg. (Not Miss) -CU', sr: '13A-a', srName: 'LT coil: Copper per kg, without S.E.' },
   { masterCode: '13b(b)',   masterName: 'LV Wdg. (Not Miss) -AL', sr: '13A-b', srName: 'LT coil: Aluminium per kg, without S.E.' },
   { masterCode: '14(ii)CU', masterName: 'LV Wdg. Re-Insu.-CU',    sr: '14-i',  srName: 'Re-insulation of LV coils with existing conductor: Copper' },
@@ -111,7 +126,7 @@ export const SCHEDULE_ITEM_MAP: ScheduleItemMapping[] = [
   // estimate still falls back to them, so a master that predates the split keeps working.
   { masterCode: '12A', masterName: 'HV Coil (generic fallback)',
     variants: { axis: 'winding-material', options: { Aluminium: '12A-b', Copper: '12A-a' },
-      note: "The without-S.E. rows. An S.E. job reads 12A-a1 / 12A-b1 from Schedule-A directly and never this code, as the HV S.E. answer on the inspection selects (G61). Copper priced from 12A-a since F52; it previously blocked, which mixed a rate question with a scrap question that the circle-limit indicator already answers. Originals-missing ('12B-*') is unreachable - nothing records it (O21)." } },
+      note: "The without-S.E. rows. An S.E. job reads its own master row, 12A(a1) / 12A(b1), then Schedule-A 12A-a1 / 12A-b1 - never this code, whose 163 would read as an override of the S.E. rate (G61, G64). Copper priced from 12A-a since F52; it previously blocked, which mixed a rate question with a scrap question that the circle-limit indicator already answers. Originals-missing ('12B-*') is unreachable - nothing records it (O21)." } },
 
   { masterCode: '13A', masterName: 'LV Coil (generic fallback)',
     variants: { axis: 'winding-material', options: { Aluminium: '13A-b', Copper: '13A-a' },
@@ -140,38 +155,45 @@ export const NOT_FROM_SCHEDULE_A: Record<string, string> = {
 };
 
 /**
- * Master rows that exist once PER WINDING MATERIAL, and the single line the estimate
- * builder emits for them.
+ * COIL MASTER ROWS, AND THE BUILDER LINE EACH ONE SHOWS - MATCHED BY TENDER ROW (AUDIT G64).
  *
- * The builder produces one coil line per job, coded '12A' / '13A' / '14', because a job has
- * one winding material. The master carries two rows, one per material. Anything rendering
- * the master's rows against a job's estimate therefore needs to know which of the two rows
- * the job's line belongs on - putting it on both would double it, and matching on the
- * generic code alone would put it on neither.
+ * The builder emits one coil line per job - coded '12A' / '13A' / '14' - and carries on it the Schedule-A row
+ * it was priced as (`scheduleSr`, G62). The master carries one row per tender row: per winding material, and
+ * for the HV coil per S.E. answer as well. A master row takes the line whose `scheduleSr` is ITS row, so a
+ * charge lands on exactly one row, and it is the row the printed estimate's Sr. No. names.
+ *
+ * ⚠ THIS USED TO MATCH BY MATERIAL ALONE. With 12A(b1) in the master, that put an S.E. job's HV coil on
+ * 12A(b) - the without-S.E. row - in the Excel export and on the multi-job sheet, contradicting the estimate.
+ *
+ * Which master row is which Schedule-A row is SCHEDULE_ITEM_MAP's to say; it is not repeated here.
  */
-export const MATERIAL_SPECIFIC_MASTER_ROWS: Record<string, { material: 'Copper' | 'Aluminium'; builderCode: string }> = {
-  '12a(a)':   { material: 'Copper',    builderCode: '12A' },
-  '12a(b)':   { material: 'Aluminium', builderCode: '12A' },
-  '13a(a)':   { material: 'Copper',    builderCode: '13A' },
-  '13b(b)':   { material: 'Aluminium', builderCode: '13A' },
-  '14(ii)cu': { material: 'Copper',    builderCode: '14'  },
-  '14(ii)al': { material: 'Aluminium', builderCode: '14'  },
+export const CODED_COIL_MASTER_ROWS: Record<string, string> = {
+  '12a(a)': '12A', '12a(a1)': '12A', '12a(b)': '12A', '12a(b1)': '12A',
+  '13a(a)': '13A', '13b(b)': '13A',
+  '14(ii)cu': '14', '14(ii)al': '14',
 };
 
 /**
- * The builder line code a master row should read, or null if this row does not apply to
- * this job. Null for the material that was not used, and null when the material is unknown -
- * an unresolved material must not silently land the charge on one of the two rows.
+ * The builder line a master row shows for a job, or undefined when the row does not apply to it.
+ *
+ * Undefined for every coil row when the winding material is unknown: an unresolved material must not land the
+ * charge on any row. A row that is not a coil row matches on its item code, as before - excluding the
+ * 'Labour Charge' line, which the caller places by description.
  */
-export function builderCodeForMasterRow(
+export function lineForMasterRow<L extends { itemCode?: string; scheduleSr?: string; desc?: string }>(
   masterCode: string,
+  lines: L[],
   material: 'Copper' | 'Aluminium' | null,
-): string | null {
+): L | undefined {
   const raw = String(masterCode ?? '').trim();
-  const split = MATERIAL_SPECIFIC_MASTER_ROWS[raw.toLowerCase()];
-  if (!split) return raw;
-  if (material === null) return null;
-  return split.material === material ? split.builderCode : null;
+  const builderCode = CODED_COIL_MASTER_ROWS[raw.toLowerCase()];
+  if (builderCode) {
+    if (material === null) return undefined;
+    const sr = scheduleSrForMasterCode(raw);
+    if (!sr) return undefined;
+    return lines.find(l => String(l.itemCode ?? '') === builderCode && String(l.scheduleSr ?? '').toLowerCase() === sr.toLowerCase());
+  }
+  return lines.find(l => String(l.itemCode ?? '').toLowerCase() === raw.toLowerCase() && l.desc !== 'Labour Charge');
 }
 
 /** The single lookup. Returns the Schedule-A `sr` for an unambiguous item, else null. */

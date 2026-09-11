@@ -11,6 +11,7 @@ import {
   defaultOverhaulingEstimateData, 
   defaultCircleLimitsEstimateData,
   withMissingDefaults,
+  withMissingDefaultsInPlace,
   EstimateItem
 } from './estimateData';
 import { checkMasterSection } from './estimateMasterHealth';
@@ -1035,16 +1036,17 @@ export function getEstimateMasterForCore(
     return defaultWoundCoreEstimateData;
   }
 
-  // CRGO
+  // CRGO - A MISSING DEFAULT ROW GOES BESIDE ITS SIBLINGS, NOT AT THE END (AUDIT G64). Pricing reads by code and
+  // is indifferent to order, but the estimate Excel export and the multi-job sheet list rows in this order, and
+  // the grid shows the same rows in the same places (seedSection) - so 12A(b1) sits under 12A(b) in all three.
   if (at?.estimateMasterCRGO && at.estimateMasterCRGO.length > 0) {
-    return withMissingDefaults(at.estimateMasterCRGO, defaultEstimateData);
+    return withMissingDefaultsInPlace(at.estimateMasterCRGO, defaultEstimateData);
   }
-  // CRGO
   if (agency?.estimateMasterCRGO && agency.estimateMasterCRGO.length > 0) {
-    return withMissingDefaults(agency.estimateMasterCRGO, defaultEstimateData);
+    return withMissingDefaultsInPlace(agency.estimateMasterCRGO, defaultEstimateData);
   }
   if (globalDef?.estimateMasterCRGO && globalDef.estimateMasterCRGO.length > 0) {
-    return withMissingDefaults(globalDef.estimateMasterCRGO, defaultEstimateData);
+    return withMissingDefaultsInPlace(globalDef.estimateMasterCRGO, defaultEstimateData);
   }
   // STEPS 3 AND 4 ARE UNREACHABLE TODAY. DO NOT DELETE THEM AS DEAD CODE.
   //

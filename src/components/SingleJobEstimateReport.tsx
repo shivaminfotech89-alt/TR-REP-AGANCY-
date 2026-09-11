@@ -1179,14 +1179,19 @@ export function buildSingleJobEstimateData(
   // The row is named once and used twice: to price the line, and to print on it (AUDIT G62).
   const hvCoilSr = isCopper ? (hvWithSe ? '12A-a1' : '12A-a') : (hvWithSe ? '12A-b1' : '12A-b');
   const hvCoilScheduleValue = scheduleRate(hvCoilSr);
-  // ⚠ WITH S.E. READS SCHEDULE-A ONLY - NEVER THE MASTER'S '12A(b)' / '12A(a)' ROWS.
+  // WITH S.E. READS ITS OWN MASTER ROW - 12A(a1) / 12A(b1) - AND SCHEDULE-A WHERE THAT ROW HAS NO CELL (AUDIT G64).
   //
-  // Those rows are the WITHOUT-S.E. figures, and the master deliberately has no S.E. rows (AUDIT
-  // O20). resolveRate's copy test compares a master cell against the baseline of the row being
-  // priced: a copied 163 in '12A(b)' differs from 12A-b1's 213, reads as a genuine override, and
-  // would price S.E. work at the without-S.E. rate. So the S.E. lookup names no master code.
+  // ⚠ ONLY THAT ROW. Never 12A(a) / 12A(b), which hold the without-S.E. figures, and never the generic '12A'.
+  // resolveRate's copy test compares a master cell against the baseline of the row being PRICED, so a 163 in
+  // either would differ from 12A-b1's 213 and read as a genuine override. Proved before building: with a
+  // generic 12A row at 163, naming it priced S.E. work at 163.
+  //
+  // ⚠ AND AT THIS ROW THE COPY TEST'S FLAW MATTERS MOST. A cell equal to the 2020 figure (213, 407) reads as a
+  // copy and the tender's Schedule-A wins - so an agency on UGVCL-2026 typing 213, meaning "our rate", is priced
+  // 215. These rows exist so agencies can override the S.E. rate, and the override that equals the old tender's
+  // figure is the one this test cannot see. Not fixed here; see resolveRate.
   const hvCoilRate = hvWithSe
-    ? resolveRate([], hvCoilScheduleValue)
+    ? resolveRate(isCopper ? ['12A(a1)'] : ['12A(b1)'], hvCoilScheduleValue)
     : resolveRate(isCopper ? ['12A(a)', '12A'] : ['12A(b)', '12A'], hvCoilScheduleValue);
   recordErrorIfApplies(hvCoilApplies, hvCoilRate, 'HV Coil');
   const hvCoilAmt = hvCoilApplies ? hvCoilWeight * (hvCoilRate ?? 0) : 0;

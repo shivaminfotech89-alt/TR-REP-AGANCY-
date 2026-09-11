@@ -284,7 +284,20 @@ var defaultEstimateData = [
   { itemCode: "11A", itemName: "LV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 156, "16": 156, "25": 156, "63": 156 } },
   { itemCode: "11B", itemName: "LV Connector", unit: "QTY", rates: { ...defaultRates, "10": 149, "16": 149, "25": 149, "63": 149 } },
   { itemCode: "12A(a)", itemName: "HV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
+  // THE HV S.E. ROWS (AUDIT G64) - each directly under its without-S.E. sibling, so the two read as a pair.
+  //
+  // ⚠ AN OVERRIDE EQUAL TO THE 2020 FIGURE IS SILENTLY DISCARDED, AND THESE ARE THE ROWS THAT INVITE OVERRIDES.
+  // resolveRate reads a cell equal to UGVCL-2020's own figure for the row - 213 aluminium, 407 copper - as a COPY
+  // and prices the job's tender's Schedule-A instead. On a UGVCL-2026 AT an agency that types 213 into 12A(b1),
+  // meaning "our rate is 213", is priced 215. Every master row has this flaw; these two are the rows added so an
+  // agency can override the S.E. rate. Not fixed here: the copy test needs an explicit override marker.
+  //
+  // ⚠ NO LV S.E. ROWS - 13A(a1) / 13A(b1) - BY DECISION. The inspection records S.E. for the HV winding only
+  // (G61), so nothing would read them and a rate typed there would be silently ignored. An absent row is better
+  // than one that discards an override. Do not complete the set until LV S.E. can be recorded.
+  { itemCode: "12A(a1)", itemName: "HV Wdg. (Not Miss) -CU S.E.", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 163, "16": 163, "25": 163, "63": 163 } },
+  { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates, "10": 213, "16": 213, "25": 213, "63": 213 } },
   { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates, "10": 34, "16": 34, "25": 34, "63": 34 } },
   { itemCode: "13A(a)", itemName: "LV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 149, "16": 149, "25": 149, "63": 149 } },

@@ -207,3 +207,34 @@ test('an added row is an edit; nothing loaded yet is not', () => {
   assert.equal(sectionIsEdited([...cloneRows(snap), { itemCode: '', itemName: '', unit: 'QTY', rates: {} as any }], snap), true);
   assert.equal(sectionIsEdited(snap, undefined), false);
 });
+
+// ------------------------------------------------------------------ 6. the grid shows missing default rows (G64)
+const SE_CODES = ['12a(a1)', '12a(b1)'];
+const storedWithoutSe = () => cloneRows(defaultEstimateData).filter(r => !SE_CODES.includes(String(r.itemCode).toLowerCase()));
+const atWithoutSe: any = { id: 'at-old', estimateMasterCRGO: storedWithoutSe() };
+
+test('a stored CRGO master that predates the S.E. rows shows them, each under its sibling', () => {
+  const codes = seedSection('CRGO', rateHolderFor(atWithoutSe, agency)).map(r => String(r.itemCode));
+  assert.equal(codes[codes.indexOf('12A(a)') + 1], '12A(a1)');
+  assert.equal(codes[codes.indexOf('12A(b)') + 1], '12A(b1)');
+});
+
+test('showing them is not an unsaved edit', () => {
+  const snap = seedSection('CRGO', rateHolderFor(atWithoutSe, agency));
+  assert.equal(sectionIsEdited(cloneRows(snap), snap), false);
+});
+
+test('showing them writes nothing to the stored rows', () => {
+  const before = atWithoutSe.estimateMasterCRGO.length;
+  seedSection('CRGO', rateHolderFor(atWithoutSe, agency));
+  assert.equal(atWithoutSe.estimateMasterCRGO.length, before);
+  assert.equal(atWithoutSe.estimateMasterCRGO.some((r: any) => SE_CODES.includes(String(r.itemCode).toLowerCase())), false);
+});
+
+test('a stored S.E. row keeps its own figure and is not duplicated', () => {
+  const stored = cloneRows(defaultEstimateData).map(r => (r.itemCode === '12A(b1)' ? { ...r, rates: { ...r.rates, '63': 220 } } : r));
+  const rows = seedSection('CRGO', rateHolderFor({ id: 'at-se', estimateMasterCRGO: stored }, agency));
+  const se = rows.filter(r => r.itemCode === '12A(b1)');
+  assert.equal(se.length, 1);
+  assert.equal((se[0].rates as any)['63'], 220);
+});

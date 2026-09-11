@@ -4923,7 +4923,12 @@ a sweep complete against its own pattern, wrong about the domain.
 >
 > The fixed selection lives in `SingleJobEstimateReport`, at the HV and LV coil lines.
 >
-> **DECIDED, 2026-09-11: NO S.E. ROWS IN THE ESTIMATE MASTER.** Schedule-A holds sixteen coil rows
+> **⚠ REVERSED 2026-09-11 (AUDIT G64): THE HV S.E. PAIR IS NOW IN THE MASTER.** The decision below
+> priced S.E. from Schedule-A alone. That left the one rate the tender prices differently as the only
+> rate an agency could not override. `12A(a1)` and `12A(b1)` now sit under their without-S.E. siblings.
+> The LV S.E. pair and the originals-missing rows stay out, because nothing reads them.
+>
+> ~~**DECIDED, 2026-09-11: NO S.E. ROWS IN THE ESTIMATE MASTER.**~~ Schedule-A holds sixteen coil rows
 > per tender - with and without S.E., originals present and missing, copper and aluminium. The master
 > holds four, all without S.E. **That is not an unfinished set.** Pricing reads Schedule-A whenever
 > the master has no row, so an S.E. job prices 12A-b1 and 13A-b1 correctly without a master row.
@@ -13752,8 +13757,8 @@ the HV rate and left LV alone, argued for two; the practical fact decided one.
 > this app has no way to say so - its LV coil prices without S.E. The line to change is the LV coil
 > in `SingleJobEstimateReport`, and the rows it needs are already in Schedule-A.
 
-**No S.E. rows were added to the estimate master** - a decision recorded in O20 and at the coil rows
-in `scheduleItemMap.ts`. Pricing reads Schedule-A when the master has no row.
+~~**No S.E. rows were added to the estimate master**~~ - **reversed in G64**, which adds the HV pair
+`12A(a1)` / `12A(b1)` and keeps the LV pair out.
 
 ### GUJARAT ENERGY TRANSMISSION, AND THE ORDER
 
@@ -13765,6 +13770,12 @@ whether it is, and whether it is HV only.
 `scripts/admin/revert-at-1049-12Ab.js` puts the five cells back to 163, the agency's own figures. It
 ships in dry-run mode and **refuses to apply while 21GETS-45, -46 and -47 have no HV S.E. answer**
 (the scrap job is excluded).
+
+> **UPDATED IN G64.** The script now MOVES the typed 213 into the new `12A(b1)` row instead of
+> discarding it, and puts 163 back in `12A(b)`. The answers are in: all four inspections were saved at
+> 15:13 on 2026-09-11, with 21GETS-47 and -46 S.E. and 21GETS-45 and the scrap job -44 not. Nothing
+> records who saved them. So the move's hold is met, and what remains is deploying G64, then the
+> operator's apply.
 
 The order:
 1. this field is deployed;
@@ -14049,3 +14060,98 @@ Passed:
 
 Not verified: the app in a browser. The AT form, the card marker, the refusal dialog and the send alert
 are verified by reading, by the rule's tests and by the print - not by use.
+
+
+## G64. The HV S.E. rate can be overridden in the estimate master
+
+**This reverses O20's "no S.E. rows" decision.** The estimate master is where an agency records its own
+rates. With S.E. priced from Schedule-A alone, the one rate the tender prices differently was the only
+rate an agency could not correct or override.
+
+### WHAT CHANGED
+
+- **Two rows in the default CRGO master, each directly under its without-S.E. sibling:**
+
+  | Code | Name | Schedule-A |
+  |---|---|---|
+  | `12A(a1)` | HV Wdg. (Not Miss) -CU S.E. | 12A-a1 |
+  | `12A(b1)` | HV Wdg. (Not Miss) -AL S.E. | 12A-b1 |
+
+  The names extend the existing convention, with "S.E." written as the tender and the inspection sheet
+  write it. At 27 characters they fit on one line in the grid and within the multi-job sheet's column.
+- **The S.E. lookup reads its own row, then Schedule-A.** It names only `12A(a1)` / `12A(b1)` - never
+  the without-S.E. rows, and never the generic `12A`. With a generic row at 163, naming it priced S.E.
+  work at 163; that was proved before building.
+- **The grid shows default rows a stored master lacks, beside their siblings.** Before this, pricing
+  added such a row but the grid did not show it, so it was priced but unreachable.
+  - A Save writes it; there was no bulk write to the 14 live masters.
+  - The panel under the section already names rows "not in storage".
+  - Pricing now places missing rows the same way (`withMissingDefaultsInPlace`), so the Excel export and
+    the multi-job sheet list `12A(b1)` under `12A(b)` too.
+- **The Excel export and the multi-job sheet match coil rows by tender row, not by material.** A coil
+  master row takes the line whose `scheduleSr` is its own Schedule-A row (`lineForMasterRow`).
+  - An S.E. job's HV coil lands on `12A(b1)`, the row the printed estimate names.
+  - Matching by material alone would have put it on `12A(b)`, contradicting the printed estimate.
+- **`functions/agency-seed.generated.mjs` is regenerated**, so a new agency is created with the rows.
+  `verify-seed-equality` passes, including its negative control.
+
+### RECORDED AT THE ROWS, NOT ONLY HERE
+
+The notes sit in `estimateData.ts`, `scheduleItemMap.ts` and at the S.E. lookup in
+`SingleJobEstimateReport`.
+
+- **⚠ The copy test discards an override equal to the 2020 figure, and these are the rows that invite
+  overrides.**
+  - A cell holding 213 (407 for copper) reads as a copy, and the job's own tender's Schedule-A prices
+    instead.
+  - On a UGVCL-2026 AT, an agency typing 213 into `12A(b1)`, meaning "our rate is 213", is priced 215.
+  - Every row has this flaw; it matters most on the rows added so agencies can override.
+  - Not fixed: the copy test needs an explicit marker on a typed cell, not a difference test.
+- **No LV S.E. rows (`13A(a1)` / `13A(b1)`), by decision.** The inspection records S.E. for the HV winding
+  only, so nothing would read them, and a rate typed into one would be silently ignored. An absent row
+  is better than one that discards an override. Do not complete the set until LV S.E. can be recorded.
+- **No originals-missing rows (12B / 13B), by decision.** Nothing records originals missing (O21).
+
+### AT 1049
+
+`scripts/admin/revert-at-1049-12Ab.js` now **moves** the typed 213 rather than deleting it: 163 goes back
+into `12A(b)`, and 213 into `12A(b1)` at the same five capacities, with the row inserted directly under
+`12A(b)`.
+- **Dry run:** five cells move, one row is inserted, and 0 of 31 other rows are touched.
+- **Against a plain revert it changes no figure,** and the script says so. 213 in `12A(b1)` is a copy,
+  so Schedule-A prices S.E. at the same 213.
+- **The hold is met.** The four inspections were answered at 15:13 on 2026-09-11: 21GETS-47 and -46 S.E.,
+  21GETS-45 and the scrap job -44 not. Nothing records who saved them.
+- **Until the move, 21GETS-45 prices its HV coil at the typed 213, not 163.**
+- **The order now:** deploy G64, then the operator runs the apply.
+
+### NOT DONE
+
+- Not deployed: hosting, functions (for the seed), and G63's rules clauses.
+- The move is not applied; that is the operator's write.
+- The copy test's flaw is not fixed.
+
+### VERIFIED, AND NOT
+
+Passed:
+- `tsc --noEmit`, `vite build`, the hooks guard, and `npm test`: 54 tests in 4 files, 20 of them new.
+  - **Export matching:** S.E. lands on `12A(b1)`, without S.E. on `12A(b)`, copper S.E. on `12A(a1)`;
+    each HV line lands on exactly one row, and an unknown material on none.
+  - **In-place insertion:** sibling placement, case-insensitive codes, copies, and the same rows as
+    `withMissingDefaults`.
+  - **Grid seeding:** the rows are shown under their siblings; showing them is not an unsaved edit and
+    writes nothing to storage; a stored S.E. figure survives.
+  - **Absence:** no LV S.E. and no originals-missing codes, in the map or the defaults.
+- **The builder, bd12ac0 against the working tree** (a detached worktree):
+  - **Nothing moved:** 77 live jobs, 0 moved, fingerprinted in full - including the newly answered
+    Gujarat Energy Transmission jobs.
+  - **The new row is read:** `12A(b1)` at 220 prices 220, while bd12ac0 ignores it (213). At 213 it reads
+    as a copy: 213 under 2020, 215 under 2026.
+  - **Exports:** all 80 charged coil lines on live jobs land on exactly one master row carrying their own
+    code, and a synthetic S.E. job lands on `12A(b1)` alone.
+  - **The grid:** on all 14 ATs, 34 rows are shown against 32 stored. The only additions are `12A(a1)`
+    under `12A(a)` and `12A(b1)` under `12A(b)`.
+- **Print-subtree hashes:** 13 of 13 byte-identical.
+
+Not verified: Estimate Master in a browser - the rows appearing, and a Save writing them - is verified by
+the seeding tests and the census, not by use.
