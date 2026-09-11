@@ -516,8 +516,12 @@ export const SCHEDULES: Record<ScheduleId, ScheduleSet> = {
  *
  * Every AT created before this field existed prices from the 2020 schedule today, because
  * it was the only one - so resolving absent to 2020 preserves what those tenders are
- * already charging, which is the whole requirement. It is verifiable rather than inferred:
- * they all predate the 2026 tender.
+ * already charging, which is the whole requirement.
+ *
+ * ⚠ THAT PRESERVES WHAT THEY CHARGE. IT DOES NOT SHOW WHAT THEY WERE AWARDED UNDER. This comment
+ * used to call the 2020 stamp "verifiable rather than inferred". It was inferred: the backfill
+ * read their names and dates as predating A/T 1819, and no A/T letter has confirmed it for any of
+ * the eight ATs that carry it (AUDIT O59).
  *
  * But a NEW AT falling through to this default would silently price a 2026 tender at 2020
  * rates - the defect this registry exists to prevent - so the AT form requires an explicit
@@ -590,9 +594,9 @@ export function scheduleNeedsConfirmation(at: any): boolean {
   if (source === 'template') return false;
   if (Number(at.scheduleConfirmedAt) > 0) return false;
   // A record predating these fields has no source. It carries a scheduleId from the
-  // backfill, which was verified against what the tender was already charging, so it is
-  // treated as needing confirmation only if it never got one - the same question, asked of
-  // an AT whose answer was established by script rather than by a person.
+  // backfill, which INFERRED it from the AT's name and dates - it was never checked against
+  // an A/T letter (AUDIT O59; this comment used to say "verified"). So it needs a person's
+  // confirmation exactly like any other unconfirmed schedule.
   return true;
 }
 

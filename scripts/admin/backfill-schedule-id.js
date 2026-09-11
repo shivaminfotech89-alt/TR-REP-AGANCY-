@@ -10,9 +10,13 @@
 // This is a different question with a knowable answer. `scheduleId` does not assert what
 // someone once decided; it names which schedule an AT prices from, and every AT written
 // before this field existed prices from UGVCL-2020 *because that was the only schedule in
-// the app*. The stamp records what these tenders are charging right now, and it is
-// verifiable: they all predate AT 1819 (07.09.2026), and their estimates today resolve
-// through the 2020 tables.
+// the app*. The stamp records what these tenders are charging right now.
+//
+// ⚠ CORRECTED 2026-09-11 (AUDIT O59). This said the stamp was "verifiable: they all predate
+// AT 1819 (07.09.2026)". What could be verified was only that these ATs were CHARGING 2020
+// rates, because the app had no other schedule. Which schedule each was AWARDED under was
+// inferred from its name and dates, and nothing has confirmed it against an A/T letter.
+// The stamp also left no trace on the records: `scheduleSource` is empty on every AT it wrote.
 //
 // WHAT IT BUYS. Until it runs, an absent `scheduleId` is ambiguous - "created before
 // schedules were versioned" and "created after, nobody chose" look identical, and both fall

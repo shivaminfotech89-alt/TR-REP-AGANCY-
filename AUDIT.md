@@ -6949,7 +6949,52 @@ one, on a document to the DISCOM, with nothing saying it was substituted.
 **It bears on O59.** The one place an estimate names its tender names the wrong one, for every tender
 in the database.
 
-**Not decided:** print the AT's number, refuse to issue an estimate with no order number, or both.
+### WHAT IT TAKES - reported 2026-09-11, not built
+
+**The direction, from the operator:**
+- the order number belongs on the AT, entered per tender;
+- the estimate reads the job's own AT;
+- unset prints blank and refuses - never another order's number.
+
+**What that needs:**
+- **Two fields on the AT, `orderNo` and `orderDate`** - the reference and the date exactly as the A/T
+  letter gives them.
+  - **Not `atNumber`.** On five of the eight 2020 ATs it is a label ("AT 26-27", "2026_27").
+  - **Not `startDate`.** That is a typed tender start, not the letter's date.
+  - **Rules:** they check no unknown keys, so saves would work before any deploy; adding two type clauses
+    makes it a rules deploy. `workOrderNo` and `dateOfAgreement` already have clauses, and nothing in
+    the code uses either.
+- **Entered on the AT form, at creation and on edit.**
+  - Never carried from the previous AT at a rollover.
+  - Never taken from a rate template: SAMOR's 1808 and 25903 both adopted the 1819 template, and each
+    is its own A/T.
+- **Read from the job's own AT only.** Pricing keeps its documented `?? activeAtMaster` fallback; the
+  order number must not follow it.
+  - A job with no AT (3 live) or a missing one prints blank.
+  - So the estimate needs the resolution (`atResolutionForJob`), not only an AT - a prop change at its
+    two call sites.
+- **Three reads go:** `agency.atDetails.orderNo` and `agency.contractAgreementNo`, which nothing writes,
+  and the hardcoded number and date.
+
+**When it is unset:**
+- **The sheet prints "Order No.:" with nothing after it.** No figure changes.
+- **Print, Word download and Send refuse**, naming the job and its AT and linking to that AT's settings.
+  - Word download has no refusal of any kind today - not even the two Print has.
+  - The Excel export and the multi-job sheet do not print an order number.
+- **No backfill.** The numbers exist only on paper. From the day it ships, every estimate refuses to
+  print or send until its agency types the number: 74 jobs under 14 ATs, and 3 with no AT until
+  they are assigned one.
+
+**STD-1** went out with the hardcoded reference under SAMOR's UGVCL-2026 allotment. After the change a
+reprint refuses until 25903's number is entered, then prints it. Whether the division receives a
+corrected sheet is not the app's decision.
+
+**The same shape nearby, outside this item:**
+- The bill's Order No. prefill ends at the active AT's `atNumber` (`BillingSystem.tsx:493`).
+- Its approval date ends at a hardcoded `02.03.2026` (`:520`).
+- The forwarding letter and the send reference prefill `.../EE-T-1/TRANS-REP/<MR>`.
+
+All are editable prefills, and all print as they are if nobody touches them.
 
 ---
 
@@ -6994,6 +7039,24 @@ equal to any of the code's variant rows as a copy.
 ### O59. Eight tenders price from the 2020 schedule on an inference, and nothing recorded can confirm it
 
 Open, 2026-09-11. Nothing changed.
+
+> **⚠ THE SCHEDULE STAMP IS AN INFERENCE FROM NAMES, AND NOTHING HAS CONFIRMED IT.**
+>
+> **Eight ATs carry UGVCL-2020 on that inference alone.** The backfill read their names and dates as
+> predating A/T 1819; no A/T letter was consulted for any of them.
+>
+> **If it is wrong for MEGHA AT 26-27, its 35 jobs move by Rs 6,551** - +6,551.47 across the 31 that
+> price cleanly under both schedules.
+>
+> **No record says how the stamp was decided.** `scheduleSource` is empty on all eight, and no field
+> says who stamped them, when, or on what basis. The only account is the backfill script's own
+> comment, which called the stamp "verifiable". That comment, and two in `ugvclSchedules.ts` saying
+> the same, are corrected.
+>
+> **Being checked on paper by the operator**, per AT, against three tests:
+> 1. the A/T letter's number and date;
+> 2. Schedule-A 12A-b at 163 (2020) or 165 (2026);
+> 3. the accepted-percentage clause against the AT's stored percentage.
 
 `scripts/admin/backfill-schedule-id.js` stamped every AT then in the database UGVCL-2020 except A/T 1819,
 on the reasoning that they predate 1819's date, 07.09.2026. That was an inference from names and
