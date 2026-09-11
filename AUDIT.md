@@ -7049,7 +7049,8 @@ for pricing, which is what they should be.**
 
 ### O70. The Estimate Master grid shows last tender's figures on this tender's AT
 
-Open, 2026-09-12. Reported; option 3 recommended, not built.
+Open, 2026-09-12. **Decided: option 3, in every holder and in the shipped defaults, plus the two residue slips.
+Built; not applied.** See BUILT below.
 
 **What the operator sees.** On a UGVCL-2026 AT the grid shows the stored cell - 163 for 12A(b), 2061 for 1a at
 25 kVA - where the tender says 165 and 2079.
@@ -7120,6 +7121,69 @@ RETIRING IT SAFE.**
   tender - by Rs 1 and Rs 0.01 - on 2020 ATs. That is a decision, not a side effect.
 - **No false "no rates" report.** `atRatesReadiness` reads `ratesSource`, and section health counts rows, so an
   AT with cleared cells is not reported as having no rates.
+
+### DECIDED 2026-09-12
+
+- **Clear everywhere:** ATs, agencies, templates, the shared defaults, and the shipped defaults in code. Clearing
+  the ATs alone would bring the copies back on the next adoption, AT creation or seed - the half-fix shape this
+  session keeps finding.
+- **Clear the two residue slips** - 1f@100 = 230 and 11B@100 = 148.99. They are wrong against both tenders, and
+  nothing should hold a figure no schedule contains.
+- **Leave** AT 1049's 213 and the radiator's 100 kVA cell. Each has its own script and its own reason.
+
+### DOES THE ORDER MATTER?
+
+**Not for pricing.** Clearing a cell never empties a section, so no read moves to another layer, and a copy is
+ignored whether or not it is there.
+
+**Yes, for copies flowing back in.** Values flow: shipped defaults → new agencies and the admin's shared default;
+shared defaults → agencies without a section; templates → ATs on adoption; agencies → new ATs; ATs and agencies →
+templates on publish. So:
+1. **Deploy the shipped-defaults change first.** Since G64, any Estimate Master save on a section that lacks the
+   12A(a1) / 12A(b1) rows re-adds them from the shipped defaults - with 407 and 213 until this change is live.
+   Agency seeding writes the defaults too.
+2. **Then clear the stored holders, sources before consumers:** shared defaults, templates, agencies, ATs. The
+   script writes in that order.
+3. **Then re-run the dry run and expect zero.** No order protects against an Estimate Master screen that was
+   opened before the run and saved after it - the grid saves what is on screen.
+
+Among the four clear scripts - row 7, rows 8/12C/13C, the radiator cell, and this one - order does not matter,
+but run them **one at a time**. Each reads a document once and reads it back against that first read.
+
+### BUILT 2026-09-12 - NOT APPLIED
+
+- **Shipped defaults:** `defaultEstimateData` carries no figure on any row priced from Schedule-A - 21 rows, 84
+  cells. Only the scrap row keeps its figure.
+- **The guard:** `variantRowDefaults.test.ts` now asserts that the only default CRGO row carrying a rate is one
+  recorded as not priced from Schedule-A - today, the scrap row alone.
+- **`scripts/admin/clear-copied-crgo-cells.js`, MODE `dry-run`:**
+  - clears copies and the two slips;
+  - leaves the scrap row, rows 8/12C/13C, the radiator's 100 kVA cell, and AT 1049's 12A(b) and 12A(b1);
+  - holds anything else;
+  - writes sources first, in a transaction per document, and reads back.
+- **Dry run:**
+  - **2,878 cells in 33 documents** - copies: shared 184, templates 160, agencies 1,310, ATs 1,203; slips: 21
+    (shared 2, agencies 11, ATs 8). **0 held.**
+  - **Left for their own reason:** 456 cells in rows 8/12C/13C, 20 radiator cells at 100 kVA, AT 1049's 5 cells,
+    and the scrap row's 330.
+  - **The control that must move:** on a UGVCL-2020 AT, 100 kVA - 1f 230 → 229 and 11B 148.99 → 149.
+  - **The control that must not move:** on a UGVCL-2026 AT, 25 kVA - every line identical, 1a charged 2079, while
+    the stored 1a@25 goes from 2061 to empty.
+  - **74 live jobs priced before and after.** Only SU-24 moves - its drying line goes from 230 to 229, and its
+    total from 5,127.82 to 5,126.78. It has nothing issued. No other movement.
+  - **Afterwards, in memory:** 0 copies and 0 slips left in the cells the script covers.
+- `tsc`, 73/73 tests, `vite build`, hooks guard.
+
+### WHAT IS LEFT BEFORE THE COPY TEST CAN BE RETIRED
+
+1. Deploy; apply the four clear scripts; re-run this dry run and see zero.
+2. **Rows 8, 12C and 13C** must be cleared by their own script. Each of their cells is a copy for one variant, and
+   retiring the test with them in place would charge a 22 kV bushing at 176.
+3. **AT 1049:** once its move runs, 12A(b) holds 163 and 12A(b1) holds 213 - the agency's own entries, both equal
+   to the UGVCL-2020 figures. On a 2020 AT they price the same whether honoured or ignored. If O59 ever puts that AT
+   on UGVCL-2026, retirement makes them overrides of 165 and 215 - which is what an agency entry is.
+4. **Then** make `resolveRate` honour any stored cell above zero, and prove it: every live job priced before and
+   after must be identical.
 
 ---
 
@@ -7215,6 +7279,15 @@ All five are SAMOR's, on the ALLOTMENT NO.25903 AT: 11 kV, aluminium, Repairable
   (item 14), which has no S.E. split.
 
 ### LV S.E. - WHAT THE FIELD COSTS, AND WHAT IT WOULD HAVE BEEN WORTH
+
+**⚠ THE FINDING, PLAINLY: A/T 1819's schedule prices LV S.E. - 13A-a1 and 13A-b1, and 13B-a1 and 13B-b1 - and the
+app assumes "not S.E." on every LV coil, on every job, because it has no way to record otherwise. That is exactly
+the default rule 4 forbids, one row over from the HV coil where it was fixed.**
+- **"LV is never S.E. in practice" is an operator's recollection, not the schedule.** The schedule prices it.
+- **Exposure is small:** at most Rs 1,570.40 across every job in the database, none billed.
+- **Until the agencies confirm otherwise,** the assumption is unverified. If an LV S.E. transformer has ever
+  arrived, every LV coil billed for it was under-charged.
+- **Decided 2026-09-12:** the owner asks the agencies before anything is built.
 
 **Exposure, if every LV coil ever priced had been S.E.** Under 2020 the LV coil goes from 13A-b 149 to 13A-b1 199,
 with each AT's percentage applied:

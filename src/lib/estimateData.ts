@@ -379,6 +379,11 @@ export const defaultOverhaulingEstimateData: EstimateItem[] = [
   }
 ];
 
+// ⚠ NO SHIPPED FIGURE ON ANY ROW PRICED FROM SCHEDULE-A (AUDIT O70). Every figure these rows carried was a UGVCL-2020
+// copy: the copy test ignored it, the Estimate Master grid showed it as though it were the AT's own tender's rate - 163
+// where a 2026 tender says 165 - and seeding, and the grid's own Save, wrote it into every agency and AT. An empty cell
+// shows the AT's tender figure as its placeholder and prices from that tender. Only the scrap row keeps its figure: it
+// is priced from the master and has no tender row to fall through to. variantRowDefaults.test.ts keeps it so.
 export const defaultEstimateData: EstimateItem[] = [
   // SCRAP CHARGE - required, and absent until now.
   //
@@ -397,16 +402,16 @@ export const defaultEstimateData: EstimateItem[] = [
   // own master. It changes what the next agency is born with.
   { itemCode: "22", itemName: "Rate for inspection & dismantling charges of damaged transformer declared as scrap by E.E. (TR)", unit: "QTY", fixedRate: 500.00,
     rates: { "5": 500.00, "10": 500.00, "16": 500.00, "25": 500.00, "50": 500.00, "63": 500.00, "100": 500.00, "200": 500.00, "315": 500.00, "500": 500.00 } },
-  { itemCode: "1a", itemName: "Dismentaling", unit: "QTY", rates: { ...defaultRates, "10": 1603.00, "16": 1603.00, "25": 2061.00, "63": 2061.00 } },
-  { itemCode: "1b", itemName: "Repl. of Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 40.00, "16": 40.00, "25": 46.00, "63": 46.00 } },
-  { itemCode: "1c", itemName: "Repl. HV/LV Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 28.75, "16": 28.75, "25": 34.00, "63": 34.00 } },
-  { itemCode: "1d", itemName: "Repl. of Insulation", unit: "Y", rates: { ...defaultRates, "10": 229.00, "16": 229.00, "25": 286.00, "63": 286.00 } },
-  { itemCode: "1e", itemName: "Repl. of M.S bolt-nuts", unit: "Y", rates: { ...defaultRates, "10": 46.00, "16": 46.00, "25": 57.00, "63": 57.00 } },
-  { itemCode: "1f", itemName: "Drying of active parts", unit: "Y", rates: { ...defaultRates, "10": 183.00, "16": 183.00, "25": 229.00, "63": 229.00 } },
-  { itemCode: "2a", itemName: "Cleaning Dirty Dank", unit: "Y", rates: { ...defaultRates, "10": 28.75, "16": 28.75, "25": 34.00, "63": 34.00 } },
-  { itemCode: "2b", itemName: "Painting Out-Side", unit: "Y", rates: { ...defaultRates, "10": 115.00, "16": 115.00, "25": 149.00, "63": 149.00 } },
+  { itemCode: "1a", itemName: "Dismentaling", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "1b", itemName: "Repl. of Gaskets", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "1c", itemName: "Repl. HV/LV Gaskets", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "1d", itemName: "Repl. of Insulation", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "1e", itemName: "Repl. of M.S bolt-nuts", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "1f", itemName: "Drying of active parts", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "2a", itemName: "Cleaning Dirty Dank", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "2b", itemName: "Painting Out-Side", unit: "Y", rates: { ...defaultRates } },
   { itemCode: "3", itemName: "Painting In-Side", unit: "N", rates: { ...defaultRates } },
-  { itemCode: "5", itemName: "Oil Level Glass", unit: "Y", rates: { ...defaultRates, "10": 46.00, "16": 46.00, "25": 46.00, "63": 46.00 } },
+  { itemCode: "5", itemName: "Oil Level Glass", unit: "Y", rates: { ...defaultRates } },
   { itemCode: "6", itemName: "Breather", unit: "N", rates: { ...defaultRates } },
   // ⚠ NO RATE ON 8, 12C OR 13C, BY DECISION (AUDIT O66). Each is ONE master row priced against TWO tender rows chosen by
   // the job - 8 by kV class (8-A / 8-B), 12C and 13C by winding material (-a copper / -b aluminium). One cell can hold one
@@ -414,11 +419,11 @@ export const defaultEstimateData: EstimateItem[] = [
   // 176 on a 22 kV bushing, 34 and 51.75 on copper winding labour. A null falls through to the job's own variant row of its
   // own tender. variantRowDefaults.test.ts keeps every such row empty.
   { itemCode: "8", itemName: "HV Bushing", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "9A", itemName: "HV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 131.00, "16": 131.00, "25": 131.00, "63": 131.00 } },
-  { itemCode: "9B", itemName: "HV Connector", unit: "QTY", rates: { ...defaultRates, "10": 80.00, "16": 80.00, "25": 80.00, "63": 80.00 } },
-  { itemCode: "10", itemName: "LV Bushing", unit: "QTY", rates: { ...defaultRates, "10": 59.80, "16": 59.80, "25": 59.80, "63": 59.80 } },
-  { itemCode: "11A", itemName: "LV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 156.00, "16": 156.00, "25": 156.00, "63": 156.00 } },
-  { itemCode: "11B", itemName: "LV Connector", unit: "QTY", rates: { ...defaultRates, "10": 149.00, "16": 149.00, "25": 149.00, "63": 149.00 } },
+  { itemCode: "9A", itemName: "HV Metal Parts", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "9B", itemName: "HV Connector", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "10", itemName: "LV Bushing", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "11A", itemName: "LV Metal Parts", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "11B", itemName: "LV Connector", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "12A(a)", itemName: "HV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
   // THE HV S.E. ROWS (AUDIT G64) - each directly under its without-S.E. sibling, so the two read as a pair.
   //
@@ -432,18 +437,18 @@ export const defaultEstimateData: EstimateItem[] = [
   // (G61), so nothing would read them and a rate typed there would be silently ignored. An absent row is better
   // than one that discards an override. Do not complete the set until LV S.E. can be recorded.
   { itemCode: "12A(a1)", itemName: "HV Wdg. (Not Miss) -CU S.E.", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 163.00, "16": 163.00, "25": 163.00, "63": 163.00 } },
-  { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates, "10": 213.00, "16": 213.00, "25": 213.00, "63": 213.00 } },
+  { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates } },   // no rate - see row 8 (O66)
   { itemCode: "13A(a)", itemName: "LV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 149.00, "16": 149.00, "25": 149.00, "63": 149.00 } },
+  { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "13C", itemName: "LV Coil - Labour", unit: "QTY", rates: { ...defaultRates } },   // no rate - see row 8 (O66)
   { itemCode: "14(ii)CU", itemName: "LV Wdg. Re-Insu.-CU", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "14(ii)AL", itemName: "LV Wdg. Re-Insu.-AL", unit: "QTY", rates: { ...defaultRates, "10": 115.00, "16": 115.00, "25": 115.00, "63": 115.00 } },
-  { itemCode: "15", itemName: "Washer Ring", unit: "QTY", rates: { ...defaultRates, "10": 54.00, "16": 54.00, "25": 54.00, "63": 54.00 } },
+  { itemCode: "14(ii)AL", itemName: "LV Wdg. Re-Insu.-AL", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "15", itemName: "Washer Ring", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "16", itemName: "Name Plate", unit: "N", rates: { ...defaultRates } },
   { itemCode: "18", itemName: "Repl. Of Tank", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "20", itemName: "Testing Of Trans.", unit: "Y", rates: { ...defaultRates, "10": 115.00, "16": 115.00, "25": 172.00, "63": 172.00 } },
-  { itemCode: "21", itemName: "Repl. Of Rediator", unit: "Y", rates: { ...defaultRates, "10": 1052.00, "16": 1052.00, "25": 1052.00, "63": 1248.00 } },
+  { itemCode: "20", itemName: "Testing Of Trans.", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "21", itemName: "Repl. Of Rediator", unit: "Y", rates: { ...defaultRates } },
   { itemCode: "17", itemName: "Con. of Sealed to Bolt", unit: "N", rates: { ...defaultRates } }
 ];
