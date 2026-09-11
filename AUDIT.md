@@ -7003,6 +7003,34 @@ for pricing, which is what they should be.**
 
 ---
 
+### O63. The multi-job sheet loses its sign-off on a tall letterhead
+
+Open, found 2026-09-11 by print-check's first run (G65). Not fixed.
+
+MR 2555 - MEGHA, four transformers, 21 item rows - on MEGHA's full-A4 letterhead (64mm header, 25mm
+footer). The last lines of the sign-off are cut off by `PrintableA4Page`'s overflow-hidden body:
+- **"Thanking you" and "Auth Sign." do not print;**
+- "Yours faithfully" and "For, MEGHA" do.
+
+**It is identical before G62 and now** (`--compare 8e2e5e7`).
+
+**Checked against O58's false finding before recording it:**
+- the build carried all 66 of the sheet's classes;
+- the rendered-style check passed 165 elements, and failed 217 with the stylesheets removed;
+- the picture shows the sheet laid out correctly - title, reference box, table, columns.
+
+What is missing is only what sits past the body's end.
+
+**The same shape as O58.** The sheet's own comment estimates about 65mm of vertical spare with 24 item rows.
+It does not say whether a letterhead's header and footer were counted, and on this one the sign-off does
+not fit. The letterhead image's own signature text also prints through the totals rows here, as recorded
+under O58.
+
+**Not decided** - the same options as O58: size the page by measured height, fewer rows a sheet when a
+letterhead is set, or a visible warning when anything is cut off.
+
+---
+
 ### O62. The same defect in three more places - a document field that fills itself in
 
 Open, 2026-09-11. **Recorded, not built, by decision.**
@@ -14231,3 +14259,105 @@ Passed:
 
 Not verified: Estimate Master in a browser - the rows appearing, and a Save writing them - is verified by
 the seeding tests and the census, not by use.
+
+
+## G65. print-check - the print harness, in the repository
+
+**Why it exists.** Through G61-G64 a scratch harness printed documents through the app's own print path in
+headless Chrome, and measured what came out.
+- **What it found:** real defects - the inspection sheet's signature block cut off on a tall letterhead
+  (O58), and the hardcoded 2020-21 order number on every estimate (O61).
+- **What it invented:** one defect the app did not have, the SU-5 cut-off, since withdrawn.
+
+It is the only thing in the project that checks printed output against real rendering. A tool that good,
+left in a scratchpad, gets rebuilt from nothing next time, without the lessons.
+
+### WHAT IT IS
+
+`npm run print-check -- [documents] [--compare <ref>] [--out <dir>]`, in `scripts/print-check/`.
+- **Documents:**
+  - the single-job estimate in its itemised and fixed-rate layouts, rendered from the component;
+  - the multi-job sheet, rendered from its component, with its figures from `EstimateGenerate`'s own
+    `getJobFullEstimate`, `builderLineFor` and `buildMultiJobData`, cut from source rather than
+    re-implemented;
+  - the internal inspection sheet, cut from source.
+- **`--compare <ref>`** also prints each document from a temporary git worktree of the ref, and reports
+  what changed on paper, row by row.
+- **Live data, key-gated, read-only.** It picks the most complete live example of each document, preferring
+  a full-A4 letterhead.
+- **Output:** outside the repository by default, and refused inside it - the G62 trap is stated at the
+  write path.
+- **Node 22 or later**, checked at startup with a message.
+- **Exit codes:** 0 clean; 1 a finding in a document; 2 a refusal, meaning the tool's own evidence would
+  not be evidence.
+- **Run by hand, not a gate**, consistent with G60.
+
+### BUILT IN, NOT REMEMBERED
+
+Each item cost a diagnosis before it became a property of the tool.
+- **Something printed, asserted first:** sheets exist, the PDF has as many pages as the screen, and the
+  rows on paper are the rows the app's builder says the document has (G61).
+- **Class coverage from the whole source** - every static class the document uses must be in the built
+  CSS - and the check is first shown able to report a miss. Not a sample (G62).
+- **The rendered style**, on every element carrying a testable utility, with a positive control that
+  strips the stylesheets and must fail.
+- **`@source` names each tree's own `src`,** so no build depends on its folder's contents - and an older
+  commit is styled by its own classes.
+- **Cut-off measured against the clipping container**, not the page edge (G61).
+- **Output never inside the repository.**
+- **Inline documents cut between markers that fail loudly.** A marker missing, duplicated, out of order,
+  or bracketing text that no longer contains the document refuses the run, and names the extraction as the
+  fix.
+- **⚠ THE WORKTREE CLEANUP ORDER.** The worktree's `node_modules` is a link to the repository's real
+  packages.
+  - The link is removed first - non-recursively, and only after proving it is a link.
+  - The repository's packages are confirmed intact.
+  - Only then is the worktree removed, and the packages are checked again.
+  - The removal is proved on a throwaway link every compare run before it is trusted with the repository.
+  - By hand this was done in the right order every time; in the wrong order, one removal follows the link
+    into the real `node_modules`.
+
+### WHAT IT SAYS IT DOES NOT CHECK
+
+In its header, so a clean run is not read as more than it is:
+- **Chrome's print layout, not a printer:** printer margins, scaling, driver font substitution and paper
+  handling go unseen.
+- **One browser engine only.**
+- **The print dialog as an operator leaves it.**
+- **This machine's fonts.**
+- **Four of the thirteen printed documents**, two of them rendered from cut source.
+- **Only the records it picks.**
+- **Whether the figures are right.**
+- **The screen.**
+
+### DECIDED
+
+- **Inline documents are cut, not extracted.** Each is extracted when its code is next touched. Extraction
+  as a project is ten app changes to enable a tool; extraction as you go is free.
+- **Live data only** for now; fixtures later.
+
+### VERIFIED, AND NOT
+
+Passed:
+- **All four documents from the working tree:**
+  - builds complete - 130, 130, 66 and 133 classes;
+  - the style check's control fails 217 elements with the stylesheets stripped;
+  - rows match the builder - 28, 2, 21 item rows under four transformer columns, and 18.
+- **`--compare 8e2e5e7`**, the commit before G62:
+  - both trees built from their own sources - 126 classes before, 130 after;
+  - the link-removal proof passed;
+  - **the only change on paper is exactly G62's**: the five coil lines' Sr. No. went from 20, 21, 22, 27 and
+    28 to 12A-b, 13A-b, 14-ii, 12C-b and 13C-b;
+  - the worktree was removed link first, the repository's `node_modules` is intact, and `git worktree
+    list` is clean.
+- **Refusals exercised:**
+  - output inside the repository - refused, with nothing created;
+  - an unknown document;
+  - a moved marker - it names the file and the extraction.
+- **Its first finding in the app:** O63.
+
+Not exercised:
+- the Node-version refusal - there is no older Node here;
+- a real marker move in the app;
+- Chrome discovery on macOS and Linux;
+- a failure in the middle of a compare - cleanup sits in `finally`, which was read, not provoked.
