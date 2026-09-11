@@ -4,7 +4,9 @@
 //
 //   npm run print-check -- [documents...] [--compare <ref>] [--out <dir>]
 //
-//   documents   all (default) | estimate | estimate-itemised | estimate-fixed-rate | multi-job | inspection
+//   documents   all (default) | estimate | estimate-itemised | estimate-fixed-rate | multi-job | inspection | inspection-stress
+//               inspection-stress is the largest inspection MR with the longest real value of every printed field in
+//               every row - the case that produced O58. A pagination fix is tested against the case that failed.
 //   --compare   also print each document from <ref>, in a temporary git worktree, and report what changed on paper
 //   --out       where PDFs, sheet pictures and results.json go. Default: a new directory under the OS temp directory.
 //               Refused inside the repository.
@@ -14,7 +16,7 @@
 //
 // EXIT CODES
 //   0  every document printed and was checked, and nothing was cut off
-//   1  a FINDING in a document: content cut off by its page
+//   1  a FINDING in a document: content cut off by its page, or the app's cut-off warning disagreeing with the print
 //   2  a REFUSAL: the tool's own evidence would not be evidence - a build missing classes, a moved marker, a check that
 //      could not fail, a document with nothing real to print. Nothing from that run should be believed.
 //   Differences found by --compare are reported, not failed: whether a difference is wanted is the reader's call.
@@ -31,6 +33,11 @@
 //   - TAILWIND IS TOLD WHERE THE SOURCE IS (@source), so a build does not depend on what its folder happens to contain.
 //     G63's correct print once rested on G62's broken output lying in the same folder.
 //   - CUT-OFF IS MEASURED AGAINST THE CLIPPING CONTAINER, not the page edge - PrintableA4Page's body hides overflow.
+//   - THE APP'S CUT-OFF WARNING IS CHECKED AGAINST THE PRINT (G66), on commits that have it. The app measures a copy in
+//     a hidden frame with its styles rewritten to their printed form; this measures the print window itself, untouched,
+//     in print media at the sheet's width. The warning must appear exactly when paper is cut, say each sheet's
+//     millimetres to within 1mm - in the print window and on the sheet on screen - and hold the dialog exactly then.
+//     The check's first run failed it, correctly: the first warning measured the screen and said 22mm for 4mm.
 //   - OUTPUT NEVER LANDS INSIDE THE REPOSITORY, where built bundles could feed the app's own Tailwind scan and prints would
 //     carry real agency data into git.
 //   - INLINE DOCUMENTS ARE CUT BETWEEN MARKERS THAT FAIL LOUDLY when they move, until each is extracted (AUDIT G65).
@@ -45,12 +52,14 @@
 //   - One browser engine. Firefox and Safari lay out print differently, and an operator may print from either.
 //   - The print dialog as an operator leaves it: scale, margins, headers and footers, background graphics.
 //   - This machine's fonts. A machine without them substitutes, and every text width changes.
-//   - Four documents. The other printed documents - bills, the challan, the forwarding letter, the external inspection
-//     and testing reports - are not covered. Two of the four are rendered from cut source, not from a component.
+//   - Four documents (five cases). The other printed documents - bills, the challan, the forwarding letter, the external
+//     inspection and testing reports - are not covered. Two of the four are rendered from cut source, not a component.
+//     The warning is checked only on these; that it measures the others is by construction, not by measurement.
 //   - Only the records it picks: the most complete live example of each document. A defect that needs long values, many
 //     rows or a particular letterhead may not be present in them.
 //   - Whether the figures are right. It reads what printed; pricing is the builder's tests' and regressions' job.
-//   - The screen. On-screen notices and anything print:hidden are outside what it measures.
+//   - The screen, beyond the cut-off warning. Other on-screen notices and anything print:hidden are not measured.
+//   - The challan's direct window.print() confirm. Only the triggerUniversalPrint path is driven.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { REPO, Refusal, checkNode, findChrome, outputDir } from './lib/env.mjs';
@@ -98,6 +107,39 @@ function somethingPrinted(doc, r) {
   return p;
 }
 
+const cutMmOf = c => Math.max(c?.bottomMm || 0, c?.rightMm || 0);
+
+/** Each sheet's millimetres as the print window's warning stated them - read back from what the operator reads. */
+const warnedMm = (lines, sheets) => Array.from({ length: sheets }, (_, i) => {
+  const line = lines.find(l => l.startsWith(`Sheet ${i + 1} of `));
+  return line ? Math.max(0, ...[...line.matchAll(/(\d+) mm/g)].map(m => Number(m[1]))) : 0;
+});
+
+/**
+ * THE APP'S WARNING AGAINST WHAT PRINTED (G66). A warning that stays silent over a cut sheet is the defect it was built
+ * to end; one that cries over a whole sheet teaches the operator to press "Print anyway" without reading. Both count.
+ * 1mm of tolerance: both sides round up, and they measure against different boxes (the body; the nearest clip).
+ */
+function warningDisagreements(r) {
+  const h = r.h;
+  if (h.flow !== 'measured') return [];
+  const out = [];
+  const cut = r.pages.filter(p => p.cutMm);
+  if (cut.length && !h.warningLines.length) out.push(`paper is cut (${cut.map(p => `sheet ${p.page} ${p.cutMm} mm`).join(', ')}) but the print window showed no warning`);
+  if (!cut.length && h.warningLines.length) out.push(`nothing is cut on paper but the print window warned: ${h.warningLines.join(' / ')}`);
+  if (cut.length && h.autoPrinted) out.push('the print dialog opened by itself over cut sheets');
+  if (!cut.length && !h.autoPrinted) out.push('the print dialog did not open although nothing is cut');
+  const warned = warnedMm(h.warningLines, r.pages.length);
+  const miscounted = h.warningLines.filter(l => !l.includes(` of ${r.pages.length}: `));
+  if (miscounted.length) out.push(`the warning counts sheets differently from the print (${r.pages.length}): ${miscounted.join(' / ')}`);
+  r.pages.forEach((p, i) => {
+    const app = warned[i], screen = cutMmOf(h.screenCutoffs[i]);
+    if (Math.abs(app - p.cutMm) > 1) out.push(`sheet ${p.page}: the print window's warning measured ${app} mm, paper loses ${p.cutMm} mm`);
+    if (Math.abs(screen - p.cutMm) > 1) out.push(`sheet ${p.page}: the sheet on screen said ${screen} mm, paper loses ${p.cutMm} mm`);
+  });
+  return out;
+}
+
 /** What changed on paper between the two prints of one document. */
 function diff(b, a) {
   const out = [];
@@ -109,7 +151,8 @@ function diff(b, a) {
     if (cb !== ca) out.push(`row ${i + 1}: ${cb}\n          -> ${ca}`);
     else if (Math.abs(rb[i].h - ra[i].h) > 0.5) out.push(`row ${i + 1} height ${rb[i].h} -> ${ra[i].h}px (${ca.slice(0, 50)})`);
   }
-  b.pages.forEach((p, i) => { if (a.pages[i] && p.cut !== a.pages[i].cut) out.push(`sheet ${i + 1} elements cut off ${p.cut} -> ${a.pages[i].cut}`); });
+  b.pages.forEach((p, i) => { if (a.pages[i] && (p.cut !== a.pages[i].cut || p.cutMm !== a.pages[i].cutMm)) out.push(`sheet ${i + 1} cut off ${p.cut} element(s) / ${p.cutMm} mm -> ${a.pages[i].cut} / ${a.pages[i].cutMm} mm`); });
+  if (b.h.flow !== a.h.flow) out.push(`print path: ${b.h.flow === 'captured' ? 'dialog on load' : 'measured first'} -> ${a.h.flow === 'captured' ? 'dialog on load' : `measured first, ${a.h.warningLines.length ? 'warning shown, dialog held' : 'no warning, dialog opened'}`}`);
   return out;
 }
 
@@ -167,7 +210,7 @@ async function main() {
       results[label] = {};
       for (const d of selected) {
         if (!builds[label].coverage[d.id]) continue;
-        const r = await printDocument(chrome, `${server.origin}/${label}/${d.id}.html`, d.kind, join(prints, `${label}-${d.id}`));
+        const r = await printDocument(chrome, `${server.origin}/${label}/${d.id}.html`, d.kind, join(prints, `${label}-${d.id}`), d.orientation);
         results[label][d.id] = r;
         if (r.error) {
           refusals.push(`${label} ${d.id}: the page did not print - ${r.error.split('\n')[0]}${r.console.length ? `\n      ${r.console.slice(0, 4).join('\n      ')}` : ''}`);
@@ -180,7 +223,9 @@ async function main() {
           else console.log(`style check control (${label}): with the stylesheets removed it fails ${control.failureCount} element(s) - it can see styling`);
           controlled = true;
         }
-        for (const p of r.pages) if (p.cut) findings.push(`${label} ${d.id} sheet ${p.page}: ${p.cut} element(s) cut off - ${JSON.stringify(p.cutSample)}`);
+        const warned = r.h.flow !== 'measured' ? 'no warning at this commit' : r.h.warningLines.length ? 'warned' : 'NOT warned';
+        for (const p of r.pages) if (p.cut) findings.push(`${label} ${d.id} sheet ${p.page}: ${p.cut} element(s) cut off, ${p.cutMm} mm (${warned}) - ${JSON.stringify(p.cutSample)}`);
+        warningDisagreements(r).forEach(w => findings.push(`${label} ${d.id}: THE WARNING IS WRONG - ${w}`));
       }
     }
     if (tree) {
@@ -207,7 +252,9 @@ async function main() {
       if (r.error) { console.log(`  ${label.padEnd(8)} ${id.padEnd(20)} did not print`); continue; }
       const rows = r.pages.reduce((n, s) => n + s.rows.length, 0);
       const cut = r.pages.reduce((n, s) => n + s.cut, 0);
-      console.log(`  ${label.padEnd(8)} ${id.padEnd(20)} ${r.pages.length} sheet(s) = ${r.pdfPages} PDF page(s), ${rows} rows, style ${r.style.checked} checked / ${r.style.failureCount} wrong, ${cut} cut off, letterhead ${r.h.letterhead}`);
+      const mm = Math.max(0, ...r.pages.map(p => p.cutMm));
+      const warning = r.h.flow !== 'measured' ? 'dialog on load' : (r.h.warningLines.length ? `WARNING SHOWN, dialog held: ${r.h.warningLines.join(' / ')}` : 'no warning, dialog opened') + ` (measured in ${r.h.printMs} ms; bars on screen: ${r.files.filter(f => f.includes('-screen-bar')).length})`;
+      console.log(`  ${label.padEnd(8)} ${id.padEnd(20)} ${r.pages.length} sheet(s) = ${r.pdfPages} PDF page(s), ${rows} rows, style ${r.style.checked} checked / ${r.style.failureCount} wrong, ${cut} cut off (${mm} mm), letterhead ${r.h.letterhead}\n${' '.repeat(32)}${warning}`);
     }
   }
   if (compare) {

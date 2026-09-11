@@ -33,7 +33,11 @@ export const measureScript = kind => `(() => {
     const clip = e => { for (let a = e.parentElement; a && a !== page; a = a.parentElement) { const o = getComputedStyle(a); if (o.overflowX !== 'visible' || o.overflowY !== 'visible') return a.getBoundingClientRect(); } return pr; };
     const cut = [...page.querySelectorAll('*')].filter(e => { const er = e.getBoundingClientRect(); if (!er.width && !er.height) return false; const c = clip(e); return er.bottom - c.bottom > 0.5 || er.right - c.right > 0.5; });
     const { rows, cols } = rowsOf(page);
-    return { page: p + 1, rows, cols, cut: cut.length, cutSample: [...new Set(cut.map(e => (e.textContent || '').trim().slice(0, 40)))].slice(0, 5) };
+    // How far past its clipping container the furthest element reaches, in millimetres of paper - measured here, in
+    // print media, independently of the app's own on-screen measurement, so the two can be compared.
+    const depthPx = Math.max(0, ...cut.map(e => { const er = e.getBoundingClientRect(), c = clip(e); return Math.max(er.bottom - c.bottom, er.right - c.right); }));
+    const mm = depthPx * (page.classList.contains('landscape') ? 297 : 210) / pr.width;
+    return { page: p + 1, rows, cols, cut: cut.length, cutMm: mm >= 1 ? Math.ceil(mm - 1e-9) : 0, cutSample: [...new Set(cut.map(e => (e.textContent || '').trim().slice(0, 40)))].slice(0, 5) };
   });
 })()`;
 

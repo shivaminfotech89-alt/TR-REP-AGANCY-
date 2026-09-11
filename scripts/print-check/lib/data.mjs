@@ -103,6 +103,34 @@ export function pickInspection(live) {
   };
 }
 
+/**
+ * THE CASE THAT PRODUCED O58: the largest inspection MR, with every row carrying the longest real value of every field
+ * the sheet prints - a combination no single job has, but every value is real. A fix to the sheet's pagination is
+ * tested against the case that failed, not against rows that happen to fit.
+ */
+export function pickInspectionStress(live) {
+  const base = pickInspection(live);
+  const longest = vals => vals.map(v => (v == null ? '' : String(v))).reduce((a, b) => (b.length > a.length ? b : a), '');
+  const inspections = Object.values(live.int);
+  // As the scratch stress census that found O58 built them, plus HV S.E. (G61's column). repairType GP adds " (GP)" to
+  // the job number cell - the widest form of it; WITHOUT_SE is the longest raw value and prints "Not S.E.".
+  const job = {
+    jobNo: longest(live.jobs.map(j => j.jobNo)), repairType: 'GP', serialNo: longest(live.jobs.map(j => j.serialNo)),
+    make: longest(live.jobs.map(j => j.make)), coreType: longest(live.jobs.map(j => j.coreType)), capacityKva: longest(live.jobs.map(j => j.capacityKva)),
+  };
+  const FIELDS = ['windingType', 'hvCoilLimb', 'damR', 'damY', 'damB', 'totCoil', 'wtOfCoil', 'totWt', 'lvCoilR', 'lvCoilY', 'lvCoilB',
+    'wtOfCoilLv', 'totWtLv', 'wasring', 'inPnt', 'tstTrn', 'dc', 'insula', 'condition', 'hvSeConductor'];
+  const fields = Object.fromEntries(FIELDS.map(f => [f, longest(inspections.map(d => d[f]))]).filter(([, v]) => v !== ''));
+  return {
+    label: `${base.label}, every row stressed with the longest real values (serial ${job.serialNo.length}, make ${job.make.length} characters)`,
+    data: {
+      ...base.data,
+      mrJobs: base.data.mrJobs.map(j => ({ ...j, ...job })),
+      formsData: Object.fromEntries(Object.entries(base.data.formsData).map(([id, d]) => [id, { ...d, ...fields }])),
+    },
+  };
+}
+
 /** The MR with the most estimable jobs that all price cleanly, itemised, under one AT. */
 export function pickMultiJob(live) {
   const groups = new Map();

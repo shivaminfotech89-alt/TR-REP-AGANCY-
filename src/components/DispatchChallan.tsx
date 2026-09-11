@@ -33,7 +33,7 @@ import { APP_MARK, CARD, CARD_PAD, NUM, TONE, TABLE_WRAP, TABLE, TH, TD } from '
 import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
-import { triggerUniversalPrint } from '../lib/printUtils';
+import { confirmWholeBeforePrint, triggerUniversalPrint } from '../lib/printUtils';
 
 export default function DispatchChallan() {
   const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
@@ -480,8 +480,10 @@ export default function DispatchChallan() {
       setChallanNo('');
       setVehicleNo('');
       
-      setTimeout(() => {
-          window.print();
+      // ⚠ A DIRECT window.print(), SO THE CUT-OFF WARNING IS A CONFIRM HERE (AUDIT G66). Routing this through
+      // triggerUniversalPrint would open a pop-up after an async save, when the browser has usually stopped allowing it.
+      setTimeout(async () => {
+          if (await confirmWholeBeforePrint(document.getElementById('printable-challan-sheet'))) window.print();
       }, 300);
       
     } catch (err: any) {
@@ -508,10 +510,11 @@ export default function DispatchChallan() {
     };
     setPrintData(dataToPrint);
     
-    setTimeout(() => {
+    setTimeout(async () => {
         const el = document.getElementById('printable-challan-section');
         if (el) el.scrollIntoView({ behavior: 'smooth' });
-        window.print();
+        // The same cut-off warning as a confirm, before the dialog (AUDIT G66).
+        if (await confirmWholeBeforePrint(document.getElementById('printable-challan-sheet'))) window.print();
     }, 250);
   };
 

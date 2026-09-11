@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { slash } from './env.mjs';
 import { cut, letterheadRegion, readSource } from './sources.mjs';
-import { pickEstimate, pickInspection, pickMultiJob } from './data.mjs';
+import { pickEstimate, pickInspection, pickInspectionStress, pickMultiJob } from './data.mjs';
 
 const EG = 'src/components/EstimateGenerate.tsx';
 
@@ -25,12 +25,20 @@ let EXPECTED: any = {};
 
 const mount = `createRoot(document.getElementById('root')!).render(<MemoryRouter><Doc /></MemoryRouter>);\n`;
 
+/** Whether this tree's print path measures sheets and warns before the dialog (G66), or opens it on load. */
+const measuresBeforePrinting = root => readSource(root, 'src/lib/printUtils.ts').includes('export function measureSheets');
+
 /**
- * THE APP'S OWN PRINT PATH. triggerUniversalPrint writes the sheet into a new window; the window is captured instead
- * of opened, its one script (window.print on load) is dropped because printing is driven from outside, and the page
- * becomes that document. Everything else it writes is kept.
+ * THE APP'S OWN PRINT PATH, RUN FOR REAL.
+ *
+ * `measured` (G66 onward): triggerUniversalPrint is handed a stand-in window whose document IS this page, so the app
+ * writes the print window into it, measures the sheets itself, and then either calls print() or shows its warning -
+ * and which it did is recorded, along with what the sheets said on screen before.
+ *
+ * `captured` (older commits): the print window's HTML is captured, its print-on-load script dropped, and written into
+ * this page. Those commits had no warning to check.
  */
-const runtime = (container, orientation) => `
+const runtime = (container, orientation, root) => { const measured = measuresBeforePrinting(root); return `
 const w: any = window;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 (async () => {
@@ -47,15 +55,42 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
     }
     await (document as any).fonts.ready;
     await sleep(1200);
-    let captured = '';
+    ${measured ? `
+    // The on-screen bars measure 400ms after the sheets settle. Read them only once every sheet says it has measured -
+    // a number read before that is a zero nobody computed.
+    for (const t2 = Date.now(); ; await sleep(100)) {
+      const states = Array.from(document.querySelectorAll('.a4-print-page')).map(p => p.getAttribute('data-cutoff-state'));
+      if (states.length && states.every(s => s === 'measured')) break;
+      if (Date.now() - t2 > 20000) throw new Error('the sheets never reported their cut-off measurement (data-cutoff-state: ' + states.join(', ') + ')');
+    }
+    await sleep(800);
+    ` : ''}
+    const screenCutoffs = Array.from(document.querySelectorAll('.a4-print-page')).map((p: any) => ({
+      bottomMm: Number(p.getAttribute('data-cutoff-bottom-mm') || 0), rightMm: Number(p.getAttribute('data-cutoff-right-mm') || 0) }));
+    ${measured ? `
+    // Held here so print-check can picture the sheets as the operator sees them in the app, bars and all.
+    w.__printCheck = { state: 'screen' };
+    for (const t3 = Date.now(); !w.__printCheckGo && Date.now() - t3 < 30000; ) await sleep(100);
+    ` : ''}
     const realOpen = window.open;
+    let flow = '${measured ? 'measured' : 'captured'}', autoPrinted = false, warningLines: string[] = [], printMs = 0;
+    ${measured ? `
+    (window as any).open = () => ({ document, focus() {}, print() { autoPrinted = true; } });
+    const tPrint = performance.now();
+    await triggerUniversalPrint('${container}', 'print-check', 'print-check.pdf', '${orientation}');
+    printMs = Math.round(performance.now() - tPrint);
+    window.open = realOpen;
+    await sleep(900);
+    const warning = document.getElementById('print-cutoff-warning');
+    warningLines = warning ? Array.from(warning.querySelectorAll('li')).map(li => String(li.textContent)) : [];
+    if (!document.querySelector('#${container}')) throw new Error('the print window received nothing');
+    ` : `
+    let captured = '';
     (window as any).open = () => ({ document: { open() {}, write(s: string) { captured += s; }, close() {} } });
     await triggerUniversalPrint('${container}', 'print-check', 'print-check.pdf', '${orientation}');
     window.open = realOpen;
     if (captured.indexOf('${container}') === -1) throw new Error('the print window received nothing');
-    const scripts = (captured.match(/<script>/g) || []).length;
-    if (scripts !== 1) throw new Error('expected one script in the print window, found ' + scripts);
-    document.open(); document.write(captured.replace(/<script>[\\s\\S]*?<\\/script>/, '')); document.close();
+    document.open(); document.write(captured.replace(/<script>[\\s\\S]*?<\\/script>/g, '')); document.close();
     const t1 = Date.now();
     for (;;) {
       const imgs = Array.from(document.images);
@@ -64,13 +99,15 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
       if (Date.now() - t1 > 15000) break;
       await sleep(100);
     }
+    `}
     await sleep(500);
-    w.__printCheck = { state: 'ready', letterhead, expected: EXPECTED, sheets: document.querySelectorAll('.a4-print-page').length };
+    w.__printCheck = { state: 'ready', letterhead, expected: EXPECTED, sheets: document.querySelectorAll('.a4-print-page').length,
+      flow, screenCutoffs, autoPrinted, warningLines, printMs };
   } catch (e: any) {
     w.__printCheck = { state: 'error', message: String((e && e.stack) || e) };
   }
 })();
-`;
+`; };
 
 const estimateSource = root => {
   const s = readSource(root, 'src/components/SingleJobEstimateReport.tsx');
@@ -102,7 +139,7 @@ function Doc(): any {
     </div>
   );
 }
-` + mount + runtime('printable-estimate-container', 'portrait');
+` + mount + runtime('printable-estimate-container', 'portrait', root);
     return { entry, coverageText: estimateSource(root) };
   },
 });
@@ -150,15 +187,16 @@ function Doc(): any {
     </div>
   );
 }
-` + mount + runtime('printable-estimate-container', 'portrait');
+` + mount + runtime('printable-estimate-container', 'portrait', root);
     const a = sheet.indexOf('export function MultiJobEstimateSheet');
     return { entry, coverageText: (a < 0 ? sheet : sheet.slice(a)) + letterheadRegion(root) };
   },
 };
 
-const inspection = {
-  id: 'inspection', title: 'Internal inspection sheet', kind: 'inspection', container: 'printable-internal-inspection-sheet', orientation: 'landscape',
-  select: live => pickInspection(live),
+/** The internal inspection sheet, on live rows or on the stress rows that produced O58 - the same generation. */
+const inspection = (id, title, select) => ({
+  id, title, kind: 'inspection', container: 'printable-internal-inspection-sheet', orientation: 'landscape',
+  select,
   generate(root) {
     const r = slash(root);
     const file = 'src/components/InternalInspection.tsx';
@@ -167,7 +205,7 @@ const inspection = {
       '  const scrapJobs = mrJobs.filter(', '\n  return (\n    <div className="space-y-6 print:space-y-0">',
       ['if (isPrintOpen && selectedMrNo) {', '<PrintableA4Page', '</PrintableA4Page>']);
     const hv = (readSource(root, file).match(/const hvCoilsPerLimb = [\s\S]*?;\n/) || [])[0];
-    const entry = head(root, 'inspection') + `
+    const entry = head(root, id) + `
 import * as SJER from '${r}/src/components/SingleJobEstimateReport';
 import { formatDDMMYYYY } from '${r}/src/lib/utils';
 import { PrintableA4Page } from '${r}/src/components/LetterheadHeader';
@@ -188,16 +226,17 @@ function Doc(): any {
 ${block}
   return null;
 }
-` + mount + runtime('printable-internal-inspection-sheet', 'landscape');
+` + mount + runtime('printable-internal-inspection-sheet', 'landscape', root);
     return { entry, coverageText: block + letterheadRegion(root) };
   },
-};
+});
 
 export const DOCUMENTS = [
   estimate('estimate-itemised', 'ITEMISED', 'Single-job estimate, itemised layout'),
   estimate('estimate-fixed-rate', 'FIXED_RATE', 'Single-job estimate, fixed-rate layout'),
   multiJob,
-  inspection,
+  inspection('inspection', 'Internal inspection sheet', live => pickInspection(live)),
+  inspection('inspection-stress', 'Internal inspection sheet, longest real values in every row (the O58 case)', live => pickInspectionStress(live)),
 ];
 
 /** What the command line may name. */

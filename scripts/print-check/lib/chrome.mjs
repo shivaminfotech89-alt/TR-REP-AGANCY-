@@ -77,25 +77,49 @@ export async function launch(chromePath, profile) {
  * The page calls the real triggerUniversalPrint and swaps itself for the print window's document; the PDF is printed
  * with preferCSSPageSize, so the @page rule that function writes decides the paper.
  */
-export async function printDocument(chrome, url, kind, outPrefix) {
+export async function printDocument(chrome, url, kind, outPrefix, orientation) {
   const { send, evaluate, events } = chrome;
   events.length = 0;
   await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setEmulatedMedia', { media: '' });
   await send('Page.navigate', { url });
-  let h = null;
+  let h = null, pictured = false;
+  const files = [];
   for (let i = 0; i < 400; i++) {
     await sleep(150);
     try { h = await evaluate('window.__printCheck'); } catch { h = null; }
+    if (h?.state === 'screen' && pictured) continue;   // released; the page says 'screen' until it is ready
+    if (h?.state === 'screen') {
+      pictured = true;
+      // The sheets in the app, before printing, as the operator sees them: the top of every sheet carrying a bar.
+      const barred = await evaluate(`[...document.querySelectorAll('.a4-print-page')].filter(p => p.querySelector('[data-screen-only]')).map(p => { const r = p.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: Math.min(r.height, 300) }; })`);
+      for (const [n, c] of barred.entries()) {
+        const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: c.x, y: c.y, width: c.w, height: c.h, scale: 1 } });
+        const f = `${outPrefix}-screen-bar${n + 1}.png`;
+        writeFileSync(f, Buffer.from(shot.data, 'base64'));
+        files.push(f);
+      }
+      await evaluate('window.__printCheckGo = true');
+      continue;
+    }
     if (h && (h.state === 'ready' || h.state === 'error')) break;
   }
   if (!h || h.state !== 'ready') return { error: h?.message || 'the page never reported ready', console: [...events] };
+  if (h.warningLines?.length) {
+    // The print window's warning, as the operator sees it before the dialog - screen media, top of the window.
+    const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: 0, y: 0, width: 1400, height: 460, scale: 1 } });
+    const f = `${outPrefix}-print-window-warning.png`;
+    writeFileSync(f, Buffer.from(shot.data, 'base64'));
+    files.push(f);
+  }
+  // ⚠ PRINT MEDIA ALONE IS NOT THE PAPER: the viewport stays 1400px wide, and width media queries answer for 1400px.
+  // On paper the viewport is the sheet. Measured at the sheet's own width, as the PDF below is laid out.
+  await send('Emulation.setDeviceMetricsOverride', { width: orientation === 'landscape' ? 1123 : 794, height: 1000, deviceScaleFactor: 1, mobile: false });
   await send('Emulation.setEmulatedMedia', { media: 'print' });
   await sleep(300);
   const pages = await evaluate(measureScript(kind));
   const style = await evaluate(STYLE_PROBE);
   const rects = await evaluate(`[...document.querySelectorAll('.a4-print-page')].map(p => { const r = p.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; })`);
-  const files = [];
   for (const [i, c] of rects.entries()) {
     const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: c.x, y: c.y, width: c.w, height: c.h, scale: 1.5 } });
     const f = `${outPrefix}-sheet${i + 1}.png`;

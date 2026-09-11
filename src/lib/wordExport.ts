@@ -3,16 +3,23 @@ export function downloadHtmlAsWord(
   filename: string = 'document.doc', 
   documentTitle: string = 'Document'
 ) {
+  // SCREEN-ONLY ELEMENTS ARE DROPPED (AUDIT G66). Word ignores print:hidden, so a warning drawn on a sheet - "4 mm will
+  // be cut off" - would otherwise arrive in the document as text. Nothing else in the output changes.
+  const htmlOf = (el: HTMLElement) => {
+    const clone = el.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('[data-screen-only]').forEach(n => n.remove());
+    return clone.innerHTML;
+  };
   let contentHtml = '';
   if (typeof elementIdOrHtml === 'string') {
     const el = document.getElementById(elementIdOrHtml);
     if (el) {
-      contentHtml = el.innerHTML;
+      contentHtml = htmlOf(el);
     } else {
       contentHtml = elementIdOrHtml;
     }
   } else {
-    contentHtml = elementIdOrHtml.innerHTML;
+    contentHtml = htmlOf(elementIdOrHtml);
   }
 
   // Ensure images with base64 or relative URLs work properly inside Word document

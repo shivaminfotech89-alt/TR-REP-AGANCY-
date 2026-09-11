@@ -7007,6 +7007,19 @@ for pricing, which is what they should be.**
 
 Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
 
+> **Step 1 - the warning - is built: G66** (2026-09-11). Every sheet on `PrintableA4Page` now says on screen
+> how many mm it will lose, and the print window holds the dialog and says it again. The warning is checked
+> against paper by print-check. **Nothing is fixed on paper.** Measured with the warning on live data, on
+> MEGHA's letterhead:
+> - the multi-job sheet, MR 2555, loses **4 mm**, its sign-off - today's data;
+> - the inspection sheet loses **12 mm**, its signature block - only in the longest-values stress case; MR 85558's
+>   real rows print whole;
+> - both estimate layouts print whole.
+>
+> Steps 2 and 3 wait for what the warning shows in use. **Nothing records a warning** - it tells the operator,
+> not us - so "in practice" means operators reporting it, unless a record is added (a production write, and
+> its own decision).
+
 **One cause.** `PrintableA4Page` gives each sheet a body between the letterhead's header and footer
 reservations. On a full-A4 letterhead those are `letterheadHeaderHeightMm` and `letterheadFooterHeightMm`.
 The body is `overflow-hidden`.
@@ -14434,3 +14447,143 @@ Not exercised:
 - a real marker move in the app;
 - Chrome discovery on macOS and Linux;
 - a failure in the middle of a compare - cleanup sits in `finally`, which was read, not provoked.
+
+---
+
+## G66. A sheet says how many mm it will lose, before the print dialog - measured as printed, not as shown
+
+**Why.** Step 1 of O64. `PrintableA4Page`'s body hides overflow, and content past it vanished from the preview
+and the paper with nothing said (O58, O63).
+- One change in `PrintableA4Page` reaches all thirteen documents.
+- It changes no layout.
+- It turns a silent defect into a visible one.
+
+Steps 2 and 3, the pagination fixes, are separate changes, made after the warning has shown which documents
+overflow.
+
+### WHAT IT DOES
+
+- **On every sheet, on screen:** a red bar across the top - "THIS SHEET WILL PRINT SHORT - 4 mm at the bottom
+  will be cut off when printed".
+  - Absolutely positioned outside the measured body, so it cannot move the layout it reports on.
+  - `print:hidden`, and marked `data-screen-only`, which the Word export now strips.
+  - The numbers are also written to `data-cutoff-bottom-mm` / `data-cutoff-right-mm`, with
+    `data-cutoff-state` saying whether a measurement has happened yet.
+- **In the print window, before the dialog** (`triggerUniversalPrint` - billing, estimates, inspections,
+  testing, the challan preview): the print-on-load script is gone.
+  - The sheets are measured first. Whole, the dialog opens as before.
+  - Cut, a red banner lists each sheet that loses anything, in mm, with **Print anyway**. The dialog waits for
+    it.
+- **The challan's two direct `window.print()` calls:** a confirm with the same lines. Not routed through the
+  print window: one follows an async save, when a pop-up is usually blocked.
+- **The wording always says a number** - "Sheet 2 of 2: 12 mm at the bottom will be cut off when printed" -
+  never "may overflow".
+
+**⚠ IT WARNS; IT NEVER REFUSES, by decision.** A document that prints short can be seen to be short; a
+refused one cannot be seen at all. A measurement that fails prints, and logs.
+
+### ⚠ THE SCREEN IS NOT THE PAPER - THE FIRST VERSION WAS WRONG, AND THE CHECK SAID SO
+
+The first build measured each sheet as laid out on screen. print-check's new warning check failed it on its
+first run:
+
+| Document | The screen-measured warning said | Paper lost |
+|---|---|---|
+| Multi-job sheet, MR 2555 | 22 mm | 4 mm |
+| Inspection sheet, MR 85558, real rows | 5 mm | **nothing - a false alarm** |
+| Inspection sheet, stress case | 18 mm | 12 mm |
+
+**Why.** Printed, `index.css` sets the root font to 10pt instead of 16px, so every rem-sized text size and
+space shrinks by a sixth. The documents also carry 82 `print:` variants.
+- The screen is taller than the paper, so it over-reports.
+- A warning that cries over a whole sheet teaches the operator to press Print anyway without reading. That is
+  worse than a small error in the number.
+
+**What it does now** (`measureAsPrinted`, `lib/printUtils.ts`):
+- The document is copied into a hidden frame exactly as wide as the paper.
+- Every media condition in the frame's styles is rewritten to what it is when printed: print rules on, screen
+  rules off, width and other features evaluated at the paper's width (`printMediumMatches`, unit-tested).
+- The sheets are measured there, and the frame is removed.
+- Nothing on screen or in the print window is restyled. The on-screen bars are measured the same way: all
+  sheets together, 400ms after the last change.
+
+**Tested in Chrome, not assumed: the rewrite does not reach the page's own stylesheets.** Chrome can share
+parsed stylesheets between documents.
+- On the built page after the app had measured, the page's media rules were unchanged - 3 print, 1 screen,
+  none rewritten.
+- Rewriting all 16 in a throwaway frame's copy left them unchanged again. The bar computed `display: block`,
+  in red, with the root font at 16px.
+
+### THE WARNING, CHECKED AGAINST PAPER - print-check
+
+- **The warning check** (on commits that have it). print-check drives the app's real `triggerUniversalPrint`
+  and reads what the operator is shown. It then measures the untouched print window independently, in print
+  media, at the sheet's width. The warning must:
+  - appear exactly when paper is cut;
+  - give each sheet's mm to within 1mm, in the banner and on the on-screen sheet;
+  - hold the dialog exactly then.
+
+  A disagreement is a finding.
+- **Measured at the sheet's width.** Print media alone left the viewport 1400px wide, so width media queries
+  answered for the screen. No figure here changed with it - 4 mm and 12 mm at both widths - but it was
+  measuring the wrong thing.
+- **`inspection-stress`**, the case that produced O58: the largest inspection MR, every row carrying the
+  longest real value of every printed field, as the scratch census built it, plus HV S.E. A pagination fix
+  is tested against the case that failed.
+- **Pictures:** the print window's banner, and the top of every sheet carrying a bar, as the operator sees
+  them.
+
+### VERIFIED
+
+- **print-check, all five cases, `--compare HEAD`:**
+
+  | Document | Warning | Paper loses |
+  |---|---|---|
+  | Estimate, itemised | none; dialog opened | 0 |
+  | Estimate, fixed-rate | none; dialog opened | 0 |
+  | Multi-job | "Sheet 1 of 1: 4 mm"; dialog held | 4 mm |
+  | Inspection (real rows) | none; dialog opened | 0 |
+  | Inspection (stress) | "Sheet 2 of 2: 12 mm"; dialog held | 12 mm |
+
+  - The on-screen bars agree.
+  - Rows, sheets and PDF pages are unchanged from HEAD.
+  - The only change on paper is the print path: "dialog on load" became "measured first".
+  - Class coverage is complete - 140, 140, 81, 145 and 145.
+  - Measuring takes 78-143 ms per document, over two runs.
+- **The pictures,** looked at: the banner and the on-screen bar are red, full-width, and state the number.
+  - The first bar pictures were blank. print-check re-took them on every tick after releasing the page, and
+    the last one caught the print window, where the copied bar is rightly hidden. Fixed: pictured once.
+- **Gates:**
+  - `tsc` clean;
+  - `npm test` 66 of 66, 12 of them new;
+  - `vite build` clean;
+  - hooks guard clean;
+  - `print-subtree-hashes --compare HEAD` - 13 byte-identical.
+
+### NOT EXERCISED
+
+- **The challan's confirm** - print-check drives only the print-window path.
+- **The Word export's stripping** of the bar - read, not run.
+- **Eight of the thirteen documents**: bills, the challan, the forwarding letter, external inspection and
+  the testing report. They are measured by construction - the same component - not by a check.
+- **Firefox and Safari.** The media rewrite uses standard CSSOM, but only Chrome was run.
+- **The cost on a screen that edits a sheet as you type.** Each pause re-measures in a fresh frame, 78-143 ms
+  on these documents; a very long MR has not been timed.
+- **`NewJob` and `LetterheadCalibrator` call `window.print()`** but are not among the thirteen, and are not
+  guarded.
+
+### SHOULD ANY DOCUMENT REFUSE? - no exceptions, recommended
+
+- **The strongest candidate is the GST tax invoice.**
+  - A tax invoice has prescribed particulars, including the tax amounts and the supplier's signature, and
+    they sit at the foot, where a cut lands.
+  - One missing them is not a valid tax invoice, and the buyer's input tax credit rests on holding one.
+  - A truncated invoice is therefore a document that looks issued and is not valid - the one case where
+    short may be worse than none.
+- **Warn anyway.**
+  - The operator now sees the mm before the dialog, and a missing signature is visible on paper.
+  - Refusing blocks every copy, including the one checked while the layout is corrected.
+  - The invoice is one content-sized sheet that has never been measured overflowing; for it, detection is
+    the fix until one is (O64 step 4).
+- **To confirm with the agency's accountant, not decided here:** whether issuing a GST invoice missing its
+  foot creates exposure worse than a delay. If it does, the tax invoice - and only it - should refuse.

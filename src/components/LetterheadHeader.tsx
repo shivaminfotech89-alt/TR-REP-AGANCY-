@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getAgencyStateCode } from '../lib/utils';
 import { Agency } from '../lib/AgencyContext';
 import { convertPdfPageToImage } from '../lib/letterheadUtils';
+import { PRINT_BODY_ATTR, scheduleSheetMeasurement, watchSheetCutoff } from '../lib/printUtils';
+import { describeCutoff, hasCutoff, type Cutoff } from '../lib/printOverflow';
 
 interface LetterheadHeaderProps {
   agency: Agency | null;
@@ -11,10 +13,10 @@ interface LetterheadHeaderProps {
   hideBackdropOnPrint?: boolean;
 }
 
-export function LetterheadHeader({ 
-  agency, 
-  documentTitle, 
-  subtitle, 
+export function LetterheadHeader({
+  agency,
+  documentTitle,
+  subtitle,
   className = '',
 }: LetterheadHeaderProps) {
   const [resolvedUrl, setResolvedUrl] = useState<string | null>(agency?.letterheadUrl || null);
@@ -82,10 +84,10 @@ export function LetterheadHeader({
   if (isHeaderOnly && resolvedUrl) {
     return (
       <div className={`text-center mb-4 border-b-2 border-black pb-2 ${className}`}>
-        <img 
-          src={resolvedUrl} 
-          alt="Agency Letterhead" 
-          className="max-h-24 w-full object-contain mx-auto mb-1.5" 
+        <img
+          src={resolvedUrl}
+          alt="Agency Letterhead"
+          className="max-h-24 w-full object-contain mx-auto mb-1.5"
         />
         {documentTitle && (
           <div className="mt-1 inline-block bg-black text-white px-5 py-0.5 rounded-full text-xs font-bold tracking-widest uppercase">
@@ -141,6 +143,12 @@ export interface PrintableA4PageProps {
 /**
  * PrintableA4Page: Guarantees strict 1-page A4 boundaries (210mm x 297mm portrait or 297mm x 210mm landscape)
  * with dedicated top and bottom safety zones matching pre-printed letterhead stationary.
+ *
+ * ⚠ THE BODY HIDES OVERFLOW, SO EVERY SHEET MEASURES WHAT IT WILL LOSE AND SAYS SO (AUDIT O64, G66). Content past
+ * the body - between the letterhead's reservations - is cut off on the preview and on paper. Measured after every
+ * change to what the sheet holds - as laid out for print, which is not the screen's layout - written to
+ * `data-cutoff-bottom-mm` / `data-cutoff-right-mm` (`data-cutoff-state` says whether it has been measured yet), and shown
+ * as a red bar across the sheet with the number. The bar is on screen only: hidden from print, dropped from Word.
  */
 export function PrintableA4Page({
   agency,
@@ -175,6 +183,38 @@ export function PrintableA4Page({
     }
   }, [agency?.letterheadUrl]);
 
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const [cutoff, setCutoff] = useState<Cutoff>({ bottomMm: 0, rightMm: 0 });
+  const [measured, setMeasured] = useState(false);
+
+  // Measured AS PRINTED, not as shown (lib/printUtils measureAsPrinted): every sheet on screen together, 400ms after
+  // the last change to any of them - its size, its DOM, fonts arriving, an image loading inside it. State only changes
+  // when the number does, and the bar sits outside the observed body, so it cannot re-render the sheet into a loop.
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+    const stop = watchSheetCutoff(page, next => {
+      setCutoff(prev => (prev.bottomMm === next.bottomMm && prev.rightMm === next.rightMm ? prev : next));
+      setMeasured(true);
+    });
+    const again = () => scheduleSheetMeasurement();
+    const body = page.querySelector(`[${PRINT_BODY_ATTR}]`);
+    const resize = body && typeof ResizeObserver !== 'undefined' ? new ResizeObserver(again) : null;
+    if (body) resize?.observe(body);
+    const mutation = body && typeof MutationObserver !== 'undefined' ? new MutationObserver(again) : null;
+    if (body) mutation?.observe(body, { childList: true, subtree: true, characterData: true, attributes: true });
+    body?.addEventListener('load', again, true);
+    (document as any).fonts?.ready?.then(again).catch(() => {});
+    window.addEventListener('load', again);
+    return () => {
+      stop();
+      resize?.disconnect();
+      mutation?.disconnect();
+      body?.removeEventListener('load', again, true);
+      window.removeEventListener('load', again);
+    };
+  }, [resolvedUrl, orientation]);
+
   const isLandscape = orientation === 'landscape';
   const widthMm = isLandscape ? '297mm' : '210mm';
   const heightMm = isLandscape ? '210mm' : '297mm';
@@ -186,8 +226,12 @@ export function PrintableA4Page({
   const effectiveRightMarginMm = marginRightMm ?? agency?.letterheadMarginRightMm ?? (isLandscape ? 10 : 14);
 
   return (
-    <div 
+    <div
       id={id}
+      ref={pageRef}
+      data-cutoff-bottom-mm={cutoff.bottomMm}
+      data-cutoff-right-mm={cutoff.rightMm}
+      data-cutoff-state={measured ? 'measured' : 'pending'}
       className={`a4-print-page relative bg-white ${isLandscape ? 'landscape' : ''} ${className}`}
       style={{
         width: widthMm,
@@ -201,16 +245,27 @@ export function PrintableA4Page({
     >
       {/* Pre-Printed Letterhead Full A4 Background Image (Rendered both in preview & print) */}
       {isFullA4 && resolvedUrl && (
-        <img 
-          src={resolvedUrl} 
-          alt="A4 Letterhead Background" 
-          className="absolute inset-0 pointer-events-none select-none z-0 object-fill" 
+        <img
+          src={resolvedUrl}
+          alt="A4 Letterhead Background"
+          className="absolute inset-0 pointer-events-none select-none z-0 object-fill"
           style={{ width: widthMm, height: heightMm, objectFit: 'fill' }}
         />
       )}
 
+      {/* THE CUT-OFF, SAID ON THE SHEET (AUDIT G66). Absolutely positioned, so it cannot change the layout it reports on;
+          outside the measured body, so it is never measured; hidden from print; dropped from the Word export. */}
+      {hasCutoff(cutoff) && (
+        <div data-screen-only="" role="alert" className="print:hidden absolute inset-x-0 top-0 z-30 pointer-events-none">
+          <div className="m-2 rounded-md border-2 border-red-800 bg-red-600 px-3 py-2 text-center text-white shadow-lg">
+            <p className="text-sm font-black uppercase tracking-wide">This sheet will print short</p>
+            <p className="text-[13px] font-bold">{describeCutoff(cutoff)}</p>
+          </div>
+        </div>
+      )}
+
       {/* Structured Content Area - Strictly padded between header and footer */}
-      <div 
+      <div
         className="relative z-10 w-full h-full box-border flex flex-col justify-between text-black"
         style={{
           paddingTop: isFullA4 ? `${effectiveHeaderHeightMm}mm` : (isLandscape ? '6mm' : '8mm'),
@@ -239,8 +294,8 @@ export function PrintableA4Page({
           </div>
         )}
 
-        {/* Main Body */}
-        <div className="flex-1 w-full overflow-hidden flex flex-col justify-between">
+        {/* Main Body - the clipping box. Marked so the cut-off measurement finds it (lib/printUtils). */}
+        <div data-print-body="" className="flex-1 w-full overflow-hidden flex flex-col justify-between">
           {children}
         </div>
       </div>
