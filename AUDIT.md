@@ -4874,6 +4874,18 @@ a sweep complete against its own pattern, wrong about the domain.
 
 ### O20. "S.E." is undefined in this codebase, and the choice is now an agency fact
 
+> **THE ANSWER HAS CHANGED - 2026-09-11.** "These agencies do not use S.E. conductor", below, was
+> the operator's answer when asked, and it was right to record it as that: an agency fact, not
+> something read off the tender. **The operator now says S.E. conductor is used.** Nothing below was
+> a mistake at the time; the fact it records is no longer current.
+>
+> Until an S.E. input exists, every coil still prices at the without-S.E. rate. On S.E. work that
+> under-charges each winding in both tenders:
+> - UGVCL-2020: 12A-b 163 against 12A-b1 213, and 13A-b 149 against 13A-b1 199;
+> - UGVCL-2026: 12A-b 165 against 12A-b1 215, and 13A-b 150 against 13A-b1 201.
+>
+> The fixed selection lives in `SingleJobEstimateReport`, at the HV and LV coil lines.
+
 Sixteen Schedule-A entries split on it — `12A`, `12B`, `13A`, `13B`, each Copper/Aluminium
 x with/without — and the rate difference is Rs 50/kg on Aluminium, Rs 50/kg on Copper.
 
@@ -9760,6 +9772,11 @@ callers' `finally` blocks still clear their submitting state and any caller want
 handle the error itself still can — this adds a floor, it does not take over.
 
 ### F47. HV coil priced at the with-S.E. rate; corrected to without
+
+> **The agency fact this correction rests on has changed (2026-09-11) - see O20.** The correction
+> was right on the answer given at the time: with S.E. on one winding and without on the other,
+> from one inspection, was wrong either way. What changed is the answer. S.E. conductor is used, so
+> "without S.E." is no longer a constant - it is one of two values an input has to select.
 
 `SingleJobEstimateReport` resolved Schedule-A **`12A-b1`** — Aluminium **with** S.E.,
 Rs 213/kg — for the HV winding, while the LV winding resolved **`13A-b`** — Aluminium
