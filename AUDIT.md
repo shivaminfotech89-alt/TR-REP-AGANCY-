@@ -6928,6 +6928,139 @@ for pricing, which is what they should be.**
 
 ---
 
+### O61. Every estimate prints the same 2020-21 tender reference, whatever its tender
+
+Open, found 2026-09-11 while printing G62. Not fixed.
+
+The estimate's header prints "Order No.: ..., Dt.: ...". `SingleJobEstimateReport` takes it from
+`agency.atDetails.orderNo || agency.contractAgreementNo || atMaster.orderNo`. When none of those is set,
+it prints a hardcoded **`UGVCL/EE-T-1/TRANS-REP/2020-21/01/1102`**, and the date falls back separately
+to **`16/04/2021`**.
+
+- **None of the three is set anywhere:** 0 of 16 agencies, 0 of 14 ATs.
+- **So every estimate in the database prints that reference.** All 74 jobs that belong to an AT do,
+  on 2020 and 2026 tenders alike, and the AT's own number (`atNumber`) is never read.
+- **One has left the building:** STD-1's estimate, sent 2026-09-10. It is on SAMOR's ALLOTMENT
+  NO.25903 - a **UGVCL-2026** tender - and names a 2020-21 order dated 2021.
+
+It is the sentinel shape this codebase keeps removing: a plausible value standing in for an absent
+one, on a document to the DISCOM, with nothing saying it was substituted.
+
+**It bears on O59.** The one place an estimate names its tender names the wrong one, for every tender
+in the database.
+
+**Not decided:** print the AT's number, refuse to issue an estimate with no order number, or both.
+
+---
+
+### O60. Copper labour coil lines price at the aluminium rate
+
+Open, found 2026-09-11 while verifying G62. Not fixed. **No live figure is affected today.**
+
+**The tender, both schedules:**
+
+| Row | Copper | Aluminium |
+|---|---|---|
+| 12C, HV coil winding labour | 12C-a: 11/kg | 12C-b: 34/kg |
+| 13C, LV coil winding labour | 13C-a: 17/kg | 13C-b: 51.75/kg (52 under 2026) |
+
+**Why copper gets the aluminium figure:**
+- **One generic row each.** The master has a single labour row per winding, `12C` and `13C`, not
+  split by material.
+- **It holds the aluminium figure everywhere.** Every AT's master, and the built-in default in
+  `estimateData.ts`, hold 34 and 51.75.
+- **The copy test misreads it.** `resolveRate` compares a master cell with the baseline of the row
+  being priced. For aluminium, 34 equals 12C-b, reads as a copy, and Schedule-A prices. For copper, 34
+  differs from 12C-a's 11, so it reads as a genuine override.
+- **The result:** copper labour prices at 34 and 51.75, under both tenders, since an override wins
+  over either schedule.
+
+**Size:** +23/kg on HV coil weight and +34.75/kg on LV, before the AT percentage. On a 149.60 kg HV coil
+that is +3,440.80.
+
+**Live:** one copper job, which charges no labour coil line.
+
+**The same shape as G61's S.E. hazard.** A master row standing for an item code with several tender rows
+is read as an override of whichever row is being priced. The HV and LV coil rows avoid it by being
+split (`12A(a)` / `12A(b)`); the labour rows are not.
+- Verified on a synthetic job with no master anywhere, on 8e2e5e7 and after G62 alike.
+- Since G62 the line prints `12C-a` beside 34, so a careful reader can see it.
+
+**Not decided:** split the master's labour rows by material, or make the copy test recognise a cell
+equal to any of the code's variant rows as a copy.
+
+---
+
+### O59. Eight tenders price from the 2020 schedule on an inference, and nothing recorded can confirm it
+
+Open, 2026-09-11. Nothing changed.
+
+`scripts/admin/backfill-schedule-id.js` stamped every AT then in the database UGVCL-2020 except A/T 1819,
+on the reasoning that they predate 1819's date, 07.09.2026. That was an inference from names and
+dates. **Nothing in the data records which Schedule-A a tender was awarded under**, and a tender
+priced from the wrong one carries the wrong figure on every line of every document, not only the coils.
+
+**Which ATs carry which schedule** - read-only census, 2026-09-11:
+
+| Agency | AT | Schedule | Its source | Start | Jobs | Issued | Priced under 2026 instead |
+|---|---|---|---|---|---|---|---|
+| ADMIN | 2026_27 | 2020 | none recorded (backfill) | 2026-08-15 | 20 | 1 challan | -32,368.05 on 14 jobs |
+| suchit | 2026-27 | 2020 | none recorded (backfill) | 2026-08-22 | 0 | - | - |
+| MEGHA | AT 26-27 | 2020 | none recorded (backfill) | 2026-08-01 | 35 | 27 challans | +6,551.47 on 31 jobs |
+| UPENDRA | 24-25 | 2020 | none recorded (backfill) | 2024-08-18 | 0 | - | - |
+| UPENDRA | AT2026-27 | 2020 | none recorded (backfill) | 2026-08-22 | 0 | - | - |
+| PATEL ELECTRICALS | .../2020-21/1087 | 2020 | none recorded (backfill) | 2026-09-07 | 5 | - | none price cleanly both ways; 2 price under 2020 and block under 2026 |
+| GUJARAT ENERGY TRANSMISSION | 2020-21/01/1049 | 2020 | none recorded (backfill) | 2021-04-16 | 4 | - | +255.24 on 4 jobs |
+| AARATI | 2026-27 (closed) | 2020 | none recorded (backfill) | 2026-08-22 | 1 | - | - |
+| ZENITH | .../2026-28/01/AT/1819 | 2026 | backfill, held back as 1819 itself | 2026-09-07 | 0 | - | - |
+| ADMIN | 2026-28/AT/1819 | 2026 | rate template | 2026-09-07 | 0 | - | - |
+| SAMOR | ALLOTMENT NO.25903 (closed) | 2026 | rate template | 2026-09-07 | 9 | 2 | (under 2020: -3,688.30) |
+| SAMOR | AT-2026-28 | 2026 | rate template | 2026-09-07 | 0 | - | - |
+| SAMOR | .../2026-28/01/AT/1808 | 2026 | rate template | 2026-09-07 | 0 | - | - |
+| megha transformer | 2026-28 | 2026 | rate template | 2026-09-07 | 0 | - | - |
+
+"Priced under 2026 instead" reprices each AT's live jobs with the real builder, counting only jobs that
+price cleanly both ways. The figure is the final amount, including the AT percentage.
+- **ADMIN's -32,368.05 is mostly a pricing-model change.** Under 2026, Amorphous and Wound Core are
+  itemised, not fixed-rate: its four Amorphous jobs move -33,058.27 and its Wound Core job -1,850.37,
+  while its CRGO jobs rise 2,540.59.
+- **MEGHA:** CRGO +1,564.67, Amorphous +3,217.76, Wound Core +1,769.04.
+- **Every issued mark on the 2020 ATs is a delivery challan**, dated 13-23 August 2026. No estimate or bill
+  on them has been issued, and all of those challans predate the schedule-confirmation gate (24fb475,
+  2026-09-07 23:41 IST).
+
+**Is any on the wrong one? The data cannot say.**
+- **Consistent with 2020:** GUJARAT ENERGY TRANSMISSION 1049 - a 2020-21 tender number and a 2021 start
+  date - and UPENDRA 24-25, starting 2024.
+- **Unknown:** the five ATs named by year - ADMIN 2026_27, suchit 2026-27, MEGHA AT 26-27, UPENDRA AT2026-27,
+  AARATI 2026-27. The name is a year, not an A/T number. Their start dates, 1-22 August 2026, precede
+  07.09.2026, but a start date is typed by the operator, not taken from the award.
+- **Self-contradictory:** PATEL 1087. Its number reads 2020-21, but its start date and creation are
+  07.09.2026 - 1819's own date - while its jobs' MR dates are 20 August.
+
+**What does not settle it, and why:**
+- **Master cells.** Every AT's cells match the 2020 schedule wherever they hold a value - including the six
+  2026 ATs, whose templates carry 2020 figures that the copy test defers to the tender's schedule. The
+  cells record a copy, not an award.
+- **The AT percentage.** The 2020 ATs hold 4 (suchit 5); the 2026 ATs hold 7, which is 1819's accepted 7.00%
+  above. A percentage is an agency's accepted bid, not a schedule marker. It can only corroborate -
+  though a 4% AT whose paper says 7.00% above is wrong on that field whatever its schedule.
+- **What the app does not record at all:** an award date, a tender (NIT) reference separate from the AT's
+  name, and which schedule edition the paper cites.
+
+**What to check on paper, per AT:**
+1. **The A/T letter's number and date.** For the five year-named ATs, the real A/T number is not in the
+   app.
+2. **The schedule of rates the A/T cites or annexes.** The quickest test is a cell that moved: Schedule-A
+   12A-b (HT coil, aluminium, without S.E.) is 163 under 2020 and 165 under 2026; 12A-b1 is 213 against 215.
+3. **Clause 2.0's accepted percentage**, against the percentage stored on the AT.
+
+**The app already asks the question once, at the first estimate sent** (read in code, not exercised):
+none of the eight has `scheduleConfirmedAt`, so the send path stops for confirmation and records who
+confirmed and when. That records a person's answer; it does not check the paper for them.
+
+---
+
 ### O58. A signed inspection sheet can lose its signature block, and nothing says so
 
 Open, found 2026-09-11 while printing G61's column. Not started.
@@ -6965,6 +7098,15 @@ Which others can overflow, on which letterheads, is not measured.
 - a visible warning when anything is cut off.
 
 Each is its own change.
+
+**The estimate is cut off too, with no letterhead at all** - found printing G62. SU-5's itemised
+estimate has 28 lines on one page and no letterhead, and it loses what sits below its totals:
+- the Final Amount row's box is clipped;
+- the signature block - "For, <DISCOM>" and "For, <agency>" - does not print.
+
+It is identical on 8e2e5e7 and after G62: 14 elements cut off, measured against the clipping container
+and seen in the print. `layoutEstimatePages` kept all 28 lines on one page; why its budget allowed that
+is not investigated. SU-5 has no issued document.
 
 **Same letterhead, a different defect.** MEGHA's letterhead image carries its own "For MSD Corporation
 / Authorized Signatory" and "Page 1 of 1" inside the picture, above the 25mm footer the agency set.
@@ -13634,3 +13776,93 @@ Authorized Signatory" and "Page 1 of 1" inside the picture, above the 25mm foote
 - The report reads "Page 1 of 1" on each of two sheets.
 
 That is the agency's image and footer setting, and nothing in the app detects it.
+
+
+## G62. The coil lines print the Schedule-A row they were priced as
+
+Point 5 of the S.E. request, which G61 did not build. Verifying G61, the HV coil line's Sr. No. read
+"20" - its position on the sheet. A division office needs the tender row: whether that coil was
+priced at 12A-b1 (with S.E., 213) or 12A-b (without, 163) is not visible anywhere else on the page.
+
+### WHAT CHANGED
+
+**Each coil line carries `scheduleSr`, the Schedule-A row its rate was selected from, and the Sr. No.
+cell prints it in place of the position:**
+
+| Line | Row printed |
+|---|---|
+| HV Coil | 12A-b / 12A-b1 aluminium; 12A-a / 12A-a1 copper - by the HV S.E. answer |
+| LV Coil | 13A-b / 13A-a |
+| Re-insulation LV Coil | 14-ii / 14-i |
+| Labour HV Coil | 12C-b / 12C-a |
+| Labour LV Coil | 13C-b / 13C-a |
+
+- **The row is named once and used twice** - to look up the rate and to print - so the code cannot name
+  a row other than the one the builder read.
+- **Every other line keeps its position.** `sr` is unchanged, because pagination and row keys use it,
+  so a sheet's numbering now skips where coil lines sit: 19, 12A-b, 13A-b, 14-ii, 23.
+- **Itemised sheet only.** Coil lines never appear on the fixed-rate sheet. The cell does not wrap: a
+  code split at its hyphen would make the row taller than `layoutEstimatePages` budgets for.
+- **12B (originals missing) cannot print**, because nothing reaches it (O21).
+- **A master override prints its row too.** AT 1049's typed 213 in `12A(b)` prints as 12A-b @ 213 until
+  its revert - a code and rate the division can now see disagree.
+
+### ⚠ WHAT IT CHANGES ON DOCUMENTS ALREADY ISSUED
+
+Estimates recompute, so a reprint shows the codes. **One issued estimate carries coil lines: STD-1,
+sent 2026-09-10.** Its positions 20, 22 and 27 reprint as 12A-b, 14-ii and 12C-b; every figure is
+unchanged. ASTD-1 carries an issued bill, which prints no estimate lines, and no issued estimate.
+
+**⚠ AND AN UNANSWERED LINE NOW CONTRADICTS ITSELF.** G61 kept "HV Coil(Aluminium SE)-N" on aluminium
+jobs with no S.E. answer, so that issued estimates would reprint unchanged. That line now prints
+**12A-b - the without-S.E. row - beside the words "Aluminium SE"**. The reason for keeping the
+wording was reprint stability, and G62 changes those reprints anyway. Not changed here: it is wording
+on a document UGVCL reads, and is a decision.
+
+### NOT BUILT
+
+- **The multi-job estimate sheet.** Its rows are master items across up to five jobs, and one row's
+  jobs can have been priced from different rows - one S.E., one not. One Sr. cell cannot name both.
+  Splitting such a row by schedule row, or printing the code per column, is a decision.
+- **The estimate Excel export**, for the same reason. Its SR column prints the master item code
+  (`12A(b)`).
+- The Word export serialises the printed page, so it carries the codes without a change.
+
+### FOUND, NOT G62's
+
+- Copper labour coil lines price at the aluminium rate (O60).
+- Every estimate prints a hardcoded 2020-21 order number, whatever its tender (O61).
+- SU-5's one-page estimate is cut off below its Final Amount (O58).
+
+### VERIFIED, AND NOT
+
+Passed:
+- `tsc --noEmit`, `vite build`, the hooks guard and `npm test` (25).
+- **Print-subtree hashes against HEAD:** 12 of 13 byte-identical; the itemised estimate
+  (`SingleJobEstimateReport#1`) changed.
+- **The builder, 8e2e5e7 against the working tree** (a detached worktree):
+  - 77 live jobs, 77 estimates, **0 moved** with `scheduleSr` set aside;
+  - 54 estimates carry codes, none on a non-coil line;
+  - all 136 charged coil lines carry the row their material and S.E. answer select.
+- **A synthetic 63 kVA job under both tenders**, aluminium and copper, each S.E. answer, with no master
+  anywhere: every line's code and rate are the same row - except copper labour, whose wrong rate is
+  identical on 8e2e5e7 (O60).
+- **Printed through `triggerUniversalPrint` in headless Chrome**, before and after: MSBT-8 (full-A4
+  letterhead, two pages) and SU-5 (no letterhead, one page), and MSBT-8 answered S.E.
+  - It asserts first that the pages match the PDF, all 28 lines printed, all five coil lines were
+    found, and the S.E. answer landed.
+  - Then: same pages, same lines per page, every description, rate and amount identical, non-coil
+    numbers unchanged, no row taller, no Sr. No. cell on two lines, no description newly wrapped,
+    nothing newly cut off.
+  - The Sr. No. column went 26.7px to 30.4px, taken from the description column (404.9 to 402).
+  - Answered S.E., MSBT-8 prints `12A-b1 HV Coil(Aluminium SE)-N 10.00 @ 213.00 = 2,130.00`.
+
+**Two of the checks were wrong on first run, and both said so rather than passing:**
+- **The print harness refused the right commit.** Its test that the old source lacked `scheduleSr`
+  matched `scheduleSrForMasterCode`. It now tests for the field's declaration.
+- **The builder check blamed G62 for the copper labour rates.** It assumed an AT with an empty master
+  prices from Schedule-A alone. An empty AT section falls back to the agency's master, and then to the
+  built-in default. It now empties both, and separates a rate G62 introduced from one 8e2e5e7 already
+  produced by pricing the same inputs on both.
+
+Not verified: the app run in a browser, and a physical printer.

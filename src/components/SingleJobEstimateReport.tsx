@@ -285,6 +285,13 @@ export interface EstimateRateError {
 export interface SingleEstimateLineItem {
   sr: number;
   itemCode?: string;
+  /**
+   * THE SCHEDULE-A ROW THIS LINE WAS PRICED AS - '12A-b1', '13A-a' - printed in the Sr. No. cell in
+   * place of `sr` (AUDIT G62). Set on the coil lines, where one item code stands for several tender
+   * rows and a division office cannot tell from the description which was applied: with or without
+   * S.E., copper or aluminium. `sr` stays the line's position, because pagination and keys use it.
+   */
+  scheduleSr?: string;
   desc: string;
   unit: string;
   qty: string;
@@ -1168,7 +1175,9 @@ export function buildSingleJobEstimateData(
     notices.push(`HV coil priced WITHOUT S.E.: this internal inspection was saved before S.E. was recorded.${isCopper ? '' : ' The line reads "Aluminium SE", the wording this estimate has always printed for aluminium - it does not mean the S.E. rate was used.'} Answer HV S.E. on the internal inspection to price it either way.`);
   }
   const hvWithSe = hvSe === 'with';
-  const hvCoilScheduleValue = scheduleRate(isCopper ? (hvWithSe ? '12A-a1' : '12A-a') : (hvWithSe ? '12A-b1' : '12A-b'));
+  // The row is named once and used twice: to price the line, and to print on it (AUDIT G62).
+  const hvCoilSr = isCopper ? (hvWithSe ? '12A-a1' : '12A-a') : (hvWithSe ? '12A-b1' : '12A-b');
+  const hvCoilScheduleValue = scheduleRate(hvCoilSr);
   // ⚠ WITH S.E. READS SCHEDULE-A ONLY - NEVER THE MASTER'S '12A(b)' / '12A(a)' ROWS.
   //
   // Those rows are the WITHOUT-S.E. figures, and the master deliberately has no S.E. rows (AUDIT
@@ -1183,6 +1192,7 @@ export function buildSingleJobEstimateData(
   internalItems.push({
     sr: srCounter++,
     itemCode: '12A',
+    scheduleSr: hvCoilSr,
     desc: `HV Coil(${coilLabel(hvSe, windingSuffix)})-N`,
     unit: 'KG',
     qty: hvCoilWeight.toFixed(2),
@@ -1217,13 +1227,15 @@ export function buildSingleJobEstimateData(
   // Master rows are '13A(a)' copper and '13b(b)' aluminium - the lower-case 'b' in the
   // aluminium code is how the data is stored, not a typo here; matching is case-insensitive
   // but the character sequence must be exact.
-  const lvCoilScheduleValue = scheduleRate(isCopper ? '13A-a' : '13A-b');
+  const lvCoilSr = isCopper ? '13A-a' : '13A-b';
+  const lvCoilScheduleValue = scheduleRate(lvCoilSr);
   const lvCoilRate = resolveRate(isCopper ? ['13A(a)', '13A'] : ['13b(b)', '13A'], lvCoilScheduleValue);
   recordErrorIfApplies(lvCoilApplies, lvCoilRate, 'LV Coil');
   const lvCoilAmt = lvCoilApplies ? lvCoilWeight * (lvCoilRate ?? 0) : 0;
   internalItems.push({
     sr: srCounter++,
     itemCode: '13A',
+    scheduleSr: lvCoilSr,
     desc: `LV Coil(${isCopper ? 'Copper' : 'Aluminium'})-N`,
     unit: 'KG',
     qty: lvCoilWeight.toFixed(2),
@@ -1252,15 +1264,17 @@ export function buildSingleJobEstimateData(
     ? Number(internalData.totWtLvReIns)
     : lvRiCount * (Number(internalData?.wtOfCoilLv) || 0);
   const reInsApplies = reInsWeight > 0;
+  const reInsSr = isCopper ? '14-i' : '14-ii';
   const reInsRate = resolveRate(
     isCopper ? ['14(ii)CU', '14'] : ['14(ii)AL', '14'],
-    scheduleRate(isCopper ? '14-i' : '14-ii')
+    scheduleRate(reInsSr)
   );
   recordErrorIfApplies(reInsApplies, reInsRate, 'Re-insulation LV Coil');
   const reInsAmt = reInsApplies ? reInsWeight * (reInsRate ?? 0) : 0;
   internalItems.push({
     sr: srCounter++,
     itemCode: '14',
+    scheduleSr: reInsSr,
     desc: `Re-insulation LV Coil(${isCopper ? 'Copper' : 'Aluminium'})`,
     unit: 'KG',
     qty: reInsWeight.toFixed(2),
@@ -1311,12 +1325,14 @@ export function buildSingleJobEstimateData(
   // 28. Labour HV Coil(Aluminium) - Schedule-A '12C-a'/'12C-b', no S.E. split
   const lbrHvWeight = hvCoilWeight;
   const lbrHvApplies = lbrHvWeight > 0;
-  const lbrHvRate = resolveRate('12C', scheduleRate(isCopper ? '12C-a' : '12C-b'));
+  const lbrHvSr = isCopper ? '12C-a' : '12C-b';
+  const lbrHvRate = resolveRate('12C', scheduleRate(lbrHvSr));
   recordErrorIfApplies(lbrHvApplies, lbrHvRate, 'Labour HV Coil');
   const lbrHvAmt = lbrHvApplies ? lbrHvWeight * (lbrHvRate ?? 0) : 0;
   labourItems.push({
     sr: srCounter++,
     itemCode: '12C',
+    scheduleSr: lbrHvSr,
     desc: `Labour HV Coil(${isCopper ? 'Copper' : 'Aluminium'})`,
     unit: 'KG',
     qty: lbrHvWeight.toFixed(2),
@@ -1328,12 +1344,14 @@ export function buildSingleJobEstimateData(
   // 29. Labour LV Coil(Aluminium) - Schedule-A '13C-a'/'13C-b', no S.E. split
   const lbrLvWeight = lvCoilWeight;
   const lbrLvApplies = lbrLvWeight > 0;
-  const lbrLvRate = resolveRate('13C', scheduleRate(isCopper ? '13C-a' : '13C-b'));
+  const lbrLvSr = isCopper ? '13C-a' : '13C-b';
+  const lbrLvRate = resolveRate('13C', scheduleRate(lbrLvSr));
   recordErrorIfApplies(lbrLvApplies, lbrLvRate, 'Labour LV Coil');
   const lbrLvAmt = lbrLvApplies ? lbrLvWeight * (lbrLvRate ?? 0) : 0;
   labourItems.push({
     sr: srCounter++,
     itemCode: '13C',
+    scheduleSr: lbrLvSr,
     desc: `Labour LV Coil(${isCopper ? 'Copper' : 'Aluminium'})`,
     unit: 'KG',
     qty: lbrLvWeight.toFixed(2),
@@ -2036,7 +2054,11 @@ export default function SingleJobEstimateReport({
                           </tr>
                           {group.rows.map((item) => (
                             <tr key={`item-${item.sr}`} className="border-b border-slate-300 print:border-black h-4">
-                              <td className="border-r border-black p-0.5 text-center font-mono">{item.sr}</td>
+                              {/* THE SCHEDULE ROW ON A COIL LINE, THE POSITION ON EVERY OTHER (AUDIT G62). A coil
+                                  line's code - 12A-b1, 13A-b - is the only way a division office can see which
+                                  tender row priced it. Never wraps: a code split at its hyphen would make the
+                                  row taller than layoutEstimatePages budgets for. */}
+                              <td className="border-r border-black p-0.5 text-center font-mono whitespace-nowrap">{item.scheduleSr ?? item.sr}</td>
                               <td className="border-r border-black p-0.5 pl-1">{item.desc}</td>
                               <td className="border-r border-black p-0.5 text-center font-semibold">{item.unit}</td>
                               <td className="border-r border-black p-0.5 text-center font-mono">{item.qty}</td>
