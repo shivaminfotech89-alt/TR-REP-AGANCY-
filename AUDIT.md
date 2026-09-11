@@ -7003,6 +7003,32 @@ for pricing, which is what they should be.**
 
 ---
 
+### O65. Should the tax invoice refuse to print short? - an open question with an owner
+
+Open, 2026-09-11. **Decided for now: warn only, no exceptions, the tax invoice included** (G66).
+
+**Who answers it: the product owner's accountant, asked by the owner.** The accountant's name is not yet
+recorded here - the owner to add it. Until they answer, nothing changes.
+- **Why an owner is named:** a decision recorded as "to confirm with the accountant", with nobody holding
+  the question, is a decision nobody owns.
+
+**The question:** is a GST tax invoice missing its tax block and signature worse than a delayed one?
+- **No:** the tax invoice stays warn-only, and this entry closes.
+- **Yes:** the tax invoice alone refuses to print when its sheet is cut. Every other document still warns.
+
+**What refusing the tax invoice alone would take - not built:**
+- **⚠ The sheet cannot say it is the tax invoice today.** In the bill package it is the third
+  `PrintableA4Page`, with no `documentTitle`; the forwarding letter and certificate carry
+  `documentTitle=""`. A refusal keyed to "sheet 3" breaks the day the package changes. The sheet needs a
+  stated identity.
+- **The package prints four documents in one window** - letter, certificate, invoice, oil account - and
+  every tab prints all four (`hidden print:block`). Whether a cut invoice refuses the whole package or lets
+  the other three print is a decision for then.
+- **The same gap shows in the warning now.** It names the sheet by number only - "Sheet 3 of 4: ..." - not
+  "tax invoice". Naming it needs the same identity, whichever way this is answered.
+
+---
+
 ### O64. Content past a page's letterhead-shortened body is cut off silently - one cause behind O58 and O63
 
 Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
@@ -7016,9 +7042,11 @@ Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
 >   real rows print whole;
 > - both estimate layouts print whole.
 >
-> Steps 2 and 3 wait for what the warning shows in use. **Nothing records a warning** - it tells the operator,
-> not us - so "in practice" means operators reporting it, unless a record is added (a production write, and
-> its own decision).
+> Steps 2 and 3 wait for evidence of what overflows in use.
+>
+> **Decided: no production write to learn which documents overflow.** The warning tells the operator, and
+> operators telling the owner is the channel for a product with twelve customers. The cheapest record, should
+> that change, is described at the end of this entry, so it is not designed under pressure.
 
 **One cause.** `PrintableA4Page` gives each sheet a body between the letterhead's header and footer
 reservations. On a full-A4 letterhead those are `letterheadHeaderHeightMm` and `letterheadFooterHeightMm`.
@@ -7076,8 +7104,54 @@ Only print-check's four documents have been measured. "Not measured" does not me
 4. **The single-sheet documents** - the four bill documents and the challan - cannot move content to a
    second sheet without a redesign. For them, detection is the fix until one is shown to overflow.
 
-**Verification:** print-check measures cut-off on four documents. The longest-real-values stress case that
-produced O58 belongs in it, so the next fix is tested against the case that failed.
+**Verification:** print-check measures cut-off on four documents, and checks the warning against paper
+(G66). The longest-real-values stress case that produced O58 is now one of its cases (`inspection-stress`),
+so the pagination fix is tested against the case that failed.
+
+### IF A RECORD OF WARNINGS IS EVER WANTED - the cheapest shape, not built
+
+Decided 2026-09-11 not to build it. Recorded so the shape is known before a customer reports a clipped
+invoice.
+
+- **One Firestore document per warning shown**, in a new create-only collection (say `printCutoffs`).
+  - **Fields:**
+    - `userId`;
+    - `path` - the print window, or the challan's confirm;
+    - `container` - the printed element's id;
+    - `sheets` - for each cut sheet, its number, the sheet count, its name, and its bottom and right mm;
+    - `at`.
+  - **Nothing from the document itself.** `triggerUniversalPrint`'s title argument carries the MR number, and
+    stays out.
+- **Written from two places only:** where the print window's banner is shown, and where the challan's
+  confirm is asked.
+  - Fire-and-forget: a failed write never delays or blocks printing.
+  - **Not from the on-screen bar.** It re-measures after every pause in editing, so it would record typing,
+    not printing.
+- **Rules:** create only, signed in, `userId` equal to the caller, keys and sizes fixed the way
+  `support_tickets` fixes them. Readable by the super admin only; no update or delete.
+  - The default deny refuses the collection today, so the rule and a rules deploy are part of the change.
+- **Read** by a read-only admin script through `scripts/admin/_db.js`, grouped by document.
+- **⚠ THE PREREQUISITE IS A NAME ON EVERY SHEET.** A record, like the warning, can only say "sheet 3 of 4 of
+  `printable-billing-container`".
+  - The forwarding letter, certificate and tax invoice have no title.
+  - Each sheet needs a stated name, stamped as an attribute the measurement reads.
+  - It is the same identity O65's refusal needs.
+- **One more field costs one more write:** whether the operator pressed Print anyway - the fact a
+  clipped-invoice complaint turns on. Pressing the button can be observed; closing the window without
+  printing cannot, reliably.
+- **Size, estimated:**
+  - app: about 40 lines, plus the sheet names;
+  - a rule of about ten lines;
+  - a read script;
+  - a rules deploy and a hosting deploy.
+
+  At twelve agencies the write volume is negligible.
+- **Considered and not cheaper:**
+  - **Firebase Analytics** - not in the app. It needs a new SDK and measurement ID, and the data lives
+    outside the app.
+  - **An automatic support ticket** - it fills the support queue with things nobody asked.
+  - **A counter on the agency document** - the agency rule's allowlist would have to widen, and a counter
+    says how often, not which sheet or by how much.
 
 ---
 
@@ -14585,5 +14659,5 @@ parsed stylesheets between documents.
   - Refusing blocks every copy, including the one checked while the layout is corrected.
   - The invoice is one content-sized sheet that has never been measured overflowing; for it, detection is
     the fix until one is (O64 step 4).
-- **To confirm with the agency's accountant, not decided here:** whether issuing a GST invoice missing its
-  foot creates exposure worse than a delay. If it does, the tax invoice - and only it - should refuse.
+- **Decided 2026-09-11: warn only, no exceptions, the tax invoice included - for now.** Whether the tax
+  invoice alone should refuse is open as O65, answered by the owner's accountant.
