@@ -768,6 +768,22 @@ and neither is visible from reading the confident part.
 
 ## Pattern: a harness that reports a defect the app does not have
 
+> **⚠ THE BUILD THAT WORKED DID SO BY LUCK, AND THAT IS THE PART TO REMEMBER.** G63's print was
+> correctly styled only because G62's broken build output was sitting in the same folder, supplying the
+> estimate's class names as text.
+> - The correct result rested on a leftover nobody could see and nobody wrote down.
+> - Clearing the folder would have made the next "correct" build as broken as G62's, and the same check
+>   would have passed it.
+> - A result that is right for a reason outside the thing being tested is not evidence about that thing.
+>
+> **⚠ AND G62'S CHECK WAS A SPOT CHECK: FIVE CLASS NAMES OUT OF 130, AND IT REPORTED CLEAN.** The five were
+> chosen before anyone knew how the build could fail, and all five happened to be names the inspection
+> files supplied.
+> - **A spot check on a subset can only report on the subset.**
+> - **Choosing the subset before knowing the failure mode is choosing it blind.** It is as likely to land
+>   entirely inside the part that works as anywhere else.
+> - The check that replaced it takes the whole set from the document's own source: all 130.
+
 **Every other blind checker in this audit missed something real. This one invented something.** The
 invented kind is harder to catch, and the reason is in the reader rather than the tool.
 - A missing finding stays open until someone looks.
