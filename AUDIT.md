@@ -7136,6 +7136,68 @@ A Google forum thread (May-June 2026) reports a database still capped after Blaz
 
 **Lifting the limit is the owner's step:** try Upgrade database after the reset.
 
+**The fallback, if the upgrade does not lift the limit: a new database and a copy.** It is
+`scripts/admin/copy-database.js`, with MODE `'dry-run'`, written 2026-09-12 and **not run** - nothing may touch
+the database until the reset.
+
+**What it needs before it runs:**
+1. **A new database,** created in the Firebase console in the same project and location (asia-south1), not
+   through AI Studio.
+2. **⚠ The owner's decision: which edition.**
+   - **Enterprise,** like the current database, bills reads by bytes and creates no indexes.
+   - **Standard** bills one read per document whatever its size, and creates single-field indexes itself. That
+     matters while letterheads sit inside agency documents.
+   - On Standard, `firestore.indexes.json`'s four single-field entries should be removed; the Firebase CLI rejects
+     single-field composites as unnecessary there.
+   - **Cost:** the free quota covers one database per project, so a new database is billed from its first
+     operation.
+3. **The service account key** in `.secrets/`, as for every admin script.
+4. **Read quota left on the source.** An apply reads every document once and prints the KiB it read, so run it
+   early in the quota day, with the app quiet.
+
+**What it does:**
+- **Refuses a target** that is missing, is the source, or is not empty; `--resume` continues a copy it started.
+- **Copies** every root collection, and any subcollection found beneath a document. Document ids and values stay
+  exactly as they are: Timestamps, GeoPoints and bytes pass through, and a reference is re-pointed at the same path
+  in the new database.
+- **Refuses** any value that is not plain Firestore data, rather than converting it.
+- **Commits in batches** of at most 200 documents or 4 MiB, retrying each batch.
+- **Reads every copied document back** and compares its hash with what the source held. Anything missing or
+  different fails the run (exit 3) with the message "do not switch".
+- **Deletes nothing** in either database. Documents in the target that the source no longer supplies are listed,
+  not removed.
+- **Does not preserve Firestore's own create and update times.** Nothing in `src/` or the functions reads them.
+
+**The switch, owner's steps, in order:**
+1. `firebase.json` `firestore.database` → the new id, then `firebase deploy --only firestore`, so rules and
+   indexes reach the new database before any client does.
+2. `firebase-applet-config.json` `firestoreDatabaseId` → the new id. It is read by `src/lib/firebase.ts` and the
+   admin scripts, and the predeploy hook copies it into `functions/app-config.json`.
+3. `firebase deploy --only functions,hosting`.
+4. Every open tab reloads.
+5. `--apply --resume` if the old database was written during the copy.
+6. The old database stays until the new one has carried a working day.
+
+**⚠ Open:**
+- **Writes made to the old database during the copy,** by the app or the payment functions, are not in it unless
+  writes are frozen or `--resume` is re-run. `--resume` cannot carry a deletion; the verification lists those.
+- **A tab loaded before the switch** keeps writing to the old database until it reloads.
+- **No read-only rules file** exists to freeze the old database. Writing one means copying `firestore.rules` with
+  every write refused - not done.
+
+**Verified - offline only:**
+- `node --check` passes.
+- **Value handling, 6 checks,** run outside the repository against the real Admin SDK classes with no credentials
+  and no network:
+  - key order does not change the hash;
+  - a changed value changes it, a Timestamp 1 ns apart included;
+  - references are re-pointed, keeping their path;
+  - Timestamps, GeoPoints and bytes pass through;
+  - the target form hashes as the source form;
+  - a `Date` or `Map` is refused.
+- **⚠ Not run against any database:** listing, paging, batching, `--resume` and the read-back verification. The
+  first dry run after the reset is their first test - it lists both databases and reads no documents.
+
 ---
 
 ### O70. The Estimate Master grid shows last tender's figures on this tender's AT
