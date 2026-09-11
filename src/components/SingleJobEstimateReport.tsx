@@ -812,57 +812,83 @@ export function buildSingleJobEstimateData(
   // unchanged so the deletion changes no figure, and flagged so they are fixed as a visible
   // decision rather than as a side effect.
   if (coreClass === 'OH') {
+    /**
+     * ⚠ EVERY ROW BUT THE OVERHAUL ITSELF IS CHARGED ON WHAT THE INSPECTION RECORDS (AUDIT O67).
+     *
+     * This walk charged any row with a rate at quantity 1, whatever the inspection said - a radiator replacement and
+     * a "sealing of an uneconomical unit" on every overhauling job - and refused every overhauling job on the per-kg
+     * tank and conservator rows, though nothing recorded either. On OH21 IS-1, Rs 1,445 of a Rs 3,506 base was work
+     * nobody recorded, and every overhauling estimate in the database refused. It had been so since overhauling was
+     * added (6282d3f); nothing ever gated it.
+     *
+     *   '7' overhauling       always 1 - the job IS the overhaul, priced as Schedule-A Sr 21
+     *   '5' radiator          the external inspection's damaged-radiator count, as the CRGO radiator line uses it
+     *   '4' conservator (kg)  refuses only when a damaged conservator is recorded - no weight exists anywhere (O27)
+     *   '3' main tank (kg)    NO LINE: a damaged main tank declares the unit scrap (O28), never an overhaul charge
+     *   '6' sealing           NO LINE: sealing an uneconomical unit is for one sent back UNREPAIRED - a scrap question
+     *                         (O48), and a scrapped job never reaches this branch
+     *   any other row         not charged, and said so - nothing on the inspection records it
+     *
+     * Rows are identified by the overhauling master's own codes, which every stored section holds. Names are only a
+     * fallback for a renumbered section, and they match the master's full descriptions: a row that merely MENTIONS
+     * overhauling or a tank is not taken for one (the first version charged "Some other overhauling extra" as an overhaul).
+     *
+     * ⚠ THE RADIATOR'S RATE IS NOT SETTLED HERE. The master's radiator row holds the photographed fixed-rate pages'
+     * 1057 / 1256 / 1452; A/T 1819's clause 19.0 pays radiators by Schedule-A Sr 20. This fixes the quantity only.
+     */
     const ohItems: SingleEstimateLineItem[] = [];
     let ohSr = 1;
+    const recordedRadiators = Math.max(0, Math.round(Number(externalData?.damRadNo) || 0));
+    const recordedConservators = Math.max(0, Math.round(Number(externalData?.damCtTank) || 0));
+    let ohExcludedBase = 0;
     masterList.forEach((mItem: any) => {
       const code = String(mItem?.itemCode ?? '').trim();
       const name = String(mItem?.itemName ?? '').toLowerCase();
       const unit = String(mItem?.unit ?? '').trim();
-      const isOverhaulLine = code === '7' || name.includes('overhauling');
+      const kind = code === '7' ? 'overhaul' : code === '5' ? 'radiator' : code === '4' ? 'conservator'
+        : code === '3' ? 'tank' : code === '6' ? 'sealing'
+        : name.includes('overhauling of complete transformer') ? 'overhaul'
+        : name.includes('conservator tank replacement') ? 'conservator'
+        : name.includes('radiator replacement') ? 'radiator'
+        : name.includes('sealing of uneconomical') ? 'sealing'
+        : name.includes('tank replacement') ? 'tank' : 'other';
+      if (kind === 'tank' || kind === 'sealing') return;
       // Only the overhauling line itself has a Schedule-A pairing (sr '21', banded by
       // capacity). The rest are agency-master rates with no schedule equivalent.
-      const rate = resolveRate(code, isOverhaulLine ? scheduleRate('21') : undefined);
+      const rate = resolveRate(code, kind === 'overhaul' ? scheduleRate('21') : undefined);
 
       let qty = 0;
-      let qtyDisplay = '0';
-      if (isOverhaulLine) {
-        qty = 1; qtyDisplay = '1';
-      } else if (rate !== null && rate > 0) {
-        if (unit === 'Y') { qty = 1; qtyDisplay = 'Y'; }
-        else if (unit === 'QTY' || unit === 'No' || unit === 'Each Transformer') { qty = 1; qtyDisplay = '1'; }
-        else if (unit === 'KG') {
-          // WAS: `qty = (kva === '10' || kva === '16') ? 14 : kva === '25' ? 15.54 : 45.36`
-          //
-          // The same constant served the main tank AND the conservator tank - two objects an
-          // order of magnitude apart - so it could not be right for both, and was almost
-          // certainly right for neither (AUDIT O26). At 63 kVA and above it charged
-          // 45.36 x Rs 54 = Rs 2,449 per row, twice, on every overhauling job.
-          //
-          // A damaged main tank means the unit is DECLARED SCRAP, not re-tanked - the
-          // internal inspection already routes that (O28) - so there is no replacement to
-          // price. And no field anywhere records a conservator weight (O27). Blocks rather
-          // than guesses, and names which field is missing.
-          qty = 0;
-          qtyDisplay = '0';
+      if (kind === 'overhaul') {
+        qty = 1;
+        recordErrorIfApplies(true, rate, mItem?.itemName || 'Overhauling');
+      } else if (kind === 'radiator') {
+        qty = recordedRadiators;
+        recordErrorIfApplies(qty > 0, rate, mItem?.itemName || 'Radiator replacement');
+      } else if (kind === 'conservator') {
+        // Per kilogram, and no weight is recorded anywhere, so a recorded conservator refuses rather than guesses. The
+        // weight constant it once used (14 / 15.54 / 45.36 kg, O25-O26) is gone and must not come back.
+        if (recordedConservators > 0) {
           rateErrors.push({
             kind: 'missing-input',
-            message: `${jobLabel}: "${mItem?.itemName || code}" is priced per KILOGRAM and no weight is recorded for it. A damaged main tank means the transformer is declared scrap rather than re-tanked, so if this line is genuinely needed the weight must be measured first - it must never be assumed from the capacity.`,
+            message: `${jobLabel}: ${recordedConservators} damaged conservator tank(s) recorded on the external inspection, and "${mItem?.itemName || code}" is priced per KILOGRAM with no weight recorded anywhere. Measure the conservator before it is charged - its weight must never be assumed from the capacity.`,
           });
         }
+      } else if (rate !== null && rate > 0) {
+        notices.push(`"${mItem?.itemName || code}" is not charged: nothing on the inspection records it.`);
       }
-      if (isOverhaulLine) recordErrorIfApplies(true, rate, mItem?.itemName || 'Overhauling');
+      const amt = qty > 0 ? qty * (rate ?? 0) : 0;
+      if (kind === 'radiator' || kind === 'conservator') ohExcludedBase += amt;
       ohItems.push({
         sr: ohSr++,
         itemCode: code,
         desc: mItem?.itemName || code,
         unit: unit || 'NOS',
-        qty: qtyDisplay,
+        qty: String(qty),
         numQty: qty,
         rate,
-        amt: qty > 0 ? qty * (rate ?? 0) : 0,
+        amt,
       });
     });
-
     const ohBase = ohItems.reduce((acc, i) => acc + i.amt, 0);
     const ohPct = Number((ohBase * (atPercentage / 100)).toFixed(2));
     const ohWith = Number((ohBase + ohPct).toFixed(2));
@@ -879,7 +905,11 @@ export function buildSingleJobEstimateData(
       amountWithPercentage: ohWith,
       lessAmount: 0,
       finalAmount: ohWith,
-      rateErrors
+      // Clause 4.0 strips radiator and conservator BEFORE the percentage - an overhaul can now carry a recorded radiator.
+      excludedBase: Number(ohExcludedBase.toFixed(2)),
+      comparisonTotal: Number(((ohBase - ohExcludedBase) * (1 + atPercentage / 100)).toFixed(2)),
+      rateErrors,
+      notices,
     };
   }
 

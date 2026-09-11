@@ -25,6 +25,11 @@ explicitly stated. Run them against the dev server with the app loaded and signe
 census counted what it could compare. The harm was that each read as a statement about all of the data, and
 the next person to wonder took the audit's word for it.
 
+**The census is the sharper instance.** F31 was a belief written down. The census was a check that ran, compared
+1,572 cells and reported them clean - and all four defects sat in the rows it could not compare. **A clean bill
+from a check that structurally cannot see the defect is worse than no check.** No check leaves the question open;
+a clean bill closes it.
+
 **How to apply:**
 - **A statement that data is empty, clean, identical or free of overrides names the read behind it** - the
   script or command, the date, the count - **and what that read excluded.**
@@ -7042,6 +7047,76 @@ for pricing, which is what they should be.**
 
 ---
 
+### O69. Rule 4 of A/T 1819's schedule: an unanswered S.E. flag must block - the app prices it without S.E.
+
+Open, 2026-09-12. Reported, not built.
+
+**The rule.** `schedule-a-1819.md`, "Rate lookup rules", rule 4: *"Coil rates need the S.E. flag. If it is not
+set, block the estimate — do not default to 'without S.E.', which under-bills."*
+- The file is the schedule attached to A/T 1819 (UGVCL-2026). Its rates match `schedule-a-ugvcl-2026.md`, and it
+  adds rules, formulas and a conflict note.
+- **It is untracked in git, and nothing refers to it.**
+- The rule appears in neither `schedule-a-ugvcl-2026.md` nor `1819AT.md`.
+
+**What the app does (G61):**
+- an unanswered HV S.E. prices without S.E., with an on-screen notice;
+- an unrecognised value blocks;
+- from G61 on, the form refuses to save a blank answer.
+
+**Blocking for UGVCL-2026 only is coherent.**
+- **The rule belongs to that tender,** and the schedule already decides pricing per tender:
+  `pricingModelForSchedule` reads the schedule's shape, not its id.
+- **Declare it on the schedule set:** UGVCL-2026 requires the answer and UGVCL-2020 does not. That follows the
+  job's own AT, like every other schedule decision.
+- **Block only when the HV coil line applies,** as the unrecognised-value refusal already does.
+- **UGVCL-2020 keeps G61's behaviour.** No 2020 tender document in the repository says otherwise.
+
+**⚠ BUT THE PREMISE IS OUT OF DATE: 60 ARE UNANSWERED, AND 9 ARE ON UGVCL-2026.** G61 counted 43 of 77 jobs.
+Today, of 69 internal inspections:
+
+| Schedule | Unanswered | With HV coil weight |
+|---|---|---|
+| UGVCL-2020 | 48 | 41 |
+| UGVCL-2026 | 9 | 9 |
+| No AT | 3 | 2 |
+
+The nine on UGVCL-2026 are all on SAMOR's ALLOTMENT NO.25903 AT, saved before G61's save boundary:
+- **STD-1** (63 kVA, 52.80 kg) - Received, with **estimate STD-02 sent 2026-09-10**;
+- **ASTD-1** (Amorphous, 100 kVA, 57.00 kg, itemised under 2026) - Received, with **bill BILL/2938 for
+  Rs 25,664 and challan 250**;
+- STD-2 and STD-03 - Received; STD-4 - Internal Done;
+- STD-5, STD-6, STD-7 and STD-8 - Cancelled.
+
+**What blocking would do to those:**
+- STD-1's estimate and ASTD-1's bill could not reprint until S.E. is answered.
+- Answering "Not S.E." leaves both unchanged.
+- Answering "S.E." raises the HV coil from 165 to 215/kg: Rs 2,640 on STD-1 and Rs 2,850 on ASTD-1, before the 7%.
+- G61's issued-document warning already asks before that change is saved.
+
+**Rule 4 reaches further than HV.** It says *coil* rates, and items 12 **and** 13 both split by S.E.
+- **LV S.E.:** the app records S.E. for the HV winding only, and prices every LV coil without S.E. by decision
+  (G61, G64). Under rule 4, that is the default the rule forbids.
+- **Originals missing:** the schedule also selects coil rates by whether originals are missing (12B / 13B).
+  Nothing records it (O21), and the app assumes not missing. That default under-bills when originals are missing,
+  though rule 4's wording does not name it.
+
+**Before switching it on:** answer S.E. on the five open STD jobs, and decide whether LV S.E. is recorded under
+this tender.
+
+**The file's other rules, against the app** (read, not all verified):
+
+| Rule | The app |
+|---|---|
+| 1. Band by rating; an unbanded rating refuses | bands silently (O68) |
+| 2. A 0 refuses | a zero reads as no rate, and the line refuses where it applies (breather, radiator at 5 kVA); the tap-changing switch has no line at all |
+| 3. Item 20 in B6 needs the exact rating | modelled; 315 refuses (O68) |
+| 5. The 7.00% stored separately | yes - `atPercentage` on the AT |
+| 6. Material, GST and labour presentable separately | not checked |
+| 7. Sr. No. against each coil line | yes (G62) |
+| Clause 4.0: strip 18a, 18b and 20 before the percentage | yes - CRGO, and overhauling since O67 |
+
+---
+
 ### O68. A capacity the tender does not name is banded silently, and 50, 75 and 315 kVA have no circle limit
 
 Open, found 2026-09-12 answering the band questions. Not fixed. **No live job is affected:** every live job is
@@ -7084,7 +7159,8 @@ Open, found 2026-09-12 answering the band questions. Not fixed. **No live job is
 
 ### O67. Every overhauling job is charged a radiator replacement and a sealing charge nobody recorded
 
-Open, found 2026-09-12 in O66's dry run. Not investigated further. Not fixed.
+Found 2026-09-12 in O66's dry run. **Fixed in code 2026-09-12 - see BUILT.** Deploying is the owner's. The
+radiator's *rate* remains open.
 
 The overhauling branch charges any row whose unit is `QTY` and whose rate is above zero at quantity 1
 (`SingleJobEstimateReport.tsx`, the OH branch). Two stored rows are `QTY`:
@@ -7151,6 +7227,50 @@ No inspection field is read for any row except the overhauling line itself.
 
   On OH21 IS-1 that leaves the overhauling line alone - 3,162 after O66's clear - with no refusals, against
   3,506 with two refusals today.
+
+### BUILT 2026-09-12
+
+As proposed, in the OH branch of `buildSingleJobEstimateData`:
+- **Radiator:** quantity is the external inspection's `damRadNo`. A recorded radiator with no rate refuses.
+- **Conservator:** refuses only when `damCtTank` is above zero.
+- **No main-tank line and no sealing line** on an overhauling job.
+- **Any other row with a rate** is not charged, and the estimate says so in a notice.
+- **Clause 4.0:** the branch now returns `comparisonTotal`, with radiator and conservator stripped *before* the AT
+  percentage, as `schedule-a-1819.md` specifies. An overhaul can now carry a recorded radiator, and the sanction
+  check must not count it.
+- **Row identity:** rows are identified by code. The name fallback matches the master's full descriptions.
+
+**⚠ THE FIRST VERSION CHARGED A CUSTOM ROW AS AN OVERHAUL.**
+- **What went wrong:** its name fallback kept the old test, `name.includes('overhauling')`, so a synthetic row
+  named "Some other overhauling extra" came out at quantity 1.
+- **How it was caught:** the verification's custom-row case.
+- **The fix:** the fallback now matches "overhauling of complete transformer". The case asserts that a row
+  mentioning overhauling and a row mentioning a tank are both uncharged, with a notice each.
+
+**Verified.** HEAD and the working tree were each bundled from their own source - HEAD via `git archive`, so the
+working tree was not touched - and run through the app's builder on live data:
+- **74 live jobs:** 0 non-overhauling jobs differ in any line, total, refusal or comparison figure.
+- **OH21 IS-1:**
+  - HEAD: overhauling 2061, radiator 1256, sealing 189, tank and conservator lines; base 3,506, two refusals.
+  - Working tree: overhauling 2061, conservator and radiator at quantity 0; base 2,061, no refusals.
+  - After O66's row-7 clear: 3,162. The row-7 dry run on this code shows 2,143.44 → 3,288.48 with 4%.
+- **Synthetic, 63 kVA on UGVCL-2026:**
+  - nothing recorded → the overhaul alone;
+  - two radiators → 2,512 charged, comparison unchanged at 2,205.27;
+  - one conservator → one refusal;
+  - a radiator at 10 kVA, where the master has no rate → a refusal;
+  - two misleading custom rows → uncharged, with two notices.
+- **Gates:** `tsc`, 72/72 tests, `vite build`, hooks guard.
+- **No unit test.** The test runner loads real modules through tsx, and the builder imports React, firebase and
+  pdfjs, whose module-scope DOMMatrix fails under Node. The before/after script is the check, and it is not in
+  the repository.
+
+**Still open:**
+- **The radiator's rate.** `schedule-a-1819.md` - the schedule attached to A/T 1819 - pays radiators by Sr 20
+  (1061 / 1061 / 1258 / 1458). It says the photographed pages' 1057 / 1256 / 1452 must not be used alongside it.
+  The overhauling master's radiator row still holds the photographed figures, and prices from them when a
+  radiator is recorded.
+- **Printing between 2026-08-18 and 2026-08-24** cannot be ruled out, as above.
 
 ---
 
@@ -7275,7 +7395,7 @@ these are wrong for one variant.
       reprint would differ by 8 paise.
   - No other movement.
 
-### A FOURTH ROW - RADIATOR 21 AT 100 kVA - reported, not built
+### A FOURTH ROW - RADIATOR 21 AT 100 kVA - built 2026-09-12, not applied
 
 Found while answering the band questions (O68). **20 holders** hold radiator row 21 at **1248 in the 100 kVA
 cell** - the 50/63/75 figure. They are the 2020-era group: all 8 UGVCL-2020 ATs, 10 agencies and both shared
@@ -7286,6 +7406,14 @@ defaults.
 - **Latent:** all 13 live 100 kVA jobs record `damRadNo` 0.
 - **Correction shape:** null the row's cells, as with 8, 12C and 13C. Every other cell in it is a 2020 copy
   that the copy test already sees through, and above 100 kVA the tender's per-capacity figures apply.
+- **Built as a single-cell clear:** `scripts/admin/clear-radiator-100kva-cell.js`, MODE `dry-run`. It clears only
+  a 100 kVA cell holding 1248. The shipped default row has no 100 kVA cell, so there is no code change.
+- **Dry run:**
+  - 20 to clear; 13 already clear (the 2026 group); 0 held; IDEAL has no section.
+  - Control on UGVCL-2020: 100 kVA 1248 → 1446, with 63 kVA unmoved at 1248. UGVCL-2026 has no holder to
+    control against.
+  - 74 jobs priced. SU-24 and MSBT-2 show the radiator rate moving 1248 → 1446 at quantity 0, so no amount or
+    total changes. No other movement.
 
 ---
 
