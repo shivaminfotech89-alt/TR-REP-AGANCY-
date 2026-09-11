@@ -48,11 +48,12 @@ import AgencySettings from './AgencySettings';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
+import { agencyGate } from '../lib/loadFailure';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
-          atSupersededNotice, dismissAtSupersededNotice } = useAgency();
+          atSupersededNotice, dismissAtSupersededNotice, agenciesLoad, retryLoad } = useAgency();
   const { currentTheme, themeId } = useTheme();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -550,7 +551,34 @@ export default function AppLayout({ user }: { user: User }) {
             </div>
           )}
 
-          {!activeAgency && location.pathname !== '/agency-settings' && location.pathname !== '/admin' && location.pathname !== '/support' && (
+          {/* ⚠ A FAILED READ IS SAID FIRST, AND NEVER AS "NO AGENCY" (AUDIT G70, O71). On 2026-09-12 the database
+              refused every read, and this screen told every customer "No Active Agency - Create one to start" over data
+              that was intact. While the load is still running, neither message shows. */}
+          {agencyGate(agenciesLoad, !!activeAgency) === 'failed' && location.pathname !== '/agency-settings' && location.pathname !== '/admin' && location.pathname !== '/support' && (
+             <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-10 flex items-center justify-center p-4 sm:p-6">
+                <div role="alert" className="bg-white p-6 rounded-xl shadow-xl border border-red-200 max-w-md w-full text-center">
+                   <Building2 className="w-12 h-12 text-red-500 mx-auto mb-4" />
+                   <h3 className="text-lg font-bold text-slate-900 mb-2">Your agencies could not be loaded</h3>
+                   <p className="text-sm text-slate-700 mb-2">
+                     Nothing has been deleted. Your agencies, jobs and documents are still stored - the app could not
+                     read them just now.
+                   </p>
+                   <p className="text-xs text-slate-500 mb-4">{agenciesLoad.error}</p>
+                   <button
+                     type="button"
+                     onClick={retryLoad}
+                     className="inline-flex items-center px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors shadow-sm"
+                   >
+                     Try again
+                   </button>
+                   <p className="text-xs text-slate-500 mt-4">
+                     Please do not create a new agency while this shows - it would sit beside the one you already have.
+                   </p>
+                </div>
+             </div>
+          )}
+
+          {agencyGate(agenciesLoad, !!activeAgency) === 'no-agency' && location.pathname !== '/agency-settings' && location.pathname !== '/admin' && location.pathname !== '/support' && (
              <div className="absolute inset-0 bg-white/70 backdrop-blur-[2px] z-10 flex items-center justify-center p-4 sm:p-6">
                 <div className="bg-white p-6 rounded-xl shadow-xl border border-amber-200 max-w-md w-full text-center">
                    <Building2 className="w-12 h-12 text-amber-500 mx-auto mb-4" />

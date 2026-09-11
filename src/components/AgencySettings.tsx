@@ -39,7 +39,7 @@ const SETTINGS_TABS: ReadonlyArray<readonly [SettingsTab, string]> = [
 const SECTION_PROBES = ['CRGO', 'Amorphous', 'Wound Core', 'OH'];
 
 export default function AgencySettings() {
-  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, publishedAts, loading, agencyPointerNotice, dismissAgencyPointerNotice, viewingAllTenders } = useAgency();
+  const { agencies, activeAgency, setActiveAgencyId, addAgency, updateAgency, atMasters, activeAtMaster, setActiveAtMasterId, publishedAts, loading, agencyPointerNotice, dismissAgencyPointerNotice, viewingAllTenders, agenciesLoad, retryLoad } = useAgency();
   // ATs belonging to the ACTIVE agency only - the selector must never offer another
   // agency's tender period (AUDIT F20 was exactly that leak).
   const agencyAtsForContext = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -442,12 +442,15 @@ export default function AgencySettings() {
                 onChange={e => setActiveAgencyId(e.target.value)}
                 className="flex-1 min-w-0 px-3 py-2 text-sm font-bold rounded-lg bg-slate-800 border border-slate-700 text-white focus:ring-1 focus:ring-blue-400"
               >
-                {agencies.length === 0 && <option value="">No agencies yet</option>}
+                {agencies.length === 0 && agenciesLoad.status === 'failed' && <option value="">Could not load agencies</option>}
+                {agencies.length === 0 && agenciesLoad.status === 'loading' && <option value="">Loading agencies...</option>}
+                {agencies.length === 0 && agenciesLoad.status === 'loaded' && <option value="">No agencies yet</option>}
                 {agencies.map(a => (
                   <option key={a.id} value={a.id}>{a.name || '(unnamed)'}</option>
                 ))}
               </select>
-              {!showAddForm && (
+              {/* Offered only once the agencies have loaded: creating one over a failed read makes a duplicate. */}
+              {!showAddForm && agenciesLoad.status === 'loaded' && (
                 <button
                   type="button"
                   onClick={() => setShowAddForm(true)}
@@ -458,6 +461,18 @@ export default function AgencySettings() {
                 </button>
               )}
             </div>
+            {/* ⚠ WHAT AN EMPTY LIST MEANS IS DECIDED BY THE LOAD (AUDIT G70). "No agencies yet" over a failed read told
+                customers their agencies were gone - and offered to create them again. */}
+            {agencies.length === 0 && agenciesLoad.status === 'failed' && (
+              <div role="alert" className="mt-2 px-3 py-2 rounded-lg bg-red-500/15 border border-red-500/40 text-red-100 text-xs">
+                <p className="font-bold">Your agencies could not be loaded - nothing has been deleted.</p>
+                <p className="mt-0.5">{agenciesLoad.error}</p>
+                <p className="mt-0.5">Adding an agency is unavailable until they load, so a second copy of one you already have cannot be made.</p>
+                <button type="button" onClick={retryLoad} className="mt-1.5 px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-white font-bold">
+                  Try again
+                </button>
+              </div>
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
@@ -505,7 +520,7 @@ export default function AgencySettings() {
           is allowed to pay does not, and those details are exactly what someone wants to
           get right slowly rather than inside a purchase flow. They are filled in afterwards,
           per agency, in the form that already exists for editing one. */}
-      {showAddForm && <AddAgencyFlow onDone={() => setShowAddForm(false)} />}
+      {showAddForm && agenciesLoad.status === 'loaded' && <AddAgencyFlow onDone={() => setShowAddForm(false)} />}
       </div>
 
       {/* ============================ TAB: AGENCY SETUP ============================ */}

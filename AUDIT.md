@@ -15602,3 +15602,58 @@ and it changes no behaviour.
     composite create --database=<id> --collection-group=<c> --field-config=field-path=<f>,order=ascending
     --density=dense`.
   - **`density`:** whether the CLI accepts the key.
+
+---
+
+## G70. A failed agency load says so - "could not load" is not "no agencies"
+
+**Why.** O71 records what customers saw on 2026-09-12:
+- `fetchData`'s catch logged to the console and left `agencies` empty;
+- every module showed "No Active Agency - Create one to start" and Settings listed "No agencies yet", over data
+  that was intact;
+- the screen invited the customer to buy a second copy of an agency they already had.
+
+A read failure and an absence rendered identically - the NOT READ / NOT BILLED distinction again, in the place a
+customer meets first.
+
+**Built:**
+- **`lib/loadFailure.ts`:**
+  - `LoadStatus` is `loading | loaded | failed`.
+  - `agencyGate(load, hasActiveAgency)` decides, in this order:
+    - an agency in hand is `ready`;
+    - otherwise a failed load is `failed`, never "no agency";
+    - a running load is `loading`;
+    - only a load that succeeded and found none is `no-agency`.
+  - `describeLoadFailure` names quota, connection and permission failures in plain words and quotes anything else.
+- **The data layer, `AgencyContext`:**
+  - `agenciesLoad` and `retryLoad`;
+  - `fetchData` sets loading, then loaded at the end of its try, or failed with the reason in its catch;
+  - `retryLoad` re-runs the load effect.
+  - Signed out counts as loaded - nothing to read.
+- **The app shell, `AppLayout`:**
+  - The failure overlay comes first: "Your agencies could not be loaded", "Nothing has been deleted", the reason,
+    Try again, and a request not to create an agency meanwhile.
+  - "No Active Agency" shows only for `no-agency`.
+  - Neither shows while the load is running; before this, the no-agency overlay also flashed during loading.
+- **Settings, `AgencySettings`:**
+  - The select says "Could not load agencies", "Loading agencies..." or "No agencies yet", by status.
+  - A red notice gives the reason and Try again.
+  - **Add Agency, and its purchase flow, are not offered until the agencies have loaded** - buying an agency over
+    a failed read makes a duplicate.
+
+**Verified:**
+- tsc passes.
+- 86/86 tests pass, 6 new in `loadFailure.test.ts`: failed is never no-agency, loading says nothing, only loaded
+  and empty is no-agency, an agency in hand is ready, and the quota message names a usage limit rather than
+  missing data.
+- The build passes, and the hooks guard found nothing in 47 files.
+- **⚠ Not seen rendered against a real failure.** That needs the database refusing, or a deliberately broken
+  read; the test covers the decision, not the screen.
+
+**⚠ NOT CHANGED, AND STILL CAPABLE OF THE SAME SHAPE:**
+- **About 15 screens' own job, inspection and oil fetches.** On failure most call `handleFirestoreError`, which
+  alerts, and the list then renders empty. These are fix 3 - an empty job list is survivable, an empty agency list
+  looks like deletion.
+- **`ManageSubscription`'s "No agencies on this account yet"** - its subscription snapshot has the same shape.
+- **The trial gate** allows writes when its snapshot fails, which is deliberate.
+- **The shared rate defaults** already had their own error banner (`globalConfigError`).

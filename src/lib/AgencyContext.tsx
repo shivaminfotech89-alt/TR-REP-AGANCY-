@@ -4,6 +4,7 @@ import { pricingModelForJob } from './ugvclSchedules';
 import { sectionsDiffer } from './compareSections';
 import { collection, query, where, getDocs, doc, setDoc, updateDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { createAgencyViaFunction } from './agencyCreate';
+import { describeLoadFailure, type AgenciesLoad } from './loadFailure';
 import { 
   defaultEstimateData, 
   defaultAmorphousEstimateData, 
@@ -1096,6 +1097,13 @@ interface AgencyContextType {
    */
   setActiveAgencyId: (id: string, knownAgencies?: Agency[]) => void;
   loading: boolean;
+  /**
+   * WHETHER `agencies` AND `atMasters` COULD BE READ (AUDIT G70). An empty list with status 'failed' is a read that
+   * failed, not an account with no agencies - screens ask this before they say anything about emptiness.
+   */
+  agenciesLoad: AgenciesLoad;
+  /** Re-run the agency and AT load after a failure. */
+  retryLoad: () => void;
   isSuperAdmin: boolean;
   globalDefaultEstimateMaster: GlobalDefaultEstimateMaster | null;
   globalConfigError: string | null;
@@ -1195,6 +1203,9 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [globalConfigError, setGlobalConfigError] = useState<string | null>(null);
   const [globalConfigLoaded, setGlobalConfigLoaded] = useState<boolean>(!!cachedGlobalDefaultEstimateMaster);
   const [loading, setLoading] = useState(true);
+  const [agenciesLoad, setAgenciesLoad] = useState<AgenciesLoad>({ status: 'loading', error: null });
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const retryLoad = () => setLoadAttempt(n => n + 1);
 
   const dismissGlobalConfigError = () => setGlobalConfigError(null);
 
@@ -1329,6 +1340,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     async function fetchData() {
       if (!auth.currentUser) return;
+      setLoading(true);
+      setAgenciesLoad({ status: 'loading', error: null });
       try {
         // 1. Fetch Global System Default Estimate Rates from Firestore public_config
         let fetchedGlobalMaster: GlobalDefaultEstimateMaster | null = null;
@@ -1504,8 +1517,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
           const activeAts = fetchedAts.filter(at => at.status === 'Active');
           setActiveAtMasterId(activeAts.length > 0 ? activeAts[0].id : fetchedAts[0].id);
         }
+        setAgenciesLoad({ status: 'loaded', error: null });
       } catch (err) {
         console.error('Error fetching context data:', err);
+        // ⚠ NOT A SILENT EMPTY LIST (AUDIT G70, O71). This catch used to log and fall through, leaving `agencies` empty,
+        // and every screen told the customer their agency did not exist while the database was refusing to read it.
+        setAgenciesLoad({ status: 'failed', error: describeLoadFailure(err) });
       } finally {
         setLoading(false);
       }
@@ -1518,8 +1535,10 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       setActiveAgencyId(null);
       setActiveAtMasterId(null);
       setLoading(false);
+      setAgenciesLoad({ status: 'loaded', error: null });
     }
-  }, [auth.currentUser]);
+    // loadAttempt: retryLoad() re-runs this load after a failure.
+  }, [auth.currentUser, loadAttempt]);
 
   /**
    * ⚠ THE STORED POINTER IS VALIDATED ONCE THE LIST IS KNOWN, AND SAYS SO IF IT IS STALE.
@@ -2594,7 +2613,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     <AgencyContext.Provider value={{
       agencies, activeAgency, setActiveAgencyId,
       atMasters, activeAtMaster, viewingAllTenders, setActiveAtMasterId,
-      loading, isSuperAdmin, globalDefaultEstimateMaster,
+      loading, agenciesLoad, retryLoad, isSuperAdmin, globalDefaultEstimateMaster,
       globalConfigError, globalConfigLoaded, dismissGlobalConfigError,
       addAgency, updateAgency, 
       countOverridesForApply, applyEstimateMasterToOwnAgencies,
