@@ -330,14 +330,24 @@ export function getCircleLimitForJob(
   };
 }
 
-// Official UGVCL Rate Schedule for OVERHAULING OF TRANSFORMER (11 KV / 22 KV)
+// OVERHAULING MASTER - per-item OVERRIDES of the tender, not a schedule of its own (AUDIT F31, O66).
+// Rows 3-6 are the 2020 Schedule-B extras (items 3 to 6); they have never been checked against a 2026 tender (O30).
 export const defaultOverhaulingEstimateData: EstimateItem[] = [
   {
     itemCode: "7",
     itemName: "Overhauling of complete transformer:\nDuring overhauling, following works are required to be carried out:-\nOverhauling charges shall be paid for below works which includes the opening & closing/refitting of transformer including minor repairing works and loading & unloading of Transformers, repairing of Tanks & radiators by welding to stop leakage of oil, replacement of burnt /damaged external parts like bushing/ nut-bolts /breather if any with Dismantling of bushing replacement of all the old gaskets by new, opening welding of top cover plate if necessary un-tanking of the winding, removal of the core plate assembly and reassembly of the same including replacement of all types of insulations whenever necessary replacement of diaphragm of explosion vent, testing of the same, Cleaning of transformer tank, removal of sludge, filtration of transformer oil, Strengthening / brazing of joints of winding, Fitting/tightening of internal joints at the HV/LV bushing, Internal painting of transformer, Drying of the active parts of the transformer to ensure proper IR value as mentioned herein, fixing of name plates and as per conditions wherever mentioned in this tender.",
     unit: "QTY",
-    fixedRate: 2061.00,
-    rates: { "5": 2061.00, "10": 1603.00, "16": 1603.00, "25": 2061.00, "50": 2061.00, "63": 2061.00, "100": 2500.00, "200": 3000.00, "315": 3000.00, "500": 3000.00 }
+    // ⚠ NO RATE, BY DECISION (AUDIT O66). Overhauling is billed "as per Sr. No. 21 of Schedule-A" in both tenders, and a
+    // null cell falls through to the JOB'S OWN tender's Sr 21 (resolveRate), so it cannot go stale when a tender reprices.
+    //
+    // From 2026-08-18 this row shipped 2061/1603/1603/2061/2061/2061/2500/3000/3000/3000. 1603 and 2061 are the 2020 Sr 1a
+    // labour charge; 2500 and 3000 appear in no tender. Differing from the 2020 Sr 21 baseline, the copy test honoured them
+    // as overrides, and seeding copied them into every agency, AT, template and shared default - so every overhauling job
+    // priced up to Rs 1,128 under its tender. scripts/admin/clear-overhauling-row-7.js clears the stored copies.
+    //
+    // The ROW stays: a default row a stored section lacks is re-added from here (getEstimateMasterForCore).
+    fixedRate: null,
+    rates: { ...defaultRates }
   },
   { 
     itemCode: "3", 

@@ -5947,6 +5947,10 @@ approval? `paymentDeductions` exists on the payment record, which is where that 
 
 ### O30. The Overhauling master has never been checked against the tender
 
+> **Row 7 is now checked - O66** (2026-09-12): its figures were no tender's, and it is cleared to fall
+> through to Sr 21. Rows 3-6 are the 2020 Schedule-B extras and remain unchecked against 2026, and rows 5 and
+> 6 are charged on every overhauling job (O67).
+
 Left untouched during the typo correction, and the reason matters: **those rows were never
 validly checked, not checked and found correct.**
 
@@ -7000,6 +7004,126 @@ constant is correct, because those cells are recognised as copies and ignored.
 Verified rather than argued: adopting the 2026 template onto AT 1819 in memory leaves every
 rate at 2026 and `baseTotal` unchanged at 5,613. **The template's master sections are inert
 for pricing, which is what they should be.**
+
+---
+
+### O67. Every overhauling job is charged a radiator replacement and a sealing charge nobody recorded
+
+Open, found 2026-09-12 in O66's dry run. Not investigated further. Not fixed.
+
+The overhauling branch charges any row whose unit is `QTY` and whose rate is above zero at quantity 1
+(`SingleJobEstimateReport.tsx`, the OH branch). Two stored rows are `QTY`:
+- **5 - Complete radiator replacement:** 1057 / 1256 / 1452 at 25 / 63 / 100 kVA;
+- **6 - Sealing of an uneconomical unit by welding:** 189 at every capacity.
+
+So every overhauling job at 25, 63 or 100 kVA carries a radiator replacement, and every one carries a sealing
+charge, whatever was done. On OH21 IS-1 they are Rs 1,445 of its Rs 3,506 base.
+- **"Sealing of an uneconomical unit ... for returning back"** describes a unit sent back unrepaired - the
+  opposite of an overhaul.
+- **On UGVCL-2026 ATs these rows hold the 2020 Schedule-B extras.** Clause 19.0 of the 2026 terms pays
+  radiator, tank and conservator replacement by Schedule-A 18a, 18b and 20.
+- **Carried across from the deleted engine** as part of F55's behaviour-preserving move; whether that engine
+  charged them the same way was not checked.
+
+---
+
+### O66. Overhauling row 7 undercharged every overhauling job - a shipped default honoured as an override
+
+Open, 2026-09-12. **Fix built, not applied.** The shipped default is nulled, and
+`scripts/admin/clear-overhauling-row-7.js` (dry-run) clears the stored copies. The apply is the owner's.
+
+**What was charged.** Row 7 of the Overhauling section, in every holder:
+
+| kVA | 5 | 10 | 16 | 25 | 50 | 63 | 100 | 200 | 315 | 500 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Stored | 2061 | 1603 | 1603 | 2061 | 2061 | 2061 | 2500 | 3000 | 3000 | 3000 |
+| UGVCL-2026 Sr 21 | 2009 | 2481 | 2481 | 3189 | 3189 | 3189 | 3189 | 3510 | 3510 | 3510 |
+| UGVCL-2020 Sr 21 | 1992 | 2460 | 2460 | 3162 | 3162 | 3162 | 3162 | 3481 | 3481 | 3481 |
+
+- **None equals the 2020 Sr 21 baseline,** so the copy test honoured every cell as an override: the charge
+  was the stored figure, on both schedules.
+- **Under by up to Rs 1,128** (2026) and Rs 1,101 (2020), at 25-63 kVA.
+- **⚠ Over by Rs 52 (2026) and Rs 69 (2020) at 5 kVA,** where the stored 2061 exceeds both tenders. Clearing
+  lowers the 5 kVA charge.
+
+**Where the figures came from:**
+- **Shipped** in `defaultOverhaulingEstimateData` by commit 6282d3f (2026-08-18) - the commit that added
+  overhauling - under the comment "Official UGVCL Rate Schedule for OVERHAULING". No earlier commit holds
+  them.
+- **1603 and 2061 are the 2020 Sr 1a figures** - the labour charge only. **2500 and 3000 appear in no tender
+  document,** no AUDIT entry, and no earlier code.
+- **Both tenders price overhauling by Sr 21.**
+  - The 2026 schedule's "Item 7 — Overhauling (separate rate sheet)" carries scope text and "billed as per
+    Sr. No. 21", and no figure.
+  - The 2020 transcription records Schedule-B item 7 as priced by Schedule-A 21 (`OH_USES_SCHEDULE_A_ITEM`).
+  - `1819AT.md` carries no overhauling rate; its "item 7" (clause 21.0) is Schedule-A Sr 7, the tapping
+    switch.
+- **Copied, not typed:** all 32 holders are byte-identical to the default, down to 1603 at 10 and 16 kVA.
+
+**Who holds them - census 2026-09-12: 32 of 34.**
+- 13 of 14 ATs - 6 on UGVCL-2026, 7 on UGVCL-2020;
+- 15 of 16 agencies;
+- both published templates;
+- `public_config` and `system_config`.
+
+The other two - GETCO's 1049 AT and IDEAL's agency - have no section, and price from the shipped default,
+which held the same figures.
+
+**Jobs reached: one.** OH21 IS-1, 63 kVA, on ADMIN's 2026_27 (UGVCL-2020, 4%), Internal Done, no estimate
+issued. Its overhauling line goes from 2061 to 3162; base from 3,506 to 4,607; with 4%, from 3,646.24 to
+4,791.28.
+
+**⚠ F31 WAS WRONG, AND IT IS WHY NOBODY LOOKED.** F31 recorded the shipped default as "five items with every
+rate null - a rate-override shell". Row 7 had carried these figures since 6282d3f, before F31 was written. The
+section was treated as "empty is normal, prices from Schedule-A" on a premise that was never true.
+
+### THE CORRECTION - CLEARED, NOT CORRECTED
+
+- **Null, not the tender's figure.** A null cell falls through to the job's own tender's Sr 21 and cannot go
+  stale when a tender reprices. A copied 2026 figure would be the next stale override.
+- **Every key written, as null.** `normalizeOverhaulingData` refills an absent key from the defaults and keeps
+  a null.
+- **The row stays.** A deleted row is re-added from the defaults by `getEstimateMasterForCore`.
+- **The default is nulled too** (`estimateData.ts`, pinned by `overhaulingDefaults.test.ts`). Otherwise the two
+  holders without a section, every new agency, and every re-seed bring the figures back.
+- **The script:**
+  - clears only a row 7 holding exactly the default figures, and holds anything else;
+  - proves before writing that a synthetic 63 kVA overhauling job on each schedule moves from 2061 to that
+    schedule's Sr 21, through the app's own builder;
+  - prices every live job before and after, and refuses the run if any non-overhauling job moves;
+  - on apply, re-reads in a transaction and reads back.
+
+**Dry run, 2026-09-12:**
+- 32 to clear, 0 held, 2 without a section.
+- Controls: UGVCL-2020 2061 → 3162; UGVCL-2026 2061 → 3189.
+- 74 jobs priced; 0 non-overhauling jobs moved; the one overhauling job as above.
+
+**Order: either.** Data first fixes the 32 holders at once on the deployed app, which keeps nulls. The deploy
+fixes GETCO 1049, IDEAL and future seeds.
+
+### THE SAME OUTCOME IN THREE CRGO ROWS, BY A DIFFERENT MECHANISM - reported, not built
+
+Rows 8, 12C and 13C are the stored CRGO rows priced against **two** tender rows, chosen by the job: kV class
+for 8, winding material for 12C and 13C. One cell can hold only one tender's figure. It is a correct copy for
+one variant, and the copy test reads it as an override of the other. Row 7's figure was wrong for every job;
+these are wrong for one variant.
+
+| Row | Stored | Right for | Wrong for | Holders | Jobs reached today |
+|---|---|---|---|---|---|
+| 8, HV bushing | 176 | 11 kV | 22 kV - charged 176; tender 268 (2026), 265 (2020) | 33 - all 14 ATs, 15 agencies, both templates, both shared defaults | 0 - all 75 external inspections are 11 kV |
+| 12C, HV winding labour | 34 | aluminium | copper - charged 34; tender 11 (O60) | the same 33 | 0 itemised - the one copper job is an Amorphous unit on a 2020 AT, priced at a fixed rate |
+| 13C, LV winding labour | 51.75 | aluminium | copper - charged 51.75; tender 17 | the same 33 | 0 itemised |
+
+- **20 of the 33 hold 13C at 51.7 at 100 kVA.** That differs from the 2020 baseline of 51.75 and is honoured,
+  so an aluminium 100 kVA job there charges 51.7/kg. Not priced across live jobs.
+- **Correction shape:** as row 7 - null every cell of the three rows, in the 33 holders and in
+  `defaultEstimateData`, keeping the rows.
+  - On today's data it moves no job, except aluminium 100 kVA LV-coil work on the 51.7 holders, by 5 paise
+    a kg.
+  - Splitting each row in two, as the coil rows were, is worth it only if an agency needs to override one
+    variant. None does.
+- **What would stop it recurring without relying on data:** `resolveRate` ignoring a master cell for a code
+  whose `SCHEDULE_ITEM_MAP` entry varies by kV or material. Not proposed now.
 
 ---
 
@@ -9786,6 +9910,11 @@ via `storedSection()`. The enrichment itself is untouched, because pricing reads
 fields and changing it would change prices.
 
 ### F31. Overhauling: an empty section is the correct state, and is no longer reported as a gap
+
+> **⚠ WRONG ABOUT THE DEFAULT - see O66** (2026-09-12). The shipped `defaultOverhaulingEstimateData` was not
+> "every rate null". Row 7 carried 2061/1603/1603/2061/2061/2061/2500/3000/3000/3000 from commit 6282d3f,
+> before this entry was written, and was seeded into 32 holders as overrides of Sr 21. The conclusion about an
+> empty section holds only now that the default is nulled.
 
 There is **no separate Overhauling schedule**. An OH job prices through `resolveRate`
 (`SingleJobEstimateReport.tsx:312`), which looks the item up in the master by code and
