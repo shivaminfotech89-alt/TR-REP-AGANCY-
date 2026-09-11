@@ -8,6 +8,33 @@ explicitly stated. Run them against the dev server with the app loaded and signe
 
 ---
 
+## Pattern: an audit statement that declared data clean closed the question for everyone after it
+
+**Two entries in this file said the rate masters were clean, and both were read as settled.**
+- **F31** said the shipped Overhauling default was "five items with every rate null - a rate-override shell".
+  - In fact, row 7 carried 2061 / 1603 / 1603 / 2061 / 2061 / 2061 / 2500 / 3000 / 3000 / 3000 from the day
+    overhauling was added. It was seeded into 32 holders, where the copy test honoured it over Sr 21.
+  - Every overhauling job priced up to Rs 1,128 under its tender, and nobody looked at the section again,
+    because the audit said there was nothing in it (O66).
+- **The copy-test census** said "1,572 comparable CRGO cells ... ZERO genuine overrides".
+  - It counted only cells with a single Schedule-A row to compare against.
+  - Rows 8, 12C, 13C and 21 were outside the count, and they held a 22 kV bushing at the 11 kV rate, copper
+    winding labour at the aluminium rate, and a 100 kVA radiator at the 63 kVA rate (O66).
+
+**Neither was careless in its own terms.** F31 described what its author believed the default held, and the
+census counted what it could compare. The harm was that each read as a statement about all of the data, and
+the next person to wonder took the audit's word for it.
+
+**How to apply:**
+- **A statement that data is empty, clean, identical or free of overrides names the read behind it** - the
+  script or command, the date, the count - **and what that read excluded.**
+  - F31 named no read.
+  - The census named a count but not its exclusion, and the exclusion is where the defects were.
+- **When a finding contradicts such a statement, correct the statement where it stands,** prominently, and not
+  only in the new entry. Otherwise the next reader of the old entry stops there.
+
+---
+
 ## Pattern: stored side-records diverge from the printed document
 
 Three instances found in one day (O3, O4, and the `estimateAmount` case below). The
@@ -6950,6 +6977,14 @@ has never occurred in 1,572 cells is speculative.
 
 ### The evidence, and how strong it actually is
 
+> **⚠ THIS COUNT EXCLUDED THE ROWS THAT HELD THE DEFECTS - see O66** (2026-09-12). "Comparable" cells are those
+> with one Schedule-A row to compare against. Rows 8, 12C, 13C and 21 map to a variant, not a row, so they were not
+> counted.
+> - Two of their cells differ from every schedule - 13C at 100 kVA is 51.7, and 21 at 100 kVA is 1248, in 20
+>   holders each - and neither is among the 17 below.
+> - "ZERO genuine overrides" was true of the cells counted, not of the master.
+> - The same rows held a 22 kV bushing at the 11 kV rate and copper labour at the aluminium rate.
+
 Across every agency and AT: **1,572 populated comparable CRGO cells, 1,555 byte-identical to
 the 2020 schedule, 17 differing, ZERO genuine overrides.**
 
@@ -7007,6 +7042,46 @@ for pricing, which is what they should be.**
 
 ---
 
+### O68. A capacity the tender does not name is banded silently, and 50, 75 and 315 kVA have no circle limit
+
+Open, found 2026-09-12 answering the band questions. Not fixed. **No live job is affected:** every live job is
+10, 16, 25, 63, 100 or 200 kVA.
+
+**The bands are right for every capacity the tender names.**
+- `bandForKva` maps 5 → 5; 10, 16 → 10&16; 25 → 25; 50, 63, 75 → 50/63/75; 100 → 100; and 200, 315, 500 →
+  above 100.
+- Priced through the builder on ADMIN's 1819 (2026) and 2026_27 (2020), 1a, 1d and the radiator follow the band
+  on both schedules.
+
+**Item 20 above 100 kVA is modelled per capacity, and 315 refuses.**
+- 200 kVA resolves to 1988.29 (2026) / 1971.69 (2020); 500 kVA to 2652.20 / 2630.06.
+- A damaged radiator at 315 kVA raises "No rate found for Radiator Replacement at 315 KVA". So does one at
+  5 kVA, where the tender's cell is 0.
+- It is the only per-capacity split in the 2026 transcription. Every other banded cell, and every single-rate
+  cell, is a plain number.
+
+**75 kVA can be entered, and prices from its band.**
+- The capacity box takes any number. The quick-picks are 10, 16, 25, 63, 100, 200, 250, 315 and 500, and the
+  rules require only a number.
+- A 75 kVA job prices 1a 2079, 1d 288 and the radiator 1258 on 2026.
+- The estimate master has no 75 column, so no stored figure can override it - which, today, is what keeps it
+  right.
+
+**But:**
+- **No circle limit at 50, 75 or 315 kVA.** The limits section holds 0 at 50 and nothing at 75 or 315.
+  - The internal inspection says "Limit not configured" and offers the Estimate Master.
+  - The job editor shows "N/A / No Cap Specified".
+  - The printed estimate prints REPAIRABLE with no over-limit statement, because `exceeds` is false when there
+    is no limit.
+  - Clause 4.0 routes by percentage of a new transformer's cost, and no tender document in the repository gives
+    that cost for 50, 75 or 315 kVA.
+- **A capacity the tender does not name is banded without a word.** 11 prices as 10&16, 40 as 50/63/75, and 150
+  and 160 as above 100. Only the radiator refuses; every other line prices.
+- **250 is offered as a quick-pick,** although no tender row prices a 250 kVA radiator and no circle limit exists
+  for it.
+
+---
+
 ### O67. Every overhauling job is charged a radiator replacement and a sealing charge nobody recorded
 
 Open, found 2026-09-12 in O66's dry run. Not investigated further. Not fixed.
@@ -7022,8 +7097,60 @@ charge, whatever was done. On OH21 IS-1 they are Rs 1,445 of its Rs 3,506 base.
   opposite of an overhaul.
 - **On UGVCL-2026 ATs these rows hold the 2020 Schedule-B extras.** Clause 19.0 of the 2026 terms pays
   radiator, tank and conservator replacement by Schedule-A 18a, 18b and 20.
-- **Carried across from the deleted engine** as part of F55's behaviour-preserving move; whether that engine
-  charged them the same way was not checked.
+- **Carried across twice, never gated.**
+  - The first overhauling code (`calculateJobItemDetails`, 6282d3f, 2026-08-18) charged every row that had a
+    rate: `QTY` and `Y` at 1, `KG` at an invented weight. Its only gate was that the job was not scrap.
+  - The builder took the rule over in 2d8869e (2026-08-24), turning the `KG` rows from invented weights into
+    refusals.
+
+### REPORTED 2026-09-12 - NOT FIXED
+
+**What makes the lines unconditional.** The OH branch walks the overhauling master and sets each row's quantity
+from its unit and rate alone:
+- a rate above zero with unit `QTY` or `Y` gives quantity 1;
+- unit `KG` gives a refusal.
+
+No inspection field is read for any row except the overhauling line itself.
+
+**Was anything meant to gate them?** Nothing in the code or its history.
+- The only gate ever present was "not scrap".
+- The same defect was found and removed for Amorphous and Wound Core bills: "the itemised walk added tank
+  replacement, conservator, radiator and sealing to every such repair whether that work was done or not" (F39).
+  The overhauling branch kept it.
+
+**Has anything been issued carrying them?** No.
+- One overhauling job exists, OH21 IS-1. It records no estimate reference, sent date, bill, payment or challan.
+- **It cannot be issued today either.** The per-kg tank and conservator rows carry a rate (54), so the branch
+  raises two refusals on every overhauling job, even though this job's external inspection records
+  `damCtTank: 0`. A refusal replaces the estimate's totals, and billing refuses on the same errors.
+- **⚠ So every overhauling estimate is blocked, in all 32 holders,** by rows no inspection called for. It is the
+  same unconditional shape as the radiator and sealing lines, pointing the other way.
+- **What the data cannot rule out:** printing leaves no record. An estimate printed between 2026-08-18 and
+  2026-08-24, when the old engine charged the per-kg rows at invented weights rather than refusing, cannot be
+  excluded.
+
+**What each line should be conditional on:**
+
+| Row | Conditional on | Recorded where | On OH21 IS-1 |
+|---|---|---|---|
+| 5 Radiator replacement | radiators recorded for replacement | external inspection `damRadNo` - the field the CRGO radiator line already uses as its quantity | 0 |
+| 6 Sealing of an uneconomical unit | the unit going back unrepaired | nothing on an overhauling job; see below | - |
+| 4 Conservator replacement (per kg) | a conservator recorded for replacement | external inspection `damCtTank` - a count, with no weight anywhere (O27) | 0 |
+| 3 Main tank replacement (per kg) | a replaced tank | nothing - a damaged tank declares the unit scrap (O28) | - |
+
+- **Sealing never belongs on an overhaul.** The nearest recorded fact to "sent back unrepaired" is a scrap
+  declaration plus a return challan. A scrapped job never reaches the OH branch: the scrap short-circuit runs
+  first, and a scrapped OH job blocks (O48). Whether a scrapped overhauling unit is charged sealing is O48's
+  question for the tender.
+- **Rates, separately.** On UGVCL-2026 ATs the radiator row holds the 2020 Schedule-B extra (1057 / 1256 /
+  1452). Clause 19.0 of the 2026 terms pays radiator replacement by Sr 20 (1061 / 1258 / 1458).
+- **Proposed fix, awaiting approval:**
+  - radiator quantity from `damRadNo`;
+  - sealing never charged on the OH branch;
+  - the conservator refusal only when `damCtTank` is above zero, and no main-tank line at all.
+
+  On OH21 IS-1 that leaves the overhauling line alone - 3,162 after O66's clear - with no refusals, against
+  3,506 with two refusals today.
 
 ---
 
@@ -7101,7 +7228,7 @@ section was treated as "empty is normal, prices from Schedule-A" on a premise th
 **Order: either.** Data first fixes the 32 holders at once on the deployed app, which keeps nulls. The deploy
 fixes GETCO 1049, IDEAL and future seeds.
 
-### THE SAME OUTCOME IN THREE CRGO ROWS, BY A DIFFERENT MECHANISM - reported, not built
+### THE SAME OUTCOME IN THREE CRGO ROWS, BY A DIFFERENT MECHANISM - built 2026-09-12, see below
 
 Rows 8, 12C and 13C are the stored CRGO rows priced against **two** tender rows, chosen by the job: kV class
 for 8, winding material for 12C and 13C. One cell can hold only one tender's figure. It is a correct copy for
@@ -7124,6 +7251,41 @@ these are wrong for one variant.
     variant. None does.
 - **What would stop it recurring without relying on data:** `resolveRate` ignoring a master cell for a code
   whose `SCHEDULE_ITEM_MAP` entry varies by kV or material. Not proposed now.
+
+### ROWS 8, 12C AND 13C - BUILT 2026-09-12, NOT APPLIED
+
+- **Shipped defaults nulled** in `estimateData.ts`, with the rows kept.
+- **`variantRowDefaults.test.ts`** asserts that every default CRGO row whose `SCHEDULE_ITEM_MAP` entry varies by
+  kV class or winding material carries no rate. A new row of that kind is caught, not only these three.
+- **`scripts/admin/clear-crgo-variant-rows.js`, MODE `dry-run`:**
+  - clears a row only when every cell holds its known figure, and holds anything else;
+  - runs positive controls on each schedule: the wrong variant must move, the right variant must not;
+  - prices every live job before and after, allowing only 13C moving from 51.7 to 51.75;
+  - on apply, writes in a transaction and reads back.
+- **Dry run:**
+  - 33 documents to clear, 0 rows held; IDEAL's agency has no section.
+  - Controls passed on both schedules:
+    - 22 kV bushing 176 → 265 (2020) / 268 (2026);
+    - copper HV labour 34 → 11;
+    - copper LV labour 51.75 → 17;
+    - 11 kV and aluminium variants unmoved.
+  - 74 jobs priced. Two moved, both 13C 51.7 → 51.75 at 100 kVA:
+    - SU-24, by 0 (no LV coil weight);
+    - MSBT-2, by Rs 0.08 (12,413.18 → 12,413.26). It is Dispatched on challan ch232 with no bill recorded, so its
+      reprint would differ by 8 paise.
+  - No other movement.
+
+### A FOURTH ROW - RADIATOR 21 AT 100 kVA - reported, not built
+
+Found while answering the band questions (O68). **20 holders** hold radiator row 21 at **1248 in the 100 kVA
+cell** - the 50/63/75 figure. They are the 2020-era group: all 8 UGVCL-2020 ATs, 10 agencies and both shared
+defaults.
+- **The 2020 Sr 20 at 100 kVA is 1446.** 1248 differs from it and is honoured, so every 100 kVA radiator
+  replacement on a UGVCL-2020 AT is charged **Rs 198 under**, per radiator.
+- **The 2026 group is unaffected.** Its 13 holders have no 100 kVA cell and price 1458 correctly.
+- **Latent:** all 13 live 100 kVA jobs record `damRadNo` 0.
+- **Correction shape:** null the row's cells, as with 8, 12C and 13C. Every other cell in it is a 2020 copy
+  that the copy test already sees through, and above 100 kVA the tender's per-capacity figures apply.
 
 ---
 

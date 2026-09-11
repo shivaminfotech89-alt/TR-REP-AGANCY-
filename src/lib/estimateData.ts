@@ -408,7 +408,12 @@ export const defaultEstimateData: EstimateItem[] = [
   { itemCode: "3", itemName: "Painting In-Side", unit: "N", rates: { ...defaultRates } },
   { itemCode: "5", itemName: "Oil Level Glass", unit: "Y", rates: { ...defaultRates, "10": 46.00, "16": 46.00, "25": 46.00, "63": 46.00 } },
   { itemCode: "6", itemName: "Breather", unit: "N", rates: { ...defaultRates } },
-  { itemCode: "8", itemName: "HV Bushing", unit: "QTY", rates: { ...defaultRates, "10": 176.00, "16": 176.00, "25": 176.00, "63": 176.00 } },
+  // ⚠ NO RATE ON 8, 12C OR 13C, BY DECISION (AUDIT O66). Each is ONE master row priced against TWO tender rows chosen by
+  // the job - 8 by kV class (8-A / 8-B), 12C and 13C by winding material (-a copper / -b aluminium). One cell can hold one
+  // tender row's figure: a correct copy for one variant, which the copy test then honoured as an override of the other -
+  // 176 on a 22 kV bushing, 34 and 51.75 on copper winding labour. A null falls through to the job's own variant row of its
+  // own tender. variantRowDefaults.test.ts keeps every such row empty.
+  { itemCode: "8", itemName: "HV Bushing", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "9A", itemName: "HV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 131.00, "16": 131.00, "25": 131.00, "63": 131.00 } },
   { itemCode: "9B", itemName: "HV Connector", unit: "QTY", rates: { ...defaultRates, "10": 80.00, "16": 80.00, "25": 80.00, "63": 80.00 } },
   { itemCode: "10", itemName: "LV Bushing", unit: "QTY", rates: { ...defaultRates, "10": 59.80, "16": 59.80, "25": 59.80, "63": 59.80 } },
@@ -429,10 +434,10 @@ export const defaultEstimateData: EstimateItem[] = [
   { itemCode: "12A(a1)", itemName: "HV Wdg. (Not Miss) -CU S.E.", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 163.00, "16": 163.00, "25": 163.00, "63": 163.00 } },
   { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates, "10": 213.00, "16": 213.00, "25": 213.00, "63": 213.00 } },
-  { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates, "10": 34.00, "16": 34.00, "25": 34.00, "63": 34.00 } },
+  { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates } },   // no rate - see row 8 (O66)
   { itemCode: "13A(a)", itemName: "LV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 149.00, "16": 149.00, "25": 149.00, "63": 149.00 } },
-  { itemCode: "13C", itemName: "LV Coil - Labour", unit: "QTY", rates: { ...defaultRates, "10": 51.75, "16": 51.75, "25": 51.75, "63": 51.75 } },
+  { itemCode: "13C", itemName: "LV Coil - Labour", unit: "QTY", rates: { ...defaultRates } },   // no rate - see row 8 (O66)
   { itemCode: "14(ii)CU", itemName: "LV Wdg. Re-Insu.-CU", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "14(ii)AL", itemName: "LV Wdg. Re-Insu.-AL", unit: "QTY", rates: { ...defaultRates, "10": 115.00, "16": 115.00, "25": 115.00, "63": 115.00 } },
   { itemCode: "15", itemName: "Washer Ring", unit: "QTY", rates: { ...defaultRates, "10": 54.00, "16": 54.00, "25": 54.00, "63": 54.00 } },
