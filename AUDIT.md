@@ -7047,6 +7047,82 @@ for pricing, which is what they should be.**
 
 ---
 
+### O70. The Estimate Master grid shows last tender's figures on this tender's AT
+
+Open, 2026-09-12. Reported; option 3 recommended, not built.
+
+**What the operator sees.** On a UGVCL-2026 AT the grid shows the stored cell - 163 for 12A(b), 2061 for 1a at
+25 kVA - where the tender says 165 and 2079.
+- **The money is right.** The estimate charges the tender's figure, because the copy test ignores a cell equal
+  to the 2020 figure.
+- **The display is wrong.** The grid is where an operator checks a rate before quoting, and it shows last
+  tender's figures as though they were this tender's.
+
+**Census, 2026-09-12** - every populated CRGO cell, classified as `resolveRate` treats it:
+
+| Holders | Cells | Copies | Copies showing a figure that is not the AT's tender | Honoured overrides | Variant rows (O66) | Scrap row |
+|---|---|---|---|---|---|---|
+| 14 ATs | 1,556 | 1,203 | 372 - the six UGVCL-2026 ATs, 62 each | 21 | 192 | 140 |
+| 16 agencies | 1,691 | 1,310 | - | 21 | 210 | 150 |
+| 2 templates | 204 | 160 | - | 0 | 24 | 20 |
+| public_config, system_config | 238 | 184 | - | 4 | 30 | 20 |
+| shipped `defaultEstimateData` | 94 | 84 | - | 0 | 0 | 10 |
+
+- **2020 ATs:** on the eight UGVCL-2020 ATs a copy *is* the tender figure, so nothing shown there is wrong. It
+  becomes wrong the moment those rows are carried onto a 2026 AT.
+- **2026 ATs:** 18 of each AT's 80 copies happen to be the same figure in both tenders.
+- **The 21 honoured overrides on ATs:**
+  - 21@100 = 1248 on 8 ATs - the radiator script;
+  - 1f@100 = 230 on 5 ATs and 11B@100 = 148.99 on 3 ATs - the public_config residue;
+  - 12A(b) = 213 at five capacities on GETCO's 1049 - the pending AT 1049 move.
+
+**The options:**
+1. **Display the resolved rate.**
+   - The grid's input must hold the stored figure. Its own comment records that an input holding the inherited
+     figure turns every inherited cell into an override on an untouched Save (F27).
+   - So this could only be a read-mode display, with edit mode showing a different number for the same cell.
+   - It keeps 2,857 dead copies and the copy test forever.
+   - It hides the test's hazard: an agency typing 213 would see 215, with nothing to say why.
+2. **Mark copies.**
+   - The grid would carry a second derivation of "is this a copy", beside `resolveRate`'s - the pattern this
+     audit keeps recording.
+   - It keeps the dead data and the copy test, though it would make the 213 → 215 discard visible.
+3. **Clear the copies.**
+   - An empty cell already renders the AT's own tender figure as its placeholder (`inheritedScheduleRate`
+     against `scheduleSetForAt(selectedAt)`), with pair, 11 kV and per-capacity forms for the variant rows.
+   - No display code changes.
+   - A stored figure then renders only where someone typed one, so the grid becomes a visible list of real
+     overrides.
+
+**Recommended: 3.** A cell that is ignored should be empty.
+
+**⚠ CLEARING ALONE DOES NOT REMOVE THE 213 → 215 HAZARD. RETIRING THE COPY TEST DOES - AND CLEARING IS WHAT MAKES
+RETIRING IT SAFE.**
+- While the test exists, a typed figure equal to the 2020 one is still discarded.
+- Retire it with a copy left anywhere, and that copy is charged: a 2020 figure on a 2026 AT, the bug the test
+  was written for.
+- **So, in order:**
+  1. clear every copy in every holder;
+  2. null the shipped defaults - a missing default row is re-added with its figures, and agency seeding writes
+     them;
+  3. confirm zero copies remain;
+  4. make `resolveRate` honour any stored cell above zero.
+- **Pricing cannot move at step 4.** No stored cell equals a 2020 figure any more, and that equality is the
+  proof.
+
+**What it touches:**
+- **Cells cleared:** 1,203 on the 14 ATs; 2,857 across every stored holder; and the 84 in the shipped defaults.
+- **Not the scrap row (22).** It is priced from the master and has no tender figure to fall through to.
+- **Not rows 8, 12C and 13C, nor the radiator's 100 kVA cell.** Their own scripts handle them; run those first.
+- **Not the Overhauling section.** Rows 3-6 have no Schedule-A pairing, so a cleared cell there is no rate at
+  all.
+- **The residue overrides (1f@100, 11B@100) are not copies.** Clearing them with the rest moves those lines to the
+  tender - by Rs 1 and Rs 0.01 - on 2020 ATs. That is a decision, not a side effect.
+- **No false "no rates" report.** `atRatesReadiness` reads `ratesSource`, and section health counts rows, so an
+  AT with cleared cells is not reported as having no rates.
+
+---
+
 ### O69. Rule 4 of A/T 1819's schedule: an unanswered S.E. flag must block - the app prices it without S.E.
 
 Open, 2026-09-12. Reported, not built.
@@ -7114,6 +7190,66 @@ this tender.
 | 6. Material, GST and labour presentable separately | not checked |
 | 7. Sr. No. against each coil line | yes (G62) |
 | Clause 4.0: strip 18a, 18b and 20 before the percentage | yes - CRGO, and overhauling since O67 |
+
+**Decided 2026-09-12: rule 4 is not built until two things are settled** - S.E. is answered on the five open jobs
+from the paper, and the owner has checked with the agencies whether an LV S.E. transformer has ever arrived.
+
+### THE FIVE OPEN JOBS - WHAT EACH ANSWER PRICES (2026-09-12)
+
+All five are SAMOR's, on the ALLOTMENT NO.25903 AT: 11 kV, aluminium, Repairable.
+- **"Not S.E." changes nothing** on any of them.
+- **"S.E."** moves the HV coil from 12A-b (165/kg) to 12A-b1 (215/kg).
+
+| Job | Paper | HV coil | Issued | Total now (with 7%) | If S.E. |
+|---|---|---|---|---|---|
+| ASTD-1 | MR 2938, serial V2938, VIJAY, 100 kVA Amorphous | 3 × 19 kg = 57.00 kg | bill BILL/2938, Rs 25,664; challan 250 | 21,748.82 | 24,798.32 (+3,049.50) |
+| STD-1 | MR STD-02, serial KHHG, VOLTAMP, 63 kVA | 12 × 4.4 kg = 52.80 kg | estimate STD-02, sent 2026-09-10, Rs 19,474 | 19,474.00 | 22,298.80 (+2,824.80) |
+| STD-2 | MR MR-105, serial NJ73727, NJA, 100 kVA | 18 × 3.3 kg = 59.40 kg | nothing | 22,597.12 | 25,775.02 (+3,177.90) |
+| STD-03 | MR 9007, serial 45611, VIJAY, 10 kVA | 12 × 1.4 kg = 16.80 kg | nothing | 9,591.91 | 10,490.71 (+898.80) |
+| STD-4 | MR 2222, serial 65412, VOLTAMP, 10 kVA | 12 × 1.3 kg = 15.60 kg | nothing | 8,940.49 | 9,775.09 (+834.60) |
+
+- **STD-1's recorded estimate amount (19,474) equals today's price,** so the estimate went out priced without
+  S.E.
+- **ASTD-1's bill (25,664)** matches today's 21,748.82 plus 18% (25,663.61, rounded).
+- **LV S.E. changes none of them.** All five record LV weight 0: their LV coils are marked for re-insulation
+  (item 14), which has no S.E. split.
+
+### LV S.E. - WHAT THE FIELD COSTS, AND WHAT IT WOULD HAVE BEEN WORTH
+
+**Exposure, if every LV coil ever priced had been S.E.** Under 2020 the LV coil goes from 13A-b 149 to 13A-b1 199,
+with each AT's percentage applied:
+- 11 live jobs have an LV coil replacement line, all on UGVCL-2020, 30.20 kg in total.
+- 8 are dispatched with no bill recorded: +Rs 1,237.60.
+- 3 have nothing issued: +Rs 332.80.
+- **At most Rs 1,570.40 across every job in the database, and none billed.**
+- No UGVCL-2026 job has an LV coil replacement line, so an LV S.E. block under rule 4 would stop nothing today.
+
+**What adding the field takes.** Yardstick: G61's HV field was 5 files and 456 lines, including a 145-line admin
+script and 120 lines of AUDIT.
+- **Internal inspection:**
+  - an `lvSeConductor` field with its own blank-first select, following the HV control's pattern;
+  - the save boundary refusing a blank;
+  - the issued-document warning extended to LV coil weight;
+  - the save payload;
+  - a 27th column on the printed sheet. G61 measured about 227px of width to spare after its own column, so one
+    more column of that size fits by that measure - but it must be printed, including the stress case.
+- **Builder:**
+  - the LV coil picks 13A-a1 / 13A-b1 on S.E.;
+  - the line's wording follows the answer;
+  - an unrecognised value refuses;
+  - unanswered keeps today's price and notice, until rule 4 applies.
+- **Master and map:**
+  - rows 13A(a1) and 13A(b1) in `SCHEDULE_ITEM_MAP`, `CODED_COIL_MASTER_ROWS` and the shipped defaults, with no
+    rates (per O66 and O70);
+  - the "no LV S.E. row" test inverts;
+  - the recorded decisions in G61 and G64 not to complete the set are withdrawn.
+- **Consumers:** the multi-job sheet and the estimate Excel export place coil lines by `scheduleSr`, so they
+  follow once the rows exist.
+- **No data migration:** a blank answer means "unanswered", as for HV.
+- **Estimate:** about 170 lines of code and tests, plus print verification - smaller than G61, which also carried
+  the AT 1049 script.
+
+**Open with the owner:** whether an LV S.E. transformer has ever arrived at any agency.
 
 ---
 
