@@ -6872,56 +6872,85 @@ for pricing, which is what they should be.**
 
 ---
 
-### O57. Pricing cannot be imported by a test - estimateCalc pulls in React, Firebase and pdf.js
+### O57. ONE IMPORT EDGE is why pricing cannot be tested - estimateCalc reaching into a component
 
-Open. Found while setting up G60's runner. It is a restructuring, so it is a separate decision, and
-the G57 seed tests do not depend on it.
+Open, and deliberately not started. It is about 1,100 lines of movement through the code that prices
+every estimate and bill, and G60's tests do not need it, so it is its own decision on its own day.
 
-**Measured, not estimated.** esbuild's metafile for `src/lib/estimateCalc.ts` shows **52 modules, 35
-of them from 19 packages (3.7 MB)**: React, react-router, Firebase (app, auth, Firestore,
-Functions) and pdf.js. Importing it under Node fails immediately with `DOMMatrix is not defined`,
-which is pdf.js. `estimateMasterHealth` pulls in the identical 52 modules, for one constant.
+> **THE CAUSE IS ONE IMPORT.** `src/lib/estimateCalc.ts` imports `buildSingleJobEstimateData` and
+> `classifyCoreType` from the component `src/components/SingleJobEstimateReport.tsx`.
+>
+> **That single edge drags 52 modules, 35 of them from 19 packages (3.7 MB), into anything that
+> touches pricing** - React, react-router, Firebase (app, auth, Firestore, Functions) and pdf.js - **and
+> makes pricing unloadable under Node.** Importing `estimateCalc` fails immediately with
+> `DOMMatrix is not defined`, which is pdf.js.
 
-**All of it arrives through one edge.** `estimateCalc` imports `buildSingleJobEstimateData` and
-`classifyCoreType` from the component `SingleJobEstimateReport.tsx`. From there the chain branches:
+Measured with esbuild's metafile, not estimated. **Every one of those packages arrives through that
+edge.** `estimateCalc`'s other imports - `ugvclSchedules`, `estimateData` and `scheduleItemMap` - pull
+in no package at all. `estimateMasterHealth` inherits the identical 52 modules, because it imports
+`estimateCalc` for one constant.
+
+From the component, the chain branches three ways:
 - React and react-router, for the component itself;
 - `LetterheadHeader` → `letterheadUtils` → pdf.js;
 - `AgencyContext` → Firebase, for `getAtPercentage` and `getEstimateMasterForCore`. Firebase
-  initialises the app as soon as the file is loaded.
+  initialises the app as soon as that file loads.
 
-`estimateCalc`'s other imports - `ugvclSchedules`, `estimateData` and `scheduleItemMap` - pull in no
-packages at all.
+### THE ONLY IMPORT CYCLE IN THE APP RUNS THROUGH THE SAME EDGE
 
-**Two import cycles ride on that edge:**
-- `estimateCalc` → the component → `estimateCalc`, for `resolveScrapCharge`;
-- `AgencyContext` → `estimateMasterHealth` → `estimateCalc` → the component → `AgencyContext`.
+This is worth knowing independently of testability: it sits in the pricing path, and nothing marks
+it. Grouping the app's 80 modules (everything reachable from `src/main.tsx`) by which can reach each
+other finds **exactly one cyclic group - four modules - and both of its cycles pass through this
+edge**:
+- `estimateCalc` → `SingleJobEstimateReport` → `estimateCalc`, because the component takes
+  `resolveScrapCharge` back;
+- `AgencyContext` → `estimateMasterHealth` → `estimateCalc` → `SingleJobEstimateReport` →
+  `AgencyContext`.
 
-**What it would take:**
-1. **Move the estimate builder out of the component** into a lib module. That is
-   `buildSingleJobEstimateData` - 1,030 lines, with no React and no JSX - plus what only it uses:
-   - `classifyCoreType`, `CoreClass`, `classifyWindingMaterial`, `windingMaterialError`;
-   - `scheduleBCandidates`, `findScheduleBEntry`;
-   - `MASTER_BASELINE_SCHEDULE_ID`, `ScheduleLookup`;
-   - its three result types.
+**Latent, not live.** In all four modules, every import from a cycle partner is used only inside a
+function, never while the module loads - checked with the TypeScript parser. So load order does not
+matter today.
 
-   The print layout, the section labels and every React import stay with the component. Two other
-   components import from it only for `classifyCoreType`.
-2. **Move `getAtPercentage` and `getEstimateMasterForCore` out of `AgencyContext`** into a module with
-   no Firebase import, re-exported from `AgencyContext` so existing importers do not change.
+It will matter the day any of the four reads a partner's export at module level - for example, a
+constant built from `SCRAP_ITEM_CODE_BY_CORE_CLASS` at the top of `estimateMasterHealth`. That read
+would happen before the export is initialised, and what follows depends on how the bundler orders
+the modules.
+
+### IF THE EDGE IS CUT, THE REST IS SMALL
+
+**The fix that matters is moving the estimate builder out of the component** into a lib module. That
+is `buildSingleJobEstimateData` - 1,030 lines, with no React and no JSX - plus what only it uses:
+- `classifyCoreType`, `CoreClass`, `classifyWindingMaterial`, `windingMaterialError`;
+- `scheduleBCandidates`, `findScheduleBEntry`;
+- `MASTER_BASELINE_SCHEDULE_ID`, `ScheduleLookup`;
+- its three result types.
+
+The print layout, the section labels and every React import stay with the component. Two other
+components import from it only for `classifyCoreType`. **That move alone takes React, react-router
+and pdf.js off the pricing path**, because they belong to the component, not to the builder.
+
+It does not finish the job by itself, and the entry should not pretend otherwise. Two follow-ons,
+both small:
+1. **Firebase travels with the builder**, because the builder itself imports `getAtPercentage` and
+   `getEstimateMasterForCore` from `AgencyContext`. Move those two functions (about 170 lines) into a
+   module with no Firebase import, and re-export them from `AgencyContext` so existing importers do
+   not change.
    - `getAtPercentage` is pure.
-   - `getEstimateMasterForCore` is not quite. **It falls back to a module-level cache,
+   - **`getEstimateMasterForCore` is not quite.** It falls back to a module-level cache,
      `cachedGlobalDefaultEstimateMaster`, which the provider fills and `localStorage` seeds when the
-     file loads.** The move has to decide whether that state moves with it or callers pass the
-     default in. A test inheriting a cache set by whichever test ran first would be
-     order-dependent.
-3. **Stop `estimateMasterHealth` depending on the estimate builder**, by pointing it at the scrap-code
-   constant's new home or moving the constant.
+     file loads. Decide whether that state moves with it or callers pass the default in. A test that
+     inherits a cache set by whichever test ran first would be order-dependent.
+2. **The cycles re-form unless two things are placed deliberately:**
+   - the builder uses `resolveScrapCharge` from `estimateCalc`, which will import the builder - so that
+     function has to live where both can import it without importing each other;
+   - `estimateMasterHealth` should take `SCRAP_ITEM_CODE_BY_CORE_CLASS` from wherever it can reach
+     without passing through `estimateCalc`.
 
-**Size and risk.** Roughly 1,100 lines move, almost all of them verbatim, into two new modules, plus
-import lines in fewer than ten files. This is the function that prices every estimate and bill, so it
-should be verified the way G57's normaliser move was - a mechanical diff proving the moved text
-unchanged - and with `scripts/admin/pricing-model-regression.js`, which already reprices live jobs
-against a baseline.
+**Size and risk.** About 1,100 lines move, almost all verbatim, into two new modules, plus import
+lines in fewer than ten files. This prices every estimate and bill, so verify it the way G57's
+normaliser move was verified - a mechanical diff proving the moved text unchanged - and with
+`scripts/admin/pricing-model-regression.js`, which already reprices live jobs against a baseline.
+Re-run the cycle grouping afterwards: the move is done when it finds no cyclic group.
 
 ---
 
