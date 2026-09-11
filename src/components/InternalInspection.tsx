@@ -1014,9 +1014,15 @@ export default function InternalInspection() {
      * NINE ROWS A PAGE - AND IT IS NOT A VERTICAL LIMIT (AUDIT G20).
      *
      * ⚠ THE BINDING CONSTRAINT IS WIDTH, WHICH IS THE OPPOSITE OF WHAT A ROW COUNT IMPLIES.
-     * This sheet is LANDSCAPE A4 and the table has 27 columns across 297mm. Vertically it is
+     * This sheet is LANDSCAPE A4 and the table has 26 columns across 297mm (25 before G61's HV S.E.;
+     * this comment said 27, and a printed measurement counted 25). Vertically it is
      * nowhere near full: content area ~176mm, and nine rows plus the header, title and
      * signature block use about 68mm - roughly 115mm SPARE. The page is two-thirds empty.
+     *
+     * ⚠ NOT ON A FULL-A4 LETTERHEAD. Printed 2026-09-11 on one with a 64mm header and a 25mm
+     * footer: ~34mm spare under nine one-line rows, ~7mm under nine two-line rows - and the last
+     * sheet's signature block is then CUT OFF by PrintableA4Page's overflow-hidden body, on the
+     * preview and on paper alike, with nothing pointing at it (AUDIT O58).
      *
      * So a reader wondering whether 9 can go up should be asking about column width, not
      * height. And a reader making the text bigger - as G20 did, 7.5px to 9.5px - is spending
@@ -1127,8 +1133,9 @@ export default function InternalInspection() {
                           <th className="border border-black p-0.5 w-6" rowSpan={2} title="DC (Dismantling Charge / Dismantling of Transformer)">DC</th>
                           <th className="border border-black p-0.5 w-6" rowSpan={2}>Insula</th>
                           <th className="border border-black p-0.5 w-14" rowSpan={2}>Condition</th>
-                          {/* HV S.E. on paper too (AUDIT G61). The sheet's stated widths total ~850px of ~1,030px
-                              printable on landscape A4, so one nowrap column fits. Not verified in a print preview. */}
+                          {/* HV S.E. on paper too (AUDIT G61). Printed through triggerUniversalPrint in headless
+                              Chrome: the column takes 40px, and with the longest real value of every field the
+                              table keeps ~227px of its narrowest width spare across the printable width. */}
                           <th className="border border-black p-0.5 w-12 whitespace-nowrap" rowSpan={2}>HV S.E.</th>
                         </tr>
                         {/* Sub-Headers for HV & LV Phases */}

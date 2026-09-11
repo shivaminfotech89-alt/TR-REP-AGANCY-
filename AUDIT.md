@@ -680,6 +680,43 @@ success condition is "nothing changed" must also assert, in the same run, at lea
 that changes. That case is not a bonus test of a second behaviour; it is the only evidence
 that the comparator can see anything at all.
 
+**⚠ THE DEFAULT SHAPE: A COMPARISON ASSERTS THAT IT COMPUTED SOMETHING BEFORE IT REPORTS THAT NOTHING
+MOVED.** A script whose success condition is "nothing changed" counts what it actually compared -
+estimates built, subtrees hashed, test files run, hooks found. It exits non-zero when that count is
+zero, or below what is known to exist, **in the same step and before the "0 moved" line prints.**
+Every such script in this project is written that way from the start; the assertion is not a repair
+fitted after each one is caught.
+
+A positive control elsewhere in the run is not a substitute. It is a separate code path: it can skip
+itself, and when it does catch the blindness it may do so only by crashing, which is how the fourth
+instance below was caught.
+
+**Four instances, each found late:**
+
+| | Reported | Why it had compared nothing | Caught by |
+|---|---|---|---|
+| **G33** | `verify-seed-equality.js` negative control: PASS | the perturbation's regex matched nothing, so an unmodified file was compared | the traceback printed above the PASS |
+| **G59** | `hooks-after-return.js`: "None" | its patterns recognised neither the early returns nor the hooks it exists to find | three hooks below a return, found by hand (G57) |
+| **G60** | `node --test`: exit 0 | no file matched, and a file with no tests counts as one passing test | trying both on purpose |
+| **G61** | S.E. regression: 77 jobs, 0 moved | the stub rule took the builder's absolute `C:/` path for a bare import, so both builders were stubs | the positive control crashing on the same missing estimate |
+
+The `est.items` case below has the same shape and predates the lettered entries.
+
+**Where the existing comparators stand (2026-09-11)** - recorded, not retrofitted:
+
+| Script | Asserts it computed something? |
+|---|---|
+| `verify-seed-equality.js` | **Yes** - the perturbation is asserted to have landed (G33) |
+| `hooks-after-return.js` | **Yes** - its self-test requires planted probes to be found (G59) |
+| `scripts/run-tests.js` | **Yes** - fails on no test files, no tests, or a file reported as its own test (G60) |
+| `pricing-model-regression.js` | **Not in Part A.** A job that throws gives the same error fingerprint on both captures and compares equal, and an empty baseline reports 0 moved. Part B fails the run when the builder throws or no Amorphous job exists, so a blind builder is still caught - one step later, by a different path. |
+| `print-subtree-hashes.js --compare` | **No.** Zero subtrees on both sides reports "byte-identical 0" and exits 0. It also exits 0 when documents are REMOVED; only a CHANGED one fails it. |
+| `master-equivalence.js`, `seed-parser-equivalence.js`, `at-resolution-census.js` | **No.** Each prints its "identical / none" verdict having compared zero items. Each prints its counts beside the verdict, so a zero is visible, but nothing stops on it. |
+| `read-counters.js --diff` | **No.** "NOTHING MOVED" prints when both snapshots hold no counters, and the diff prints no count. |
+
+**It is up to whoever next touches one of the "No" rows to fit the assertion then.** A script written
+from now on starts with it.
+
 **It earned itself twice in one file, both times in
 `scripts/admin/pricing-model-regression.js`, and both times it was the differing case that
 caught the bug rather than any review of the method.**
@@ -6888,6 +6925,53 @@ constant is correct, because those cells are recognised as copies and ignored.
 Verified rather than argued: adopting the 2026 template onto AT 1819 in memory leaves every
 rate at 2026 and `baseTotal` unchanged at 5,613. **The template's master sections are inert
 for pricing, which is what they should be.**
+
+---
+
+### O58. A signed inspection sheet can lose its signature block, and nothing says so
+
+Open, found 2026-09-11 while printing G61's column. Not started.
+
+`PrintableA4Page`'s body is `flex-1 overflow-hidden` (`LetterheadHeader.tsx:243`). Whatever does not fit
+between the letterhead's header and footer is cut off:
+- not moved to another page;
+- not flagged on screen or on paper.
+
+The preview is cut the same way, so an operator who looks for the signatures can see they are missing,
+but nothing points there.
+
+**Measured on the internal inspection sheet** - MR 85558, printed through `triggerUniversalPrint` in
+headless Chrome, on a full-A4 letterhead with a 64mm header and a 25mm footer:
+
+| Nine rows of | Spare under the table | The last sheet's signature block |
+|---|---|---|
+| one line (today's data) | 130.1px (~34mm) | visible |
+| two lines (a make that wraps) | 27.6px (~7mm) | **cut off by 43.8px (~12mm)**: Inspected by, Executive Engineer and the agency's signatory are all gone |
+
+It is identical before and after G61. It takes a full last sheet (`CHUNK_SIZE = 9`) whose rows wrap -
+a long make or serial on each - and the signature block sits only on the last sheet.
+
+**⚠ THE CHUNK_SIZE MODEL IS WRONG ON A LETTERHEAD.** G20 measured ~115mm spare and called the sheet
+two-thirds empty, and the comment above `CHUNK_SIZE` repeated it. That figure did not account for a
+letterhead's header and footer. On this one the spare is about a third of it with one-line rows, and
+almost nothing with two-line rows. The comment now says so.
+
+**The shape is wider than this sheet.** Every document built on `PrintableA4Page` has the same body.
+Which others can overflow, on which letterheads, is not measured.
+
+**Not decided:**
+- paginating by measured height rather than a row count;
+- fewer rows a sheet when a letterhead is set;
+- a visible warning when anything is cut off.
+
+Each is its own change.
+
+**Same letterhead, a different defect.** MEGHA's letterhead image carries its own "For MSD Corporation
+/ Authorized Signatory" and "Page 1 of 1" inside the picture, above the 25mm footer the agency set.
+- They print through the table's lower rows.
+- The report reads "Page 1 of 1" on each of two sheets.
+
+That comes from the agency's image and its footer setting; nothing in the app compares the two.
 
 ---
 
@@ -13408,11 +13492,12 @@ as a hardcoded constant.
    - An unanswered one keeps the wording this estimate has always printed - "Aluminium SE", whatever
      the rate - so an issued estimate reprints unchanged.
    - The on-screen notice says plainly that the old wording does not mean the S.E. rate was used.
-6. **The printed inspection sheet carries the column.** Its stated widths total about 850px of about
-   1,030px printable on landscape A4, so one nowrap column fits.
+6. **The printed inspection sheet carries the column, and it has been printed** - a real MR through
+   `triggerUniversalPrint` in headless Chrome, before and after G61. See PRINTED below.
    - Print-subtree hashes against HEAD: 12 of 13 printed documents are byte-identical, and the only
      change is this sheet.
-   - **Not checked in a print preview.**
+   - This entry first rested the fit on stated widths alone, and the report of it said the sheet had
+     29 columns. It has 26 (25 before); the comment above `CHUNK_SIZE` said 27, and is corrected.
 
 ### WHY THERE IS NO LV FIELD - A DECISION, WITH A STATED LIMIT
 
@@ -13451,7 +13536,22 @@ exactly why the revert waits for the answers.
 
 ### NOT DONE
 
-- **The Excel export of the inspection sheet** has no HV S.E. column.
+- **The Excel export of the inspection sheet has no HV S.E. column - recorded, not built.** Who reads
+  it, as far as the repository can say:
+  - **Nothing in the app sends it anywhere.** `handleExportExcel` writes
+    `Internal_Inspection_MR_<n>.xlsx` to the operator's machine. No email, upload or covering letter
+    names it.
+  - **The document made for UGVCL to sign is the printed sheet.** It carries the joint-inspection
+    signature block - Inspected by (Junior Engineer), Executive Engineer, and the agency's signatory
+    - and tender clause 4.0 makes the internal inspection joint with UGVCL's engineers. The
+    estimate's covering letter, "submitting you inspection reports and estimates", goes to the circle
+    office. The printed sheet carries the column.
+  - **The Excel file has no letterhead and no signatures**, so it is not the signed report. Whether an
+    agency emails it to a division office anyway is not something the code can show - **that is the
+    agency's answer to give**, and it decides how much the gap matters.
+  - **Why it was missed is structural.** The export rebuilds its rows from the form data rather than
+    serialising the page - the second half of *"an export that serialises the page cannot disagree
+    with it; one that rebuilds always can"* - so a column added to the page cannot reach it by itself.
 - **The estimate header's "Aluminium SE"** (`windingTypeStr`) still prints for every aluminium job,
   whatever the rate. It is pre-existing and left alone; only the HV line's wording now follows the
   answer.
@@ -13475,8 +13575,62 @@ Passed:
 the builder's absolute Windows path, `C:/…`, as one. Both "builders" were therefore stubs: all 77
 jobs returned no estimate, and the run reported "0 moved". It was caught only because the positive
 control then crashed on the same missing estimate. The harness now fails if no job produces an
-estimate - the G33 / G59 / G60 failure again, in a check written the same day as G60's.
+estimate - the G33 / G59 / G60 failure again, in a check written the same day as G60's. That
+assertion is now the stated default shape for every such script, in the pattern *a harness that
+reports "no difference" must contain a case that MUST differ*.
 
-The harness lives in the session's scratchpad, not the repository. **The app was not run in a
-browser**: the form, the confirmation and the printed column are verified by reading and by the
-harness, not by use.
+The harness lives in the session's scratchpad, not the repository. **The app itself was not run in
+a browser**: the form and the confirmation are verified by reading and by the harness, not by use.
+The printed sheet was rendered from the component's own source text, below.
+
+### PRINTED
+
+MR 85558 was printed five ways through the app's `triggerUniversalPrint`, in headless Chrome, at the
+`@page` size that function writes. The MR is MEGHA's: 18 jobs, two sheets, and a full-A4 letterhead
+with a 64mm header, 25mm footer and 12mm side margins.
+- **The sheet was not re-typed.** The harness cuts the component's print branch out of
+  `InternalInspection.tsx` and asserts that the cut contains, byte for byte, the subtree
+  `print-subtree-hashes.js` hashes.
+- **It asserts something printed before it judges fit.** Checked: two sheets on screen and two PDF
+  pages, all 18 rows, the letterhead drawn, the column present only after G61 and directly after
+  Condition, and every perturbation present in every row.
+
+On the tightest sheet of each print:
+
+| Print | Narrowest the table can be | Spare of 1,031.8px printable | Rows taller than before |
+|---|---|---|---|
+| before G61 | 758.6px | 273.2px | - |
+| G61, today's data (column blank) | 794.7px | 237.1px | 0 |
+| G61, every row "Not S.E." | 798.1px | 233.7px | 0 |
+| before G61, longest real value of every field in every row | 765.6px | 266.2px | - |
+| G61, the same, "Not S.E." | 805.1px | 226.7px | 0 |
+
+- **The column takes 40px.** It comes out of the four columns that had room - Job No, Trans S.No, Make
+  and Type / Core, each about 9% narrower.
+- Nothing is past the margin, no cell clips its text, "Not S.E." stays on one line, and no row got
+  taller.
+- **The spare is width that unbreakable text can still use** - roughly 40 more characters of job number
+  at 9.5px monospace. Serial and Make break anywhere, so a longer one costs height rather than width.
+- **The live database is mostly test entries.** Its longest serial is 12 characters and its longest make
+  16, so the stress print is the longest this data holds, not the longest an agency will type.
+
+**⚠ THE FIT CHECK WAS BLIND ON ITS FIRST RUN - the rule above, in the harness written to follow it.**
+- **What it did:** it asserted that rows printed, then measured fit against the page box and the cell
+  widths.
+- **What it missed:** it reported "signature yes" and "nothing below the page" for a stress sheet
+  whose picture showed the signature block cut off. The text is in the DOM and inside the page; it is
+  `PrintableA4Page`'s `overflow-hidden` body that cuts it.
+- **What caught it:** a picture of each sheet.
+- **Now:** it measures every element against its nearest clipping container, and that cut-off pre-G61
+  stress sheet is its positive control.
+
+**What it found is not G61's, and is recorded as O58.** On this letterhead, nine two-line rows leave
+27.6px under the table, and the last sheet's signature block is cut off by 43.8px. It is identical
+before and after G61.
+
+**Also seen, also not G61's.** MEGHA's letterhead image carries its own "For MSD Corporation /
+Authorized Signatory" and "Page 1 of 1" inside the picture, above the 25mm footer the agency set.
+- They print through the table's lower rows.
+- The report reads "Page 1 of 1" on each of two sheets.
+
+That is the agency's image and footer setting, and nothing in the app detects it.
