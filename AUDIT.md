@@ -7047,6 +7047,97 @@ for pricing, which is what they should be.**
 
 ---
 
+### O71. The live app stopped: a database billing cannot lift, no indexes, and a read pattern twelve customers can exhaust
+
+Open, 2026-09-12. **Three facts compounded, and none of them was visible until the app stopped.**
+
+**What happened.** Firestore refused every read:
+*"RESOURCE_EXHAUSTED: Quota exceeded for quota metric 'Free daily read units per project (free tier database)' …
+This database cannot exceed free quota limits even when a billing instrument is enabled."*
+- **First seen** at 20:11 UTC on 2026-09-11 (01:41 IST on the 12th), when an admin script's snapshot read was
+  refused.
+- **When the quota actually ran out is not known.**
+- **A one-document probe** later failed the same way, and the owner confirmed every agency was getting the error.
+- The quota resets at midnight Pacific time, about 12:30 IST.
+- Nothing was written or lost.
+
+**Fact 1 - billing alone cannot lift this database's limit.** Firestore admin API metadata, 2026-09-12:
+- `ai-studio-trrepagency-24815277-…`, in asia-south1, created 2026-08-10 by Google AI Studio;
+- `databaseEdition: ENTERPRISE`, `freeTier: true`, `freeTierLimited: true`.
+
+Firebase's AI Studio integration page says:
+- such databases share a quota group - 50,000 read units and 40,000 write units a day;
+- adding billing does not remove the cap;
+- the database itself must be upgraded: Firebase console → the database → **Upgrade database → Upgrade to
+  pay-as-you-go**.
+
+A Google forum thread (May-June 2026) reports a database still capped after Blaze, unresolved.
+
+**Fact 2 - Enterprise edition bills by bytes and creates no indexes.**
+- Reads are charged in 4 KiB read units.
+- A query with no index scans the whole collection and is billed on every document's bytes, whatever its
+  filters.
+- This database had **zero indexes**. Every query in the app - each already filtered by owner - was billed for
+  every agency's documents.
+
+**Fact 3 - what the app reads.** From the code; units are estimated from document sizes on disk.
+- **Document sizes:**
+  - job about 1.1 KiB;
+  - inspection data 0.07-0.47 KiB;
+  - AT about 15.5 KiB;
+  - agency about 23 KiB, or 130-170 KiB with its letterhead stored inline (ZENITH 112 KiB, MEGHA 144 KiB of
+    letterhead).
+- **One sign-in, about 230-420 units,** repeated on every browser reload:
+  - the shared rate defaults, about 5;
+  - every agency, about 160-350;
+  - every AT, about 55;
+  - templates, about 8.
+- **One screen visit:** jobs, inspections and oil come to about 35 units; Testing Report about 46; AtSettings
+  adds about 22 per AT.
+- **Reads that repeat:**
+  - 8 screens re-fetch when the agency record object is replaced;
+  - Testing Report re-fetches each time its form opens or closes;
+  - AtSettings scans once per AT whenever the AT list changes;
+  - NewJob scans on leaving the serial field, and on submit makes three scans plus one per transformer.
+  - No keystroke or render-loop reads were found.
+- **Normal use with twelve customers can exceed the day's quota.** 12 operators with 10 reloads, 100 screen
+  visits and 20 submissions each come to about 100,000 units a day. That activity level is assumed, not
+  measured - the service account cannot read Cloud Monitoring.
+- **The admin scripts read the same collections,** at about 250-450 units a run. This session's dozens of
+  runs plausibly used 10,000-25,000 units across 2026-09-11 and 12 - a large share of the day it failed.
+
+**What a customer saw.** The agency load failed silently and the list stayed empty.
+- Every module showed "No Active Agency - Create one to start".
+- Settings listed "No agencies yet".
+- A read failure and an absence rendered identically, and the app chose the alarming reading - fixed in G70.
+
+**The fixes, in order and as separate changes:**
+1. **Indexes** - G69.
+2. **A load status in the data layer** - G70.
+3. **Letterheads out of the agency document, and each agency's jobs and inspections loaded once** - planned
+   below, not built.
+
+**Fix 3, planned.** Not built: it migrates production data, and needs the database to verify.
+- **Letterheads:** store the image outside `agencies` - Cloud Storage, or a `letterheads/{agencyId}` document
+  read only when a document prints or Settings edits it.
+  - A dry-run migration script moves each existing `letterheadUrl`.
+  - Every reader of `letterheadUrl` - printing, the calibrator, Settings, the seed - reads through one accessor.
+  - Sign-in stops reading images.
+- **Jobs and inspections once:** the data layer loads the active agency's jobs, inspections and oil once, with a
+  status. Screens read them from the data layer and refresh after their own writes.
+  - That removes about 15 per-screen fetches, and carries G70's failed state to every screen.
+- **With it:**
+  - **inspections read by agency.** Every inspection read today filters by owner, or owner and type, never by
+    agency, though new records are written with `agencyId` (ExternalInspection.tsx:580). Check whether older
+    records all carry it after the reset.
+  - AtSettings' scan per AT replaced by one query;
+  - Testing Report's refetch on form toggle removed;
+  - NewJob's per-transformer job-number checks answered from jobs already loaded.
+
+**Lifting the limit is the owner's step:** try Upgrade database after the reset.
+
+---
+
 ### O70. The Estimate Master grid shows last tender's figures on this tender's AT
 
 Open, 2026-09-12. **Decided: option 3, in every holder and in the shipped defaults, plus the two residue slips.
@@ -15447,3 +15538,67 @@ completes O70's display for the one rate outside CRGO.
 the rows it seeds, not pixels.
 
 **Deploy:** hosting. It changes no data and no price.
+
+---
+
+## G69. Indexes for the app's queries - `firestore.indexes.json`
+
+**Why.** O71's second fact: an Enterprise edition database creates no indexes, and this one had none, so every
+query scanned its whole collection and was billed for every agency's documents. This is configuration, not code,
+and it changes no behaviour.
+
+**Every query shape the app makes.** All are equality filters, with no sorting, and `limit(1)` in AtSettings.
+
+| Collection | Fields (all ascending, dense) | Used by |
+|---|---|---|
+| agencies | ownerId | sign-in load; createAgency and subscription functions |
+| atMasters | ownerId | sign-in load |
+| atMasters | agencyId | the delete-guard function |
+| jobs | ownerId, agencyId | about 15 screens; AT creation seed |
+| jobs | ownerId, agencyId, atId | the same screens scoped to one tender (`atClause`) |
+| jobs | ownerId, agencyId, serialNo | NewJob guarantee lookup by serial |
+| jobs | ownerId, agencyId, jobNo | NewJob guarantee lookup by job number |
+| jobs | ownerId, atId | AtSettings (`limit 1`); NewJob allotment |
+| jobs | ownerId, mrNo | NewJob, MR check |
+| jobs | ownerId, jobNo | NewJob, job-number check |
+| jobs | atId | the delete-guard function |
+| jobs | agencyId | the delete-guard function |
+| oilTransactions | ownerId, agencyId | Dashboard, Billing, OilInward, AtSettings |
+| subscriptions | ownerId | ManageSubscription; createAgency |
+| support_tickets | userId | SupportTickets |
+
+**⚠ NOT INDEXED, BY DECISION: inspections by `ownerId`, and by `ownerId` plus `type`.**
+- **Enterprise charges an indexed read per document looked up,** each at least one read unit. Google's example:
+  20 documents of 1 KiB cost 5 units scanned and 21 units through an index.
+- **Inspections are tiny,** about 0.1-0.5 KiB each. A scan of all ~144 costs about 11 units, while an owner's
+  indexed read of 60 costs about 61.
+- **Across twelve agencies,** scans cost about 132 units and indexed reads about 156.
+- **So an index here would raise the cost at today's size.** Revisit with fix 3, when inspections are read by
+  agency rather than by owner. The sizes are estimates - check them after the reset.
+
+**What it saves, estimated:**
+- **Agencies at sign-in:** 160-350 units become the account's own documents, about 6-43.
+- **ATs:** about 55 become the account's own, about 4 each.
+- **Jobs:** each visit cost 22 units for everyone, and now costs the agency's own job count plus one.
+  - Across one visit by each of twelve agencies that is about 89 units instead of 264.
+  - The delete-guard functions are bounded by their limit instead of scanning.
+
+**⚠ WHAT DOES NOT IMPROVE, OR GETS WORSE:**
+- **The largest agency's job reads cost more per visit** than a scan does now, whenever it holds more than about
+  21 jobs, until the jobs collection grows past that crossover.
+- **Inspection reads are unchanged.**
+- **Sign-in's image cost shrinks but remains** - a letterhead is still read with its own agency until fix 3.
+
+**Deploying:**
+- **The command:** `firebase deploy --only firestore:indexes`. `firebase.json` now names the file for the
+  named database.
+- **What building costs:** it is billed as write units, one per KiB of index entries created - a few hundred
+  units here. The minimum build time is a few minutes.
+- **Safe with the app live.** An Enterprise database runs an unindexed query as a scan, so a query arriving while
+  its index is still building runs exactly as it does today.
+- **⚠ Not verified by a deploy:**
+  - **Single-field entries:** whether the Firebase CLI accepts them for an Enterprise database. The Standard
+    edition CLI rejects them as unnecessary. If it refuses, create those four with `gcloud firestore indexes
+    composite create --database=<id> --collection-group=<c> --field-config=field-path=<f>,order=ascending
+    --density=dense`.
+  - **`density`:** whether the CLI accepts the key.

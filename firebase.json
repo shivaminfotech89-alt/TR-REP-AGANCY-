@@ -1,7 +1,8 @@
 {
   "firestore": {
     "database": "ai-studio-trrepagency-24815277-6016-4ae2-8734-e6d2444b37dd",
-    "rules": "firestore.rules"
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
   },
   "functions": [
     {

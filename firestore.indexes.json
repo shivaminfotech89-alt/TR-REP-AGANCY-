@@ -1,0 +1,40 @@
+{
+  "indexes": [
+    { "collectionGroup": "agencies", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }] },
+
+    { "collectionGroup": "atMasters", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }] },
+    { "collectionGroup": "atMasters", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "agencyId", "order": "ASCENDING" }] },
+
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "agencyId", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "agencyId", "order": "ASCENDING" }, { "fieldPath": "atId", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "agencyId", "order": "ASCENDING" }, { "fieldPath": "serialNo", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "agencyId", "order": "ASCENDING" }, { "fieldPath": "jobNo", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "atId", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "mrNo", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "jobNo", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "atId", "order": "ASCENDING" }] },
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "agencyId", "order": "ASCENDING" }] },
+
+    { "collectionGroup": "oilTransactions", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }, { "fieldPath": "agencyId", "order": "ASCENDING" }] },
+
+    { "collectionGroup": "subscriptions", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "ownerId", "order": "ASCENDING" }] },
+
+    { "collectionGroup": "support_tickets", "queryScope": "COLLECTION", "density": "DENSE",
+      "fields": [{ "fieldPath": "userId", "order": "ASCENDING" }] }
+  ],
+  "fieldOverrides": []
+}
