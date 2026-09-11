@@ -211,8 +211,17 @@ var defaultOverhaulingEstimateData = [
     itemCode: "7",
     itemName: "Overhauling of complete transformer:\nDuring overhauling, following works are required to be carried out:-\nOverhauling charges shall be paid for below works which includes the opening & closing/refitting of transformer including minor repairing works and loading & unloading of Transformers, repairing of Tanks & radiators by welding to stop leakage of oil, replacement of burnt /damaged external parts like bushing/ nut-bolts /breather if any with Dismantling of bushing replacement of all the old gaskets by new, opening welding of top cover plate if necessary un-tanking of the winding, removal of the core plate assembly and reassembly of the same including replacement of all types of insulations whenever necessary replacement of diaphragm of explosion vent, testing of the same, Cleaning of transformer tank, removal of sludge, filtration of transformer oil, Strengthening / brazing of joints of winding, Fitting/tightening of internal joints at the HV/LV bushing, Internal painting of transformer, Drying of the active parts of the transformer to ensure proper IR value as mentioned herein, fixing of name plates and as per conditions wherever mentioned in this tender.",
     unit: "QTY",
-    fixedRate: 2061,
-    rates: { "5": 2061, "10": 1603, "16": 1603, "25": 2061, "50": 2061, "63": 2061, "100": 2500, "200": 3e3, "315": 3e3, "500": 3e3 }
+    // ⚠ NO RATE, BY DECISION (AUDIT O66). Overhauling is billed "as per Sr. No. 21 of Schedule-A" in both tenders, and a
+    // null cell falls through to the JOB'S OWN tender's Sr 21 (resolveRate), so it cannot go stale when a tender reprices.
+    //
+    // From 2026-08-18 this row shipped 2061/1603/1603/2061/2061/2061/2500/3000/3000/3000. 1603 and 2061 are the 2020 Sr 1a
+    // labour charge; 2500 and 3000 appear in no tender. Differing from the 2020 Sr 21 baseline, the copy test honoured them
+    // as overrides, and seeding copied them into every agency, AT, template and shared default - so every overhauling job
+    // priced up to Rs 1,128 under its tender. scripts/admin/clear-overhauling-row-7.js clears the stored copies.
+    //
+    // The ROW stays: a default row a stored section lacks is re-added from here (getEstimateMasterForCore).
+    fixedRate: null,
+    rates: { ...defaultRates }
   },
   {
     itemCode: "3",
@@ -266,23 +275,28 @@ var defaultEstimateData = [
     fixedRate: 500,
     rates: { "5": 500, "10": 500, "16": 500, "25": 500, "50": 500, "63": 500, "100": 500, "200": 500, "315": 500, "500": 500 }
   },
-  { itemCode: "1a", itemName: "Dismentaling", unit: "QTY", rates: { ...defaultRates, "10": 1603, "16": 1603, "25": 2061, "63": 2061 } },
-  { itemCode: "1b", itemName: "Repl. of Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 40, "16": 40, "25": 46, "63": 46 } },
-  { itemCode: "1c", itemName: "Repl. HV/LV Gaskets", unit: "QTY", rates: { ...defaultRates, "10": 28.75, "16": 28.75, "25": 34, "63": 34 } },
-  { itemCode: "1d", itemName: "Repl. of Insulation", unit: "Y", rates: { ...defaultRates, "10": 229, "16": 229, "25": 286, "63": 286 } },
-  { itemCode: "1e", itemName: "Repl. of M.S bolt-nuts", unit: "Y", rates: { ...defaultRates, "10": 46, "16": 46, "25": 57, "63": 57 } },
-  { itemCode: "1f", itemName: "Drying of active parts", unit: "Y", rates: { ...defaultRates, "10": 183, "16": 183, "25": 229, "63": 229 } },
-  { itemCode: "2a", itemName: "Cleaning Dirty Dank", unit: "Y", rates: { ...defaultRates, "10": 28.75, "16": 28.75, "25": 34, "63": 34 } },
-  { itemCode: "2b", itemName: "Painting Out-Side", unit: "Y", rates: { ...defaultRates, "10": 115, "16": 115, "25": 149, "63": 149 } },
+  { itemCode: "1a", itemName: "Dismentaling", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "1b", itemName: "Repl. of Gaskets", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "1c", itemName: "Repl. HV/LV Gaskets", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "1d", itemName: "Repl. of Insulation", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "1e", itemName: "Repl. of M.S bolt-nuts", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "1f", itemName: "Drying of active parts", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "2a", itemName: "Cleaning Dirty Dank", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "2b", itemName: "Painting Out-Side", unit: "Y", rates: { ...defaultRates } },
   { itemCode: "3", itemName: "Painting In-Side", unit: "N", rates: { ...defaultRates } },
-  { itemCode: "5", itemName: "Oil Level Glass", unit: "Y", rates: { ...defaultRates, "10": 46, "16": 46, "25": 46, "63": 46 } },
+  { itemCode: "5", itemName: "Oil Level Glass", unit: "Y", rates: { ...defaultRates } },
   { itemCode: "6", itemName: "Breather", unit: "N", rates: { ...defaultRates } },
-  { itemCode: "8", itemName: "HV Bushing", unit: "QTY", rates: { ...defaultRates, "10": 176, "16": 176, "25": 176, "63": 176 } },
-  { itemCode: "9A", itemName: "HV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 131, "16": 131, "25": 131, "63": 131 } },
-  { itemCode: "9B", itemName: "HV Connector", unit: "QTY", rates: { ...defaultRates, "10": 80, "16": 80, "25": 80, "63": 80 } },
-  { itemCode: "10", itemName: "LV Bushing", unit: "QTY", rates: { ...defaultRates, "10": 59.8, "16": 59.8, "25": 59.8, "63": 59.8 } },
-  { itemCode: "11A", itemName: "LV Metal Parts", unit: "QTY", rates: { ...defaultRates, "10": 156, "16": 156, "25": 156, "63": 156 } },
-  { itemCode: "11B", itemName: "LV Connector", unit: "QTY", rates: { ...defaultRates, "10": 149, "16": 149, "25": 149, "63": 149 } },
+  // ⚠ NO RATE ON 8, 12C OR 13C, BY DECISION (AUDIT O66). Each is ONE master row priced against TWO tender rows chosen by
+  // the job - 8 by kV class (8-A / 8-B), 12C and 13C by winding material (-a copper / -b aluminium). One cell can hold one
+  // tender row's figure: a correct copy for one variant, which the copy test then honoured as an override of the other -
+  // 176 on a 22 kV bushing, 34 and 51.75 on copper winding labour. A null falls through to the job's own variant row of its
+  // own tender. variantRowDefaults.test.ts keeps every such row empty.
+  { itemCode: "8", itemName: "HV Bushing", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "9A", itemName: "HV Metal Parts", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "9B", itemName: "HV Connector", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "10", itemName: "LV Bushing", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "11A", itemName: "LV Metal Parts", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "11B", itemName: "LV Connector", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "12A(a)", itemName: "HV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
   // THE HV S.E. ROWS (AUDIT G64) - each directly under its without-S.E. sibling, so the two read as a pair.
   //
@@ -296,19 +310,21 @@ var defaultEstimateData = [
   // (G61), so nothing would read them and a rate typed there would be silently ignored. An absent row is better
   // than one that discards an override. Do not complete the set until LV S.E. can be recorded.
   { itemCode: "12A(a1)", itemName: "HV Wdg. (Not Miss) -CU S.E.", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 163, "16": 163, "25": 163, "63": 163 } },
-  { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates, "10": 213, "16": 213, "25": 213, "63": 213 } },
-  { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates, "10": 34, "16": 34, "25": 34, "63": 34 } },
+  { itemCode: "12A(b)", itemName: "HV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "12A(b1)", itemName: "HV Wdg. (Not Miss) -AL S.E.", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "12C", itemName: "HV Coil - Labour", unit: "QTY", rates: { ...defaultRates } },
+  // no rate - see row 8 (O66)
   { itemCode: "13A(a)", itemName: "LV Wdg. (Not Miss) -CU", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates, "10": 149, "16": 149, "25": 149, "63": 149 } },
-  { itemCode: "13C", itemName: "LV Coil - Labour", unit: "QTY", rates: { ...defaultRates, "10": 51.75, "16": 51.75, "25": 51.75, "63": 51.75 } },
+  { itemCode: "13b(b)", itemName: "LV Wdg. (Not Miss) -AL", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "13C", itemName: "LV Coil - Labour", unit: "QTY", rates: { ...defaultRates } },
+  // no rate - see row 8 (O66)
   { itemCode: "14(ii)CU", itemName: "LV Wdg. Re-Insu.-CU", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "14(ii)AL", itemName: "LV Wdg. Re-Insu.-AL", unit: "QTY", rates: { ...defaultRates, "10": 115, "16": 115, "25": 115, "63": 115 } },
-  { itemCode: "15", itemName: "Washer Ring", unit: "QTY", rates: { ...defaultRates, "10": 54, "16": 54, "25": 54, "63": 54 } },
+  { itemCode: "14(ii)AL", itemName: "LV Wdg. Re-Insu.-AL", unit: "QTY", rates: { ...defaultRates } },
+  { itemCode: "15", itemName: "Washer Ring", unit: "QTY", rates: { ...defaultRates } },
   { itemCode: "16", itemName: "Name Plate", unit: "N", rates: { ...defaultRates } },
   { itemCode: "18", itemName: "Repl. Of Tank", unit: "QTY", rates: { ...defaultRates } },
-  { itemCode: "20", itemName: "Testing Of Trans.", unit: "Y", rates: { ...defaultRates, "10": 115, "16": 115, "25": 172, "63": 172 } },
-  { itemCode: "21", itemName: "Repl. Of Rediator", unit: "Y", rates: { ...defaultRates, "10": 1052, "16": 1052, "25": 1052, "63": 1248 } },
+  { itemCode: "20", itemName: "Testing Of Trans.", unit: "Y", rates: { ...defaultRates } },
+  { itemCode: "21", itemName: "Repl. Of Rediator", unit: "Y", rates: { ...defaultRates } },
   { itemCode: "17", itemName: "Con. of Sealed to Bolt", unit: "N", rates: { ...defaultRates } }
 ];
 
