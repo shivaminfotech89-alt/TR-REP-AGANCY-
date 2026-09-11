@@ -22,6 +22,7 @@ interface ScheduleLookup {
 }
 import { scheduleSrForMasterCode, isClause4Excluded } from '../lib/scheduleItemMap';
 import { resolveScrapCharge } from '../lib/estimateCalc';
+import type { OrderReference } from '../lib/orderReference';
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
 const SECTION_LABELS: Record<EstimateSection, string> = {
@@ -1426,6 +1427,11 @@ export interface SingleJobEstimateReportProps {
   estimateDate?: string;
   letterDateText?: string;
   className?: string;
+  /**
+   * THE ORDER THIS ESTIMATE NAMES - from the job's own AT, resolved by the caller (AUDIT G63).
+   * Required: there is no default to fall back to, which is the point.
+   */
+  orderRef: OrderReference;
 }
 
 export default function SingleJobEstimateReport({
@@ -1436,13 +1442,23 @@ export default function SingleJobEstimateReport({
   internalData,
   estimateDate,
   letterDateText,
-  className = ''
+  className = '',
+  orderRef,
 }: SingleJobEstimateReportProps) {
   const estimate = buildSingleJobEstimateData(job, agency, atMaster, externalData, internalData);
   const dateFormatted = letterDateText || formatDDMMYYYY(estimateDate || job.estimateSentDate || job.updatedAt || new Date());
   const mrDateFormatted = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
-  const orderNo = agency?.atDetails?.orderNo || agency?.contractAgreementNo || atMaster?.orderNo || 'UGVCL/EE-T-1/TRANS-REP/2020-21/01/1102';
-  const orderDate = agency?.atDetails?.orderDate || '16/04/2021';
+  /**
+   * THE ORDER LINE, FROM THE JOB'S OWN AT OR BLANK (AUDIT O61, G63).
+   *
+   * ⚠ THERE IS NO FALLBACK HERE AND THERE MUST NOT BE ONE. This read two agency fields nothing wrote,
+   * then `atMaster.orderNo`, then printed a hardcoded 2020-21 order number and date (quoted in AUDIT O61,
+   * and kept out of this file by a test) - so every estimate named that order whatever its tender, and one went to a division
+   * under a 2026 allotment. Unset now prints nothing after "Order No.:", and the screen that issues the
+   * sheet refuses print, Word download and send (orderRefusalFor).
+   */
+  const orderLine = [orderRef.orderNo, orderRef.orderDate ? `Dt.: ${formatDDMMYYYY(orderRef.orderDate)}` : '']
+    .filter(Boolean).join(', ');
 
   const windingTypeStr = estimate.internalData?.windingType === 'CU' ? 'Copper' : 'Aluminium SE';
   const voltageRating = job.starRating || job.ratingLevel || '3 Star';
@@ -1664,6 +1680,13 @@ export default function SingleJobEstimateReport({
         )}
         {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
             the operator about a SETTING, not part of the estimate the division receives. */}
+        {/* ⚠ ON SCREEN ONLY (AUDIT G63). Why "Order No.:" is blank, before the operator meets the refusal. */}
+        {orderRef.refusal && (
+          <div className="print:hidden mb-3 rounded-lg border-2 border-rose-300 bg-rose-50 px-3.5 py-2.5">
+            <p className="text-sm font-bold text-rose-900">This estimate cannot be printed, downloaded or sent: it has no order to name</p>
+            <p className="text-xs text-rose-900 mt-1">{orderRef.refusal}</p>
+          </div>
+        )}
         {(estimate.notices?.length ?? 0) > 0 && (
           // ⚠ ON SCREEN ONLY (AUDIT G61). What this estimate ASSUMED because the inspection does not
           // record it. The printed estimate is unchanged by it.
@@ -1747,7 +1770,7 @@ export default function SingleJobEstimateReport({
                               its box rather than wrap. `min-w-0` so the flex child is allowed
                               to shrink and wrap at all. Costs one line, ~4.5mm, against the
                               ~11.7mm this sheet has spare. */}
-                          <span className="font-mono break-all min-w-0">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
+                          <span className="font-mono break-all min-w-0">{orderLine}</span>
                         </div>
                       </div>
 
@@ -1894,6 +1917,13 @@ export default function SingleJobEstimateReport({
     <>
         {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
           the operator about a SETTING, not part of the estimate the division receives. */}
+      {/* ⚠ ON SCREEN ONLY (AUDIT G63). Why "Order No.:" is blank, before the operator meets the refusal. */}
+      {orderRef.refusal && (
+        <div className="print:hidden mb-3 rounded-lg border-2 border-rose-300 bg-rose-50 px-3.5 py-2.5">
+          <p className="text-sm font-bold text-rose-900">This estimate cannot be printed, downloaded or sent: it has no order to name</p>
+          <p className="text-xs text-rose-900 mt-1">{orderRef.refusal}</p>
+        </div>
+      )}
       {(estimate.notices?.length ?? 0) > 0 && (
         // ⚠ ON SCREEN ONLY (AUDIT G61). What this estimate ASSUMED because the inspection does not
         // record it. The printed estimate is unchanged by it.
@@ -1993,7 +2023,7 @@ export default function SingleJobEstimateReport({
                               its box rather than wrap. `min-w-0` so the flex child is allowed
                               to shrink and wrap at all. Costs one line, ~4.5mm, against the
                               ~11.7mm this sheet has spare. */}
-                          <span className="font-mono break-all min-w-0">{orderNo}, Dt.: {formatDDMMYYYY(orderDate)}</span>
+                          <span className="font-mono break-all min-w-0">{orderLine}</span>
                       </div>
                     </div>
 

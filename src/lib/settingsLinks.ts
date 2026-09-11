@@ -56,3 +56,14 @@ export function estimateMasterLink(
   if (open) q.set('open', open);
   return `/agency-settings?${q.toString()}`;
 }
+
+/**
+ * WHERE A REFUSAL ABOUT A TENDER'S OWN DETAILS SENDS THE OPERATOR: the AT tab, with that AT open
+ * (AtSettings reads `atId` and opens the named AT). The AT, for the same reason as above - the job's
+ * tender is not necessarily the active one.
+ */
+export function atSettingsLink(at?: { id?: string | null } | null): string {
+  const q = new URLSearchParams({ section: 'at' });
+  if (at?.id) q.set('atId', at.id);
+  return `/agency-settings?${q.toString()}`;
+}

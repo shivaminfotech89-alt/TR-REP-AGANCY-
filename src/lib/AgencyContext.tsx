@@ -253,6 +253,22 @@ export interface AtMaster {
   atPercentage?: number;
 
   /**
+   * THE A/T LETTER'S REFERENCE AND DATE - what the estimate prints as "Order No.: ..., Dt.: ..."
+   * (AUDIT O61, G63).
+   *
+   * ⚠ ENTERED PER TENDER, FROM THE LETTER. Not `atNumber`, which on most ATs is a label ("AT 26-27"),
+   * and not `startDate`, which is the typed tender period. Never carried from the previous AT and
+   * never taken from a rate template: two agencies on one template hold two different A/Ts.
+   *
+   * ⚠ ABSENT IS A REFUSAL, NOT A DEFAULT. The estimate used to print a hardcoded 2020-21 order
+   * when nothing was set - on every estimate, under every tender. Unset now prints blank and
+   * refuses print, Word download and send (lib/orderReference).
+   */
+  orderNo?: string;
+  /** The letter's date as the date input gives it, YYYY-MM-DD. A date, not a moment - no time zone. */
+  orderDate?: string;
+
+  /**
    * THE GUARANTEE PERIOD, IN MONTHS, PER CORE TYPE (AUDIT G42).
    *
    * ⚠ ON THE AT BECAUSE IT IS A TENDER TERM. A/T 1819 clause 38.2 states it; another A/T may

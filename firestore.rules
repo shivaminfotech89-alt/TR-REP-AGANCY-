@@ -304,6 +304,10 @@ service cloud.firestore {
              (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
              (!('workOrderNo' in data) || (data.workOrderNo is string && data.workOrderNo.size() <= 150)) &&
              (!('dateOfAgreement' in data) || (data.dateOfAgreement is string && data.dateOfAgreement.size() <= 100)) &&
+             // THE A/T LETTER'S REFERENCE AND DATE, as the estimate prints them (AUDIT G63). Blank is
+             // allowed - an AT is created before its letter is to hand - and the estimate refuses instead.
+             (!('orderNo' in data) || (data.orderNo is string && data.orderNo.size() <= 150)) &&
+             (!('orderDate' in data) || (data.orderDate is string && data.orderDate.size() <= 20)) &&
              (!('agencyId' in data) || (data.agencyId is string && data.agencyId.size() <= 128)) &&
              (!('atPercentage' in data) || (data.atPercentage is number)) &&
              (!('atPercentageCRGO' in data) || (data.atPercentageCRGO is number)) &&

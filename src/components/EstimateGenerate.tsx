@@ -22,7 +22,8 @@ import { getJobFullEstimate as getJobFullEstimatePure, checkJobCircleLimit as ch
 import { GP_TEXT_CLASS, missingForEstimate, StageCell } from '../lib/jobDisplay';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
-import { estimateMasterLink } from '../lib/settingsLinks';
+import { estimateMasterLink, atSettingsLink } from '../lib/settingsLinks';
+import { orderReferenceFor, orderRefusalFor } from '../lib/orderReference';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { ExternalData } from './ExternalInspection';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
@@ -346,6 +347,49 @@ export default function EstimateGenerate() {
   };
 
   /**
+   * NO ESTIMATE LEAVES NAMING NO ORDER - OR SOMEONE ELSE'S (AUDIT O61, G63).
+   *
+   * Each sheet prints its job's own A/T reference and date, read from the job's OWN AT only: pricing's
+   * `?? activeAtMaster` fallback does not apply to the order, because the active tender's letter is a
+   * different order. Where the AT has none, or the job has no AT, the sheet prints the line blank and
+   * every exit refuses - Print, Word download and Send.
+   *
+   * ⚠ A REFUSAL, NOT A COST. Until each agency types its A/T number, every estimate refuses. A sheet
+   * that will not print is fixed in a minute; one naming the wrong tender sits in a division's file.
+   *
+   * The forwarding letter and the multi-job sheet print no order number, so printing those alone is not
+   * refused. Send is refused for the whole MR, whatever view is on screen: it issues the estimates.
+   */
+  const orderRefFor = (job: any) => orderReferenceFor(atResolutionForJob(job, atMasters), job.jobNo || job.id);
+
+  /** The jobs whose single-job sheets are in the printable container for the current view. */
+  const jobsOnPaper = (): any[] => {
+    if (estimateViewMode === 'batch_all') return selectedJobsData;
+    if (estimateViewMode === 'single_job') {
+      const target = selectedJobsData.find(j => j.id === (activeSingleJobId || selectedJobsData[0]?.id)) || selectedJobsData[0];
+      return target ? [target] : [];
+    }
+    return [];
+  };
+
+  const blockIfOrderMissing = (action: string, jobs: any[]) => {
+    const refusal = orderRefusalFor(jobs.map(job => ({ jobLabel: job.jobNo || job.id, ref: orderRefFor(job) })));
+    if (!refusal) return false;
+    setSetupGap({
+      title: 'No order number to print on this estimate',
+      problem: `The estimate cannot be ${action}. It prints the A/T order it is issued under, and that order has not been entered.`,
+      position: refusal.lines[0],
+      detail: [
+        ...refusal.lines.slice(1),
+        'Nothing is filled in for you. The number and date come from the A/T letter; another tender\'s would put the wrong order on a document going to the division.',
+      ],
+      actionLabel: refusal.at ? 'Open this AT' : 'Open AT settings',
+      actionTo: atSettingsLink(refusal.at),
+    });
+    return true;
+  };
+
+  /**
    * Blocks when the estimate master section a job prices from does not contain that
    * section's schedule - AARATI's Wound Core holding the CRGO card, and the like.
    *
@@ -431,6 +475,7 @@ export default function EstimateGenerate() {
   const handlePrint = () => {
     if (blockIfDiscomIncomplete('printed')) return;
     if (blockIfMasterMisfiled('printed')) return;
+    if (blockIfOrderMissing('printed', jobsOnPaper())) return;
     if (selectedMrNo) {
       triggerUniversalPrint('printable-estimate-container', `Estimate Report & Forwarding Letter - MR ${selectedMrNo}`, `Estimate_MR_${selectedMrNo}.pdf`);
     } else {
@@ -932,6 +977,17 @@ export default function EstimateGenerate() {
      * Skipped entirely for a template-sourced schedule: the administrator chose it when
      * publishing and the agency was shown it before adopting.
      */
+    /**
+     * ⚠ NO ORDER, NO SEND (AUDIT G63). Every estimate in the MR, whatever view is on screen - the send
+     * issues them all. Refused before the schedule confirmation, so nothing is recorded first.
+     */
+    const orderRefusal = orderRefusalFor((mrGroups[sendTargetMr] || []).map((job: any) => ({ jobLabel: job.jobNo || job.id, ref: orderRefFor(job) })));
+    if (orderRefusal) {
+      alert('Cannot send: each estimate prints the A/T order it is issued under, and it has not been entered.\n\n'
+        + orderRefusal.lines.join('\n\n'));
+      return;
+    }
+
     const sendAt = atForJob((mrGroups[sendTargetMr] || [])[0], atMasters) ?? activeAtMaster;
     if (scheduleNeedsConfirmation(sendAt)) {
       setScheduleConfirmAt(sendAt);
@@ -1751,6 +1807,10 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   </button>
                   <button 
                     onClick={() => {
+                      // ⚠ THE WORD FILE IS THE PRINTED PAGE, so it is refused on the same order check
+                      // (AUDIT G63). It refused nothing before this, and it still skips Print's DISCOM
+                      // and estimate-master checks - recorded in G63, not changed here.
+                      if (blockIfOrderMissing('downloaded', jobsOnPaper())) return;
                       const container = document.getElementById('printable-estimate-container');
                       if (container) downloadHtmlAsWord(container, `Estimate_Report_${selectedMrNo}.doc`, `Estimate Report & Forwarding Letter - ${selectedMrNo}`);
                     }}
@@ -2077,6 +2137,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     job={job}
                     agency={activeAgency}
                     atMaster={atForJob(job, atMasters) ?? activeAtMaster}
+                    orderRef={orderRefFor(job)}
                     externalData={externalInspMap[job.id]}
                     internalData={internalInspMap[job.id]}
                     letterDateText={letterDateText || dateString}
@@ -2107,6 +2168,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     job={targetJob}
                     agency={activeAgency}
                     atMaster={atForJob(targetJob, atMasters) ?? activeAtMaster}
+                    orderRef={orderRefFor(targetJob)}
                     externalData={externalInspMap[targetJob.id]}
                     internalData={internalInspMap[targetJob.id]}
                     letterDateText={letterDateText || dateString}

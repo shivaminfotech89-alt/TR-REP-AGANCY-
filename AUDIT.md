@@ -6928,9 +6928,39 @@ for pricing, which is what they should be.**
 
 ---
 
+### O62. The same defect in three more places - a document field that fills itself in
+
+Open, 2026-09-11. **Recorded, not built, by decision.**
+
+O61's defect is a document printing a value that is not the job's own when nobody entered one. The
+same shape sits in three more places. All three are editable prefills, and all print as they stand if
+nobody touches them.
+
+1. **The bill's Order No.** (`BillingSystem.tsx:493`, `:519`). It prefills from the job's own AT's
+   `atNumber`, else the job's stored `atNumber`, else **the active AT's** `atNumber`.
+   - The last rung puts another tender's number on a tax invoice whenever the job's own AT does not
+     resolve.
+   - All three read `atNumber`, which on most ATs is a label rather than the A/T reference G63 now
+     records.
+2. **The bill's approval date** (`BillingSystem.tsx:520`) falls back to a hardcoded **`02.03.2026`**.
+3. **The forwarding letter's and the send's references** (`EstimateGenerate.tsx:183`, `:790`) prefill
+   **`.../EE-T-1/TRANS-REP/<MR>`**: a fixed office prefix around the MR number, in the shape of a UGVCL
+   reference.
+
+**A fix would follow G63's rule:** the job's own AT, blank when unset, a refusal at the exit.
+
+---
+
 ### O61. Every estimate prints the same 2020-21 tender reference, whatever its tender
 
-Open, found 2026-09-11 while printing G62. Not fixed.
+> **FIXED in G63** (2026-09-11).
+> - The A/T order number and date are entered on the AT.
+> - They are read from the job's own AT only and printed blank when unset.
+> - Print, Word download and Send refuse until both are entered.
+>
+> The three nearby instances are O62, recorded and not built.
+
+Found 2026-09-11 while printing G62.
 
 The estimate's header prints "Order No.: ..., Dt.: ...". `SingleJobEstimateReport` takes it from
 `agency.atDetails.orderNo || agency.contractAgreementNo || atMaster.orderNo`. When none of those is set,
@@ -7162,14 +7192,19 @@ Which others can overflow, on which letterheads, is not measured.
 
 Each is its own change.
 
-**The estimate is cut off too, with no letterhead at all** - found printing G62. SU-5's itemised
-estimate has 28 lines on one page and no letterhead, and it loses what sits below its totals:
-- the Final Amount row's box is clipped;
-- the signature block - "For, <DISCOM>" and "For, <agency>" - does not print.
+**⚠ WITHDRAWN, 2026-09-11 - "the estimate is cut off too, with no letterhead" was the print harness, not
+the app.** Printing G62, SU-5's one-page estimate appeared to lose its signature block and part of its
+totals box.
+- **Printed again for G63, on a correctly styled build,** the same sheet prints both, with nothing cut
+  off.
+- **The G62 build had lost CSS the job box needs.** Its pictures show all fourteen fields stacked in one
+  column, with no label widths, instead of two columns. The box grew and pushed the page past its end.
+- **That build's own check had passed.** It confirmed five other class names were present in the CSS,
+  and none of them were the job box's.
+- **Why the build lost them is not established.**
 
-It is identical on 8e2e5e7 and after G62: 14 elements cut off, measured against the clipping container
-and seen in the print. `layoutEstimatePages` kept all 28 lines on one page; why its budget allowed that
-is not investigated. SU-5 has no issued document.
+The harness now asserts the page as rendered - the job box in two grid columns, 96px labels - rather
+than the CSS file's contents (G63).
 
 **Same letterhead, a different defect.** MEGHA's letterhead image carries its own "For MSD Corporation
 / Authorized Signatory" and "Page 1 of 1" inside the picture, above the 25mm footer the agency set.
@@ -13895,7 +13930,8 @@ on a document UGVCL reads, and is a decision.
 
 - Copper labour coil lines price at the aluminium rate (O60).
 - Every estimate prints a hardcoded 2020-21 order number, whatever its tender (O61).
-- SU-5's one-page estimate is cut off below its Final Amount (O58).
+- ~~SU-5's one-page estimate is cut off below its Final Amount (O58).~~ **Withdrawn:** it was the
+  harness. This entry's print ran on a build that had lost the job box's CSS; see G63.
 
 ### VERIFIED, AND NOT
 
@@ -13929,3 +13965,87 @@ Passed:
   produced by pricing the same inputs on both.
 
 Not verified: the app run in a browser, and a physical printer.
+
+
+## G63. An estimate names its own tender's order, or refuses to leave
+
+O61, built.
+
+Every estimate printed "Order No.: ..., Dt.: ..." from two agency fields and one AT field that nothing
+ever wrote. Behind them sat a hardcoded 2020-21 order number and date, so the same order printed
+whatever the tender. **STD-1's estimate went to a division that way on 2026-09-10, under SAMOR's
+UGVCL-2026 allotment.**
+
+### WHAT CHANGED
+
+- **Two fields on the AT, `orderNo` and `orderDate`:** the A/T letter's reference and its date.
+  - Entered on the AT form, optional at creation, and on edit.
+  - Never prefilled, whether from the previous AT or from a template.
+  - An AT without both carries a "No order no." marker, computed by the same rule the estimate refuses
+    on.
+- **`lib/orderReference` holds the rule.**
+  - The order comes from the job's own AT only (`atResolutionForJob`), never the active tender's.
+    Pricing's fallback does not apply to it.
+  - Both parts must be present after trimming. Otherwise it returns a refusal naming the AT, or naming
+    the job when the job has no AT or its AT is gone.
+- **The estimate prints the line blank when unset** - nothing after "Order No.:" - with a red notice on
+  screen that never prints. The hardcoded number and date, and the agency reads, are gone.
+- **Print, Word download and Send refuse** until every estimate going out has both parts.
+  - Print and Word check the sheets that are in the printable container for the view on screen. The
+    forwarding letter and the multi-job sheet print no order number, so they are not refused.
+  - Send checks every job in the MR, before the schedule confirmation.
+  - Word download refused nothing before this.
+- **`firestore.rules`** gains type clauses for both fields. Saves work without deploying them;
+  deploying makes the types validated.
+
+### WHAT IT COSTS, BY DECISION
+
+**Every estimate refuses to print, download or send until its agency enters the A/T number and
+date.** Today 0 of 14 ATs have them: that is 74 jobs under 14 ATs, plus 3 jobs with no AT until they
+are assigned one. A document naming the wrong tender is worse than one that will not print.
+
+STD-1's reprint is the operator's decision, once SAMOR can enter 25903's number.
+
+### NOT DONE
+
+- **O62:** the same defect in the bill's order prefill, its hardcoded approval date, and the letter's
+  reference prefill. Recorded, not built, by decision.
+- **Word download still skips Print's other two checks** - DISCOM details, and a misfiled estimate
+  master. Only the order check was added.
+- The rules clauses are not deployed.
+
+### VERIFIED, AND NOT
+
+Passed:
+- `tsc --noEmit`, `vite build`, the hooks guard, and `npm test`: 34 tests in 2 files, 9 of them new.
+  - The new tests cover set, half-set, whitespace, no AT, a missing AT, and one refusal per AT across a
+    batch.
+  - One scans the estimate's source for the hardcoded reference, the date and the agency reads. Run
+    against the committed file as a control, the scan finds the literal.
+  - **It failed on its first run, on my own comment**, which quoted the literal while explaining its
+    removal. The comment was reworded; the literal now lives only in AUDIT.
+- **Print-subtree hashes:** 11 of 13 identical. Both estimate subtrees changed, by the order line.
+- **Printed through `triggerUniversalPrint` in headless Chrome**, HEAD against the working tree, on
+  MSBT-8 (full-A4 letterhead, two pages) and SU-5 (no letterhead, one page):
+  - **before:** the hardcoded 2020-21 order and its date;
+  - **after, AT with no order:** nothing after "Order No.:", with the notice on screen and not on paper;
+  - **after, with a synthetic order on the AT:** exactly that reference and date.
+  - Same pages, lines per page, Sr. Nos., amounts and row heights, and nothing cut off. The job box is
+    12.3px shorter when the line is blank.
+
+**⚠ G62'S ESTIMATE PRINT RAN ON A MIS-STYLED BUILD, AND ITS CHECK PASSED IT.**
+- **What was wrong:** that harness build had lost the job box's CSS, and all fourteen of the box's
+  fields stacked in one column.
+- **Why the check missed it:** it only confirmed five other class names were in the CSS file.
+- **The consequence:** O58's "SU-5 cut off", now withdrawn. G62's before/after comparisons were like
+  for like and stand; its absolute page findings do not.
+- **The harness now asserts the page as rendered** - the job box in two grid columns, and two labels of
+  different text at one fixed width. A positive control strips the stylesheets and requires that check
+  to fail.
+- **That assertion was itself wrong twice on first run.** It expected 96px, but the print stylesheet's
+  10pt root makes the label 80px. And it first measured the "Order No.:" label, which shrinks beside a
+  long value. Both failed loudly, and neither failure was the sheet.
+- **Why G62's build lost the classes is not established.**
+
+Not verified: the app in a browser. The AT form, the card marker, the refusal dialog and the send alert
+are verified by reading, by the rule's tests and by the print - not by use.

@@ -10,6 +10,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
 import { computeOilBalance, openingMapFrom, describeOil } from '../lib/oilBalance';
 import { otherActiveAts, isUnassigned } from '../lib/AgencyContext';
+import { orderReferenceFor } from '../lib/orderReference';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 
@@ -289,6 +290,8 @@ export function AtSettings() {
     startDate: string;
     endDate: string;
     atPercentage: string;
+    orderNo: string;
+    orderDate: string;
   } | null>(null);
 
   const [newAt, setNewAt] = useState({
@@ -299,6 +302,10 @@ export function AtSettings() {
     // EMPTY, NOT '4'. See the parse guard in handleAdd for why a pre-filled
     // percentage is a figure nobody chose.
     atPercentage: '',
+    // EMPTY, AND NEVER PREFILLED (AUDIT G63) - not from the previous AT and not from a template. The
+    // A/T letter is the only source; an estimate under this AT refuses to print until it is typed.
+    orderNo: '',
+    orderDate: '',
   });
 
   const agencyAts = atMasters.filter(at => at.agencyId === activeAgency?.id);
@@ -641,6 +648,10 @@ export function AtSettings() {
         scheduleId: effectiveSchedule.id,
         scheduleSource: effectiveSchedule.source,
         ...(effectiveSchedule.fromAtId ? { scheduleInheritedFromAtId: effectiveSchedule.fromAtId } : {}),
+        // ONLY WHEN TYPED (AUDIT G63). Optional at creation - an AT is often set up before its letter
+        // is to hand - and every estimate under it refuses until both are entered.
+        ...(newAt.orderNo.trim() ? { orderNo: newAt.orderNo.trim() } : {}),
+        ...(newAt.orderDate ? { orderDate: newAt.orderDate } : {}),
       });
       // Creating an AT is a clear signal of intent to work with it, so make it active.
       // The Divisions & Allotments panel renders only for the ACTIVE AT, so without this
@@ -693,6 +704,8 @@ export function AtSettings() {
         startDate: new Date().toISOString().split('T')[0],
         endDate: new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0],
         atPercentage: '',
+        orderNo: '',
+        orderDate: '',
       });
     } catch (err: any) {
       // Surface the real reason - the context throws a named error for an orphan AT.
@@ -711,6 +724,8 @@ export function AtSettings() {
       startDate: at.startDate ? new Date(at.startDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       endDate: at.endDate ? new Date(at.endDate).toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
       atPercentage: String(at.atPercentage ?? at.atPercentage ?? 4),
+      orderNo: at.orderNo || '',
+      orderDate: at.orderDate || '',
     });
   };
 
@@ -725,6 +740,9 @@ export function AtSettings() {
         startDate: editFormData.startDate ? new Date(editFormData.startDate).getTime() : Date.now(),
         endDate: editFormData.endDate ? new Date(editFormData.endDate).getTime() : Date.now(),
         atPercentage: Number(editFormData.atPercentage) || 0,
+        // Written as typed, blank included - clearing the field must clear the order (AUDIT G63).
+        orderNo: editFormData.orderNo.trim(),
+        orderDate: editFormData.orderDate,
       });
       setEditingAtId(null);
       setEditFormData(null);
@@ -982,6 +1000,15 @@ export function AtSettings() {
                                   <AlertTriangle className="w-3 h-3 mr-1" /> No rates
                                 </span>
                               )}
+                              {/* The same rule the estimate refuses on, not a second copy of it (AUDIT G63). */}
+                              {orderReferenceFor({ at, source: 'own' }, at.atNumber).refusal && (
+                                <span
+                                  title="This tender has no A/T order number and date. Every estimate under it refuses to print, download or send until they are entered - open the AT and use Edit."
+                                  className="text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-full flex items-center"
+                                >
+                                  <AlertTriangle className="w-3 h-3 mr-1" /> No order no.
+                                </span>
+                              )}
                             </div>
                             <div className="text-xs text-slate-500 flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 ml-6">
                               <span className="flex items-center"><Calendar className="w-3.5 h-3.5 mr-1 text-slate-400" /> {formatDDMMYYYY(at.startDate)} to {formatDDMMYYYY(at.endDate)}</span>
@@ -1145,6 +1172,19 @@ export function AtSettings() {
                               <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">End Date</label>
                               <input required type="date" value={editFormData?.endDate || ''} onChange={e => setEditFormData(prev => prev ? {...prev, endDate: e.target.value} : null)} className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-indigo-500" />
                             </div>
+                            {/* THE A/T LETTER (AUDIT G63) - printed on every estimate under this AT as
+                                "Order No.: ..., Dt.: ...". Nothing prefills it; estimates refuse until both are in. */}
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">A/T Order No. (as on the letter)</label>
+                              <input type="text" value={editFormData?.orderNo || ''} onChange={e => setEditFormData(prev => prev ? {...prev, orderNo: e.target.value} : null)} className="w-full px-2.5 py-1.5 text-xs border rounded-lg font-mono focus:ring-1 focus:ring-indigo-500" placeholder="Exactly as the A/T letter gives it" />
+                            </div>
+                            <div>
+                              <label className="block text-[10px] uppercase font-bold text-slate-500 mb-0.5">A/T Order Date</label>
+                              <input type="date" value={editFormData?.orderDate || ''} onChange={e => setEditFormData(prev => prev ? {...prev, orderDate: e.target.value} : null)} className="w-full px-2.5 py-1.5 text-xs border rounded-lg focus:ring-1 focus:ring-indigo-500" />
+                            </div>
+                            <p className="md:col-span-2 text-[10px] text-slate-500 -mt-1">
+                              Printed on every estimate under this AT. Estimates refuse to print, download or send until both are entered.
+                            </p>
                           </div>
 
                           <div className="border-t border-slate-100 pt-2 mt-2">
@@ -1392,6 +1432,20 @@ export function AtSettings() {
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">End Date</label>
                   <input required type="date" value={newAt.endDate} onChange={e => setNewAt({...newAt, endDate: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" />
                 </div>
+                {/* THE A/T LETTER (AUDIT G63). Optional here - the letter may not be to hand when the AT is set
+                    up - but every estimate under this AT refuses to print, download or send until both are in.
+                    Never prefilled: not from the previous AT, not from the template (its A/T is not yours). */}
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">A/T Order No. (as on the letter)</label>
+                  <input type="text" value={newAt.orderNo} onChange={e => setNewAt({...newAt, orderNo: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white font-mono" placeholder="Exactly as the A/T letter gives it" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">A/T Order Date</label>
+                  <input type="date" value={newAt.orderDate} onChange={e => setNewAt({...newAt, orderDate: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" />
+                </div>
+                <p className="md:col-span-2 text-[11px] text-slate-500 -mt-1">
+                  Printed on every estimate under this AT. Estimates refuse to print, download or send until both are entered.
+                </p>
               </div>
 
               <div className="border-t border-slate-200 pt-3">
