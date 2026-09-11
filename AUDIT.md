@@ -6872,6 +6872,59 @@ for pricing, which is what they should be.**
 
 ---
 
+### O57. Pricing cannot be imported by a test - estimateCalc pulls in React, Firebase and pdf.js
+
+Open. Found while setting up G60's runner. It is a restructuring, so it is a separate decision, and
+the G57 seed tests do not depend on it.
+
+**Measured, not estimated.** esbuild's metafile for `src/lib/estimateCalc.ts` shows **52 modules, 35
+of them from 19 packages (3.7 MB)**: React, react-router, Firebase (app, auth, Firestore,
+Functions) and pdf.js. Importing it under Node fails immediately with `DOMMatrix is not defined`,
+which is pdf.js. `estimateMasterHealth` pulls in the identical 52 modules, for one constant.
+
+**All of it arrives through one edge.** `estimateCalc` imports `buildSingleJobEstimateData` and
+`classifyCoreType` from the component `SingleJobEstimateReport.tsx`. From there the chain branches:
+- React and react-router, for the component itself;
+- `LetterheadHeader` → `letterheadUtils` → pdf.js;
+- `AgencyContext` → Firebase, for `getAtPercentage` and `getEstimateMasterForCore`. Firebase
+  initialises the app as soon as the file is loaded.
+
+`estimateCalc`'s other imports - `ugvclSchedules`, `estimateData` and `scheduleItemMap` - pull in no
+packages at all.
+
+**Two import cycles ride on that edge:**
+- `estimateCalc` → the component → `estimateCalc`, for `resolveScrapCharge`;
+- `AgencyContext` → `estimateMasterHealth` → `estimateCalc` → the component → `AgencyContext`.
+
+**What it would take:**
+1. **Move the estimate builder out of the component** into a lib module. That is
+   `buildSingleJobEstimateData` - 1,030 lines, with no React and no JSX - plus what only it uses:
+   - `classifyCoreType`, `CoreClass`, `classifyWindingMaterial`, `windingMaterialError`;
+   - `scheduleBCandidates`, `findScheduleBEntry`;
+   - `MASTER_BASELINE_SCHEDULE_ID`, `ScheduleLookup`;
+   - its three result types.
+
+   The print layout, the section labels and every React import stay with the component. Two other
+   components import from it only for `classifyCoreType`.
+2. **Move `getAtPercentage` and `getEstimateMasterForCore` out of `AgencyContext`** into a module with
+   no Firebase import, re-exported from `AgencyContext` so existing importers do not change.
+   - `getAtPercentage` is pure.
+   - `getEstimateMasterForCore` is not quite. **It falls back to a module-level cache,
+     `cachedGlobalDefaultEstimateMaster`, which the provider fills and `localStorage` seeds when the
+     file loads.** The move has to decide whether that state moves with it or callers pass the
+     default in. A test inheriting a cache set by whichever test ran first would be
+     order-dependent.
+3. **Stop `estimateMasterHealth` depending on the estimate builder**, by pointing it at the scrap-code
+   constant's new home or moving the constant.
+
+**Size and risk.** Roughly 1,100 lines move, almost all of them verbatim, into two new modules, plus
+import lines in fewer than ten files. This is the function that prices every estimate and bill, so it
+should be verified the way G57's normaliser move was - a mechanical diff proving the moved text
+unchanged - and with `scripts/admin/pricing-model-regression.js`, which already reprices live jobs
+against a baseline.
+
+---
+
 ### O56. The unsaved-edits flag reports edits that do not exist - and the screen acts on it
 
 > **FIXED in G57**, together with the first two leads below, which shared its cause. The third
@@ -13185,3 +13238,79 @@ self-test built only from the current code can only test the shapes the current 
 - **Two blinded copies, one per old blind spot:** both exit 1 with SELF-TEST FAILED.
 - **Not wired into anything.** Like every harness here, it runs when someone runs it; the project
   has no CI.
+
+
+## G60. A test runner, not a gate - and two ways a pass could have meant nothing
+
+The project had no test runner and no test files. It now has one. Its first suite is the 25 G57
+seed tests, in `src/lib/estimateMasterSeed.test.ts`.
+
+### NODE'S BUILT-IN RUNNER, WITH TSX - NO NEW DEPENDENCIES
+
+`npm test` runs `scripts/run-tests.js`, which runs Node's built-in test runner with `tsx` loading
+TypeScript. `tsx` was already a devDependency that nothing used.
+- **Tests sit beside the module they test**, as `*.test.ts`.
+- **Nothing imports them**, so `vite build` never bundles them.
+- **`tsc --noEmit` type-checks them** with everything else.
+
+**Vitest was the alternative, and was not taken.** Vitest 5 fits the project (Vite 6.4.3, Node 24)
+and would reuse the Vite config. But a dry-run install added 30 packages, removed 25 and changed 123
+- a lockfile reshuffle for a capability nothing needs today. It earns its place when component
+tests are wanted, which would also bring jsdom and Testing Library - not before.
+
+### ⚠ "tests 0" IS A PASS, AS FAR AS NODE IS CONCERNED
+
+There were two ways the suite could report success having tested nothing, and both were found by
+trying them:
+- **The pattern matches nothing.** `node --test "src/**/*.test.ts"` exits 0 and prints "tests 0".
+  Rename a file, move a folder or mistype the pattern, and the suite passes.
+- **A test file contains no tests.** Node reports the file itself as one passing test, named by its
+  path - "tests 1, pass 1". The wrapper's first version counted tests and passed this.
+
+So the wrapper finds the test files itself and fails when there are none. It reads the run's own
+TAP report and fails when no test ran, or when a file appears as its own result. This is the same
+failure as G33 and G59: a check that reports clean because it cannot see its subject.
+
+| Negative control | Result |
+|---|---|
+| One assertion flipped - "the tender's rows come first" told to expect the agency's figure | exit 1, and that test fails |
+| A folder with no test files | exit 1 |
+| A test file containing no tests | exit 1 - the wrapper's first version passed it |
+
+### ⚠ NOT A GATE - A DECISION, NOT AN OMISSION
+
+Nothing runs `npm test` automatically - not `vite build`, not a Vercel or Firebase deploy, not a git
+hook. It runs when someone runs it.
+
+**Why:** a gate over 25 tests covering one module would give false confidence about the other forty
+in `src/lib`. A green gate reads as "the app is tested"; this suite shows only that Estimate Master
+seeding is.
+
+**What would change it:** the suite covering the code that decides money - pricing (`estimateCalc`,
+the estimate builder, rate resolution) and bill totals. Not merely more tests. That waits on O57,
+because pricing cannot be imported by a test today.
+
+**Where a gate would go is also undecided.** Vercel builds the frontend on push, and the Firebase
+predeploy covers only Functions. So a gate most likely means `build` running the tests, or a CI the
+project does not have.
+
+### `scripts/admin` STAYS SEPARATE
+
+29 of its 33 scripts read the production database with a service key, and several write to it:
+migrations, deletes, backfills. **A test run must never be able to reach them**, and the boundary is
+clearer as two things than as one with exceptions.
+
+The four that touch no data stay as they are too, because none is a test in shape:
+- the hooks guard (G59);
+- `verify-seed-equality.js`, already the Functions predeploy gate;
+- `model-agency-rules.js`;
+- `print-subtree-hashes.js`.
+
+What changes is new work only. A pure-logic check becomes a test, not another script that compiles
+real modules through esbuild by hand.
+
+### VERIFIED
+
+- `npm test`: 25 tests in 1 file pass.
+- The three negative controls above.
+- `tsc --noEmit`, `vite build` and the hooks guard pass.
