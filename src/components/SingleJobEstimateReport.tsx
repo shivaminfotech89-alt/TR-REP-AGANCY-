@@ -21,6 +21,7 @@ interface ScheduleLookup {
   baseline: number | undefined;
 }
 import { scheduleSrForMasterCode, isClause4Excluded } from '../lib/scheduleItemMap';
+import { overhaulingRowKind } from '../lib/overhaulingRows';
 import { resolveScrapCharge } from '../lib/estimateCalc';
 import type { OrderReference } from '../lib/orderReference';
 
@@ -845,13 +846,8 @@ export function buildSingleJobEstimateData(
       const code = String(mItem?.itemCode ?? '').trim();
       const name = String(mItem?.itemName ?? '').toLowerCase();
       const unit = String(mItem?.unit ?? '').trim();
-      const kind = code === '7' ? 'overhaul' : code === '5' ? 'radiator' : code === '4' ? 'conservator'
-        : code === '3' ? 'tank' : code === '6' ? 'sealing'
-        : name.includes('overhauling of complete transformer') ? 'overhaul'
-        : name.includes('conservator tank replacement') ? 'conservator'
-        : name.includes('radiator replacement') ? 'radiator'
-        : name.includes('sealing of uneconomical') ? 'sealing'
-        : name.includes('tank replacement') ? 'tank' : 'other';
+      // One answer for the estimate and the Estimate Master grid (lib/overhaulingRows, AUDIT G68).
+      const kind = overhaulingRowKind(code, name);
       if (kind === 'tank' || kind === 'sealing') return;
       // Only the overhauling line itself has a Schedule-A pairing (sr '21', banded by
       // capacity). The rest are agency-master rates with no schedule equivalent.

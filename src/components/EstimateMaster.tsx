@@ -24,6 +24,7 @@ import { SCHEDULE_A, bandForKva, RADIATOR_ABOVE_100, ScheduleSet, scheduleSetFor
 import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 import { sameContent } from '../lib/compareSections';
 import { rateHolderFor, seedSection, planReseed, sectionIsEdited, cloneRows } from '../lib/estimateMasterSeed';
+import { inheritedForCell, INHERITS_NOTHING } from '../lib/gridInheritance';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
@@ -38,142 +39,10 @@ const SECTION_FIELD: Record<SectionKey, string> = {
   OVERHAULING: 'estimateMasterOverhauling',
   CIRCLE_LIMITS: 'estimateMasterCircleLimits' };
 
-/**
- * What the ESTIMATE would charge for this item at this capacity when the master says
- * nothing - i.e. the tender rate the cell inherits.
- *
- * A blank cell is not a gap: resolveRate falls through to Schedule-A, so the job prices
- * correctly from the tender. Showing that figure turns an empty cell from "unknown" into
- * "inherited", which is the difference between an agency wondering whether something is
- * missing and an agency seeing what it will be charged.
- *
- * Returns null for variant items - a row whose rate depends on the job (KV rating, winding
- * material, capacity) has no single inherited value, and printing one would be a confident
- * half-truth. Those render a marker instead.
- */
-function inheritedScheduleRate(set: ScheduleSet, itemCode: string, kva: string): number | null {
-  if (variantAxisForMasterCode(itemCode)) return null;
-  const sr = scheduleSrForMasterCode(itemCode);
-  if (!sr) return null;
-  const entry = set.scheduleA.find(i => i.sr === sr);
-  if (!entry) return null;
-  const v = entry.rates[bandForKva(Number(kva) || 0)];
-  return typeof v === 'number' && v > 0 ? v : null;
-}
-
-/**
- * Both tender rates for a row whose only variable is the winding material.
- *
- * Worth showing BOTH rather than a marker: since copper stopped blocking (AUDIT F52) each
- * of these is a rate the estimate will actually charge, chosen by a field the operator
- * fills in. "Varies by winding material" told the reader the cell had two answers without
- * telling them either one - true, and useless for checking a bill.
- *
- * Rendered stacked, not side by side, and the reason is the grid rather than taste: this
- * column auto-sizes to its widest cell, so one row carrying "163.00 AL / 357.00 CU" would
- * widen all ten capacity columns for all 31 rows. Two short lines cost height on two rows
- * instead of width on the whole table.
- */
-function inheritedWindingPair(set: ScheduleSet, itemCode: string, kva: string): { al: number; cu: number } | null {
-  const v = variantAxisForMasterCode(itemCode);
-  if (!v || v.axis !== 'winding-material') return null;
-  const rateFor = (sr: string | undefined): number | null => {
-    if (!sr) return null;
-    const entry = set.scheduleA.find(i => i.sr === sr);
-    if (!entry) return null;
-    const r = entry.rates[bandForKva(Number(kva) || 0)];
-    return typeof r === 'number' && r > 0 ? r : null;
-  };
-  const al = rateFor(v.options.Aluminium);
-  const cu = rateFor(v.options.Copper);
-  // Both or neither. Showing one half of a pair labelled by material invites the reader to
-  // assume the other is absent from the tender rather than absent from this lookup.
-  return al !== null && cu !== null ? { al, cu } : null;
-}
-
-/**
- * THE RADIATOR'S TENDER RATE AT ONE EXACT CAPACITY (AUDIT G6).
- *
- * ⚠ THIS MIRRORS THE ESTIMATE'S OWN LINE, DELIBERATELY. SingleJobEstimateReport computes
- *
- *     const radScheduleValue = kvaNum > 100 ? set.radiatorAbove100[kvaNum] : scheduleRate('20');
- *
- * and this is the same expression against the same two sources. That equivalence is the whole
- * licence for showing a figure here: the grid must never print a rate the estimate will not
- * use, and the ONLY reason it may print 2630.06 for 500 KVA is that the estimate charges
- * 2630.06 for 500 KVA.
- *
- * ⚠ THE MARKER WAS NOT HIDING AN UNKNOWN - IT WAS HIDING A DISAGREEMENT IN THE LOOKUP.
- * `inheritedScheduleRate` resolves through `bandForKva`, and 200 and 500 both fall in
- * `B_ABOVE_100`, whose single value is 1971.69. So the generic path would have shown 1971.69
- * in the 500 column while the estimate charged 2630.06. The estimate has been right all along;
- * the grid could not say so, because it asked the schedule a question the schedule cannot
- * answer - "what is the rate for this BAND" - where the estimate asks "what is the rate for
- * this CAPACITY".
- *
- * ⚠ 315 KVA RETURNS NULL, AND THAT IS THE POINT. The tender does not price it.
- * `set.radiatorAbove100[315]` is undefined, `resolveRate` returns null, and the estimate BLOCKS
- * with a missing-rate error rather than interpolating between 200 and 500. The grid keeps its
- * marker on exactly that cell - a figure there would be the falsehood the marker exists to
- * prevent, and it is the one cell in the whole table where the tender genuinely has no answer.
- *
- * 5 KVA also returns null: the schedule's B5 rate for radiator is 0, which is "not priced"
- * rather than "free", and `> 0` is the same test the estimate applies.
- */
-function inheritedRadiatorRate(set: ScheduleSet, itemCode: string, kva: string): number | null {
-  const v = variantAxisForMasterCode(itemCode);
-  if (!v || v.axis !== 'capacity') return null;
-  const n = Number(kva) || 0;
-  if (n > 100) {
-    const exact = set.radiatorAbove100[n];
-    return typeof exact === 'number' && exact > 0 ? exact : null;   // 315: not priced -> marker
-  }
-  const entry = set.scheduleA.find(i => i.sr === (v.options as Record<string, string>)['upto-100']);
-  if (!entry) return null;
-  const r = entry.rates[bandForKva(n)];
-  return typeof r === 'number' && r > 0 ? r : null;
-}
-
-/**
- * THE 11 KV TENDER RATE FOR A ROW WHOSE ONLY VARIABLE IS THE KV CLASS (AUDIT G5).
- *
- * ⚠ DISPLAY ONLY. THE CALCULATION IS UNTOUCHED. The tender prices 11 AND 22 KV, and F48
- * established that refusing to price 22 KV work would be wrong: a job entered at 22 KV still
- * resolves 8-B, and a blank or unrecognised `kv` still BLOCKS rather than defaulting. Nothing
- * here is consulted when an estimate is priced - `resolveRate` reads the schedule, not this.
- *
- * ⚠ WHY 11 IS THE ONE SHOWN. Confirmed with the operator: every transformer these agencies
- * repair is a DISTRIBUTION transformer at 11 KV, across all DISCOMs. 22 KV does not arise in
- * their work. "Varies by KV rating" was true and useless - it told the reader the cell had two
- * answers without telling them either, when one of the two is the answer for every job they
- * will ever enter.
- *
- * Same treatment as the winding pair above and for the same reason: show the figure that
- * applies, LABELLED with which it is. The label is what keeps this honest - `176.00 (11 KV)`
- * says the rate and its condition, so an agency that ever does 22 KV work sees immediately
- * that this is not their number, where a bare `176.00` would not.
- */
-function inheritedKvRate(set: ScheduleSet, itemCode: string, kva: string): { value: number; kv: string } | null {
-  const v = variantAxisForMasterCode(itemCode);
-  if (!v || v.axis !== 'kv-class') return null;
-  // The 11 KV option, by name. Not options[0] - an ordering change in the map would silently
-  // relabel the figure, which is the class of fault this file keeps recording.
-  const sr = (v.options as Record<string, string>)['11'];
-  if (!sr) return null;
-  const entry = set.scheduleA.find(i => i.sr === sr);
-  if (!entry) return null;
-  const r = entry.rates[bandForKva(Number(kva) || 0)];
-  return typeof r === 'number' && r > 0 ? { value: r, kv: '11' } : null;
-}
-
-/** Short reason a variant row shows no inherited figure. Never blank - see AUDIT F50. */
-function variantMarker(itemCode: string): string | null {
-  const v = variantAxisForMasterCode(itemCode);
-  if (!v) return null;
-  return v.axis === 'kv-class' ? 'Varies by KV rating'
-    : v.axis === 'winding-material' ? 'Varies by winding material'
-    : 'Varies by capacity';
-}
+// WHAT AN EMPTY CELL SHOWS - the tender rate it inherits - is lib/gridInheritance.ts, asked PER SECTION (AUDIT G68).
+// It lived here as five functions keyed on the item code alone, and every section's grid called them: a code meaning one
+// thing in CRGO and another elsewhere showed the CRGO figure - 46.00, the oil gauge glass, on the Overhauling radiator
+// row. The CRGO rules moved unchanged; the section is now part of the question.
 
 // mergeDefaultRates and the three section normalisers moved, unchanged, to
 // lib/estimateMasterSeed.ts, beside the seeding that uses them (AUDIT G57).
@@ -1955,11 +1824,13 @@ export default function EstimateMaster() {
                             {(() => {
                               const stored = rateVal !== null && rateVal !== undefined
                                 && !isNaN(Number(rateVal)) && Number(rateVal) > 0;
-                              const inherited = stored ? null : inheritedScheduleRate(gridSchedule, item.itemCode, kva);
-                              const pair = stored || inherited !== null ? null : inheritedWindingPair(gridSchedule, item.itemCode, kva);
-                              const kvRate = stored || inherited !== null || pair ? null : inheritedKvRate(gridSchedule, item.itemCode, kva);
-                              const radRate = stored || inherited !== null || pair || kvRate ? null : inheritedRadiatorRate(gridSchedule, item.itemCode, kva);
-                              const marker = stored || pair || kvRate || radRate !== null ? null : variantMarker(item.itemCode);
+                              // THE SECTION IS PART OF THE QUESTION (AUDIT G68): an Overhauling '5' is a radiator, not CRGO's oil gauge glass.
+                              const inh = stored ? INHERITS_NOTHING : inheritedForCell(sectionKey, gridSchedule, item.itemCode, item.itemName, kva);
+                              const inherited = inh.kind === 'rate' ? inh.value : null;
+                              const pair = inh.kind === 'pair' ? { al: inh.al, cu: inh.cu } : null;
+                              const kvRate = inh.kind === 'kv' ? { value: inh.value, kv: inh.kv } : null;
+                              const radRate = inh.kind === 'radiator' ? inh.value : null;
+                              const marker = inh.kind === 'marker' ? inh.text : null;
                               const fmt = (n: number) => n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
                               const radTitle = radRate !== null
                                 ? `From the UGVCL tender schedule at exactly ${kva} KVA. Above 100 KVA the tender prices each capacity separately - 200 and 500 differ - so this is the rate for this column, not a band average. It is the same figure the estimate charges. Nothing is stored for this cell; type over it to override.`

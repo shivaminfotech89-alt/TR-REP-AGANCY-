@@ -15376,3 +15376,74 @@ printed subtrees.
   - Their names are proved present by the compiler and were read in the diff.
   - None has been seen in a warning. "Tax invoice: ..." is a unit test, not a printed run.
 - **Two jobs' estimates overflowing in one print.**
+
+---
+
+## G68. The Estimate Master grid answered for sections its lookup did not cover
+
+**The wrong figure first.** The Overhauling section's radiator row (code `5`) is empty at 5, 10, 16, 50, 200,
+315 and 500 kVA. On every AT the grid showed **46.00** in those cells - the rate for CRGO item `5`, the oil gauge
+glass. It was shown in the same tint and weight as a real tender rate, in the grid an operator reads to check a
+rate before quoting, and it was there before any clearing.
+
+**The cause.** An empty cell shows "the tender rate that applies while this is blank". The lookup that found it
+took an item code alone, and knew only the CRGO master's codes (`SCHEDULE_ITEM_MAP`). Every section's grid called
+it, and item codes belong to their section: `5` is the oil gauge glass in CRGO and radiator replacement in
+Overhauling. It is the same shape as the scrap charge sitting under `0` in one section and `22` in another.
+
+**The same collision elsewhere** - census 2026-09-12, over the rows each AT's grid actually puts on screen:
+
+| Section | Empty cells | Showed a CRGO figure | ATs |
+|---|---|---|---|
+| Overhauling | 98 | **98** - the radiator row's 7 empty capacities on each AT, all 46.00 | 14 |
+| Amorphous (shown under UGVCL-2020) | 544 | **400** | 8 |
+| Wound Core (shown under UGVCL-2020) | 544 | **400** | 8 |
+| Circle Limits | 266 | 0 | - |
+
+- **898 wrong figures on screen.** The Schedule-B fixed-rate rows share codes with CRGO:
+  - `1a` (10 kVA aluminium winding) showed CRGO's labour charge - 2061, 1603, 1374;
+  - `1b` and `1c` showed gasket rates;
+  - `1e` showed the bolt-nut rate;
+  - `1f` showed the drying rate;
+  - `5` (radiator) showed the oil gauge glass, 46.00.
+- **Hidden from view:** the same rows on the six UGVCL-2026 ATs - 300 cells each for Amorphous and Wound Core -
+  sit in sections the grid hides under a tender with no Schedule-B.
+- **Circle Limits collided nowhere.** Its codes (`01`-`05`) match no CRGO code.
+
+**THE FIX: THE LOOKUP KNOWS WHICH SECTION IT IS IN, AND REFUSES THE ONES IT DOES NOT COVER.**
+- **`lib/gridInheritance.ts`, `inheritedForCell(section, schedule, code, name, kva)`:**
+  - **CRGO:** exactly the old rules, moved rather than rewritten - single rows, the aluminium/copper pair, the
+    11 kV figure, the radiator per capacity, and the markers.
+  - **Overhauling:** the overhaul row only - Schedule-A Sr 21 of the AT's own schedule, as the estimate prices
+    it.
+  - **Everything else:** nothing, which the grid renders as "-".
+- **Not "add row 7 to the lookup".** That would have fixed the gap and kept the collision.
+- **`lib/overhaulingRows.ts`, `overhaulingRowKind`:** one answer to "which overhauling row is the overhaul", now
+  used by both the estimate builder and the grid. Two decisions could disagree about which row it is.
+- **`EstimateMaster.tsx`:** its five code-only functions are removed, and each cell asks the new lookup with its
+  section.
+
+**Row 7, once the O66 clear has run.** On 2026-28/AT/1819 the empty overhaul row now shows 2009 (5 kVA),
+2481 (10, 16), 3189 (25 to 100) and 3510 (above 100) - this tender's Sr 21. At HEAD it would have shown "-". That
+completes O70's display for the one rate outside CRGO.
+
+**Verified:**
+- **Census:** HEAD's five grid functions, cut from HEAD's own source, against the new lookup, over every AT's
+  seeded rows.
+  - **0 CRGO cells changed display.**
+  - Every non-CRGO cell that showed a figure now shows "-".
+- **Pricing:** HEAD and the working tree through the builder - 74 live jobs and 5 synthetic overhauling cases,
+  custom and renumbered rows included - differ in nothing: no line, total, comparison figure, refusal or notice.
+- **`gridInheritance.test.ts`:**
+  - the row-5 case;
+  - 2079, 1524 and 165 under UGVCL-2026;
+  - row 7 under both tenders;
+  - every `SCHEDULE_ITEM_MAP` code refused in every other section, under both tenders, at every capacity;
+  - the variant forms unchanged;
+  - the shared row kind.
+- **Gates:** `tsc`, 80/80 tests, `vite build`, hooks guard.
+
+**Not exercised:** the grid was not rendered in a browser. The census reads the functions the grid calls and
+the rows it seeds, not pixels.
+
+**Deploy:** hosting. It changes no data and no price.
