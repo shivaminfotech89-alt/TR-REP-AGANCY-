@@ -766,6 +766,60 @@ and neither is visible from reading the confident part.
 
 ---
 
+## Pattern: a harness that reports a defect the app does not have
+
+**Every other blind checker in this audit missed something real. This one invented something.** The
+invented kind is harder to catch, and the reason is in the reader rather than the tool.
+- A missing finding stays open until someone looks.
+- A recorded, fixed or withdrawn finding is a problem everyone believes is settled, and nobody re-checks
+  a problem they think is solved.
+
+**The instance (O58, G62, G63).**
+- **What was recorded:** printing G62, SU-5's one-page estimate appeared to lose its signature block and
+  part of its totals box. O58 recorded it as a defect in the app.
+- **What was actually wrong:** the print harness had built the estimate with 28 of its 130 classes
+  missing, `grid-cols-2` among them. The job box stacked its fourteen fields in one column and pushed the
+  page past its end. The app's own build carries all 130.
+- **How it surfaced:** G63's print of the same sheet counted 0 elements cut off where G62 had counted 14,
+  and the two numbers were compared rather than each believed.
+
+**Why the build lost them - reproduced, 2026-09-11.**
+- **The setup:** the harness builds with its own scratch folder as Vite's root. In that setup Tailwind
+  generated classes only from what it found in that folder, not from the estimate component the build
+  imported from the repository.
+- **Which classes survived:** the folder held the inspection harness's generated files, which copy the
+  inspection sheet's markup. The classes the two documents share were present; the estimate's own were
+  not.
+- **The reproduction:**
+  - Built with the folder as it stood before G62's first estimate build: **28 of 130 classes missing.**
+  - Built again with a previous estimate build's output in the folder: **0 missing.**
+- **So G63's correct styling was not a fix.** It came from G62's broken build output, sitting in the same
+  folder with the class names in it as text. The first correct print was luck, resting on the wrong one.
+  The two classes of G63's new on-screen notice, which no earlier build contained, were missing from that
+  build.
+- **G61's inspection prints stand.** Their build carried all 133 of the sheet's classes, because the
+  harness's entry files are that sheet's source.
+
+**Why G62's own check passed:** it confirmed five class names were in the CSS, and all five were among
+the classes the inspection files happened to supply.
+
+**The remedy, tested on the same clean folder.** The harness stylesheet imports the app's `index.css` and
+adds `@source` for the repository's `src`. Built that way, the estimate carries 130 of 130 classes with no
+earlier build output present. The harness no longer depends on what its folder happens to contain.
+
+**THE RULE: a harness's evidence about a page is only as good as the page it built, and that must be
+checked against the document's own source, not against a list someone chose.** The harness now has two
+such checks, both in the scratch harness and not in the repository:
+- **class coverage:** every static class in the document's print source is present in the built CSS -
+  130 of 130 for the estimate, 133 of 133 for the inspection sheet;
+- **the rendered style:** measured on the printed page, with a positive control that strips the
+  stylesheets and must fail.
+
+**And a finding a harness produced is withdrawn where it was recorded, with its cause, so the withdrawal
+is as visible as the finding was.**
+
+---
+
 ## Pattern: a check can only see what its model anticipated, and reports confidently outside it
 
 Three instances in this audit, and the third is the clearest because the code was RIGHT.
@@ -7206,7 +7260,10 @@ totals box.
   column, with no label widths, instead of two columns. The box grew and pushed the page past its end.
 - **That build's own check had passed.** It confirmed five other class names were present in the CSS,
   and none of them were the job box's.
-- **Why the build lost them is not established.**
+- **Why the build lost them: established and reproduced afterwards.** The harness built with its scratch
+  folder as Vite's root, and Tailwind took class names from that folder instead of from the estimate
+  component. Built the same way, the estimate lacks 28 of its 130 classes; adding `@source` for the
+  repository's `src` makes it 0. See *"a harness that reports a defect the app does not have"*.
 
 The harness now asserts the page as rendered - the job box in two grid columns, 96px labels - rather
 than the CSS file's contents (G63).
@@ -14056,7 +14113,10 @@ Passed:
 - **That assertion was itself wrong twice on first run.** It expected 96px, but the print stylesheet's
   10pt root makes the label 80px. And it first measured the "Order No.:" label, which shrinks beside a
   long value. Both failed loudly, and neither failure was the sheet.
-- **Why G62's build lost the classes is not established.**
+- **Why G62's build lost the classes: established afterwards, and reproduced.** The harness built with
+  its scratch folder as Vite's root, and Tailwind took class names from that folder rather than from the
+  component. This build's correct styling came from G62's broken output sitting in the same folder. See
+  *"a harness that reports a defect the app does not have"*.
 
 Not verified: the app in a browser. The AT form, the card marker, the refusal dialog and the send alert
 are verified by reading, by the rule's tests and by the print - not by use.
