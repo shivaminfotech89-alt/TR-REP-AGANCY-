@@ -1699,7 +1699,7 @@ export default function DispatchChallan() {
 
             {/* PRINTABLE DOCUMENT SHEET (WITH HORIZONTAL SCROLL PROTECTION ON MOBILE) */}
             <div id="printable-challan-sheet" className="p-0 bg-white">
-              <PrintableA4Page agency={activeAgency} documentTitle="DELIVERY CHALLAN">
+              <PrintableA4Page agency={activeAgency} sheetName="Delivery challan" documentTitle="DELIVERY CHALLAN">
                 <div className="flex flex-col justify-between h-full">
                   <div>
                     <div className="flex flex-col sm:flex-row justify-between items-start mb-3 text-xs gap-2">

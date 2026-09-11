@@ -38,6 +38,9 @@ const measuresBeforePrinting = root => readSource(root, 'src/lib/printUtils.ts')
  * `captured` (older commits): the print window's HTML is captured, its print-on-load script dropped, and written into
  * this page. Those commits had no warning to check.
  */
+/** Whether this tree's sheets carry the name the warning uses (G67). Before it, the warning numbers sheets. */
+const namesSheets = root => readSource(root, 'src/components/LetterheadHeader.tsx').includes('data-sheet-name');
+
 const runtime = (container, orientation, root) => { const measured = measuresBeforePrinting(root); return `
 const w: any = window;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -101,8 +104,9 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
     }
     `}
     await sleep(500);
+    const sheetNames = Array.from(document.querySelectorAll('.a4-print-page')).map(p => p.getAttribute('data-sheet-name'));
     w.__printCheck = { state: 'ready', letterhead, expected: EXPECTED, sheets: document.querySelectorAll('.a4-print-page').length,
-      flow, screenCutoffs, autoPrinted, warningLines, printMs };
+      flow, screenCutoffs, autoPrinted, warningLines, printMs, sheetNames, named: ${namesSheets(root)} };
   } catch (e: any) {
     w.__printCheck = { state: 'error', message: String((e && e.stack) || e) };
   }

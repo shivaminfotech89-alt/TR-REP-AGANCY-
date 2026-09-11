@@ -109,9 +109,21 @@ function somethingPrinted(doc, r) {
 
 const cutMmOf = c => Math.max(c?.bottomMm || 0, c?.rightMm || 0);
 
-/** Each sheet's millimetres as the print window's warning stated them - read back from what the operator reads. */
-const warnedMm = (lines, sheets) => Array.from({ length: sheets }, (_, i) => {
-  const line = lines.find(l => l.startsWith(`Sheet ${i + 1} of `));
+/**
+ * THE LABEL THE WARNING MUST GIVE EACH SHEET, worked out here from the names on the printed sheets rather than taken from
+ * the app (G67): its name, numbered among the sheets sharing it; its position among all sheets when it has none - which is
+ * every sheet before G67.
+ */
+const expectedLabels = names => names.map((n, i) => {
+  const name = String(n || '').trim();
+  if (!name) return `Sheet ${i + 1} of ${names.length}`;
+  const same = names.map((m, j) => [String(m || '').trim(), j]).filter(([m]) => m === name).map(([, j]) => j);
+  return same.length > 1 ? `${name}, sheet ${same.indexOf(i) + 1} of ${same.length}` : name;
+});
+
+/** Each sheet's millimetres as the print window's warning stated them, found by its label - what the operator reads. */
+const warnedMm = (lines, labels) => labels.map(label => {
+  const line = lines.find(l => l.startsWith(`${label}: `));
   return line ? Math.max(0, ...[...line.matchAll(/(\d+) mm/g)].map(m => Number(m[1]))) : 0;
 });
 
@@ -129,9 +141,13 @@ function warningDisagreements(r) {
   if (!cut.length && h.warningLines.length) out.push(`nothing is cut on paper but the print window warned: ${h.warningLines.join(' / ')}`);
   if (cut.length && h.autoPrinted) out.push('the print dialog opened by itself over cut sheets');
   if (!cut.length && !h.autoPrinted) out.push('the print dialog did not open although nothing is cut');
-  const warned = warnedMm(h.warningLines, r.pages.length);
-  const miscounted = h.warningLines.filter(l => !l.includes(` of ${r.pages.length}: `));
-  if (miscounted.length) out.push(`the warning counts sheets differently from the print (${r.pages.length}): ${miscounted.join(' / ')}`);
+  const names = h.sheetNames || r.pages.map(() => null);
+  if (names.length !== r.pages.length) out.push(`${names.length} sheet name(s) read for ${r.pages.length} printed sheet(s)`);
+  const labels = expectedLabels(names);
+  if (h.named) names.forEach((n, i) => { if (!String(n || '').trim()) out.push(`sheet ${i + 1} has no name - its warning would read "${labels[i]}", which the operator has to count to decode`); });
+  const warned = warnedMm(h.warningLines, labels);
+  const strays = h.warningLines.filter(l => !labels.some(label => l.startsWith(`${label}: `)));
+  if (strays.length) out.push(`the warning names a sheet the print does not have - expected one of ${JSON.stringify(labels)}: ${strays.join(' / ')}`);
   r.pages.forEach((p, i) => {
     const app = warned[i], screen = cutMmOf(h.screenCutoffs[i]);
     if (Math.abs(app - p.cutMm) > 1) out.push(`sheet ${p.page}: the print window's warning measured ${app} mm, paper loses ${p.cutMm} mm`);

@@ -53,12 +53,30 @@ export function describeCutoff(c: Cutoff): string | null {
   return parts.length ? `${parts.join(' and ')} will be cut off when printed` : null;
 }
 
-/** One line per sheet that loses anything, numbered as the reader counts sheets: "Sheet 2 of 3: 4 mm at the bottom ...". */
-export function summariseSheets(sheets: Cutoff[]): string[] {
+/** A sheet's measurement with the name it prints under - PrintableA4Page's `sheetName`, read from the sheet. */
+export interface NamedCutoff extends Cutoff { name?: string | null }
+
+/** Where PrintableA4Page writes its sheet's name, for the measurement to read. */
+export const SHEET_NAME_ATTR = 'data-sheet-name';
+
+/**
+ * ONE LINE PER SHEET THAT LOSES ANYTHING, NAMED AS THE OPERATOR KNOWS IT (AUDIT G67).
+ *   "Tax invoice: 12 mm at the bottom will be cut off when printed"
+ *   "Internal inspection report, sheet 2 of 2: 5 mm at the bottom ..." - counted among sheets of that name
+ * "Sheet 3 of 4" made the operator count sheets to find the document; a name is read, not decoded. A sheet with no
+ * name (markup from before G67) falls back to its position among all the sheets.
+ */
+export function summariseSheets(sheets: NamedCutoff[]): string[] {
+  const nameOf = (s: NamedCutoff) => (s.name || '').trim();
   return sheets
     .map((c, i) => ({ c, i }))
     .filter(({ c }) => hasCutoff(c))
-    .map(({ c, i }) => `Sheet ${i + 1} of ${sheets.length}: ${describeCutoff(c)}`);
+    .map(({ c, i }) => {
+      const name = nameOf(c);
+      if (!name) return `Sheet ${i + 1} of ${sheets.length}: ${describeCutoff(c)}`;
+      const same = sheets.filter(s => nameOf(s) === name);
+      return `${same.length > 1 ? `${name}, sheet ${same.indexOf(c) + 1} of ${same.length}` : name}: ${describeCutoff(c)}`;
+    });
 }
 
 /**

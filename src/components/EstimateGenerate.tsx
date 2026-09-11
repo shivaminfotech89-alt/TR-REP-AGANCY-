@@ -1296,7 +1296,7 @@ export default function EstimateGenerate() {
       const isLast = pageIdx === totalPages - 1;
 
       return (
-        <PrintableA4Page key={pageIdx} agency={activeAgency} documentTitle="FORWARDING LETTER">
+        <PrintableA4Page key={pageIdx} agency={activeAgency} sheetName="Estimate forwarding letter" documentTitle="FORWARDING LETTER">
           {/* ⚠ NO `justify-between h-full` HERE, AND IT MUST NOT COME BACK.
               It stretched this container to the full A4 body and pushed the signature block
               to the floor, so the gap between the closing paragraph and the signatures was

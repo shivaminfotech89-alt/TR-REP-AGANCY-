@@ -1083,6 +1083,7 @@ export default function InternalInspection() {
                 key={pageIdx}
                 agency={activeAgency}
                 orientation="landscape"
+                sheetName="Internal inspection report"
                 documentTitle="INTERNAL INSPECTION & COIL DAMAGE REPORT"
                 subtitle={jobChunks.length > 1 ? `Sheet ${pageIdx + 1} of ${jobChunks.length}` : undefined}
                 className={pageIdx > 0 ? 'print-page-break-before mb-6' : 'mb-6'}

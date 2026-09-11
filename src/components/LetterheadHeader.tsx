@@ -127,6 +127,13 @@ export interface PrintableA4PageProps {
   key?: React.Key;
   agency: Agency | null;
   children: React.ReactNode;
+  /**
+   * WHAT THE OPERATOR CALLS THIS SHEET - "Tax invoice", "Internal inspection report" (AUDIT G67). Required, so no
+   * document can be added without one. The cut-off warning names a short sheet by it ("Tax invoice: 12 mm at the
+   * bottom will be cut off"), and anything that must pick one document out of a package - a refusal, a record - has
+   * only this to go on. Not printed: `documentTitle` is what paper says, and several sheets have none.
+   */
+  sheetName: string;
   documentTitle?: string;
   subtitle?: string;
   className?: string;
@@ -153,6 +160,7 @@ export interface PrintableA4PageProps {
 export function PrintableA4Page({
   agency,
   children,
+  sheetName,
   documentTitle,
   subtitle,
   className = '',
@@ -229,6 +237,7 @@ export function PrintableA4Page({
     <div
       id={id}
       ref={pageRef}
+      data-sheet-name={sheetName}
       data-cutoff-bottom-mm={cutoff.bottomMm}
       data-cutoff-right-mm={cutoff.rightMm}
       data-cutoff-state={measured ? 'measured' : 'pending'}
@@ -306,19 +315,21 @@ export function PrintableA4Page({
 export function LetterheadPageWrapper({
   agency,
   children,
+  sheetName,
   className = '',
   documentTitle,
   subtitle,
 }: {
   agency: Agency | null;
   children: React.ReactNode;
+  sheetName: string;
   className?: string;
   documentTitle?: string;
   subtitle?: string;
   showTitleBadge?: boolean;
 }) {
   return (
-    <PrintableA4Page agency={agency} documentTitle={documentTitle} subtitle={subtitle} className={className}>
+    <PrintableA4Page agency={agency} sheetName={sheetName} documentTitle={documentTitle} subtitle={subtitle} className={className}>
       {children}
     </PrintableA4Page>
   );

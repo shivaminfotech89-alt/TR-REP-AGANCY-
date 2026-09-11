@@ -3207,6 +3207,7 @@ export default function BillingSystem() {
             <PrintableA4Page
               agency={activeAgency}
               documentTitle=""
+              sheetName="Bill forwarding letter"
               className={activeDocTab === 'all' || activeDocTab === 'forwarding' ? 'block' : 'hidden print:block'}
             >
               {/* ⚠ NO `justify-between h-full` - THIRD INSTANCE OF THE SAME DEFECT (AUDIT G7).
@@ -3296,6 +3297,7 @@ export default function BillingSystem() {
             <PrintableA4Page
               agency={activeAgency}
               documentTitle=""
+              sheetName="Guarantee certificate"
               className={activeDocTab === 'all' || activeDocTab === 'certificate' ? 'block' : 'hidden print:block'}
             >
               <div className="flex flex-col justify-center h-full my-auto">
@@ -3341,6 +3343,7 @@ export default function BillingSystem() {
             <PrintableA4Page
               agency={activeAgency}
               showAgencyHeaderIfNoLetterhead={false}
+              sheetName="Tax invoice"
               className={activeDocTab === 'all' || activeDocTab === 'invoice' ? 'block' : 'hidden print:block'}
             >
               {/* ⚠ NO `justify-between` (AUDIT G7). This was `h-full flex flex-col justify-between` with
@@ -3680,6 +3683,7 @@ export default function BillingSystem() {
               agency={activeAgency}
               documentTitle="OIL ACCOUNT SHEET"
               showAgencyHeaderIfNoLetterhead={false}
+              sheetName="Oil account sheet"
               className={activeDocTab === 'all' || activeDocTab === 'oil' ? 'block' : 'hidden print:block'}
             >
               <div className="border-2 border-black p-3 text-black text-[9px] space-y-2 h-full flex flex-col justify-between">

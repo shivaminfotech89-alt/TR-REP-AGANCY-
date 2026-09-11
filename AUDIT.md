@@ -7007,8 +7007,8 @@ for pricing, which is what they should be.**
 
 Open, 2026-09-11. **Decided for now: warn only, no exceptions, the tax invoice included** (G66).
 
-**Who answers it: the product owner's accountant, asked by the owner.** The accountant's name is not yet
-recorded here - the owner to add it. Until they answer, nothing changes.
+**Who answers it: Kaushal Shah, the owner's accountant, asked by the owner.** Until that answer comes,
+nothing changes.
 - **Why an owner is named:** a decision recorded as "to confirm with the accountant", with nobody holding
   the question, is a decision nobody owns.
 
@@ -7017,15 +7017,14 @@ recorded here - the owner to add it. Until they answer, nothing changes.
 - **Yes:** the tax invoice alone refuses to print when its sheet is cut. Every other document still warns.
 
 **What refusing the tax invoice alone would take - not built:**
-- **⚠ The sheet cannot say it is the tax invoice today.** In the bill package it is the third
-  `PrintableA4Page`, with no `documentTitle`; the forwarding letter and certificate carry
-  `documentTitle=""`. A refusal keyed to "sheet 3" breaks the day the package changes. The sheet needs a
-  stated identity.
+- **The sheet's identity - built, G67.** The tax invoice is the third sheet of the bill package and has no
+  `documentTitle`. It now carries `sheetName="Tax invoice"`, so a refusal keys on the name. Keying on
+  "sheet 3" would break the day the package changes.
 - **The package prints four documents in one window** - letter, certificate, invoice, oil account - and
   every tab prints all four (`hidden print:block`). Whether a cut invoice refuses the whole package or lets
   the other three print is a decision for then.
-- **The same gap shows in the warning now.** It names the sheet by number only - "Sheet 3 of 4: ..." - not
-  "tax invoice". Naming it needs the same identity, whichever way this is answered.
+- **The warning names it - built, G67.** "Tax invoice: 12 mm at the bottom will be cut off when printed", no
+  longer "Sheet 3 of 4: ...".
 
 ---
 
@@ -7086,7 +7085,8 @@ Only print-check's four documents have been measured. "Not measured" does not me
 
 ### WHAT FIXING IT TAKES - reported, not built
 
-1. **Detection, once, in `PrintableA4Page` - this reaches all thirteen documents.**
+1. **Detection, once, in `PrintableA4Page` - this reaches all twelve documents** (said thirteen until G67;
+   the thirteenth printed subtree is the unused `LetterheadPageWrapper`).
    - Measure the body's content against its height, and say on screen, before printing, how many mm will
      be cut off.
    - Sum the children's natural heights, as G23 does: the body is a flex column, so its children compress
@@ -7131,16 +7131,15 @@ invoice.
   `support_tickets` fixes them. Readable by the super admin only; no update or delete.
   - The default deny refuses the collection today, so the rule and a rules deploy are part of the change.
 - **Read** by a read-only admin script through `scripts/admin/_db.js`, grouped by document.
-- **⚠ THE PREREQUISITE IS A NAME ON EVERY SHEET.** A record, like the warning, can only say "sheet 3 of 4 of
-  `printable-billing-container`".
-  - The forwarding letter, certificate and tax invoice have no title.
-  - Each sheet needs a stated name, stamped as an attribute the measurement reads.
-  - It is the same identity O65's refusal needs.
+- **The prerequisite, a name on every sheet, is built: G67.** `data-sheet-name` gives the record its
+  document, as it gives the warning.
+  - The single-job estimate's name carries its job number. Under "nothing from the document itself", the
+    record would store the name without it.
 - **One more field costs one more write:** whether the operator pressed Print anyway - the fact a
   clipped-invoice complaint turns on. Pressing the button can be observed; closing the window without
   printing cannot, reliably.
 - **Size, estimated:**
-  - app: about 40 lines, plus the sheet names;
+  - app: about 40 lines;
   - a rule of about ten lines;
   - a read script;
   - a rules deploy and a hosting deploy.
@@ -14485,7 +14484,7 @@ In its header, so a clean run is not read as more than it is:
 - **One browser engine only.**
 - **The print dialog as an operator leaves it.**
 - **This machine's fonts.**
-- **Four of the thirteen printed documents**, two of them rendered from cut source.
+- **Four of the twelve printed documents** (said thirteen until G67), two of them rendered from cut source.
 - **Only the records it picks.**
 - **Whether the figures are right.**
 - **The screen.**
@@ -14528,7 +14527,7 @@ Not exercised:
 
 **Why.** Step 1 of O64. `PrintableA4Page`'s body hides overflow, and content past it vanished from the preview
 and the paper with nothing said (O58, O63).
-- One change in `PrintableA4Page` reaches all thirteen documents.
+- One change in `PrintableA4Page` reaches all twelve documents (said thirteen until G67).
 - It changes no layout.
 - It turns a silent defect into a visible one.
 
@@ -14638,12 +14637,12 @@ parsed stylesheets between documents.
 
 - **The challan's confirm** - print-check drives only the print-window path.
 - **The Word export's stripping** of the bar - read, not run.
-- **Eight of the thirteen documents**: bills, the challan, the forwarding letter, external inspection and
+- **Eight of the twelve documents**: bills, the challan, the forwarding letter, external inspection and
   the testing report. They are measured by construction - the same component - not by a check.
 - **Firefox and Safari.** The media rewrite uses standard CSSOM, but only Chrome was run.
 - **The cost on a screen that edits a sheet as you type.** Each pause re-measures in a fresh frame, 78-143 ms
   on these documents; a very long MR has not been timed.
-- **`NewJob` and `LetterheadCalibrator` call `window.print()`** but are not among the thirteen, and are not
+- **`NewJob` and `LetterheadCalibrator` call `window.print()`** but are not among the twelve, and are not
   guarded.
 
 ### SHOULD ANY DOCUMENT REFUSE? - no exceptions, recommended
@@ -14661,3 +14660,91 @@ parsed stylesheets between documents.
     the fix until one is (O64 step 4).
 - **Decided 2026-09-11: warn only, no exceptions, the tax invoice included - for now.** Whether the tax
   invoice alone should refuse is open as O65, answered by the owner's accountant.
+
+---
+
+## G67. Every printed sheet has a name, and the warning uses it
+
+**Why.** G66's warning named a short sheet by its position - "Sheet 3 of 4: 12 mm" - so an operator had to
+count sheets to find which document was short. In the bill package the third sheet is the tax invoice, and
+nothing on screen said so. A name is read; a position has to be decoded.
+
+The same name is the prerequisite for O65's refusal and O64's record, so it was built ahead of both
+decisions rather than as part of one.
+
+### WHAT IT TOOK
+
+- **One required prop** on `PrintableA4Page`, `sheetName`, stamped on the sheet as `data-sheet-name`.
+  Required, so the compiler refuses a document added without one.
+- **One line at each of twelve call sites, in eight files.** No layout change; the name is not printed.
+
+| Sheet | `sheetName` | Its printed title |
+|---|---|---|
+| Bill package, sheet 1 | Bill forwarding letter | none - `documentTitle=""` |
+| Bill package, sheet 2 | Guarantee certificate | "CERTIFICATE" in the body - `documentTitle=""` |
+| Bill package, sheet 3 | Tax invoice | "TAX INVOICE" in the body - no `documentTitle` |
+| Bill package, sheet 4 | Oil account sheet | OIL ACCOUNT SHEET |
+| Delivery challan | Delivery challan | DELIVERY CHALLAN |
+| Estimate forwarding letter (paginated) | Estimate forwarding letter | FORWARDING LETTER |
+| Single-job estimate, both layouts | Estimate for job *job no.* - "Estimate" if blank | ESTIMATION REPORT ... |
+| Multi-job estimate | Estimate for multiple transformers | ESTIMATE — MULTIPLE TRANSFORMERS |
+| Internal inspection | Internal inspection report | INTERNAL INSPECTION & COIL DAMAGE REPORT |
+| External inspection | External inspection report | EXTERNAL INSPECTION & PRELIMINARY ASSESSMENT REPORT |
+| Testing report | Testing report | DISTRIBUTION TRANSFORMER ROUTINE TESTING REPORT |
+
+- **Names are what the operator calls the document**, not the printed title: the titles are long capitals,
+  and three bill sheets print none.
+- The unused `LetterheadPageWrapper` passes the name through.
+
+### WHAT THE WARNING SAYS NOW
+
+- **A name one sheet carries:** "Tax invoice: 12 mm at the bottom will be cut off when printed".
+- **A name several sheets carry** is counted among those sheets only: "Internal inspection report, sheet 2
+  of 2: 12 mm at the bottom will be cut off when printed" - the same "Sheet 2 of 2" the inspection sheets
+  print.
+- **Two jobs' estimates in one print** are told apart by job number.
+- **A sheet with no name** falls back to "Sheet 3 of 4". Only markup from before G67 has none.
+- **The location stays** - "at the bottom", "at the right edge" - because both happen.
+
+### ⚠ THE COUNT WAS TWELVE, NOT THIRTEEN
+
+O64, G65 and G66 said `PrintableA4Page` carries thirteen documents, from print-subtree-hashes' thirteen
+printed subtrees.
+- Twelve are documents. The thirteenth is `LetterheadPageWrapper`, which nothing calls.
+- Corrected in those entries.
+- `NewJob`'s job receipt slip is not on `PrintableA4Page` at all - it prints a `LetterheadHeader` - so the
+  warning does not reach it. G66 already listed `NewJob`'s `window.print()` as unguarded.
+
+### PRINT-CHECK
+
+- **Works out each sheet's label itself,** from the names on the printed sheets, and finds the warning's
+  line by it.
+- **A finding** for a sheet with no name on a commit that names sheets, or a warning line that matches no
+  sheet.
+- **Both label forms were matched against real warnings in one run.** `--compare 715a5c3` read "Sheet 2 of
+  2: 12 mm" before and "Internal inspection report, sheet 2 of 2: 12 mm" after.
+  - A label rule that ignored names would have failed the after side; one that required them, the before
+    side.
+  - Not provoked with a deliberately wrong warning.
+
+### VERIFIED
+
+- **print-check, 5 cases, `--compare 715a5c3`:**
+  - the only change is the wording - nothing changed on paper, and the mm are identical (4, 12);
+  - every sheet is named;
+  - no disagreement between warning and paper.
+  - The warnings read:
+    - "Estimate for multiple transformers: 4 mm at the bottom will be cut off when printed"
+    - "Internal inspection report, sheet 2 of 2: 12 mm at the bottom will be cut off when printed"
+- **`tsc` clean** - itself the check that no sheet lacks a name.
+- **`npm test` 69 of 69, 3 new; `vite build`; hooks guard.**
+- **`print-subtree-hashes --compare 715a5c3`: all 13 subtrees changed**, each by 22-70 bytes - the added
+  prop. Expected, since the hash covers the call site's source.
+
+### NOT EXERCISED
+
+- **Seven sheets are not rendered by print-check:** the bill package's four, the challan, the estimate
+  forwarding letter, external inspection and the testing report.
+  - Their names are proved present by the compiler and were read in the diff.
+  - None has been seen in a warning. "Tax invoice: ..." is a unit test, not a printed run.
+- **Two jobs' estimates overflowing in one print.**

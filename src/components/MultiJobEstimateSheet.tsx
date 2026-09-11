@@ -129,7 +129,7 @@ export function MultiJobEstimateSheet({ agency, data }: { agency: Agency | null;
         const from = pageIdx * PER_PAGE + 1;
         const to = pageIdx * PER_PAGE + cols.length;
         return (
-          <PrintableA4Page key={pageIdx} agency={agency} documentTitle="ESTIMATE — MULTIPLE TRANSFORMERS">
+          <PrintableA4Page key={pageIdx} agency={agency} sheetName="Estimate for multiple transformers" documentTitle="ESTIMATE — MULTIPLE TRANSFORMERS">
             {/* ⚠ CENTRED EXPLICITLY, NOT BY FILLING THE WIDTH. The table is 187mm inside a
                 ~190mm content area, so today it looks centred by accident of nearly filling
                 the page. Raise a size or drop a column and it would sit left. `mx-auto` on a

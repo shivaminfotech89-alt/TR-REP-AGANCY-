@@ -1,4 +1,4 @@
-import { cutoffOf, printMediumMatches, summariseSheets, SCREEN_ONLY_ATTR, type Box, type Cutoff } from './printOverflow';
+import { cutoffOf, printMediumMatches, summariseSheets, SCREEN_ONLY_ATTR, SHEET_NAME_ATTR, type Box, type Cutoff, type NamedCutoff } from './printOverflow';
 
 /** Marks PrintableA4Page's clipping body, so a measurement finds it without knowing the component's classes. */
 export const PRINT_BODY_ATTR = 'data-print-body';
@@ -10,17 +10,18 @@ const boxOf = (r: DOMRect): Box => ({ left: r.left, top: r.top, right: r.right, 
  * How much of one sheet is cut off AS IT IS LAID OUT in the document it is in. On the app's screen that is the screen
  * layout, which is not the paper - see measureAsPrinted, which is what every warning uses.
  */
-export function measureSheet(page: Element): Cutoff {
+export function measureSheet(page: Element): NamedCutoff {
+  const name = page.getAttribute(SHEET_NAME_ATTR);
   const body = page.querySelector(`[${PRINT_BODY_ATTR}]`);
   const pageRect = page.getBoundingClientRect();
-  if (!body || !pageRect.width) return NOTHING_CUT;
+  if (!body || !pageRect.width) return { ...NOTHING_CUT, name };
   const paperWidthMm = page.classList.contains('landscape') ? 297 : 210;
   const inner = Array.from(body.querySelectorAll('*')).map(e => boxOf(e.getBoundingClientRect()));
-  return cutoffOf(boxOf(body.getBoundingClientRect()), inner, paperWidthMm / pageRect.width);
+  return { ...cutoffOf(boxOf(body.getBoundingClientRect()), inner, paperWidthMm / pageRect.width), name };
 }
 
-/** Every sheet under `root`, in print order. */
-export function measureSheets(root: Document | Element): Cutoff[] {
+/** Every sheet under `root`, in print order, each with the name it prints under. */
+export function measureSheets(root: Document | Element): NamedCutoff[] {
   return Array.from(root.querySelectorAll('.a4-print-page')).map(measureSheet);
 }
 
@@ -77,7 +78,7 @@ function applyPrintMedia(doc: Document, paper: Window): void {
  * rewritten to what they are when printed, and measured there. The frame is removed afterwards; nothing on screen or in
  * the print window is restyled.
  */
-export async function measureAsPrinted(html: string, landscape: boolean, host: Document = document): Promise<Cutoff[]> {
+export async function measureAsPrinted(html: string, landscape: boolean, host: Document = document): Promise<NamedCutoff[]> {
   const frame = host.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.tabIndex = -1;

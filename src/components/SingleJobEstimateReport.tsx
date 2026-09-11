@@ -1727,7 +1727,7 @@ export default function SingleJobEstimateReport({
           const isLast = pageIdx === totalPages - 1;
 
           return (
-            <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
+            <PrintableA4Page key={pageIdx} agency={agency} sheetName={job?.jobNo ? `Estimate for job ${job.jobNo}` : 'Estimate'} orientation="portrait" className={`text-black ${className}`}>
               <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
                 <div ref={isFirst ? contentColumnRef : undefined}>
                   <div className="text-center mb-1 pb-0.5 border-b-2 border-black">
@@ -1978,7 +1978,7 @@ export default function SingleJobEstimateReport({
         });
 
         return (
-          <PrintableA4Page key={pageIdx} agency={agency} orientation="portrait" className={`text-black ${className}`}>
+          <PrintableA4Page key={pageIdx} agency={agency} sheetName={job?.jobNo ? `Estimate for job ${job.jobNo}` : 'Estimate'} orientation="portrait" className={`text-black ${className}`}>
             <div ref={isFirst ? measureContentAreaRef : undefined} className="flex flex-col justify-between h-full text-black">
               <div>
                 {/* Header Title */}
