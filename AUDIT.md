@@ -7003,7 +7003,75 @@ for pricing, which is what they should be.**
 
 ---
 
+### O64. Content past a page's letterhead-shortened body is cut off silently - one cause behind O58 and O63
+
+Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
+
+**One cause.** `PrintableA4Page` gives each sheet a body between the letterhead's header and footer
+reservations. On a full-A4 letterhead those are `letterheadHeaderHeightMm` and `letterheadFooterHeightMm`.
+The body is `overflow-hidden`.
+- Whatever does not fit is cut off, on the preview and on paper, and nothing says so.
+- A taller reservation leaves a shorter body.
+- A document that decides what goes on a sheet without knowing that height overflows it on a tall
+  letterhead.
+
+**Two measured instances, on one agency's letterhead** (MEGHA: 64mm header, 25mm footer):
+
+| | Document | What decides a sheet's contents | What is lost |
+|---|---|---|---|
+| O58 | Internal inspection sheet | `CHUNK_SIZE = 9` rows a sheet | The whole signature block on the last sheet, 43.8px deep - when the nine rows wrap to two lines. Nine one-line rows fit with about 34mm to spare, and MR 85558 prints whole today. |
+| O63 | Multi-job estimate sheet | `PER_PAGE = 5` transformer COLUMNS a sheet. **Every sheet prints every applicable item row**; there is no vertical pagination at all. | "Thanking you" and "Auth Sign." on the last sheet, with 21 item rows (MR 2555). |
+
+**One cause, two mechanisms - recorded as one, so a fix is not applied to half of it.**
+- The inspection sheet has a row count that could be derived from the body's height.
+- The multi-job sheet has no row count to derive: its rows never move to another sheet.
+- Deriving a rows-per-page constant fixes the first and leaves the second exactly as it is.
+
+**The whole family - every document printed on `PrintableA4Page`:**
+
+| Document | How a sheet's contents are decided | Knows the body's height? |
+|---|---|---|
+| Single-job estimate, itemised | `layoutEstimatePages`: an mm budget against `contentMm`, **measured** from the page at runtime | **Yes** - the only document that does |
+| Single-job estimate, fixed-rate | The same budget, with about 85mm of clause and notes not charged to it (G22), but a **measured** overflow warning (G23) | Partly |
+| Internal inspection sheet | `CHUNK_SIZE = 9` | No (O58) |
+| External inspection sheet | `CHUNK_SIZE = 9` | No - not measured |
+| Testing report | `CHUNK_SIZE = 8` | No - not measured |
+| Estimate forwarding letter | `paginateRows`: 14 rows on the first sheet, 22 after | No - not measured |
+| Multi-job estimate sheet | 5 columns a sheet; every row on every sheet | No (O63) |
+| Bill: forwarding letter, certificate, tax invoice, oil account | One sheet each, content-sized, never paginated | No - not measured. The certificate's own comment records its signature once escaping the border. |
+| Delivery challan | One sheet, never paginated | No - not measured |
+
+Only print-check's four documents have been measured. "Not measured" does not mean fine.
+
+### WHAT FIXING IT TAKES - reported, not built
+
+1. **Detection, once, in `PrintableA4Page` - this reaches all thirteen documents.**
+   - Measure the body's content against its height, and say on screen, before printing, how many mm will
+     be cut off.
+   - Sum the children's natural heights, as G23 does: the body is a flex column, so its children compress
+     and the body's own `scrollHeight` reports nothing.
+   - On screen only, like every other layout notice.
+   - It does not stop the cut. It ends the silence, including for documents that will not be re-paginated
+     soon.
+2. **Height-derived pagination for the fixed-count documents** - inspection, external inspection, testing
+   report and forwarding letter. Pack rows by height against the measured body.
+   - **⚠ These rows wrap, and O58's failure IS wrapped rows.** A row's height has to be measured, not
+     assumed the way the estimate's `ROW_MM` assumes it. That makes the layout two passes: render, measure
+     each row, then lay out.
+3. **Vertical pagination for the multi-job sheet.** Item rows continue onto a further sheet under a
+   repeated column header, with the totals and the sign-off where they fit. The column count stays at 5.
+4. **The single-sheet documents** - the four bill documents and the challan - cannot move content to a
+   second sheet without a redesign. For them, detection is the fix until one is shown to overflow.
+
+**Verification:** print-check measures cut-off on four documents. The longest-real-values stress case that
+produced O58 belongs in it, so the next fix is tested against the case that failed.
+
+---
+
 ### O63. The multi-job sheet loses its sign-off on a tall letterhead
+
+> **Consolidated into O64** (2026-09-11): one cause with O58's signature block. Kept here for its
+> measurement - fix it there.
 
 Open, found 2026-09-11 by print-check's first run (G65). Not fixed.
 
@@ -7258,6 +7326,11 @@ confirmed and when. That records a person's answer; it does not check the paper 
 ---
 
 ### O58. A signed inspection sheet can lose its signature block, and nothing says so
+
+> **The signature-block finding is consolidated into O64** (2026-09-11): one cause with O63's multi-job
+> sheet - content past a letterhead-shortened page body, cut off silently. Fix it there. The letterhead-image
+> note at the end of this entry - the image's own signature text printing through the rows - is a
+> different defect and stays here.
 
 Open, found 2026-09-11 while printing G61's column. Not started.
 
