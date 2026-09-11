@@ -85,6 +85,12 @@ export const SCHEDULE_ITEM_MAP: ScheduleItemMapping[] = [
   // which match no row at all, so the agency-override step was dead for all six (AUDIT
   // F51). The master's codes are irregular - '13b(b)' lower-cases the 'b' that '13A(a)'
   // capitalises - and they are reproduced here exactly as stored, not tidied.
+  //
+  // ⚠ NO S.E. OR ORIGINALS-MISSING ROWS HERE, BY DECISION (2026-09-11, AUDIT O20). Schedule-A holds
+  // sixteen coil rows per tender; the master holds these four without-S.E. rows. That is not an
+  // unfinished set. Pricing reads Schedule-A whenever the master has no row, so an S.E. job prices
+  // 12A-b1 / 13A-b1 correctly without one - and every row added is another cell that can disagree
+  // with the tender. Do not "complete" it.
   { masterCode: '12A(a)',   masterName: 'HV Wdg. (Not Miss) -CU', sr: '12A-a', srName: 'HT coil: Copper per kg, without S.E.' },
   { masterCode: '12A(b)',   masterName: 'HV Wdg. (Not Miss) -AL', sr: '12A-b', srName: 'HT coil: Aluminium per kg, without S.E.' },
   { masterCode: '13A(a)',   masterName: 'LV Wdg. (Not Miss) -CU', sr: '13A-a', srName: 'LT coil: Copper per kg, without S.E.' },
@@ -105,11 +111,11 @@ export const SCHEDULE_ITEM_MAP: ScheduleItemMapping[] = [
   // estimate still falls back to them, so a master that predates the split keeps working.
   { masterCode: '12A', masterName: 'HV Coil (generic fallback)',
     variants: { axis: 'winding-material', options: { Aluminium: '12A-b', Copper: '12A-a' },
-      note: "Without-S.E. on BOTH materials - an agency fact, not derived (O20). Copper priced from 12A-a Rs 357 since F52; it previously blocked, which mixed a rate question with a scrap question that the circle-limit indicator already answers. Originals-missing ('12B-*') is unreachable - nothing records it (O21)." } },
+      note: "The without-S.E. rows. An S.E. job reads 12A-a1 / 12A-b1 from Schedule-A directly and never this code, as the HV S.E. answer on the inspection selects (G61). Copper priced from 12A-a since F52; it previously blocked, which mixed a rate question with a scrap question that the circle-limit indicator already answers. Originals-missing ('12B-*') is unreachable - nothing records it (O21)." } },
 
   { masterCode: '13A', masterName: 'LV Coil (generic fallback)',
     variants: { axis: 'winding-material', options: { Aluminium: '13A-b', Copper: '13A-a' },
-      note: "As 12A. Originals-missing ('13B-*') likewise unreachable (O21)." } },
+      note: "Material as 12A, but ALWAYS without S.E.: there is no LV S.E. answer, by decision (G61). 13A-a1 / 13A-b1 are in Schedule-A and unused - an LV S.E. transformer would price without S.E. (a stated limit). Originals-missing ('13B-*') likewise unreachable (O21)." } },
 
   { masterCode: '14', masterName: 'Re-insulation LV Coil (generic fallback)',
     variants: { axis: 'winding-material', options: { Copper: '14-i', Aluminium: '14-ii' },

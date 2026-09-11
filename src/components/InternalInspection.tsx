@@ -15,6 +15,7 @@ import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExt
 import { getJobFullEstimate, checkJobCircleLimit, coreTypeHasCircleLimit } from '../lib/estimateCalc';
 import { atForJob, matchesAtScope } from '../lib/AgencyContext';
 import { estimateMasterLink } from '../lib/settingsLinks';
+import { issuedMarks } from '../lib/issuedDocuments';
 import { OtherTenderNote } from './OtherTenderNote';
 import { classifyCoreType } from './SingleJobEstimateReport';
 
@@ -45,6 +46,22 @@ const hvCoilsPerLimb = (coreType?: string): string =>
 
 export interface InternalData {
   windingType: string;
+  /**
+   * S.E. (super-enamelled) conductor on the HV winding: 'WITH_SE' | 'WITHOUT_SE', or '' for not
+   * answered (AUDIT G61). Selects Schedule-A 12A with or without S.E.
+   *
+   * ⚠ HV ONLY - THERE IS NO LV FIELD, BY DECISION. The tender prices LV S.E. too: 13A-a1 and
+   * 13A-b1 (and 13B-a1 / 13B-b1, originals missing) are transcribed in both schedules. But LV is
+   * never super-enamelled in practice, so those rows go unused. STATED LIMIT: if an LV S.E.
+   * transformer ever arrives, the tender prices it at 13A-b1 and this app has no way to say so -
+   * its LV coil prices without S.E.
+   *
+   * ⚠ NEVER DEFAULTED, UNLIKE `windingType` BESIDE IT. A pre-filled answer is submitted unread, and
+   * this one moves the most expensive line on the estimate by Rs 50/kg. Blank is a real, selectable
+   * state: the save refuses it, and an inspection saved before this field existed prices without
+   * S.E. and says so on the estimate.
+   */
+  hvSeConductor: string;
   hvCoilLimb: string;
   damR: string;
   damY: string;
@@ -216,6 +233,8 @@ export default function InternalInspection() {
 
         initialForms[j.id] = {
           windingType: existingInsp.data.windingType || 'AL',
+          // As stored, or not set. Never defaulted - see InternalData.hvSeConductor.
+          hvSeConductor: existingInsp.data.hvSeConductor ?? '',
           condition: existingInsp.data.condition || 'Repairable',
           hvCoilLimb: existingInsp.data.hvCoilLimb || hvCoilsPerLimb(j.coreType),
           damR,
@@ -247,6 +266,7 @@ export default function InternalInspection() {
       } else {
         initialForms[j.id] = {
           windingType: 'AL',
+          hvSeConductor: '',
           condition: 'Repairable',
           hvCoilLimb: hvCoilsPerLimb(j.coreType),
           damR: '',
@@ -505,6 +525,9 @@ export default function InternalInspection() {
 
       const missing: string[] = [];
       if (!jobData.windingType || jobData.windingType.trim() === '') missing.push('Winding Type');
+      // THE SAVE BOUNDARY (AUDIT G61). Every inspection saved from here on carries the answer; one
+      // saved before this field existed keeps pricing without S.E. until someone re-saves it.
+      if (jobData.hvSeConductor !== 'WITH_SE' && jobData.hvSeConductor !== 'WITHOUT_SE') missing.push('HV S.E. (S.E. / Not S.E.)');
       if (!jobData.condition || jobData.condition.trim() === '') missing.push('Condition (Repairable / Scrap)');
       if (!jobData.wasring || jobData.wasring.trim() === '') missing.push('WAS Ring');
       if (!jobData.inPnt || jobData.inPnt.trim() === '') missing.push('Inside Paint');
@@ -524,6 +547,38 @@ export default function InternalInspection() {
 
     if (incompleteJobs.length > 0) {
       alert(`⚠️ Blank or incomplete internal inspection forms are NOT acceptable!\n\nPlease fill in all required inspection details before saving:\n\n${incompleteJobs.join('\n')}`);
+      return;
+    }
+
+    // ⚠ A FIGURE CHANGING UNDER AN ISSUED DOCUMENT IS A DELIBERATE ACT, ASKED BEFORE SAVING (G61).
+    //
+    // Estimates and bills are recomputed from the inspection, not reproduced from a stored figure.
+    // So answering S.E. on a job whose estimate or bill has already gone out changes what that
+    // document prints the next time it is opened. That can be right - but it has to be chosen, the
+    // way consenting to repair within the limit is, not discovered after the save.
+    //
+    // It compares what each coil PRICES AT, not the raw answers: an inspection saved before these
+    // fields existed prices without S.E., so answering "without" changes nothing and is not asked
+    // about. `issuedMarks` is the app's one definition of "a document left the agency".
+    const pricedSe = (v: unknown) => (v === 'WITH_SE' ? 'with S.E.' : 'without S.E.');
+    const issuedChanges: string[] = [];
+    for (const job of mrJobs) {
+      if (job.status === 'Dispatched' || job.isClosed === true) continue;
+      const marks = issuedMarks(job);
+      if (marks.length === 0) continue;
+      const jobData = formsData[job.id];
+      const stored = inspections.find(i => i.jobId === job.id)?.data || {};
+      const changes: string[] = [];
+      if (Number(jobData.totWt) > 0 && pricedSe(stored.hvSeConductor) !== pricedSe(jobData.hvSeConductor)) {
+        changes.push(`HV coil ${pricedSe(stored.hvSeConductor)} -> ${pricedSe(jobData.hvSeConductor)}`);
+      }
+      if (changes.length) issuedChanges.push(`Job #${job.jobNo} (${marks.join('; ')}): ${changes.join(', ')}`);
+    }
+    if (issuedChanges.length > 0 && !window.confirm(
+      `⚠️ This save changes figures on documents that have already been issued.\n\n`
+      + `Estimates and bills are recomputed from the inspection, so these will print differently from the copies already sent:\n\n`
+      + `${issuedChanges.join('\n')}\n\nSave anyway?`
+    )) {
       return;
     }
     
@@ -550,6 +605,7 @@ export default function InternalInspection() {
           data: {
             inspectionDate: internalInspectionDate,
             windingType: jobData.windingType,
+            hvSeConductor: jobData.hvSeConductor,
             condition: jobData.condition || 'Repairable',
             hvCoilLimb: jobData.hvCoilLimb,
             damR: jobData.damR,
@@ -757,6 +813,31 @@ export default function InternalInspection() {
       {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
     </select>
   );
+
+  /**
+   * HV S.E. - its own control, because renderSelectField has no blank option.
+   *
+   * A controlled select whose value matches no option DISPLAYS the first option while holding
+   * '' - so through renderSelectField an unanswered field would look answered. Blank is a real,
+   * selectable option here, and the control stays marked until the question is answered (G61).
+   */
+  const renderHvSeSelect = (jobId: string) => {
+    const value = formsData[jobId]?.hvSeConductor || '';
+    return (
+      <select
+        title="HV winding: super-enamelled (S.E.) conductor? Schedule-A prices the HV coil with and without S.E. separately (12A)."
+        value={value}
+        onChange={(e) => handleChange(jobId, 'hvSeConductor', e.target.value)}
+        className={`px-1 py-1 text-[10px] font-bold border rounded focus:ring-1 focus:ring-blue-500 text-center shadow-2xs cursor-pointer w-20 ${
+          value ? 'border-slate-300 bg-white text-slate-800' : 'border-rose-400 bg-rose-50 text-rose-700'
+        }`}
+      >
+        <option value=""></option>
+        <option value="WITH_SE">S.E.</option>
+        <option value="WITHOUT_SE">Not S.E.</option>
+      </select>
+    );
+  };
 
   // Live Clause 4.0 Circle Estimate Power Limit indicator - CRGO jobs only (Amorphous
   // / Wound Core are fixed-rate by capacity, so nothing the operator enters here can
@@ -1046,6 +1127,9 @@ export default function InternalInspection() {
                           <th className="border border-black p-0.5 w-6" rowSpan={2} title="DC (Dismantling Charge / Dismantling of Transformer)">DC</th>
                           <th className="border border-black p-0.5 w-6" rowSpan={2}>Insula</th>
                           <th className="border border-black p-0.5 w-14" rowSpan={2}>Condition</th>
+                          {/* HV S.E. on paper too (AUDIT G61). The sheet's stated widths total ~850px of ~1,030px
+                              printable on landscape A4, so one nowrap column fits. Not verified in a print preview. */}
+                          <th className="border border-black p-0.5 w-12 whitespace-nowrap" rowSpan={2}>HV S.E.</th>
                         </tr>
                         {/* Sub-Headers for HV & LV Phases */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
@@ -1102,6 +1186,10 @@ export default function InternalInspection() {
                               <td className="border border-black p-0.5">{data.insula || 'Y'}</td>
                               <td className={`border border-black p-0.5 font-bold ${data.condition === 'Scrap' ? 'text-red-600' : 'text-slate-800'}`}>
                                 {data.condition || 'Repairable'}
+                              </td>
+                              {/* Blank prints blank: an unanswered inspection is not "Not S.E." on paper either. */}
+                              <td className="border border-black p-0.5 font-bold whitespace-nowrap">
+                                {data.hvSeConductor === 'WITH_SE' ? 'S.E.' : data.hvSeConductor === 'WITHOUT_SE' ? 'Not S.E.' : ''}
                               </td>
                             </tr>
                           );
@@ -1466,7 +1554,7 @@ export default function InternalInspection() {
 
           <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm print:hidden">
             <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
-            <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, WAS Ring, and fill damaged coil weights before submitting.</span>
+            <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, HV S.E., WAS Ring, and fill damaged coil weights before submitting.</span>
           </div>
 
           <div className="bg-white rounded-lg border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
@@ -1522,6 +1610,10 @@ export default function InternalInspection() {
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>INSU<br/>LA</th>
                       <th className="p-2 bg-rose-50/80 text-[10px] font-bold text-rose-950 uppercase tracking-wider min-w-[95px] text-center" rowSpan={2}>
                         CONDITION
+                      </th>
+                      {/* HV S.E. - after Condition, before the circle-limit indicator (AUDIT G61). HV only. */}
+                      <th className="p-2 bg-amber-50/80 text-[10px] font-bold text-amber-950 uppercase tracking-wider min-w-[90px] border-r border-slate-200 text-center" rowSpan={2} title="HV winding: super-enamelled conductor? Schedule-A 12A prices with and without S.E. separately. Required on save.">
+                        HV S.E.
                       </th>
                       <th className="p-2 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[180px] text-center" rowSpan={2} title="Live estimate cost vs Clause 4.0 Circle Estimate Power Limit - CRGO jobs only">
                         Est. vs Circle Limit
@@ -1695,6 +1787,9 @@ export default function InternalInspection() {
                             <option value="Repairable">Repairable</option>
                             <option value="Scrap">Scrap</option>
                           </select>
+                        </td>
+                        <td className="p-1 border-r border-slate-200 text-center bg-amber-50/30">
+                          {renderHvSeSelect(job.id)}
                         </td>
                         <td className="p-1.5 text-center align-top">
                           {renderCircleLimitIndicator(job)}

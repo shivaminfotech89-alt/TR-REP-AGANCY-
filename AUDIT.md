@@ -4885,6 +4885,13 @@ a sweep complete against its own pattern, wrong about the domain.
 > - UGVCL-2026: 12A-b 165 against 12A-b1 215, and 13A-b 150 against 13A-b1 201.
 >
 > The fixed selection lives in `SingleJobEstimateReport`, at the HV and LV coil lines.
+>
+> **DECIDED, 2026-09-11: NO S.E. ROWS IN THE ESTIMATE MASTER.** Schedule-A holds sixteen coil rows
+> per tender - with and without S.E., originals present and missing, copper and aluminium. The master
+> holds four, all without S.E. **That is not an unfinished set.** Pricing reads Schedule-A whenever
+> the master has no row, so an S.E. job prices 12A-b1 and 13A-b1 correctly without a master row.
+> Adding one buys nothing and creates another cell that can disagree with the tender. Anyone counting
+> sixteen schedule rows against four master rows is looking at this decision, not a gap to fill.
 
 Sixteen Schedule-A entries split on it — `12A`, `12B`, `13A`, `13B`, each Copper/Aluminium
 x with/without — and the rate difference is Rs 50/kg on Aluminium, Rs 50/kg on Copper.
@@ -13360,3 +13367,116 @@ real modules through esbuild by hand.
 - `npm test`: 25 tests in 1 file pass.
 - The three negative controls above.
 - `tsc --noEmit`, `vite build` and the hooks guard pass.
+
+
+## G61. HV S.E. is an answer on the inspection now, not an agency constant
+
+The operator's answer that these agencies do not use super-enamelled conductor has changed (O20, F47):
+S.E. conductor is used. The estimate priced every HV coil from the without-S.E. row, 12A-b or 12A-a,
+as a hardcoded constant.
+
+### WHAT WAS BUILT
+
+1. **One field, `hvSeConductor`, on the internal inspection** - blank / S.E. / Not S.E. - in its own
+   column after Condition and before Est. vs Circle Limit.
+   - **Blank is a real, selectable option, and nothing defaults it** - unlike Winding Type beside it,
+     which pre-fills AL. A pre-filled answer is submitted unread, and this one moves the most
+     expensive line on the estimate by Rs 50/kg.
+   - **It has its own select**, because `renderSelectField` offers no blank option: a controlled
+     select whose value matches no option shows the first option while holding `''`, so an
+     unanswered field would have looked answered.
+2. **The save boundary.** The form refuses to save a blank answer. An inspection saved before the
+   field existed prices without S.E. - exactly as before - and the estimate says so on screen.
+   Today that is 43 of the 77 live jobs.
+3. **The issued-document warning.** Before saving, the form asks for confirmation when all three hold:
+   - the job carries an issued document (`issuedMarks`, the app's one definition);
+   - it has an HV coil weight;
+   - the answer changes what the HV coil prices at. Unanswered prices without S.E., so answering
+     "Not S.E." on an old inspection changes nothing and is not asked about.
+
+   It lists each job and its documents. Estimates recompute rather than reproduce, so a figure
+   changing under an issued document has to be chosen, the way consent to repair within the limit
+   is.
+4. **Pricing, in both tenders.** S.E. selects 12A-b1 / 12A-a1: 213 / 407 under UGVCL-2020, 215 / 411
+   under UGVCL-2026. An unrecognised value blocks rather than guesses.
+   - **⚠ The S.E. lookup names no master code.** The master's `12A(b)` row holds the without-S.E.
+     figure, and `resolveRate`'s copy test compares a master cell against the baseline of the row
+     being priced. A copied 163 would differ from 12A-b1's 213, read as a genuine override, and price
+     S.E. work at 163. Verified with a real override: 170 in `12A(b)` prices Not S.E. at 170 and S.E.
+     at 213.
+5. **The wording follows the answer.** An answered HV line reads "Aluminium SE" or "Aluminium".
+   - An unanswered one keeps the wording this estimate has always printed - "Aluminium SE", whatever
+     the rate - so an issued estimate reprints unchanged.
+   - The on-screen notice says plainly that the old wording does not mean the S.E. rate was used.
+6. **The printed inspection sheet carries the column.** Its stated widths total about 850px of about
+   1,030px printable on landscape A4, so one nowrap column fits.
+   - Print-subtree hashes against HEAD: 12 of 13 printed documents are byte-identical, and the only
+     change is this sheet.
+   - **Not checked in a print preview.**
+
+### WHY THERE IS NO LV FIELD - A DECISION, WITH A STATED LIMIT
+
+**The tender prices LV S.E. too.** 13A-a1 and 13A-b1 - and 13B-a1 / 13B-b1, originals missing - are
+transcribed in both schedules. **But LV is never super-enamelled in practice**, so one HV answer is
+what the inspection records, and those rows stay unused.
+
+The field went one → two → one on the way here. The tender's separate rows, and an agency that set
+the HV rate and left LV alone, argued for two; the practical fact decided one.
+
+> **⚠ STATED LIMIT:** if an LV S.E. transformer ever arrives, the tender prices it at 13A-b1 and
+> this app has no way to say so - its LV coil prices without S.E. The line to change is the LV coil
+> in `SingleJobEstimateReport`, and the rows it needs are already in Schedule-A.
+
+**No S.E. rows were added to the estimate master** - a decision recorded in O20 and at the coil rows
+in `scheduleItemMap.ts`. Pricing reads Schedule-A when the master has no row.
+
+### GUJARAT ENERGY TRANSMISSION, AND THE ORDER
+
+On 2026-09-11 the agency's own account typed 213 - the with-S.E. rate - into AT 2020-21/01/1049's
+`12A(b)`, the without-S.E. row, at five capacities. All four of its jobs were inspected the same day,
+none has an issued document, and nothing records whether the work is S.E. The agency is being asked
+whether it is, and whether it is HV only.
+
+`scripts/admin/revert-at-1049-12Ab.js` puts the five cells back to 163, the agency's own figures. It
+ships in dry-run mode and **refuses to apply while 21GETS-45, -46 and -47 have no HV S.E. answer**
+(the scrap job is excluded).
+
+The order:
+1. this field is deployed;
+2. the answers are recorded on those inspections;
+3. the operator runs the revert.
+
+Until then the typed 213 still prices those jobs' HV coils whatever the answer - verified - which is
+exactly why the revert waits for the answers.
+
+### NOT DONE
+
+- **The Excel export of the inspection sheet** has no HV S.E. column.
+- **The estimate header's "Aluminium SE"** (`windingTypeStr`) still prints for every aluminium job,
+  whatever the rate. It is pre-existing and left alone; only the HV line's wording now follows the
+  answer.
+- **`scripts/hv-coil-se-exposure-console.js`** still states the old answer in its header. It is a
+  historical measurement script.
+
+### VERIFIED, AND NOT
+
+Passed:
+- `tsc --noEmit`, `vite build`, the hooks guard, and `npm test` (25).
+- **Regression:** all 77 live jobs priced by HEAD's builder and by the working tree's - **0 moved**.
+  No inspection records the field yet.
+- **Positive control, 20 checks:**
+  - unanswered, Not S.E., S.E. and an unrecognised value, under both tenders;
+  - copper under both tenders;
+  - LV untouched;
+  - the override case;
+  - AT 1049 as it stands.
+
+**⚠ THE FIRST REGRESSION RUN WAS BLIND.** The harness stubs every bare import, and its test treated
+the builder's absolute Windows path, `C:/…`, as one. Both "builders" were therefore stubs: all 77
+jobs returned no estimate, and the run reported "0 moved". It was caught only because the positive
+control then crashed on the same missing estimate. The harness now fails if no job produces an
+estimate - the G33 / G59 / G60 failure again, in a check written the same day as G60's.
+
+The harness lives in the session's scratchpad, not the repository. **The app was not run in a
+browser**: the form, the confirmation and the printed column are verified by reading and by the
+harness, not by use.

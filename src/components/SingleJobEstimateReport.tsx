@@ -314,6 +314,9 @@ export interface SingleJobEstimateData {
   /** Messages for applicable items whose rate couldn't be resolved. Non-empty means
    *  the total must not be shown/trusted - see rateErrors handling in the renderer. */
   rateErrors: EstimateRateError[];
+  /** ON SCREEN ONLY, never printed: what the estimate assumed because the inspection does not
+   *  record it - today, S.E. on an inspection saved before the question existed (AUDIT G61). */
+  notices?: string[];
 }
 
 export function buildSingleJobEstimateData(
@@ -373,6 +376,33 @@ export function buildSingleJobEstimateData(
   const windingMaterial = classifyWindingMaterial(internalData?.windingType);
   const isCopper = windingMaterial === 'Copper';
   const windingSuffix = isCopper ? 'Copper' : 'Aluminium SE';
+
+  // S.E. CONDUCTOR ON THE HV WINDING - recorded on the internal inspection, never defaulted (G61).
+  //
+  //   'WITH_SE' / 'WITHOUT_SE'  select that row of Schedule-A 12A (a or b, with or without the -1)
+  //   not recorded              the inspection predates the question: priced WITHOUT S.E., exactly as
+  //                             before, and the estimate says so on screen (`notices`)
+  //   anything else             blocks - a value this does not understand is not evidence either way
+  //
+  // HV only. There is no LV answer, by decision - see the LV coil below for why, and for the limit.
+  const seAnswer = (raw: unknown): 'with' | 'without' | 'unrecorded' | 'unrecognised' => {
+    const v = String(raw ?? '').trim();
+    if (!v) return 'unrecorded';
+    if (v === 'WITH_SE') return 'with';
+    if (v === 'WITHOUT_SE') return 'without';
+    return 'unrecognised';
+  };
+  const hvSe = seAnswer(internalData?.hvSeConductor);
+  const notices: string[] = [];
+  /**
+   * The coil line's wording follows the ANSWER. An unanswered inspection keeps the wording this
+   * estimate has always printed - "Aluminium SE" on the HV line, whatever the rate - so an issued
+   * estimate reprints unchanged; an answered one names what was priced.
+   */
+  const coilLabel = (se: ReturnType<typeof seAnswer>, legacy: string) =>
+    se === 'with' ? `${isCopper ? 'Copper' : 'Aluminium'} SE`
+      : se === 'without' ? (isCopper ? 'Copper' : 'Aluminium')
+        : legacy;
 
   const rateErrors: EstimateRateError[] = [];
   if (atPercentageRaw === null) {
@@ -1108,9 +1138,11 @@ export function buildSingleJobEstimateData(
   if (hasInternalData && hvDamagedCoils > 0 && hvCoilWeight === 0) {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: ${hvDamagedCoils} HV coil(s) marked damaged but no per-coil weight ("Wt of Coil") was recorded, so the HV coil charge cannot be calculated.` });
   }
-  // WITHOUT S.E. - '12A-b', Rs 163/kg. An AGENCY FACT, confirmed by the operator: these
-  // agencies do not use super-enamelled conductor when rewinding, so the without-S.E.
-  // variant is the applicable one on both windings (AUDIT O20, F47).
+  // WITH OR WITHOUT S.E., AS THE INSPECTION RECORDS FOR THE HV WINDING (AUDIT G61).
+  //
+  // This was a constant - '12A-b' - on the operator's answer that these agencies do not use
+  // super-enamelled conductor (AUDIT O20, F47). That answer has changed: S.E. is used, and the
+  // tender prices it per winding. An unanswered inspection still prices without S.E.
   //
   // Supersedes the previous reasoning, which is worth stating because it was wrong in an
   // instructive way: '12A-b1' (with S.E., Rs 213/kg) was kept because it matched the rate
@@ -1119,25 +1151,39 @@ export function buildSingleJobEstimateData(
   // accepted document says the customer did not object, not that it was right. It
   // overcharged HV coil work by Rs 50/kg.
   //
-  // COPPER PRICES TOO, at '12A-a' Rs 357/kg - the without-S.E. variant, same axis and same
-  // agency fact that selects '12A-b' for aluminium. Copper used to block here on the
-  // grounds that '12A-a' (Rs 357) against '12A-a1' (Rs 407) could not be resolved; but the
-  // agency fact resolves the S.E. axis for BOTH materials, so blocking one and pricing the
-  // other was treating the same evidence two different ways.
+  // COPPER PRICES TOO - '12A-a' without S.E., '12A-a1' with. Copper used to block here on the
+  // grounds that '12A-a' (Rs 357) against '12A-a1' (Rs 407) could not be resolved; one answer
+  // now resolves the S.E. axis for BOTH materials, so blocking one and pricing the other would
+  // treat the same evidence two different ways.
   //
   // The block also carried an unstated second job - stopping copper rewinds that ought to
   // be scrapped. That is the circle-limit indicator's work, and it does it properly: it
   // compares the actual cost against the actual limit instead of inferring the answer from
   // the material. A copper rewind will breach the limit and be flagged; a minor copper
   // repair will not, and now prices instead of refusing.
-  const hvCoilScheduleValue = scheduleRate(isCopper ? '12A-a' : '12A-b');
-  const hvCoilRate = resolveRate(isCopper ? ['12A(a)', '12A'] : ['12A(b)', '12A'], hvCoilScheduleValue);
+  if (hvCoilApplies && hvSe === 'unrecognised') {
+    rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: HV S.E. reads "${String(internalData?.hvSeConductor)}" on the internal inspection, so the HV coil rate cannot be selected - Schedule-A prices it with and without S.E. separately. Answer HV S.E. on the internal inspection.` });
+  }
+  if (hvCoilApplies && hvSe === 'unrecorded') {
+    notices.push(`HV coil priced WITHOUT S.E.: this internal inspection was saved before S.E. was recorded.${isCopper ? '' : ' The line reads "Aluminium SE", the wording this estimate has always printed for aluminium - it does not mean the S.E. rate was used.'} Answer HV S.E. on the internal inspection to price it either way.`);
+  }
+  const hvWithSe = hvSe === 'with';
+  const hvCoilScheduleValue = scheduleRate(isCopper ? (hvWithSe ? '12A-a1' : '12A-a') : (hvWithSe ? '12A-b1' : '12A-b'));
+  // ⚠ WITH S.E. READS SCHEDULE-A ONLY - NEVER THE MASTER'S '12A(b)' / '12A(a)' ROWS.
+  //
+  // Those rows are the WITHOUT-S.E. figures, and the master deliberately has no S.E. rows (AUDIT
+  // O20). resolveRate's copy test compares a master cell against the baseline of the row being
+  // priced: a copied 163 in '12A(b)' differs from 12A-b1's 213, reads as a genuine override, and
+  // would price S.E. work at the without-S.E. rate. So the S.E. lookup names no master code.
+  const hvCoilRate = hvWithSe
+    ? resolveRate([], hvCoilScheduleValue)
+    : resolveRate(isCopper ? ['12A(a)', '12A'] : ['12A(b)', '12A'], hvCoilScheduleValue);
   recordErrorIfApplies(hvCoilApplies, hvCoilRate, 'HV Coil');
   const hvCoilAmt = hvCoilApplies ? hvCoilWeight * (hvCoilRate ?? 0) : 0;
   internalItems.push({
     sr: srCounter++,
     itemCode: '12A',
-    desc: `HV Coil(${windingSuffix})-N`,
+    desc: `HV Coil(${coilLabel(hvSe, windingSuffix)})-N`,
     unit: 'KG',
     qty: hvCoilWeight.toFixed(2),
     numQty: hvCoilWeight,
@@ -1158,11 +1204,14 @@ export function buildSingleJobEstimateData(
   if (hasInternalData && (lvDamCount > 0 || lvRiCount > 0) && !(Number(internalData?.wtOfCoilLv) > 0)) {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: LV coils marked ${lvDamCount ? `${lvDamCount} damaged` : ''}${lvDamCount && lvRiCount ? ' and ' : ''}${lvRiCount ? `${lvRiCount} for re-insulation` : ''}, but no per-coil weight ("Wt of Coil LV") was recorded, so the LV charge cannot be calculated.` });
   }
-  // WITHOUT S.E. - '13A-b', Rs 149/kg. Same agency fact as the HV coil above: these
-  // agencies do not use super-enamelled conductor, so both windings take the without-S.E.
-  // variant. This side was already correct; the reason is stated here too so the two
-  // sites carry the same justification rather than one being explained and the other
-  // silently agreeing with it.
+  // ALWAYS WITHOUT S.E. - '13A-b' Rs 149/kg, '13A-a' copper. There is no LV S.E. answer, by
+  // decision (AUDIT G61). The tender does price LV S.E. - 13A-a1 and 13A-b1, and 13B-a1 / 13B-b1
+  // for originals missing, all transcribed in both schedules - but LV is never super-enamelled in
+  // practice, so one HV answer is what the inspection records.
+  //
+  // ⚠ STATED LIMIT: an LV S.E. transformer would price here WITHOUT S.E., and nothing in the app
+  // can record otherwise. If one ever arrives, this is the line to change, and the rows it needs
+  // are already in Schedule-A.
   //
   // Copper prices at '13A-a' Rs 314/kg, for the reasons given on the HV coil above.
   // Master rows are '13A(a)' copper and '13b(b)' aluminium - the lower-case 'b' in the
@@ -1344,7 +1393,8 @@ export function buildSingleJobEstimateData(
     excludedBase: Number(excludedBase.toFixed(2)),
     /** finalAmount minus those three, with the AT percentage applied. Clause 4.0 measures THIS. */
     comparisonTotal,
-    rateErrors
+    rateErrors,
+    notices,
   };
 }
 
@@ -1596,6 +1646,16 @@ export default function SingleJobEstimateReport({
         )}
         {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
             the operator about a SETTING, not part of the estimate the division receives. */}
+        {(estimate.notices?.length ?? 0) > 0 && (
+          // ⚠ ON SCREEN ONLY (AUDIT G61). What this estimate ASSUMED because the inspection does not
+          // record it. The printed estimate is unchanged by it.
+          <div className="print:hidden mb-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3.5 py-2.5">
+            <p className="text-sm font-bold text-amber-900">Priced on an answer the inspection does not record</p>
+            <ul className="text-xs text-amber-900 mt-1 list-disc list-inside space-y-0.5">
+              {estimate.notices!.map((n, i) => <li key={i}>{n}</li>)}
+            </ul>
+          </div>
+        )}
         {paginatedByLetterhead && (
           <div className="print:hidden mb-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3.5 py-2.5">
             <p className="text-sm font-bold text-amber-900">
@@ -1816,6 +1876,16 @@ export default function SingleJobEstimateReport({
     <>
         {/* ⚠ ON SCREEN ONLY — never on the printed document (AUDIT G7). It is a message to
           the operator about a SETTING, not part of the estimate the division receives. */}
+      {(estimate.notices?.length ?? 0) > 0 && (
+        // ⚠ ON SCREEN ONLY (AUDIT G61). What this estimate ASSUMED because the inspection does not
+        // record it. The printed estimate is unchanged by it.
+        <div className="print:hidden mb-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3.5 py-2.5">
+          <p className="text-sm font-bold text-amber-900">Priced on an answer the inspection does not record</p>
+          <ul className="text-xs text-amber-900 mt-1 list-disc list-inside space-y-0.5">
+            {estimate.notices!.map((n, i) => <li key={i}>{n}</li>)}
+          </ul>
+        </div>
+      )}
       {paginatedByLetterhead && (
         <div className="print:hidden mb-3 rounded-lg border-2 border-amber-300 bg-amber-50 px-3.5 py-2.5">
           <p className="text-sm font-bold text-amber-900">
