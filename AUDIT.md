@@ -16069,3 +16069,86 @@ money.
 **Deploy:** **functions** (the guard and the transaction live there) **and hosting** - a push to `main` (O71). The
 button calls the same callable name as before, so an un-deployed function reports itself as not deployed rather than
 failing silently (F75, F77).
+
+---
+
+## G74. Renaming an MR moved the jobs and detached the oil
+
+**Reported:** editing the MR number in Full Edit and saving does not change it.
+
+### ⚠ THE REPORTED SYMPTOM IS NOT EXPLAINED BY THE CODE, AND IS STILL OPEN
+
+Diagnosed before changing anything:
+- **The save DOES write `mrNo` to every job** - `MrLedger.tsx:798` for existing jobs, `:832` for new ones. The field
+  is bound and editable (`:1640`), and the modal already showed "Will rename MR for all units".
+- **`mrNo` was not caught by G11.** That change made `division` and `repairType` per-job, and G24 then locked those
+  controls. `mrNo` stays an MR-level value, which is correct: it is the group's identity, so it must be written from
+  the header onto every row.
+- **The rules permit it:** `isValidJob` asks only that `mrNo` be a string of 1-100 characters.
+- **Only 2 of 30 MR groups would abort** at `atForEditingMr()` - **MR 9344** (2 jobs, no `atId`) and **MR 1** (1 job,
+  no `atId`) - and both alert rather than fail silently.
+
+**So the write path is sound, and what the owner saw remains unexplained** unless the MR edited was one of those
+two. The owner is checking which. **Everything below was found while diagnosing it and is real either way.**
+
+### What keys on `mrNo`, and what does not follow a rename
+
+| Holder | Link | Follows? |
+|---|---|---|
+| jobs | the `mrNo` field | **Yes** - the save writes every one |
+| inspections | `jobId` only - they carry no `mrNo` at all (0 of 144, `inspectionLink.js`) | Yes, through their job |
+| estimates, bills, challans, testing | grouped from jobs by `mrNo` | Yes |
+| job-number prefix and counter | keyed on **division** | Not affected |
+| allotment check | keyed on **division + core type** | Not affected |
+| **oilTransactions** | **its own `mrNo` field, matched by plain string equality** | **⚠ NO** |
+
+**⚠ A RENAME WAS A DATA-DETACHING OPERATION.** `getMrDateIso` and `computeOilBalance` match `tx.mrNo` against the
+job's `mrNo` as text. Renaming the jobs left the oil row on the old number: the litres the division issued detached
+from the MR, the balance stopped pairing shortage against receipt, and nothing said so.
+
+**And nothing refused a merge.** New Job checks for a duplicate MR at intake; the rename had no such check, so
+renaming 1234 onto a number another MR already used folded two MRs into one on the next fetch, with no record of
+which transformers came from which.
+
+### Built
+
+- **`src/lib/mrRename.ts`**, pure and tested: `collisionJobs`, `oilRowsForMr`, `unmatchedOilRows`, `litresOf`,
+  `describeRename`.
+- **The merge refusal**, naming the clashing job numbers and their divisions.
+  - **⚠ CHECKED AGAINST THE ACCOUNT, NOT AGAINST WHAT THE SCREEN FETCHED.** `fetchJobs` is scoped to the active
+    tender, so an MR under another tender is not in `mrGroups` and a merge with it would have passed unseen. The
+    check queries the database.
+- **The oil moves in the same batch as the jobs.** A separate write could leave the jobs renamed and the oil behind,
+  which is the detachment itself by another route.
+- **A confirmation naming what moves** - transformers, and the oil records with their litres - before anything is
+  written.
+- **A failed read aborts the rename.** Renaming without knowing what else holds the number, or which oil rows must
+  move, is the defect this exists to prevent (G34, G70).
+- **The notification says what happened:** "MR 1234 renamed to 7777: 4 transformer(s) and 2 oil record(s) renumbered
+  with it", or that no oil carried the old number.
+
+### The Oil Account now shows receipts that match no MR
+
+**⚠ MR 5585, 2,110 litres, DEESA - the single live oil transaction, and no job anywhere carries that number.**
+Reported, **not fixed**: either the receipt was entered against the wrong MR or the transformers were booked under a
+different number, and only the agency's paper says which.
+
+- A rose section on the Oil Account, the same treatment the unassigned-oil banner gets, for a different question:
+  that one belongs to no **tender**, this one to no **MR**.
+- **Shown in every tender mode.** The unassigned banner hides under "all tenders" because those rows are counted in
+  the figures there; a receipt attached to no MR is unattributed whichever tender is selected.
+- **⚠ COMPUTED AGENCY-WIDE, NOT FROM THE TENDER-SCOPED LISTS.** `transactions` and `jobs` are narrowed to the
+  selected tender, and matching against those would have reported every OTHER tender's receipts as unaccounted for.
+- It states that the litres ARE counted in the received total - what is missing is the MR they belong to - and names
+  both routes out: correct the number on the receipt, or rename the MR, which now moves its oil.
+- A row carrying no MR number at all is reported separately from one whose number has no transformers.
+
+**Cost:** two extra queries, on a rename only - jobs by `mrNo` and the agency's oil, both indexed (G69).
+
+**Verified:** tsc; **142 tests, 14 new**; build; hooks guard, 47 files.
+- **⚠ NOT RUN AGAINST THE DATABASE.** No rename has been performed: the batch, the merge refusal and the banner have
+  never executed against live data.
+- One of my own tests asserted the opposite of the scoping rule - that another agency holding the same MR number
+  counts as a match - and was corrected rather than the code.
+
+**Deploy:** hosting - a push to `main` (O71).

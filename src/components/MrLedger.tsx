@@ -18,6 +18,7 @@ import { issuedMarks } from '../lib/issuedDocuments.js';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { CARD, LABEL, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import { inspectionsForJob } from '../lib/inspectionLink.js';
+import { collisionJobs, oilRowsForMr, describeRename } from '../lib/mrRename';
 import { 
   Loader2, 
   Search, 
@@ -680,6 +681,80 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     }
 
     /**
+     * ⚠ RENAMING AN MR IS NOT A FIELD EDIT - IT MOVES A GROUP, AND TWO THINGS DO NOT FOLLOW BY THEMSELVES
+     * (AUDIT G74).
+     *
+     * There is no MR document: an MR is jobs sharing an `mrNo` string. The loop below writes the new number onto
+     * every job, which is right and was never the gap. The gaps were:
+     *
+     *   1. NOTHING REFUSED A MERGE. Renaming 1234 onto a number another MR already uses folded two MRs into one on
+     *      the next fetch, with no record of which jobs came from which.
+     *   2. OIL DID NOT FOLLOW. `oilTransactions` is its own collection with its own `mrNo`, matched to an MR by
+     *      plain string equality - so a rename detached the litres the division issued, silently.
+     *
+     * ⚠ THE COLLISION IS CHECKED AGAINST THE ACCOUNT, NOT AGAINST WHAT THIS SCREEN FETCHED. `fetchJobs` is scoped
+     * to the active tender, so an MR under another tender would not be in `mrGroups` and a merge with it would pass
+     * unseen. The query below asks the database.
+     */
+    const newMrNo = editingMr.mrNo.trim();
+    const oldMrNo = String(editingMr.originalMrNo ?? '').trim();
+    const isRename = newMrNo !== oldMrNo;
+    let oilToRenumber: Array<{ id: string; netLiters?: number; mrNo?: string; agencyId?: string }> = [];
+
+    if (isRename) {
+      let existing: any[] = [];
+      let agencyOil: any[] = [];
+      try {
+        const [clashSnap, oilSnap] = await Promise.all([
+          getDocs(query(
+            collection(db, 'jobs'),
+            where('ownerId', '==', auth.currentUser.uid),
+            where('mrNo', '==', newMrNo),
+          )),
+          getDocs(query(
+            collection(db, 'oilTransactions'),
+            where('ownerId', '==', auth.currentUser.uid),
+            where('agencyId', '==', activeAgency.id),
+          )),
+        ]);
+        existing = clashSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+        agencyOil = oilSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      } catch (readErr) {
+        // ⚠ A FAILED READ ABORTS THE RENAME. Renaming without knowing what else carries the number, or which oil
+        // rows must move with it, is the detachment this block exists to prevent (AUDIT G34, G70).
+        console.error('Could not check the new MR number:', readErr);
+        alert('Could not check whether that MR number is already in use, or which oil records carry the old one. Nothing was saved - try again.');
+        return;
+      }
+
+      const clash = collisionJobs({
+        newMrNo,
+        agencyId: activeAgency.id,
+        jobs: existing,
+        movingJobIds: editingMr.jobs.map((j: any) => String(j.id ?? '')).filter(Boolean),
+      });
+      if (clash.length > 0) {
+        alert([
+          `MR ${newMrNo} already exists and holds ${clash.length} transformer(s).`,
+          '',
+          clash.slice(0, 10).map((j: any) => `${j.jobNo || '(no job number)'}${j.division ? ` — ${j.division}` : ''}`).join('\n'),
+          clash.length > 10 ? `…and ${clash.length - 10} more` : '',
+          '',
+          'Renaming onto it would merge two MRs into one, and nothing afterwards could say which transformers came from which. Use a number that is free, or cancel the other MR first.',
+        ].filter(Boolean).join('\n'));
+        return;
+      }
+
+      oilToRenumber = oilRowsForMr(oldMrNo, activeAgency.id, agencyOil) as typeof oilToRenumber;
+
+      const ok = window.confirm(
+        describeRename({ fromMrNo: oldMrNo, toMrNo: newMrNo, jobCount: editingMr.jobs.length, oilRows: oilToRenumber })
+        + '\n\nEverything else - inspections, estimates, bills and challans - follows the jobs.',
+      );
+      if (!ok) return;
+    }
+
+    /**
      * ⚠ A REMOVED ROW CANNOT TAKE AN ISSUED DOCUMENT WITH IT (AUDIT G3).
      *
      * This loop deletes every job the operator removed from the edit modal, and it checked
@@ -864,6 +939,13 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
         }
       }
 
+      // 3. ⚠ OIL RECORDS CARRYING THE OLD MR NUMBER MOVE WITH IT, IN THE SAME BATCH (AUDIT G74). A separate
+      //    write could leave the jobs renamed and the oil behind - which is the detachment itself, arrived at by
+      //    another route. `oilToRenumber` is empty unless this save is a rename.
+      for (const tx of oilToRenumber) {
+        batch.update(doc(db, 'oilTransactions', tx.id), { mrNo: newMrNo });
+      }
+
       await batch.commit();
 
       // ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (ACTIVE JOBS ONLY)
@@ -899,7 +981,12 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
       setNotification({
         type: 'success',
-        message: `✓ MR #${editingMr.mrNo} and all ${editingMr.jobs.length} transformer records updated successfully!`
+        message: isRename
+          ? `✓ MR ${oldMrNo} renamed to ${newMrNo}: ${editingMr.jobs.length} transformer(s)`
+            + (oilToRenumber.length > 0
+              ? ` and ${oilToRenumber.length} oil record(s) renumbered with it.`
+              : ', and no oil record carried the old number.')
+          : `✓ MR #${editingMr.mrNo} and all ${editingMr.jobs.length} transformer records updated successfully!`
       });
       setTimeout(() => setNotification(null), 5000);
 

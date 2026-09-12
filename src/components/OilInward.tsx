@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { formatDDMMYYYY, getMrDateIso } from '../lib/utils';
 import { describeOil } from '../lib/oilBalance';
+import { unmatchedOilRows, litresOf } from '../lib/mrRename';
 import { CARD, CARD_PAD, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import {
   Droplet,
@@ -101,6 +102,20 @@ export default function OilInward() {
   const [unassignedTx, setUnassignedTx] = useState<OilTransaction[]>([]);
   const [unassignedJobCount, setUnassignedJobCount] = useState(0);
   const [showUnassignedOil, setShowUnassignedOil] = useState(false);
+  /**
+   * ⚠ OIL RECEIVED AGAINST AN MR NUMBER NO JOB CARRIES (AUDIT G74).
+   *
+   * `oilTransactions` is its own collection holding its own `mrNo`, matched to an MR by plain string equality. A
+   * receipt whose number belongs to no job is in no MR's account - money the division issued that the app cannot
+   * attribute - and until now it was visible only to a census. It is still COUNTED in the received total; what is
+   * missing is the MR it belongs to.
+   *
+   * ⚠ HELD AGENCY-WIDE, NOT FROM THE TENDER-SCOPED LISTS. `transactions` and `jobs` above are narrowed to the
+   * selected tender, and matching against those would report every OTHER tender's receipts as unaccounted for.
+   */
+  const [agencyTx, setAgencyTx] = useState<OilTransaction[]>([]);
+  const [agencyJobs, setAgencyJobs] = useState<Array<{ mrNo?: string; agencyId?: string }>>([]);
+  const [showUnmatchedOil, setShowUnmatchedOil] = useState(false);
   const [jobs, setJobs] = useState<any[]>([]);
   const [inspections, setInspections] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -278,6 +293,10 @@ export default function OilInward() {
       setUnassignedTx(allTx.filter(isUnassigned));
       setUnassignedJobCount(allJobs.filter(isUnassigned).length);
 
+      // Agency-wide, for the unmatched check only - see the state declaration (AUDIT G74).
+      setAgencyTx(allTx);
+      setAgencyJobs(allJobs.map((j: any) => ({ mrNo: j.mrNo, agencyId: j.agencyId })));
+
       const inspDocs = inspSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
       setInspections(inspDocs.filter((i: any) => i.type === "External"));
     } catch (error) {
@@ -432,6 +451,16 @@ ${intakeGate.reason}`);
       grossLitersManual: false,
     });
   };
+
+  /**
+   * Oil receipts naming an MR that does not exist, or naming none at all (AUDIT G74). Shown in every tender mode:
+   * unlike the unassigned banner - which hides under "all tenders" because those rows are counted in the figures
+   * there - a receipt attached to no MR is unattributed whichever tender is selected.
+   */
+  const unmatchedOil = useMemo(
+    () => unmatchedOilRows(agencyTx as any, agencyJobs as any, activeAgency?.id),
+    [agencyTx, agencyJobs, activeAgency?.id],
+  );
 
   const mrSummary = useMemo(() => {
     const summary: Record<
@@ -831,6 +860,66 @@ ${intakeGate.reason}`);
           </p>
         </div>
       )}
+      {/* ⚠ OIL RECEIVED AGAINST AN MR NUMBER NO JOB CARRIES (AUDIT G74). The same treatment the unassigned oil
+          gets below, for a different question: that one belongs to no TENDER, this one to no MR. It is shown in
+          every tender mode, because an unattributed receipt is unattributed whichever tender is selected. */}
+      {unmatchedOil.length > 0 && (() => {
+        const litres = litresOf(unmatchedOil.map(u => u.tx));
+        return (
+          <div className="bg-rose-50 border-2 border-rose-300 rounded-xl overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowUnmatchedOil(o => !o)}
+              className="w-full text-left p-3.5 flex items-start gap-2.5 hover:bg-rose-100/60"
+            >
+              <Droplet className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-bold text-rose-900 flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-600 shrink-0" />
+                  {unmatchedOil.length} oil receipt{unmatchedOil.length === 1 ? '' : 's'}
+                  {' '}({litres.toFixed(2)} LTR) name an MR with no transformers
+                </p>
+                <p className="text-xs text-rose-800 mt-0.5">
+                  These litres were issued by the division and are counted in the received total, but no job carries
+                  the MR number on them &mdash; so they belong to no MR&rsquo;s account. Either the receipt was
+                  entered against the wrong MR, or the transformers were booked under a different number. The
+                  agency&rsquo;s paperwork says which: correct the number on the receipt here, or rename the MR in
+                  the MR Ledger, which moves its oil with it.
+                </p>
+              </div>
+              <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-rose-600 text-white">
+                {showUnmatchedOil ? 'Hide' : 'Show'}
+              </span>
+            </button>
+
+            {showUnmatchedOil && (
+              <div className="border-t-2 border-rose-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
+                {unmatchedOil.map(({ tx, reason }) => (
+                  <div key={tx.id} className="p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
+                    <span className="font-mono tabular-nums font-bold text-slate-900">
+                      MR {tx.mrNo || '(none)'}
+                    </span>
+                    <span className="text-slate-600">{tx.division || '(no division)'}</span>
+                    <span className="font-mono tabular-nums font-bold text-slate-900">
+                      {(Number((tx as any).netLiters) || 0).toFixed(2)} LTR
+                    </span>
+                    <span className="text-slate-500">
+                      {(() => {
+                        const ms = parseDateToTimestamp((tx as any).date);
+                        return ms ? formatDDMMYYYY(new Date(ms).toISOString().slice(0, 10)) : '(no date)';
+                      })()}
+                    </span>
+                    <span className="text-rose-700 font-semibold">
+                      {reason === 'no-mr-number' ? 'no MR number recorded' : 'no transformer carries this MR number'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
       {/* OIL BELONGING TO NO TENDER — reachable, countable, and NOT in the balance above
           (AUDIT F87). The same treatment the unassigned jobs backlog gets in MrLedger, and
           for the same reason: a filter working exactly as written while litres the DISCOM is
