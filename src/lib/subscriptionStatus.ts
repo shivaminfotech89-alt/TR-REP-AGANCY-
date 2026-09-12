@@ -33,6 +33,15 @@ export type SubscriptionRecord = {
   origin?: string;
 
   /**
+   * Written beside the amount by the payment functions, and declared here so the document that RENDERS a payment -
+   * the receipt - reads them by name instead of casting past the type (AUDIT G71).
+   */
+  currency?: string;
+  ownerEmail?: string;
+  agencyName?: string;
+  razorpayOrderId?: string;
+
+  /**
    * ⚠ CANCELLATION IS A DIFFERENT AXIS FROM PROVENANCE, WHICH IS WHY IT IS NOT A FIFTH STATUS
    * (AUDIT G40). `active`, `granted` and `admin` say how a subscription CAME TO BE. Cancelled
    * says how it ENDED - and something that was granted and then cancelled is both, so folding

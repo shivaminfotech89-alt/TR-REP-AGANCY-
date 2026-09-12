@@ -11,7 +11,8 @@ import {
   createOrder, payWithRazorpay, CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined,
 } from '../lib/subscriptionClient';
 import { formatDDMMYYYY } from '../lib/utils';
-import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock } from 'lucide-react';
+import { ShieldCheck, Loader2, AlertTriangle, CreditCard, Clock, Download } from 'lucide-react';
+import { canIssueReceipt, printReceipt } from '../lib/receipt';
 
 /**
  * MANAGE SUBSCRIPTION — every agency this account owns, in one list (AUDIT G38).
@@ -175,6 +176,9 @@ export default function ManageSubscription() {
               <th className="p-3">Agency</th>
               <th className="p-3">Status</th>
               <th className="p-3">Expires</th>
+              {/* A RECEIPT, NOT AN INVOICE - the column says so, because the two are different documents and only
+                  one of them exists today (AUDIT G71, G30). */}
+              <th className="p-3">Receipt</th>
               <th className="p-3 text-right">Renew</th>
             </tr>
           </thead>
@@ -211,6 +215,27 @@ export default function ManageSubscription() {
                       </span>
                     )}
                   </td>
+                  <td className="p-3">
+                    {/* ⚠ NEVER OFFERED OVER A FAILED READ (AUDIT G71). `unread` means the subscriptions could not be
+                        read, and a row with no receipt button then says "no payment" about a payment that may exist. */}
+                    {!unread && canIssueReceipt(cls, r.sub) ? (
+                      <button
+                        type="button"
+                        onClick={() => printReceipt({ agencyName: r.name, sub: r.sub! })}
+                        className="inline-flex items-center gap-1.5 border border-slate-300 hover:bg-slate-100 text-slate-700 font-bold text-[11px] px-2.5 py-1.5 rounded-lg"
+                        title="A receipt for the money received. Not a tax invoice."
+                      >
+                        <Download className="w-3 h-3" /> Receipt
+                      </button>
+                    ) : (
+                      <span
+                        className="text-slate-400"
+                        title={unread ? 'Subscriptions could not be read' : 'No payment to receipt'}
+                      >
+                        &mdash;
+                      </span>
+                    )}
+                  </td>
                   <td className="p-3 text-right">
                     <button
                       type="button"
@@ -233,7 +258,7 @@ export default function ManageSubscription() {
               );
             })}
             {rows.length === 0 && (
-              <tr><td colSpan={4} className="p-4 text-slate-500">No agencies on this account yet.</td></tr>
+              <tr><td colSpan={5} className="p-4 text-slate-500">No agencies on this account yet.</td></tr>
             )}
           </tbody>
         </table>

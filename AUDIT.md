@@ -15832,3 +15832,82 @@ customer meets first.
 - **`ManageSubscription`'s "No agencies on this account yet"** - its subscription snapshot has the same shape.
 - **The trial gate** allows writes when its snapshot fails, which is deliberate.
 - **The shared rate defaults** already had their own error banner (`globalConfigError`).
+
+---
+
+## G71. A receipt for money received - which is not a tax invoice, and says so
+
+**Why.** A customer who has paid has nothing to file. A GST invoice cannot be issued yet (G30: gap-free numbering,
+SAC code unsettled), and that is not a reason to give them nothing - money was received, and a receipt records
+that.
+
+**Where.** Agency Settings -> Manage subscription, a **Receipt** column, one button per row. It opens the document
+in its own window and offers the print dialog, where "Save as PDF" writes the file.
+
+**What it says** - `src/lib/receipt.ts`, every field from `subscriptions/{agencyId}`:
+- **Issued by** MEGHA HASMUKHBHAI PANCHAL, trading as MSD CORPORATION, sole proprietorship. The proprietor is the
+  legal party, as on the legal pages.
+- **Received from** the agency, and the account email.
+- **Amount received**, to the paisa, and the **date received**.
+- **Gateway payment:** the payment id and order id. **Manual payment:** the reference and who recorded it, plus
+  "This payment did not go through the payment gateway".
+- **Subscription: "Runs to DD-MM-YYYY".**
+- **"This is a receipt for money received. It is not a tax invoice."**
+- **The invoice line, bound to `invoicePending`:** pending -> "A GST invoice for this payment has not been issued
+  yet. It will be sent separately"; false -> "A GST invoice has been issued for this payment."
+  - **No timing, ever.** None can be promised until the SAC code is settled. A test refuses "shortly", "within",
+    "working days" and any number of days.
+  - Saying nothing was considered and rejected: a document headed "receipt" that is silent about tax invites the
+    customer to file it AS their tax document.
+
+**⚠ WHAT MUST NEVER APPEAR, AND WHY IT IS ASSERTED RATHER THAN TRUSTED.** No GSTIN, no invoice number, no tax
+split, no SAC code, never the words "Tax Invoice".
+- `SELLER.gstin` sits in the same object the receipt reads the seller's name from.
+- `gstBreakdown()` was **already imported into the very screen** that calls this, for the pricing line.
+- Both are one line away from the code being written, so `receipt.test.ts` asserts their absence on a gateway
+  receipt, a manual one, and an invoiced one.
+
+**Which rows get one:** `wasPaid && lastPaymentDate > 0 && planAmount > 0`.
+- **Yes:** ACTIVE, ACTIVE (MANUAL), and **EXPIRED or CANCELLED where the subscription was paid for** - a receipt
+  for money already received must not vanish when the year lapses.
+- **No:** GRANTED, ADMIN, TRIAL, TRIAL ENDED, NOT BILLED. They show an em dash titled "No payment to receipt";
+  GRANTED already says "no invoice behind it".
+- **⚠ NOT READ offers nothing at all.** Over a failed read, a missing button would say "no payment" about a
+  payment that exists (G34, G70).
+
+**How, and what was not built:**
+- **Not `PrintableA4Page`.** That composes a sheet on THE CUSTOMER AGENCY'S letterhead, with header/footer
+  reservations, cut-off measurement, Word export and a print-check case. This receipt is issued BY the vendor TO
+  the customer - the customer's letterhead would be wrong - and eight lines cannot overflow a body. It carries its
+  own styles and borrows none of the app's.
+- **No PDF library was added.** `pdfjs-dist` only reads PDFs; a writer (jsPDF, pdf-lib) would put a new dependency
+  in a bundle already past the 500 KB warning, for an eight-line document. The browser's Save as PDF does it.
+  - **What would reopen this:** mobile Safari proving genuinely unusable for that flow. Not a reason to decide now.
+- **The window title is `Receipt - <agency> - <date>`**, which is what the save dialog suggests as a filename.
+
+**⚠ TWO THINGS THE RECEIPT CANNOT SAY, BOTH BECAUSE OF WHAT IS STORED:**
+1. **The period a payment bought.** `startDate` is the ORIGINAL start, preserved across renewals
+   (`startDate: prev.startDate || now`), and the prior expiry is overwritten by the new one. Printing
+   `startDate -> expiryDate` would span several years on a renewal. Hence "Runs to".
+   - **The right shape, if renewals ever need it:** `periodStart` / `periodEnd` written by the payment functions
+     AT THE MOMENT OF PAYMENT, in `functions/subscription.js` and `functions/adminSubscription.js`.
+   - **Declined for now, deliberately:** it would not be retrospective, so every receipt that exists today would
+     still be unable to state its period - and a field that works only for future payments, on a document whose
+     whole job is recording past ones, is worth less than it costs.
+2. **Anything but the latest payment.** `subscriptions/{agencyId}` holds one payment, and `payments/{paymentId}`
+   is `allow get, list: if isSuperAdmin()` for clients. **A customer who has paid twice cannot get last year's
+   receipt.** Letting owners read their own payment history means a rules change - the payment records do carry
+   `uid` - plus a deploy. Not done.
+
+**Also changed:** `SubscriptionRecord` now declares `currency`, `ownerEmail`, `agencyName` and `razorpayOrderId`.
+The payment functions already wrote all four; the type simply did not name them, and a document that renders a
+payment should read them by name rather than cast past the type.
+
+**Verified:** tsc; 99/99 tests, 13 new; build; hooks guard, 47 files.
+- **⚠ Not seen on paper.** No test opens the print window or renders the sheet - the tests cover the document's
+  text and what it must never contain, not its printed appearance.
+
+**Deploy:** hosting - which here means a push to `main`, since the site builds on Vercel (O71).
+
+**Still open, and the owner's:** the GST invoices themselves. The receipt now promises one on a document the
+customer keeps, which raises the cost of never issuing them. Kaushal Shah is being chased this week (O65).
