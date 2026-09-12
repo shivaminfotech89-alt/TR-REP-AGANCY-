@@ -16333,3 +16333,48 @@ records, which are still deleted with their agency.
   The guard is the comment at both ends and this entry.
 
 **Deploy:** **functions** - the fix lives there.
+
+---
+
+## G77. A field that accepted input and governed nothing, and a comment that said it was already gone
+
+**Removed:** "GP Validation Period (Months)" from Agency Settings - the input, its state, its sync line, its
+change-summary line and its save payload entry.
+
+**Why it is a defect and not untidiness.** The guarantee period became a TENDER term in G42 - A/T 1819 clause 38.2,
+per core type, and another A/T may set another. From that day `agency.gpValidationMonths` was **written by the form
+and read by nothing.** Measured before removing, across `src/`, `functions/` and `scripts/`, the field had five
+mentions: four inside `EditAgencyForm` writing to itself, and the type declaration.
+
+Every consumer named in the report resolves elsewhere:
+
+| Consumer | What it actually reads |
+|---|---|
+| The GP intake window | `calculateGpWarranty(..., months)` with months from `guaranteeMonthsFor` |
+| The guarantee certificate | `guaranteeMonthsFor(activeAtMaster, coreType, job.gpGuaranteeMonths)` (BillingSystem:406) |
+| The Dashboard warranty count | `job.gpGuaranteeMonths`, falling back to `DEFAULT_GUARANTEE_MONTHS` (Dashboard:482) |
+
+and `guaranteeMonthsFor` never consults the agency at all: job -> AT -> clause default.
+
+**⚠ SO IT WAS THE G24 DEFECT IN A SECOND PLACE.** G24 removed a control that took input and discarded it for every
+row but a new one, on the ground that *an input that ignores you is worse than a locked one, because it also tells
+you it worked.* This one took a number, saved it to the document, and listed it in the change summary as though
+something had changed. **Removing it fixes that rather than tidying.**
+
+**⚠ AND THE DECLARATION SAID IT WAS ALREADY GONE.** The comment on `Agency.gpValidationMonths` read *"it is no
+longer READ for a new job - the tender decides - and it is not offered on the agency form."* The first half was
+true. **The second half was false from the day it was written** - the input sat at `EditAgencyForm:761`, editable,
+the whole time. A sentence at a declaration is where the next person checks, so a false one there is worse than
+silence: it answers the question before it is asked. Corrected in the same change, with the measurement beside it.
+
+**Left alone, deliberately:** the stored field on the 15 documents that carry it, and the `firestore.rules`
+validator that accepts it. A production write to delete a field nothing reads buys nothing and risks something. It
+is now unreachable from the UI, unread by code, and documented as both at its declaration - which is what stops it
+becoming an authoritative-looking orphan.
+
+**Measured 2026-09-12:** 18 agencies - 15 store `18`, three store nothing, **not one stores anything else.** No
+job's behaviour changes, because nothing read it.
+
+**Verified:** tsc; 142 tests; build; hooks guard, 47 files. Code-only - no production write, no functions deploy.
+
+**Deploy:** hosting - a push to `main` (O71).

@@ -69,11 +69,21 @@ export interface Agency {
   lastJobNumbers: Record<string, number>;
   allotments?: Record<string, Record<string, number>>;
   /**
-   * ⚠ SUPERSEDED BY `AtMaster.guaranteeMonths` (AUDIT G42), AND KEPT FOR THE RECORDS THAT HAVE
-   * IT. Twelve agencies store 18 and three store nothing; not one stores anything else, so the
-   * move to the AT changed no outcome. It is no longer READ for a new job - the tender decides -
-   * and it is not offered on the agency form. Left on the type because deleting a field twelve
-   * live documents carry would make those documents fail a validator for no gain.
+   * ⚠ SUPERSEDED BY `AtMaster.guaranteeMonths` (AUDIT G42), AND NOW WRITE-ONLY - NOTHING READS IT.
+   *
+   * The guarantee period is a TENDER term (clause 38.2, per core type), so it moved to the AT. Every live consumer
+   * resolves without this field: the GP intake window and the certificate through `guaranteeMonthsFor`
+   * (job -> AT -> clause default), the Dashboard's warranty count through the job's stamped `gpGuaranteeMonths`.
+   *
+   * ⚠ THIS COMMENT USED TO SAY "it is not offered on the agency form", AND THAT WAS FALSE FROM THE DAY IT WAS
+   * WRITTEN (AUDIT G77). The form went on offering an editable "GP Validation Period (Months)" input, which saved
+   * the value and listed it in the change summary while nothing read it - the G24 shape, in the one place a reader
+   * would come to check. The input was removed 2026-09-12; a sentence at a declaration is where the next person
+   * looks, so it is stated here rather than only in the entry.
+   *
+   * Measured 2026-09-12: 15 of 18 agencies store 18, three store nothing, not one stores anything else. The stored
+   * field is LEFT on those documents, and firestore.rules still accepts it - deleting a field nothing reads is a
+   * production write with no gain.
    */
   gpValidationMonths?: number;
   

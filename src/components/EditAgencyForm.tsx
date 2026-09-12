@@ -96,7 +96,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
    */
   const isOwner = !!auth.currentUser && agency.ownerId === auth.currentUser.uid;
   const [msmeNo, setMsmeNo] = useState(agency.msmeNo || '');
-  const [gpValidationMonths, setGpValidationMonths] = useState(agency.gpValidationMonths ?? 18);
 
   // Letterhead Layout & Calibrator States
   const [letterheadBase64, setLetterheadBase64] = useState(agency.letterheadUrl || '');
@@ -160,7 +159,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setPhone(agency.phone || '');
     setEmail(agency.email || '');
     setMsmeNo(agency.msmeNo || '');
-    setGpValidationMonths(agency.gpValidationMonths ?? 18);
 
     setDiscomName(agency.discomName || '');
     setDiscomGstin(agency.discomGstin || '');
@@ -211,7 +209,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   }, [
     agency.id,
     agency.name, agency.address, agency.agencyState, agency.agencyStateCode, agency.legalName,
-    agency.gstin, agency.pan, agency.phone, agency.email, agency.msmeNo, agency.gpValidationMonths,
+    agency.gstin, agency.pan, agency.phone, agency.email, agency.msmeNo,
     agency.discomName, agency.discomGstin, agency.discomPan, agency.discomAddress, agency.discomState,
     agency.discomStateCode, agency.serviceSacCode,
     agency.circleOfficeName, agency.circleAuthority, agency.divisionAuthority,
@@ -330,7 +328,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       // confirmation lists, and it is the last chance to notice that access is being moved.
       checkChange('Access email (who can use this agency)', agency.email, email);
       checkChange('MSME / Udyam No', agency.msmeNo, msmeNo);
-      checkChange('GP Validation (Months)', agency.gpValidationMonths ?? 18, gpValidationMonths);
 
       checkChange('DISCOM Name', agency.discomName, discomName);
       checkChange('DISCOM GSTIN', agency.discomGstin, discomGstin);
@@ -378,7 +375,6 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         letterheadMarginLeftMm: marginLeftMm,
         letterheadMarginRightMm: marginRightMm,
         showPageNumbers,
-        gpValidationMonths,
         
         // Agency details
         address,
@@ -756,18 +752,21 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
-                  GP Validation Period (Months)
-                </label>
-                <input
-                  type="number"
-                  value={gpValidationMonths}
-                  onChange={e => setGpValidationMonths(Number(e.target.value))}
-                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
-                  placeholder="18"
-                />
-              </div>
+              {/* ⚠ "GP VALIDATION PERIOD (MONTHS)" WAS HERE, AND IT ACCEPTED INPUT THAT NOTHING READ (AUDIT G77).
+                  The guarantee period became a TENDER term in G42 - it is A/T 1819 clause 38.2, per core type, and
+                  a different A/T may set another. From that day `agency.gpValidationMonths` was written by this form
+                  and read by nothing: the intake window, the certificate and the Dashboard's warranty count all
+                  resolve through `guaranteeMonthsFor` (job -> AT -> clause default) or through the job's own stamped
+                  `gpGuaranteeMonths`.
+
+                  ⚠ SO THIS WAS THE G24 DEFECT IN A SECOND PLACE: a control that took a number, saved it, listed it
+                  in the change summary as though something had changed, and governed nothing. Removing it is the fix,
+                  not tidying - an input that ignores you is worse than an absent one, because it also tells you it
+                  worked.
+
+                  The STORED field is deliberately left on the 15 documents that carry it, and the rules validator
+                  still accepts it: a production write to delete a field nothing reads buys nothing. It is now
+                  unreachable from the UI and unread by code - see the note at its declaration in AgencyContext. */}
 
               <div className="md:col-span-2 pt-4 border-t border-slate-200">
                 <LetterheadCalibrator
