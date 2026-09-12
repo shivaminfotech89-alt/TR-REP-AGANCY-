@@ -7134,7 +7134,20 @@ A Google forum thread (May-June 2026) reports a database still capped after Blaz
   - Testing Report's refetch on form toggle removed;
   - NewJob's per-transformer job-number checks answered from jobs already loaded.
 
-**Lifting the limit is the owner's step:** try Upgrade database after the reset.
+**LIFTED, 2026-09-12.** The owner moved the project to Blaze and used the console's **Upgrade database**
+control - Firebase console → **Databases & Storage → Firestore**, a banner near the top of the page, **Upgrade
+database → Upgrade to pay-as-you-go**.
+- **`freeTierLimited` is now absent from the database settings**, where it read `true` on 2026-09-11. The settings
+  were last written 2026-09-11 21:15 UTC.
+- `freeTier` still reads `true`, which is the free daily allowance, not the cap, and `databaseEdition` is still
+  `ENTERPRISE` - the upgrade changes billing, not edition.
+- **The settings call costs no read units.** It is the admin API, not the data: `GET
+  firestore.googleapis.com/v1/projects/<project>/databases/<id>`.
+
+**⚠ HOSTING IS VERCEL, NOT FIREBASE HOSTING.** `firebase.json` has no `hosting` key; `vercel.json` holds the SPA
+rewrite, and the site deploys from a push to `main` on GitHub. "Deploy hosting" anywhere in this audit means that
+push. Verified 2026-09-12 by reading the live bundle at `transregister.com`: it contains "Your agencies could not
+be loaded", "Nothing has been deleted", "Could not load agencies" and "Loading agencies...", so G70 is live.
 
 **The fallback, if the upgrade does not lift the limit: a new database and a copy.** It is
 `scripts/admin/copy-database.js`, with MODE `'dry-run'`, written 2026-09-12 and **not run** - nothing may touch
@@ -7201,6 +7214,49 @@ the database until the reset.
 ---
 
 ### O70. The Estimate Master grid shows last tender's figures on this tender's AT
+
+### APPLIED 2026-09-12 - ALL FOUR, AND ALL FOUR DRY RUNS NOW READ ZERO
+
+Run one at a time, each with MODE set to `apply` for the run and back to `dry-run` afterwards:
+
+| Script | Documents | Read back |
+|---|---|---|
+| `clear-overhauling-row-7.js` | 32 | 32 |
+| `clear-crgo-variant-rows.js` | 33 | 33 |
+| `clear-radiator-100kva-cell.js` | 20 | 20 |
+| `clear-copied-crgo-cells.js` | 33 (shared 2, templates 2, agencies 17, ATs 14) | 33 |
+
+**Held, refused or unexpected: none, in any of the four.**
+
+**Measured against a snapshot of every stored rate section, taken before and after:**
+- **3,706 cells cleared** - agencies 1,706, ATs 1,554, templates 206, `public_config` 120, `system_config` 120.
+- **0 cells gained a value.** Nothing was added anywhere, which is the check that a clear did not become a write.
+- 12,638 filled cells before, 9,180 after.
+
+**The dry runs afterwards, all four:** "Nothing holds the default figures", "Nothing holds these figures",
+"No 100 kVA radiator cell holds 1248", "No copied cell and no slip remains".
+
+**What moved on live jobs, priced through the app's own builder, 74 jobs before and after:**
+- **OH21 IS-1** (63 kVA, 2026_27, UGVCL-2020): overhauling row 7 **2,061 → 3,162**, with 4% AT **2,143.44 →
+  3,288.48**. The stored copy was below the tender; clearing it charges the tender.
+- **SU-24** (100 kVA): radiator 1,248 → 1,446 and 13C 51.7 → 51.75, neither line charged; the two slips move the
+  total **5,127.82 → 5,126.78**, by Rs 1.04.
+- **MSBT-2** (100 kVA): 13C 51.7 → 51.75, total unchanged at 12,413.26.
+- **No other job moved at all.**
+
+**⚠ AN AGENCY WAS CREATED WHILE THE SEQUENCE RAN, AND IT CAME OUT CLEAN.** "R.K Electricals transformers
+industries", 2026-09-12 05:46 UTC, seeded through the deployed function:
+- its CRGO section carries **only the scrap row** (22 at 500) - no copied cell;
+- its Overhauling section is identical to every cleared holder: rows 3, 4, 5 and 6, which are not priced from
+  Schedule-A, and **no row 7**.
+- So the shipped-defaults change is live, and creating an agency no longer re-adds what was just cleared. That is
+  the flow-back risk this order was chosen to avoid, tested by accident on a real customer's agency.
+
+**Left standing, deliberately:** 340 cells on rows not priced from Schedule-A, and AT 1049's 5 cells for
+`revert-at-1049-12Ab.js`.
+
+**The copy test's retirement** (step 4, making `resolveRate` honour any stored cell above zero) is now unblocked:
+every dry run reads zero. It is still a decision, not a consequence.
 
 Open, 2026-09-12. **Decided: option 3, in every holder and in the shipped defaults, plus the two residue slips.
 Built; not applied.** See BUILT below.
@@ -15658,12 +15714,12 @@ and it changes no behaviour.
   units here. The minimum build time is a few minutes.
 - **Safe with the app live.** An Enterprise database runs an unindexed query as a scan, so a query arriving while
   its index is still building runs exactly as it does today.
-- **⚠ Not verified by a deploy:**
-  - **Single-field entries:** whether the Firebase CLI accepts them for an Enterprise database. The Standard
-    edition CLI rejects them as unnecessary. If it refuses, create those four with `gcloud firestore indexes
-    composite create --database=<id> --collection-group=<c> --field-config=field-path=<f>,order=ascending
-    --density=dense`.
-  - **`density`:** whether the CLI accepts the key.
+**DEPLOYED 2026-09-12**, with `firebase deploy --only firestore:indexes`:
+- **The CLI accepted the file as written** - the four single-field entries and the `density` key included. No
+  gcloud fallback was needed.
+- **All 15 indexes read READY** within a minute of the deploy, checked through the admin API. Nothing had to wait,
+  and no query ran against a half-built index.
+- **Build cost:** write units, as expected. No read units.
 
 ---
 
