@@ -16378,3 +16378,87 @@ job's behaviour changes, because nothing read it.
 **Verified:** tsc; 142 tests; build; hooks guard, 47 files. Code-only - no production write, no functions deploy.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G78. A rule applied where the question was asked, while the same write happened unnoticed on another path
+
+**The guarantee period is a tender term with a real default.** Eleven of fifteen live ATs store nothing, price at
+clause 38.2's figure, and that figure is correct on every tender in the database today. **That is a fact about
+today's tenders, not a property of the system:** an A/T setting anything else prices at 18 silently, and nothing
+announces it.
+
+### ⚠ THE FINDING: MATERIALISING DEFAULTS WAS RULED OUT ON ONE PATH AND WAS ALREADY HAPPENING ON ANOTHER
+
+Asked whether a new AT should store the clause defaults at creation, the answer was no, for a stated reason:
+**writing figures nobody typed turns an honest silence into a recorded answer, and a recorded answer cannot be told
+from a confirmed one later.**
+
+**`AtDivisions.handleSave` was doing exactly that, on every save.** Its guarantee inputs are pre-seeded from
+`GUARANTEE_DEFAULTS`, and the save wrote every input above zero:
+
+```js
+Object.entries(guaranteeMonths).forEach(([ct, raw]) => {
+  const n = Number(String(raw).trim());
+  if (Number.isFinite(n) && n > 0) monthsOut[ct] = Math.round(n);   // every core type, every save
+});
+```
+
+So **someone renaming a division was silently confirming a guarantee period they never looked at** - on a panel
+whose headline is "Divisions & Core Prefixes", where the question is never asked.
+
+**The shape, which this session keeps finding:** the rule was right, and it was applied *where the question was
+asked* rather than *where the write occurs*. A decision taken about one path leaves the same write untouched on
+every other path that reaches the same field. The creation form was examined because the question named it; the
+save was not, because nothing about it invited the question.
+
+**The cost, concretely:** the four ATs that hold a guarantee map cannot be distinguished from ATs whose panel was
+saved once for an unrelated reason. **"Confirmed" is a claim the data will not support for them**, and the word had
+to be weakened rather than the state invented.
+
+### Built
+
+- **`guaranteeState(at, coreLabel)`** returns one of three, and `describeGuaranteeState` puts it in words:
+  - **default** - "18 months - clause 38.2 default, not confirmed against this A/T"
+  - **recorded** - "18 months - recorded on this tender (may predate this change)"
+  - **differs** - "24 months - set on this tender (clause default is 18)"
+- **Labels beside each input on the AT panel**, in a tone that reads as a fact with a source rather than a warning.
+  **No dashboard banner and no setup-gap dialog:** nothing is blocked, and a nag correct on all fifteen tenders
+  trains people to dismiss it.
+- **The save writes only what differs from the clause.** An already-stored figure is preserved even when it equals
+  the clause - dropping it would be a second write nobody typed, in the other direction.
+- **LSTC / PAT is in the same change**, and is the sharper case: six months against eighteen, on a core type this
+  app knows mainly as a job-number prefix, so a tender setting it differently is the least likely to be noticed.
+  Splitting it would have meant two panels doing one job.
+
+**⚠ THE FOUR EXISTING MAPS ARE NOT TOUCHED.** They are ambiguous, not wrong, and a write to disambiguate them would
+be inventing the answer. They resolve when someone edits that AT; until then the label says exactly that.
+
+**⚠ AND A COMMENT THAT WAS FALSE, NOT OUTDATED.** The state initialiser carried *"LSTC / PAT IS ABSENT
+DELIBERATELY … a six-month default keyed to something nothing can select would be a setting that does nothing."*
+`GUARANTEE_DEFAULTS` has always held four keys and the editor maps over its keys, so **an LSTC / PAT input has
+always rendered three lines below that sentence**, with a note under the grid stating its six months. It was never
+true. Corrected in the same change and recorded as false rather than stale, because the two invite different
+reactions: a stale comment gets updated, a false one should make a reader wonder what else was asserted without
+being checked.
+
+### The model to copy, rather than another defect: `FRESH_LITRES_PER_BARREL`
+
+**Named here because a good instance is more useful than a list of bad ones.** Oil's 210 litres per barrel is the
+same kind of constant - a convention applied to every transaction - and it is handled correctly:
+
+- **The default is visible**, in the field and in the helper text: *"Defaults to 210 L per barrel. Type over it if
+  the division sent a barrel short."*
+- **A deviation is recorded**, not merely accepted: `grossLitersManual` is set when the operator types over it
+  (F97).
+- **The document says which**: the register and the Excel export print `manual (default 420)` against the row.
+
+**That is the shape the guarantee period was missing** - and the reason it works is that the deviation is a fact
+about a delivery, so recording it is recording something real. Its residual gap: **210 is global rather than per
+tender.** A line, not a fix - no tender has yet stated otherwise, and the flag would surface it the first time one
+did.
+
+**Verified:** tsc; 152 tests, 10 new; build; hooks guard, 47 files.
+- **⚠ Not seen rendered.** The three states and their wording are tested; the panel is not.
+
+**Deploy:** hosting - a push to `main` (O71). No production write: the four maps stay as they are.

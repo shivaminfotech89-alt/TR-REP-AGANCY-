@@ -6,6 +6,7 @@ import { getCounterKey } from '../lib/AgencyContext';
 import {
   seedFromStartingNumber, startingNumberFromSeed,
   ALL_CORE_TYPES, GUARANTEE_DEFAULTS, hasNoGuarantee,
+  guaranteeState, describeGuaranteeState,
 } from '../lib/guaranteePeriod';
 
 export function AtDivisions({ at }: { at: AtMaster }) {
@@ -72,16 +73,21 @@ export function AtDivisions({ at }: { at: AtMaster }) {
 
   // Real-time validation result
   /**
-   * THE GUARANTEE PERIOD, PER CORE TYPE, ON THE AT (AUDIT G42).
+   * THE GUARANTEE PERIOD, PER CORE TYPE, ON THE AT (AUDIT G42, G78).
    *
    * ⚠ A TENDER TERM, WHICH IS WHY IT IS HERE AND NOT ON THE AGENCY. A/T 1819 clause 38.2 sets
    * it; another A/T may set another. On the agency it would survive a rollover and apply the
    * previous tender's terms to this tender's work.
    *
-   * ⚠ LSTC / PAT IS ABSENT DELIBERATELY. Clause 38.2 gives SDT/PAT six months and this app has
-   * no such core type - LSTC exists only as a job-number prefix, and no live job carries it. A
-   * six-month default keyed to something nothing can select would be a setting that does
-   * nothing. See lib/guaranteePeriod.ts for what adding it would take.
+   * ⚠ THIS COMMENT USED TO SAY "LSTC / PAT IS ABSENT DELIBERATELY", AND THAT WAS NEVER TRUE - not outdated,
+   * FALSE FROM THE DAY IT WAS WRITTEN (AUDIT G78). `GUARANTEE_DEFAULTS` has always held four keys, this editor
+   * maps over its keys, so an LSTC / PAT input has always rendered here - and the note below the grid has always
+   * said it is six months. A comment describing the opposite of what the loop three lines down does is the kind a
+   * reader trusts instead of checking.
+   *
+   * LSTC / PAT is the sharper case for the labelling, not a lesser one: six months against eighteen, on a core
+   * type this app knows mainly as a job-number prefix, so a tender setting it differently is the least likely to
+   * be noticed.
    */
   const [guaranteeMonths, setGuaranteeMonths] = useState<Record<string, string>>(() => {
     const out: Record<string, string> = {};
@@ -147,10 +153,28 @@ export function AtDivisions({ at }: { at: AtMaster }) {
         seededCounters[key] = seedFromStartingNumber(n);
       });
 
+      /**
+       * ⚠ ONLY WHAT DIFFERS FROM THE CLAUSE IS WRITTEN (AUDIT G78).
+       *
+       * This used to write every input above zero, and the inputs are pre-seeded from `GUARANTEE_DEFAULTS` - so
+       * SAVING THIS PANEL TO RENAME A DIVISION WROTE 18/18/18/6 ONTO THE AT. Someone adjusting a prefix was
+       * silently recording a guarantee period they never looked at, and the stored figure then read as this
+       * tender's answer. Materialising defaults was ruled out at AT creation for exactly that reason; the same
+       * write was happening unnoticed here, on the path where the question is never asked.
+       *
+       * ⚠ AN ALREADY-STORED FIGURE IS PRESERVED EVEN WHEN IT EQUALS THE CLAUSE. Dropping it would be a second
+       * write nobody typed, in the other direction, and the four ATs holding one are ambiguous rather than wrong -
+       * they are left exactly as they are and labelled "recorded ... may predate this change" until someone edits
+       * them. Silence is not disambiguated by guessing.
+       */
       const monthsOut: Record<string, number> = {};
       Object.entries(guaranteeMonths).forEach(([ct, raw]) => {
         const n = Number(String(raw).trim());
-        if (Number.isFinite(n) && n > 0) monthsOut[ct] = Math.round(n);
+        if (!Number.isFinite(n) || n <= 0) return;
+        const months = Math.round(n);
+        const clause = GUARANTEE_DEFAULTS[ct];
+        const alreadyStored = Number(at.guaranteeMonths?.[ct] ?? 0) > 0;
+        if (months !== clause || alreadyStored) monthsOut[ct] = months;
       });
 
       await updateAtMaster(at.id, {
@@ -202,22 +226,37 @@ export function AtDivisions({ at }: { at: AtMaster }) {
               A/T clause 38.2. Printed on the guarantee certificate, and checked when a GP job is booked.
             </span>
           </div>
+          {/* ⚠ WHAT IS STORED, AND WHAT IS MERELY IN FORCE, SAID IN WORDS (AUDIT G78). The number alone cannot
+              tell an operator whether this tender was checked: eleven of fifteen live ATs store nothing and price
+              at the clause figure, which is correct and unconfirmed. The label is a FACT WITH A SOURCE, not a
+              warning - nothing here is wrong, and a nag that is correct on every tender teaches people to dismiss
+              it. It reads the STORED value, not the input being typed, so it describes the tender rather than the
+              keystroke. */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {Object.keys(GUARANTEE_DEFAULTS).map(label => (
-              <div key={label}>
-                <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">{label}</label>
-                <div className="flex items-center gap-1">
-                  <input
-                    type="number"
-                    min={1}
-                    value={guaranteeMonths[label] ?? ''}
-                    onChange={e => setGuaranteeMonths(prev => ({ ...prev, [label]: e.target.value }))}
-                    className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-mono tabular-nums"
-                  />
-                  <span className="text-[10px] text-slate-500 shrink-0">mo</span>
+            {Object.keys(GUARANTEE_DEFAULTS).map(label => {
+              const state = guaranteeState(at, label);
+              const tone = state.kind === 'differs'
+                ? 'text-indigo-700'
+                : state.kind === 'recorded' ? 'text-slate-600' : 'text-amber-700';
+              return (
+                <div key={label}>
+                  <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">{label}</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min={1}
+                      value={guaranteeMonths[label] ?? ''}
+                      onChange={e => setGuaranteeMonths(prev => ({ ...prev, [label]: e.target.value }))}
+                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-mono tabular-nums"
+                    />
+                    <span className="text-[10px] text-slate-500 shrink-0">mo</span>
+                  </div>
+                  <span className={`block text-[9px] mt-0.5 leading-snug ${tone}`}>
+                    {describeGuaranteeState(state)}
+                  </span>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
           {/* ⚠ OVERHAULING IS ABSENT FROM THE EDITOR BECAUSE IT HAS NO GUARANTEE AT ALL, stated
               rather than left as a blank column. Verified in BOTH tender documents: "overhaul"

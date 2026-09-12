@@ -78,6 +78,57 @@ export function guaranteeMonthsFor(
   return GUARANTEE_DEFAULTS[key] ?? DEFAULT_GUARANTEE_MONTHS;
 }
 
+/**
+ * WHICH OF THREE THINGS IS TRUE OF A TENDER'S GUARANTEE PERIOD (AUDIT G78).
+ *
+ * ⚠ BLANK READS AS UNSET AND UNSET READS AS BROKEN, AND NEITHER IS THE TRUTH. When an AT stores nothing, a real
+ * period still applies - clause 38.2's - and what is missing is confirmation that this tender agrees with it.
+ * Those are three states, and the panel used to render two of them identically.
+ *
+ * ⚠ `recorded` IS DELIBERATELY WEAKER THAN "confirmed". Until 2026-09-12 `AtDivisions.handleSave` wrote every
+ * guarantee input on every save, and the inputs were pre-seeded from these defaults - so saving that panel to
+ * rename a division wrote 18/18/18/6 onto the AT. A stored figure equal to the clause therefore cannot be told
+ * apart from a figure nobody looked at, and the word must not claim otherwise. Four live ATs are in that state;
+ * they are left untouched, because a write to disambiguate them would be inventing the answer. They resolve when
+ * someone edits that AT.
+ */
+export type GuaranteeStateKind = 'default' | 'recorded' | 'differs';
+
+export interface GuaranteeState {
+  kind: GuaranteeStateKind;
+  /** The months in force - always what `guaranteeMonthsFor` would apply, so a label cannot disagree with pricing. */
+  months: number;
+  /** What clause 38.2 gives this core type. */
+  clauseMonths: number;
+}
+
+export function guaranteeState(
+  at: Pick<AtMaster, 'guaranteeMonths'> | null | undefined,
+  coreLabel: string,
+): GuaranteeState {
+  const clauseMonths = GUARANTEE_DEFAULTS[coreLabel] ?? DEFAULT_GUARANTEE_MONTHS;
+  const stored = at?.guaranteeMonths?.[coreLabel];
+  if (typeof stored !== 'number' || !(stored > 0)) {
+    return { kind: 'default', months: clauseMonths, clauseMonths };
+  }
+  return {
+    kind: stored === clauseMonths ? 'recorded' : 'differs',
+    months: stored,
+    clauseMonths,
+  };
+}
+
+/** The sentence the panel prints. A fact with a source, never a warning - nothing here is wrong. */
+export function describeGuaranteeState(s: GuaranteeState): string {
+  if (s.kind === 'default') {
+    return `${s.months} months - clause 38.2 default, not confirmed against this A/T`;
+  }
+  if (s.kind === 'recorded') {
+    return `${s.months} months - recorded on this tender (may predate this change)`;
+  }
+  return `${s.months} months - set on this tender (clause default is ${s.clauseMonths})`;
+}
+
 /** Map any stored spelling onto the label these tables are keyed by. */
 export function normaliseCoreLabel(coreType: string | null | undefined): string {
   const t = String(coreType || 'CRGO').trim().toUpperCase();
