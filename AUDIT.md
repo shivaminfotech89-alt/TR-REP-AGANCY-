@@ -16462,3 +16462,108 @@ did.
 - **⚠ Not seen rendered.** The three states and their wording are tested; the panel is not.
 
 **Deploy:** hosting - a push to `main` (O71). No production write: the four maps stay as they are.
+
+---
+
+## G79. A precondition at the entrance of a handler, blocking writes that never needed it
+
+**Reported:** renaming an MR fails with an error about ATs. **Reproduced exactly as predicted** - only two MR groups
+in the database can produce it, MEGHA's **MR 9344** (2 jobs) and **MR 1** (1 job), both with no `atId` on any job.
+30 of 32 groups save normally.
+
+### What the guard was for, and what it actually blocked
+
+`atForEditingMr()` reads the tender from the MR's own jobs, never from the session (F66), and returns an error when
+they cannot agree. `handleSaveFullMr` called it as its **first act** and aborted on any error.
+
+**The AT is used in exactly two places in that function:**
+1. stamping `atId` on a **newly added** row;
+2. advancing the AT's job-number counter.
+
+**The update branch for an existing job never writes `atId`** - it writes the MR number, the job number, the serial,
+the make, the capacity, the status. So a rename, or a serial correction, on jobs belonging to no tender was refused
+by a precondition that guarded nothing about that write. **Three live jobs were in that state and their numbers were
+effectively frozen** - not by a rule anyone chose, but by a check inherited from the path they shared.
+
+**⚠ THIS IS THE INVERSE OF G3, NOT A RETREAT FROM IT.** G3 moved a gate INTO a handler because hiding the button was
+not enough: the gate belonged where the write happens. This moves a gate DOWN TO the write that needs it, for the
+same reason. **A precondition belongs at the operation it protects, not at the entrance of a handler that several
+operations share** - and the two failures look opposite while being the same mistake about where a check lives.
+
+### Built
+
+- **The AT is required only when the save adds a row** (`jobs.some(j => j.isNew || !j.id)`). Everything else -
+  rename, serial, make, capacity, status, cancellation - saves on an AT-less MR.
+- **The new-row stamp is unreachable without a resolved AT**, and says so where it is written.
+- **The counter advance is skipped for an AT-less MR, commented as correct rather than an oversight.** A3 settled
+  what those jobs are: the allotment count queries `where('atId','==',...)`, so they are counted nowhere and consume
+  no quota. A number on such a job has never been in any AT's sequence, so there is no counter to advance.
+- **The messages now say what they were always about.** They described adding a transformer - job numbers, AT
+  percentages - to an operator who had renamed a number. Each now opens *"A transformer cannot be added to MR X"*
+  and closes with *"The units already on this MR can still be edited"*, which is the fact the reader needs and the
+  one the old wording withheld.
+
+**Verified:** tsc; 152 tests; build; hooks guard, 47 files. No test drives the modal - the change is in which
+branch runs, and it is stated here rather than asserted.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+### O72. MSBT-12 exists twice, and three jobs belong to no tender - both MEGHA's, both reported not fixed
+
+**Open, 2026-09-12. Nothing here has been written.** MEGHA is the test agency, so neither is urgent; a job number
+existing twice is worth understanding rather than leaving.
+
+**MSBT-12 is TWO DOCUMENTS, not one record seen twice.**
+
+| | `drIm8L5uHbX2OVRdbVeP` | `ScUE3NkHxAKW6T9C9623` |
+|---|---|---|
+| MR | 9344 | 1 |
+| Repair type | **OGP** | **GP** |
+| Serial / make / KVA | 12 / 121 / 100 | 12 / 121 / 100 |
+| Status | Dispatched, closed | Dispatched, closed |
+| Challan | 12 | yrtr2 |
+| Bill | - | **BILL/1** |
+| Estimate | - | **UGVCL/EE-T-1/TRANS-REP/1, Rs 5,661** |
+| Payment | - | **Paid** |
+| Inspections | 2 | 2 |
+| Created | 2026-08-11 | 2026-08-11, ~18 minutes later |
+
+**They are the same physical transformer**, by serial, make and capacity - and that is the one shape the app
+deliberately permits. A GP repair reuses the original job number: `NewJob` refuses a duplicate number *unless* the
+intake is GP and the unit matches on serial, make and capacity, exactly as here. So this is a unit repaired under
+OGP on MR 9344 and returned under guarantee as MR 1, which is **correct by design**, not a duplicate.
+
+**⚠ What is odd is the MR number, not the job number.** "1" is not a division's MR reference; every other MR on the
+system is a four-digit number. The GP return looks as though it was booked with a placeholder. That is the thing to
+check against the paperwork - and it is exactly what G79 now permits the owner to correct, since renaming MR 1 no
+longer requires the AT those jobs lack.
+
+**The three AT-less jobs** - all MEGHA, all SABARMATI, all dispatched and closed:
+
+| Doc | Job | MR | Repair | Carries |
+|---|---|---|---|---|
+| `drIm8L5uHbX2OVRdbVeP` | MSBT-12 | 9344 | OGP | challan 12 |
+| `tKP7KMh4S45h875tWUPE` | MSBT-1 | 9344 | OGP | challan 232 |
+| `ScUE3NkHxAKW6T9C9623` | MSBT-12 | 1 | GP | challan yrtr2, BILL/1, estimate Rs 5,661, Paid |
+
+**What assigning an AT would take:** MEGHA has exactly one AT - `AT 26-27`, Active, schedule UGVCL-2020, 4% - and it
+already holds 35 jobs. So the write is a one-field update on three documents, with one candidate and no ambiguity
+about which tender is meant.
+
+**What it would change, and why it is not obviously safe:**
+- **They would enter the allotment count.** MEGHA's SABARMATI/CRGO row currently reads 21 of 30 used; two of these
+  are OGP CRGO in SABARMATI, so it would become 23 of 30. That is a correction, not a distortion - those repairs
+  happened - but it moves a live quota figure.
+- **They would appear in every per-tender screen** - the MR ledger, reports, billing - where they are invisible
+  today. Three closed, dispatched jobs would arrive in AT 26-27's history.
+- **⚠ ONE OF THEM CARRIES AN ISSUED BILL AND A PAYMENT.** `ScUE3NkHxAKW6T9C9623` holds BILL/1, an estimate
+  reference and Rs 5,661 marked Paid. Its estimate recomputes from whichever AT it names - so stamping it with
+  AT 26-27 (UGVCL-2020, 4%) would reprice a document that has already been issued and paid. **The paper in the
+  file would stop matching the screen**, which is precisely the failure F72 exists to prevent.
+- **The counter** would seed from these numbers on the next save that touches them.
+
+**So the shape of the decision is:** the two OGP jobs are a straightforward attribution, and the billed GP job is
+not - its figures are already on paper. The safe order, if the owner wants it done, is the two OGP jobs first,
+the billed one only after checking what its issued estimate says against what AT 26-27 would now produce.

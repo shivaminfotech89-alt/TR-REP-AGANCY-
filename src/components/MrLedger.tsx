@@ -478,19 +478,33 @@ export default function MrLedger() {
     const without = editingMr.jobs.filter(j => !String((j as any).atId ?? '').trim()).length;
 
     if (ids.length === 1 && without === 0) return { atId: ids[0] };
-    if (ids.length === 0) {
-      return { error: `MR ${editingMr.mrNo} does not record which AT it was issued under - none of its ${editingMr.jobs.length} transformer(s) carries one.
 
-A transformer added now would have to take its job number and AT percentage from whichever AT is selected today, which may not be the tender this MR belongs to. Set the AT on the existing jobs first.` };
+    /**
+     * ⚠ EVERY MESSAGE BELOW IS ABOUT ADDING A TRANSFORMER, AND NOW ONLY FIRES WHEN ONE IS BEING ADDED
+     * (AUDIT G79). They were accurate about the case they were written for and silent about the case they
+     * were shown for: an operator who renamed an MR number met three sentences on job numbering and AT
+     * percentages, none of which described what they had done. The caller decides when to ask; these say
+     * plainly what cannot be done and what can.
+     */
+    if (ids.length === 0) {
+      return { error: `A transformer cannot be added to MR ${editingMr.mrNo}: it does not record which AT it was issued under - none of its ${editingMr.jobs.length} transformer(s) carries one.
+
+A new unit would have to take its job number and AT percentage from whichever AT is selected today, which may not be the tender this MR belongs to.
+
+The units already on this MR can still be edited - their numbers, serials, MR number and status all save normally. Set the AT on them if you need to add one.` };
     }
     if (ids.length === 1) {
-      return { error: `MR ${editingMr.mrNo} is partly unstamped - ${without} of its ${editingMr.jobs.length} transformer(s) carry no AT.
+      return { error: `A transformer cannot be added to MR ${editingMr.mrNo}: it is partly unstamped - ${without} of its ${editingMr.jobs.length} transformer(s) carry no AT.
 
-The AT is known from the others, but adding a transformer while the MR disagrees with itself would spread the inconsistency. Set the AT on those jobs first.` };
+The AT is known from the others, but adding a unit while the MR disagrees with itself would spread the inconsistency.
+
+The units already on this MR can still be edited. Set the AT on the unstamped ones if you need to add one.` };
     }
-    return { error: `MR ${editingMr.mrNo} has transformers under ${ids.length} DIFFERENT ATs.
+    return { error: `A transformer cannot be added to MR ${editingMr.mrNo}: its transformers sit under ${ids.length} DIFFERENT ATs.
 
-An MR belongs to one tender. Until that is resolved there is no single sequence to draw a job number from, and no single percentage to price a new transformer at.` };
+An MR belongs to one tender, so there is no single sequence to draw a job number from and no single percentage to price a new unit at.
+
+The units already on this MR can still be edited.` };
   };
 
   // Add new transformer row to editing MR
@@ -636,23 +650,34 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
     if (!editingMr || !auth.currentUser || !activeAgency) return;
 
     /**
-     * ⚠ THE SAME GUARD THE ADD-UNIT BUTTON USES, ON THE PATH THAT ACTUALLY WRITES (AUDIT G2).
+     * ⚠ THE SAME GUARD THE ADD-UNIT BUTTON USES, ON THE PATH THAT ACTUALLY WRITES (AUDIT G2) - BUT ONLY WHEN
+     * THIS SAVE ADDS A ROW (AUDIT G79).
      *
-     * `handleAddTransformerToMr` calls `atForEditingMr()` and refuses when the MR's own jobs
-     * do not agree on a tender. This function - which creates jobs in a batch a few lines
-     * below - did not, and fell back to `activeAtMaster ? activeAtMaster.id : ''`.
+     * `handleAddTransformerToMr` calls `atForEditingMr()` and refuses when the MR's own jobs do not agree on a
+     * tender. This function - which creates jobs in a batch below - did not, and fell back to
+     * `activeAtMaster ? activeAtMaster.id : ''`.
      *
-     * ⚠ THE WRONG-TENDER CASE IS WORSE THAN THE EMPTY ONE. An empty `atId` is findable: it
-     * shows in the unassigned backlog and every census counts it. A job stamped with TODAY'S
-     * tender on another tender's MR looks correct everywhere and prices from the wrong rate
-     * schedule and the wrong AT percentage - the exact failure F72 exists to prevent.
+     * ⚠ THE WRONG-TENDER CASE IS WORSE THAN THE EMPTY ONE. An empty `atId` is findable: it shows in the
+     * unassigned backlog and every census counts it. A job stamped with TODAY'S tender on another tender's MR
+     * looks correct everywhere and prices from the wrong rate schedule and the wrong AT percentage - the exact
+     * failure F72 exists to prevent. The MR's own jobs are the authority, never the session (F66).
      *
-     * The MR's own jobs are the authority, never the session (F66). If they cannot say which
-     * tender this MR belongs to, that is a question for a person with the paperwork, not a
-     * default for the app to pick.
+     * ⚠⚠ AND THE GUARD SAT AT THE TOP OF THE FUNCTION, WHERE IT BLOCKED WRITES THAT NEVER NEEDED IT.
+     *
+     * The AT is used in exactly two places: stamping `atId` on a NEW row, and advancing the AT's job-number
+     * counter. The update branch for an existing job never writes `atId` - it writes the MR number, the job
+     * number, the serial, the status. So renaming an MR, or correcting a serial, on jobs that belong to no
+     * tender was refused by a precondition that guarded nothing about that write. Three live jobs are in that
+     * state, all MEGHA's, and their numbers were effectively frozen.
+     *
+     * ⚠ THIS IS THE INVERSE OF G3, NOT A RETREAT FROM IT. G3 moved a gate INTO a handler because hiding the
+     * button was not enough - the gate belonged where the write happens. This moves a gate DOWN TO the write
+     * that needs it, for the same reason: a precondition belongs at the operation it protects, not at the
+     * entrance of a handler several operations share.
      */
+    const addsRow = editingMr.jobs.some((j: any) => j.isNew || !j.id);
     const mrAt = atForEditingMr();
-    if ('error' in mrAt) {
+    if (addsRow && 'error' in mrAt) {
       alert(mrAt.error);
       return;
     }
@@ -922,11 +947,11 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
             isCancelled: isJobCancelled,
             mrStatus: isJobCancelled ? 'Cancelled' : 'Active',
             isClosed: false,
-            // ⚠ `activeAtMaster` DOES NOT APPEAR HERE (AUDIT G2). `mrAt` is resolved from the
-            // MR's own jobs at the top of this function, and the save refuses if they cannot
-            // agree - so there is no case left in which a fallback would be consulted, and no
-            // expression for a later edit to widen back into one.
-            atId: mrAt.atId,
+            // ⚠ `activeAtMaster` DOES NOT APPEAR HERE (AUDIT G2). `mrAt` is resolved from the MR's own jobs,
+            // and a save that ADDS a row refuses when they cannot agree (G79) - so this branch is unreachable
+            // without a resolved AT, there is no case in which a fallback would be consulted, and no expression
+            // for a later edit to widen back into one.
+            atId: 'error' in mrAt ? '' : mrAt.atId,
             prevAtNo: j.prevAtNo || '',
             prevJobNo: j.prevJobNo || '',
             prevDeliveryDate: j.prevDeliveryDate || '',
@@ -948,10 +973,17 @@ An MR belongs to one tender. Until that is resolved there is no single sequence 
 
       await batch.commit();
 
-      // ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (ACTIVE JOBS ONLY)
+      /**
+       * ADVANCE THE COUNTER TO WHAT WAS ACTUALLY SAVED (ACTIVE JOBS ONLY)
+       *
+       * ⚠ SKIPPED ENTIRELY FOR AN MR THAT BELONGS TO NO TENDER, AND THAT IS CORRECT RATHER THAN AN OVERSIGHT
+       * (AUDIT G79, A3). `lastJobNumbers` lives on the AT, and A3 already settled what AT-less jobs are: the
+       * allotment count queries `where('atId','==',...)`, so they are counted nowhere and consume no quota.
+       * A number on such a job has never been in any AT's sequence, so there is no counter for it to advance
+       * and nothing is left behind by not advancing one. If those jobs are ever assigned an AT, the counter is
+       * seeded from the real job numbers at that point.
+       */
       if (editingMr.repairType !== 'GP') {
-        // Resolved once at the top of this function - the save cannot have reached here with
-        // an unresolved AT, so this no longer re-derives it (AUDIT G2).
         const at = mrAt;
         if (!('error' in at)) {
           const activeJobs = editingMr.jobs.filter(j => j.status !== 'Cancelled' && !j.isCancelled);
