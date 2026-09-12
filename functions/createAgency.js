@@ -102,9 +102,12 @@ export function makeCreateAgency(db) {
       const ownSubs = await db.collection('subscriptions').where('ownerId', '==', uid).get();
       const hadTrial = ownSubs.docs.some(d => (d.data() || {}).status === 'trial');
       if (hadTrial) {
+        // ⚠ "its free trial", NOT "its free ${TRIAL_LENGTH_LABEL}" (AUDIT G75). The label is a noun phrase - it
+        // fits "for 3 days" and "After 3 days", and does not fit a slot that wants the noun "trial". The length is
+        // still stated, where it reads as a length.
         throw new HttpsError('failed-precondition',
-          `This login has already used its free ${TRIAL_LENGTH_LABEL}. The trial is one per `
-          + 'account, not one per agency - add this one by buying it. The price and what it '
+          `This login has already used its free trial. The trial is ${TRIAL_LENGTH_LABEL}, one per `
+          + 'account rather than one per agency - add this agency by buying it. The price and what it '
           + 'includes are on the Pricing page.');
       }
 

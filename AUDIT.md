@@ -16152,3 +16152,67 @@ different number, and only the agency's paper says which.
   counts as a match - and was corrected rather than the code.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G75. A free trial offered to people who cannot have one, and a price shown to the vendor
+
+**Confirmed live first.** The deployed bundle carries the trial card - "Try it free for 3 days", "One free trial per
+login", "Start the free trial", "no card, no charge" - and `TRIAL_LENGTH_LABEL` is `'3 days'`, so what a customer
+reads is the phrase G50 settled on. The one "72 hours" string in the bundle is the tender's Schedule-A row 1f,
+"Drying of active part by ovening 48-72 hours" - a repair process, not the trial. **G50 holds: no customer-facing
+string counts hours.**
+
+### What was wrong
+
+1. **The card had no eligibility test at all.** It rendered for every non-admin. `createAgency` refuses a trial to an
+   account that already holds an agency - so the offer was made to people who could not accept it, and the refusal
+   arrived only after they had named the agency and pressed the button. **A card offering a free trial to someone who
+   cannot have one is worse than no card.**
+2. **The refusal sentence was ungrammatical.** `TRIAL_LENGTH_LABEL` is a noun phrase, and the message read "has
+   already used its free 3 days".
+3. **The vendor was shown prices they are never charged.** "Rs 5,900 for the year" on cards that create agencies for
+   free, corrected only on the next step.
+
+### Built
+
+- **The trial card is hidden when the account already holds an agency** - `!isAdmin && agencies.length === 0`. No new
+  read: `agencies` is already in context, and the test matches the server's own rule.
+- **The refusal names the trial and states the length where a length belongs:** "This login has already used its free
+  trial. The trial is 3 days, one per account rather than one per agency…"
+- **The price cards read "No payment (vendor account)" for the vendor**, from the first screen, through the same
+  `isAdmin` branch that hides the trial card. The server is unchanged and still decides from the verified token.
+
+**Every other slot was checked and is correct.** `TRIAL_LENGTH_LABEL` appears in five places - "Try it free for 3
+days" (Add Agency and the Pricing page), "After 3 days your work stays readable", "Free for 3 days - no card, no
+charge", and the grant reason on the subscription record - all noun-phrase slots that fit. `trialRefusal()` never
+interpolates it: it names the moment the trial ended. **One wrong context did not mean more, this time.**
+
+### ⚠ G73 SILENTLY BROKE "ONE TRIAL PER ACCOUNT", AND THIS ENTRY IS WHERE IT WAS NOTICED
+
+**Not fixed - the owner's call.** `createAgency` enforces one trial per account by querying the account's
+subscriptions for `status: 'trial'`, with no date filter, and its comment names exactly what it depends on:
+
+> ⚠ THIS CHECK IS NOT REDUNDANT WITH THE AGENCY CHECK BELOW… The gap is `deleteIfEmpty` - the vendor CAN remove an
+> agency through it, **and it does not remove the subscription.** A deleted trial agency would otherwise leave the
+> account eligible for a second trial.
+
+**G73 made it remove the subscription.** A trial subscription carries no payment, so it is exactly what that change
+deletes alongside its agency - which erases the only record that the trial was ever used.
+
+- **The consequence:** the vendor deletes a customer's trial agency; that account now has no agency and no trial
+  record; `hadTrial` reads false; **it is granted a second free trial, silently.**
+- **It also changes what the residual case does.** The "had a trial, holds no agency now" case was left alone in this
+  entry on the understanding that it ends in a server refusal. After G73 it does not end in a refusal at all - it
+  ends in a new trial.
+- **The recommendation:** keep the subscription when the agency being deleted is on a trial, and delete it for
+  `admin` and `granted` as G73 does. A trial record has a second job the others do not - it is the eligibility
+  ledger, not merely a pointer to an agency - so "a record pointing at nothing" is the wrong reading of it.
+- **Reachable only by the vendor**, since no client can delete an agency. That is why it is recorded rather than
+  rushed.
+
+**Verified:** tsc; 142 tests (none new - these are JSX conditionals and one server string); build; hooks guard, 47
+files.
+- **⚠ Not seen rendered, and not covered by a test.** The card conditions and both messages were read, not exercised.
+
+**Deploy:** **functions** for the refusal sentence, **and hosting** for the cards - a push to `main` (O71).

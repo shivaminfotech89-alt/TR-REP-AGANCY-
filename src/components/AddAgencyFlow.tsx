@@ -191,10 +191,21 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
           &mdash; the estimate sheets, tax invoices and inspection reports this prints.
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {/* ⚠ THE TRIAL IS OFFERED FIRST AND ONLY TO A NON-ADMIN. A vendor creating agencies
-              for themselves does not want a trial clock on one, and the server would refuse
-              anyway once they own an agency. */}
-          {!isAdmin && (
+          {/* ⚠ THE TRIAL IS OFFERED FIRST, AND ONLY TO SOMEONE WHO COULD ACTUALLY HAVE ONE. A vendor creating
+              agencies for themselves does not want a trial clock on one, and the server would refuse anyway once
+              they own an agency.
+
+              ⚠ AND NOT TO AN ACCOUNT THAT ALREADY HOLDS AN AGENCY (AUDIT G75). `createAgency` refuses a trial to
+              one - "A free trial is for a first agency" - and the card had no eligibility test at all, so the offer
+              was made to people who could not accept it and the refusal arrived only after they had named the
+              agency and pressed the button. A card offering a free trial to someone who cannot have one is worse
+              than no card.
+
+              ⚠ THE RESIDUAL CASE IS LEFT, DELIBERATELY: an account that had a trial and no longer holds any agency
+              still sees the card and is still refused server-side. Catching it needs a `subscriptions` read on a
+              screen that does not otherwise make one, for a state reachable only because the vendor deleted an
+              agency - a poor trade, and recorded as one rather than missed. */}
+          {!isAdmin && agencies.length === 0 && (
             <button type="button" onClick={() => start(false, true)}
               className="text-left border-2 border-indigo-400 bg-indigo-50 rounded-lg p-3 hover:border-indigo-600 sm:col-span-2">
               <span className="block text-sm font-bold text-indigo-900">Try it free for {TRIAL_LENGTH_LABEL}</span>
@@ -206,16 +217,25 @@ export default function AddAgencyFlow({ onDone }: { onDone: () => void }) {
               </span>
             </button>
           )}
+          {/* ⚠ THE VENDOR IS NEVER CHARGED, SO THE VENDOR IS NEVER SHOWN A PRICE (AUDIT G75). These read
+              "Rs 5,900 for the year" to an account that `createAgency` creates for free, and the correction -
+              "no payment (vendor account)" - arrived only on the next step, after a card had already quoted a
+              figure that would never be taken. The same `isAdmin` branch that hides the trial card answers this;
+              what the server does is unchanged, and still decided from the verified token. */}
           <button type="button" onClick={() => start(false)}
             className="text-left border border-slate-300 rounded-lg p-3 hover:border-blue-500 hover:bg-blue-50">
             <span className="block text-sm font-bold text-slate-900">One agency</span>
-            <span className="block text-[11px] text-slate-500 mt-0.5">{formatPrice()} for the year</span>
+            <span className="block text-[11px] text-slate-500 mt-0.5">
+              {isAdmin ? 'No payment (vendor account)' : `${formatPrice()} for the year`}
+            </span>
           </button>
           <button type="button" onClick={() => start(true)}
             className="text-left border border-slate-300 rounded-lg p-3 hover:border-blue-500 hover:bg-blue-50">
             <span className="block text-sm font-bold text-slate-900">Several agencies</span>
             <span className="block text-[11px] text-slate-500 mt-0.5">
-              {formatPrice()} each, in one payment &mdash; up to {MAX_AGENCIES}
+              {isAdmin
+                ? `No payment (vendor account) — up to ${MAX_AGENCIES}`
+                : `${formatPrice()} each, in one payment — up to ${MAX_AGENCIES}`}
             </span>
           </button>
         </div>
