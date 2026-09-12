@@ -1,8 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { formatDDMMYYYY } from '../lib/utils';
 import { useAgency, AtMaster, AllotmentRecord } from '../lib/AgencyContext';
 import { TABLE, TH } from '../lib/ui';
-import { Plus, Check, Loader2, FileText, History, Lock, ShieldCheck, CheckCircle2, ArrowRight, X } from 'lucide-react';
+import { db, auth } from '../lib/firebase';
+import { collection, query, where, getDocs } from 'firebase/firestore';
+import { editLetter, deleteLetter, bookedFor, type AllotmentLetter, type Correction } from '../lib/allotments';
+import { Plus, Check, Loader2, FileText, History, Lock, ShieldCheck, CheckCircle2, ArrowRight, X, Pencil, Trash2, AlertTriangle } from 'lucide-react';
 
 export interface AllotmentConfirmationData {
   letterNo: string;
@@ -37,6 +40,103 @@ export function AtAllotments({ at }: { at: AtMaster }) {
 
   // Confirmation Modal state
   const [confirmationData, setConfirmationData] = useState<AllotmentConfirmationData | null>(null);
+
+  /**
+   * CORRECTING A LETTER (AUDIT G72). A quota typed as 30 for a letter that said 13 could only ever be added to.
+   *
+   * ⚠ THE QUOTA MOVES BY THE DIFFERENCE, NEVER REBUILT FROM THE LETTERS - see lib/allotments.ts, which holds the
+   * reason and the live figures. The jobs below are what the floor is checked against: a correction may not leave a
+   * quota under what is already booked for that division and core type.
+   */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ date: string; letterNo: string; division: string; coreType: string; quantity: string }>(
+    { date: '', letterNo: '', division: '', coreType: '', quantity: '' });
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
+  const [atJobs, setAtJobs] = useState<Array<{ division?: string; coreType?: string; repairType?: string }> | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      if (!auth.currentUser) { setAtJobs(null); return; }
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'jobs'),
+          where('ownerId', '==', auth.currentUser.uid),
+          where('atId', '==', at.id),
+        ));
+        if (live) setAtJobs(snap.docs.map(d => d.data() as any));
+      } catch (err) {
+        // ⚠ null IS "NOT READ", AND CORRECTION IS REFUSED WHILE IT IS (AUDIT G34, G70, G72). An empty list here
+        // would read as "nothing booked" and let a correction through the floor it exists to enforce.
+        console.warn('Could not read the jobs booked under this AT:', err);
+        if (live) setAtJobs(null);
+      }
+    })();
+    return () => { live = false; };
+  }, [at.id, auth.currentUser?.uid]);
+
+  const booked = (division: string, coreType: string) => bookedFor(atJobs || [], division, coreType);
+
+  const startEdit = (record: AllotmentRecord) => {
+    setCorrectionError(null);
+    setEditingId(record.id);
+    setDraft({
+      date: record.date || '', letterNo: record.letterNo || '', division: record.division || '',
+      coreType: record.coreType || 'CRGO', quantity: String(record.quantity ?? ''),
+    });
+  };
+
+  const applyCorrection = async (result: Correction) => {
+    // `result.ok === false`, not `!result.ok`: this tsconfig has strict off, where a boolean-literal discriminant
+    // narrows only on an explicit comparison.
+    if (result.ok === false) { setCorrectionError(result.reason); return; }
+    setIsSaving(true);
+    try {
+      await updateAtMaster(at.id, {
+        allotmentHistory: result.allotmentHistory as AllotmentRecord[],
+        allotments: result.allotments,
+      });
+      setAllotments(result.allotments);
+      setEditingId(null);
+      setCorrectionError(null);
+    } catch (err) {
+      setCorrectionError('That correction could not be saved. Nothing was changed.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const saveEdit = async (record: AllotmentRecord) => {
+    if (atJobs === null) { setCorrectionError('The jobs booked under this tender could not be read, so a correction cannot be checked against them. Try again.'); return; }
+    await applyCorrection(editLetter({
+      history: (at.allotmentHistory || []) as AllotmentLetter[],
+      allotments: at.allotments || {},
+      id: record.id,
+      patch: {
+        date: draft.date, letterNo: draft.letterNo, division: draft.division,
+        coreType: draft.coreType, quantity: Number(draft.quantity),
+      },
+      booked,
+    }));
+  };
+
+  const removeLetter = async (record: AllotmentRecord) => {
+    if (atJobs === null) { setCorrectionError('The jobs booked under this tender could not be read, so a removal cannot be checked against them. Try again.'); return; }
+    const result = deleteLetter({
+      history: (at.allotmentHistory || []) as AllotmentLetter[],
+      allotments: at.allotments || {},
+      id: record.id,
+      booked,
+    });
+    if (result.ok === false) { setCorrectionError(result.reason); return; }
+    const ok = window.confirm(
+      `Remove allotment letter ${record.letterNo}?\n\n`
+      + `${record.division} / ${record.coreType}: quota ${allotments[record.division]?.[record.coreType] ?? 0} becomes `
+      + `${(allotments[record.division]?.[record.coreType] ?? 0) - record.quantity}, with ${booked(record.division, record.coreType)} already booked.\n\n`
+      + 'The letter is removed from the history. No job is changed.');
+    if (!ok) return;
+    await applyCorrection(result);
+  };
   
   const currentPrefixes = (at.prefixes && Object.keys(at.prefixes).length > 0) ? at.prefixes : (activeAgency?.prefixes || {});
   const divisions = Object.keys(currentPrefixes);
@@ -261,6 +361,12 @@ export function AtAllotments({ at }: { at: AtMaster }) {
             <h5 className="text-[10px] font-bold text-slate-600 uppercase mb-2 flex items-center tracking-wider">
               <History className="w-3.5 h-3.5 mr-1.5 text-blue-600" /> Letter History ({at.allotmentHistory.length} Records)
             </h5>
+            {correctionError && (
+              <div role="alert" className="mb-2 flex items-start gap-2 text-[11px] font-medium rounded px-2.5 py-2 border bg-red-50 border-red-300 text-red-900">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{correctionError}</span>
+              </div>
+            )}
             <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-lg shadow-2xs">
               <table className={`${TABLE} text-xs bg-white`}>
                 <thead className="bg-slate-100/80 sticky top-0 border-b border-slate-200">
@@ -271,10 +377,57 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                     <th className={`${TH}`}>Prefix</th>
                     <th className={`${TH}`}>Core Type</th>
                     <th className={`${TH} text-right`}>Qty Added</th>
+                    {/* CORRECTION LIVES ON THE LETTER, not on the quota table: the letter is the fact, the
+                        quota is its consequence (AUDIT G72). */}
+                    <th className={`${TH} text-right`}>Correct</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {[...at.allotmentHistory].reverse().map((record, idx) => (
+                    editingId === record.id ? (
+                      <tr key={record.id || idx} className="bg-blue-50/60">
+                        <td className="p-2">
+                          <input type="date" value={draft.date} onChange={e => setDraft({ ...draft, date: e.target.value })}
+                            className="w-full px-2 py-1 text-[11px] border border-slate-300 rounded font-semibold" />
+                        </td>
+                        <td className="p-2">
+                          <input type="text" value={draft.letterNo} onChange={e => setDraft({ ...draft, letterNo: e.target.value })}
+                            className="w-full px-2 py-1 text-[11px] border border-slate-300 rounded font-mono tabular-nums font-bold" />
+                        </td>
+                        <td className="p-2">
+                          <select value={draft.division} onChange={e => setDraft({ ...draft, division: e.target.value })}
+                            className="w-full px-2 py-1 text-[11px] border border-slate-300 rounded font-bold">
+                            {divisions.map(d => <option key={d} value={d}>{d}</option>)}
+                            {!divisions.includes(draft.division) && <option value={draft.division}>{draft.division}</option>}
+                          </select>
+                        </td>
+                        <td className="p-2.5 font-mono tabular-nums text-[11px] text-blue-700">
+                          {getPrefixString(draft.division, draft.coreType) || '-'}
+                        </td>
+                        <td className="p-2">
+                          <select value={draft.coreType} onChange={e => setDraft({ ...draft, coreType: e.target.value })}
+                            className="w-full px-2 py-1 text-[11px] border border-slate-300 rounded font-bold">
+                            <option value="CRGO">CRGO</option>
+                            <option value="Amorphous">Amorphous</option>
+                            <option value="Wound Core">Wound Core</option>
+                          </select>
+                        </td>
+                        <td className="p-2">
+                          <input type="number" min="1" value={draft.quantity} onChange={e => setDraft({ ...draft, quantity: e.target.value })}
+                            className="w-full px-2 py-1 text-[11px] border border-slate-300 rounded text-right font-bold" />
+                        </td>
+                        <td className="p-2 text-right whitespace-nowrap">
+                          <button type="button" onClick={() => saveEdit(record)} disabled={isSaving}
+                            className="px-2 py-1 text-[11px] font-bold bg-blue-600 text-white rounded hover:bg-blue-700 disabled:bg-slate-300">
+                            Save
+                          </button>
+                          <button type="button" onClick={() => { setEditingId(null); setCorrectionError(null); }}
+                            className="ml-1 px-2 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 rounded">
+                            Cancel
+                          </button>
+                        </td>
+                      </tr>
+                    ) : (
                     <tr key={record.id || idx} className="hover:bg-blue-50/40 transition-colors">
                       <td className="p-2.5 text-slate-700 font-medium">{formatDDMMYYYY(record.date)}</td>
                       <td className="p-2.5 font-mono tabular-nums font-bold text-slate-800">{record.letterNo}</td>
@@ -290,7 +443,20 @@ export function AtAllotments({ at }: { at: AtMaster }) {
                       <td className="p-2.5 text-right font-black text-emerald-600">
                         +{record.quantity}
                       </td>
+                      <td className="p-2.5 text-right whitespace-nowrap">
+                        <button type="button" onClick={() => startEdit(record)} disabled={isSaving || atJobs === null}
+                          title={atJobs === null ? 'The jobs booked under this tender could not be read' : 'Correct this letter'}
+                          className="p-1 text-slate-500 hover:text-blue-700 hover:bg-blue-50 rounded disabled:opacity-40">
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button type="button" onClick={() => removeLetter(record)} disabled={isSaving || atJobs === null}
+                          title={atJobs === null ? 'The jobs booked under this tender could not be read' : 'Remove this letter'}
+                          className="ml-1 p-1 text-slate-500 hover:text-red-700 hover:bg-red-50 rounded disabled:opacity-40">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </td>
                     </tr>
+                    )
                   ))}
                 </tbody>
               </table>
@@ -392,6 +558,8 @@ export function AtAllotments({ at }: { at: AtMaster }) {
           <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
           <span>
             Quota synchronization is active across AT periods and Agency profile. To allocate new quotas, click <strong>"Add Allotment Letter"</strong> above.
+            A wrong figure is corrected on the letter it came from, in the history above &mdash; a correction is refused if it would
+            leave a quota below the jobs already booked against it.
           </span>
         </div>
       </div>

@@ -15911,3 +15911,78 @@ payment should read them by name rather than cast past the type.
 
 **Still open, and the owner's:** the GST invoices themselves. The receipt now promises one on a document the
 customer keeps, which raises the cost of never issuing them. Kaushal Shah is being chased this week (O65).
+
+---
+
+## G72. An allotment quota could only ever go up
+
+**The report.** An agency entered a wrong quota and had no way to correct it. True: the panel was **add-only**. Its
+one control appended a letter and added its quantity to the division's quota; the quota table carried a "Read-Only"
+badge, and no row - letter or quota - had an edit or a delete.
+
+**Built:**
+- **Correct a letter** - date, reference, division, core type, quantity - on its row in the letter history.
+- **Remove a letter**, for a quota recorded against a division that never issued it. SAMOR runs `DAEESA` and
+  `DAEESA-1` side by side with five letters split between them, which is exactly that case.
+- **`src/lib/allotments.ts`**, pure and tested, holding both rules.
+- **The Add path is unchanged**, and the quota table stays read-only: **a correction is made on the letter, because
+  the letter is the fact and the quota is its consequence.**
+
+**⚠ RULE ONE, AND IT IS STATED AT THE CODE, NOT ONLY HERE: THE QUOTA MOVES BY THE DELTA. IT IS NEVER REBUILT FROM
+THE LETTERS.** A reader who notices that `allotments[division][coreType]` ought to equal the sum of that division's
+letters, finds live data where it does not, and reaches for the obvious fix would silently change live quotas. The
+header of `allotments.ts` carries the figures and the reason, so the temptation meets the evidence in the same place.
+
+**⚠ RULE TWO - THE FLOOR: no correction may leave a quota below what is already booked against it**, per division and
+core type, and the refusal names both figures: *"That would leave the CRGO quota for SABARMATI at 20, but 21 jobs are
+already booked against it. Reduce it to 21 or more, or cancel the jobs first."*
+- **The AT-delete rule does not transfer here, and copying it would have been wrong.** `deleteIfEmpty` refuses while
+  ANY job references the AT, because deleting it orphans them. No job references a letter, and refusing on "any job
+  exists" would block correction on exactly the tenders that need it - MEGHA could never fix a letter, because 21
+  jobs sit under that tender.
+- **Moving a letter to another division** checks the floor on the division that LOSES the quota.
+- **Equal is allowed**; only below is refused.
+- **A correction is refused while the jobs cannot be read.** An empty list would read as "nothing booked" and let a
+  correction through the floor it exists to enforce (G34, G70).
+
+**Also fixed: the Dashboard counted GP jobs as quota used.** `AllotmentWidget` excluded only Overhauling; New Job
+excludes guarantee rework as well, correctly - a GP repair is rework on a job the quota already paid for. MEGHA's
+SABARMATI/CRGO row read **25 on the Dashboard and 21 at intake**. Both now call `drawsOnAllotment`, one definition
+in one place.
+
+### ⚠ OPEN, AND ONLY PAPER CAN ANSWER IT: two ATs whose quota exceeds their letters
+
+Measured 2026-09-12. **Nothing here has been touched.**
+
+| AT | Division / core | Quota map | Letters total | Difference | Booked |
+|---|---|---|---|---|---|
+| ADMIN 2026_27 | SABARMATI / CRGO | 35 | 15 | +20 | 0 |
+| ADMIN 2026_27 | SABARMATI / Amorphous | 30 | 15 | +15 | 0 |
+| ADMIN 2026_27 | SABARMATI / Wound Core | 10 | 0 | +10 | 0 |
+| MEGHA AT 26-27 | SABARMATI / CRGO | 30 | 25 | +5 | 21 |
+| MEGHA AT 26-27 | SABARMATI / Amorphous | 10 | 0 | +10 | 3 |
+| MEGHA AT 26-27 | KALOL / Amorphous | 10 | 0 | +10 | 1 |
+| MEGHA AT 26-27 | KALOL / Wound Core | 10 | 0 | +10 | 0 |
+
+The other six ATs carrying quotas agree with their letters exactly.
+
+**The question the owner answers from the letters on file, per row:** is the map right and the letters incomplete,
+or is the map inflated - in which case **21 MEGHA jobs sit under a quota that was never issued**. The database cannot
+say, and a recompute would answer it by accident in one direction.
+
+**HOW IT AROSE** - recorded because the fix only holds if the new path does not repeat it:
+- `AtAllotments` initialised its quota state to `at.allotments || activeAgency?.allotments` - **the AGENCY's fallback
+  map** - and the first "Add letter" save wrote that inherited map onto the AT along with the increment.
+- **ADMIN's AT map is its agency map exactly** - 35 / 30 / 10 - under a different division name: the agency record
+  says `DEESA`, the AT says `SABARMATI`.
+- MEGHA's agency map is 20 / 10 / 10 against an AT map of 30 / 10 / 10, so its rows are a mixture of inheritance and
+  real letters.
+- **The correction path reads only the AT's own stored map** and returns it changed by the delta. It never reads the
+  agency record and never reconstructs, so it cannot inherit a figure the way the Add path did.
+- **The Add path still initialises from the agency map.** Not changed here: changing it would alter what a NEW letter
+  writes on ATs that currently inherit, which is the same open question as the table above.
+
+**Verified:** tsc; 116 tests, 17 new; build; hooks guard, 47 files.
+- **⚠ Not seen rendered.** No test drives the panel; the tests cover the two rules and the counting definition.
+
+**Deploy:** hosting - a push to `main` (O71).

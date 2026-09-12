@@ -4,6 +4,7 @@ import { useAgency, AtMaster } from '../lib/AgencyContext';
 import { db } from '../lib/firebase';
 import { auth } from '../lib/firebase';
 import { collection as fsCollection, query as fsQuery, where as fsWhere, getDocs as fsGetDocs } from 'firebase/firestore';
+import { drawsOnAllotment } from '../lib/allotments';
 
 export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
   const { activeAgency, activeAtMaster } = useAgency();
@@ -29,8 +30,10 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
           const div = data.division;
           const cType = data.coreType || 'CRGO';
           
-          // Skip OH as it's not allotted
-          if (cType === 'OH' || data.repairType === 'OH') return;
+          // ⚠ THE SAME RULE AS INTAKE, FROM ONE PLACE (AUDIT G72). This counted GP rework as quota used while New
+          // Job did not, so the Dashboard overstated usage for any agency with guarantee work - MEGHA's
+          // SABARMATI/CRGO row read 25 here and 21 at intake. One quantity may not have two counts.
+          if (!drawsOnAllotment(data)) return;
           
           if (!newCounts[div]) newCounts[div] = {};
           if (!newCounts[div][cType]) newCounts[div][cType] = 0;
