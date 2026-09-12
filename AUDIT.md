@@ -16510,6 +16510,77 @@ branch runs, and it is stated here rather than asserted.
 
 ---
 
+## G80. The manifest never met the install criteria, and what was taken for the PWA working was not
+
+**⚠ THE OWNER'S ASSUMPTION, CORRECTED, AND RECORDED BECAUSE IT WOULD HAVE GONE ON BEING BELIEVED.** The install
+prompt on Chrome mobile was read as evidence that the PWA was working. **It cannot have been.** The manifest
+declared exactly one icon - a 516-byte SVG, listed at `64x64 32x32 24x24 16x16` - and Chromium requires the icon
+array to contain **a 192px and a 512px icon**. It has never met that, on any platform.
+
+What was actually being used is Chrome's **"Add to Home screen"**, which is always offered for any page and is a
+different mechanism: a shortcut, not an installed app, and nothing to do with the manifest's completeness. The two
+look alike from the outside, and the belief was self-confirming - the app appeared on the home screen, so the
+manifest looked as though it were doing something it was not.
+
+**The shape:** a mechanism that appears to work because a DIFFERENT mechanism produces the same visible outcome.
+Nothing in the app could have contradicted it, because nothing in the app was involved.
+
+### What was actually required, verified rather than recalled
+
+Per MDN, Chromium requires: `name` or `short_name`; **`icons` containing a 192px and a 512px**; `start_url`;
+`display` and/or `display_override`; `prefer_related_applications` false or absent. Four of the five were already
+satisfied. **SVG alone does not satisfy the icon rule** - the install flow wants raster PNGs at those sizes.
+
+### Built
+
+- **Three PNGs, rasterised from the one mark** by `scripts/make-app-icons.mjs`: `icon-192.png`, `icon-512.png`,
+  `icon-512-maskable.png`. No image library was added - the script drives the same Chrome-over-DevTools mechanism
+  print-check already uses, with Node built-ins only, and reads the written PNG's IHDR back to assert its real
+  dimensions rather than trusting the clip.
+- **⚠ THE MASKABLE VARIANT IS NOT THE SAME PICTURE SCALED.** A launcher crops to the centre 80%, and this mark
+  fills its frame corner to corner - the tile's rounded corners and the bushing stems (y=9 and y=55 of 64) sit
+  outside that zone. The maskable file draws the mark at 80% on a FULL-BLEED navy field with the corner rounding
+  removed, because the launcher supplies the silhouette. Inspected after rendering: the tile's navy merges into the
+  field, so the mark reads as strokes on navy rather than as a tile - correct for maskable, and worth stating
+  because it looks wrong beside the plain icon until you know why.
+- **The manifest** now lists 192 `any`, 512 `any`, 512 `maskable`, and keeps the SVG for the browser tab. `scope`
+  added.
+- **A one-row install offer at the foot of the sidebar** - `lib/installPrompt.ts` plus a row in `AppLayout`,
+  dismissible to `localStorage`, hidden when `display-mode: standalone` matches or `appinstalled` fires. Not a
+  banner: a page-wide prompt for something nobody asked for is the shape this app removes elsewhere.
+- **⚠ `prompt()` MAY BE CALLED ONCE PER EVENT**, so the event object itself is held rather than a boolean. A
+  "remind me later" that re-prompted from a stored flag would find a spent event and a button that silently does
+  nothing - the G24 shape, a control that accepts a click and achieves nothing.
+
+### ⚠ NO SERVICE WORKER, AND THE REASON IS NOT CONVENIENCE
+
+**Installability does not require one** (MDN, above). Chrome's own blog records the split: the fetch-handler
+requirement was removed *"for installation from the menu, since version 108 on mobile and 112 on Desktop"*, while
+*"the algorithm that displays the install prompt still requires the presence of a `fetch()` handler."* So icons
+alone give the address-bar icon, menu install and a real installed app; only the automatic prompt algorithm needs
+a worker.
+
+**That trade is refused deliberately.** This app deploys often, and its rate data is corrected IN PLACE - this
+session alone cleared 3,706 copied cells, moved oil with an MR rename, and corrected a guarantee period. **A cached
+bundle in an installed window would price from yesterday's masters with nothing on screen saying so, and the person
+affected could not tell.** An offline cache serving a stale estimate builder is the exact failure this audit spends
+its length removing.
+
+**If `beforeinstallprompt` turns out not to fire and one is ever added:** it must be **network-first with no
+precache** - a fetch handler that always goes to the network and falls back to cache only when offline, with
+`skipWaiting` and `clients.claim`. That requirement is stated at `lib/installPrompt.ts` as well as here, because
+the file that would be edited is not this one.
+
+**Verified:** manifest parses; tsc; 152 tests; build; hooks guard, 47 files. All three PNGs and the manifest ship
+into `dist/`.
+- **⚠ NOT CONFIRMED ON A DESKTOP CHROME.** Whether the address-bar icon appears, and whether
+  `beforeinstallprompt` fires without a service worker, are observations that need a browser - they are predictions
+  until the owner looks.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
 ### O72. MSBT-12 exists twice, and three jobs belong to no tender - both MEGHA's, both reported not fixed
 
 **Open, 2026-09-12. Nothing here has been written.** MEGHA is the test agency, so neither is urgent; a job number
@@ -16567,3 +16638,51 @@ about which tender is meant.
 **So the shape of the decision is:** the two OGP jobs are a straightforward attribution, and the billed GP job is
 not - its figures are already on paper. The safe order, if the owner wants it done, is the two OGP jobs first,
 the billed one only after checking what its issued estimate says against what AT 26-27 would now produce.
+
+### DECIDED 2026-09-12: DO NOT STAMP THE BILLED JOB - and three separate findings, not one bad record
+
+Priced through the app's own builder by `scripts/admin/price-job-under-at.js` (read-only, kept - "what would this
+job cost under a different tender" recurs at every rollover):
+
+| | Amount |
+|---|---|
+| Recomputed as it stands (no AT) | **6,571.20** |
+| Recomputed under AT 26-27 (UGVCL-2020, 4%) | **6,834.05** |
+| Difference the stamp would make | **+262.85** |
+
+The line items are **identical** in both - the same ten rows, the same `baseTotal` of 6,571.20. The whole
+difference is the AT percentage: 0% today, 4% under the tender.
+
+**⚠ But the stamp is refused for a better reason than the 262.85: the record is internally inconsistent in three
+ways, and a stamp would bury them under a fourth change.** Each is a separate fact.
+
+**FINDING 1 - the estimate does not reproduce, and that is F72 ALREADY REALISED rather than a risk of it.**
+`estimateAmount` and `approvedAmount` both say **5,661**. The builder says **6,571.20** today, with no AT involved
+at all. **The gap of 910.20 predates any stamp**, and it exists because a printed estimate is not stored line by
+line - it is rebuilt from the job, its inspections and the tender every time it is opened. The paper in the file
+and the screen have already parted company for this job. Stamping the AT would widen the gap to 1,173.05; it is
+not what breaks it.
+
+**FINDING 2 - `paymentDeductions` equals `paidAmount`, and the record PREDATES the guard rather than bypassing
+it.** Both are **6,680**. This is the O5 shape, and the dates settle which: the record was written **2026-08-15**
+(`billSentDate`, `paymentDate`, `updatedAt`), and the guard landed in **`b6ea965`, 2026-08-21 23:17** - six days
+later. O5 names this very document as the reason the check exists, so it is the instance that prompted the fix,
+not an escape from it. Nothing to do; recorded so the two entries are not read as two occurrences.
+
+**FINDING 3 - A GP JOB CARRYING A FULL MONEY TRAIL. OPEN, AND THE ONE THAT MATTERS.** `isGpJob(job)` is **true**,
+and `estimateCalc` states a GP repair is excluded from every money path - estimates, forwarding letters, bills.
+This job holds an estimate, an approval, a bill, a payment and a UTR.
+
+- **The builder priced it regardless**, which is correct and worth knowing: the exclusion lives in the CALLERS,
+  not in `buildSingleJobEstimateData`.
+- **The flags hint at age, not at sequence.** Of six GP jobs, four carry `isGp: true` (three with `gpSource`); two
+  carry `repairType: 'GP'` with neither - MSBT-6 and this one, both created before `773d1d0` (2026-08-21 22:20),
+  which is when the GP chip and filter work landed. That dates the FLAG, not the VALUE.
+- **⚠ THE QUESTION IS NOT ANSWERED:** whether this job was OGP when it was billed on 15 August and marked GP
+  afterwards - and, more importantly, **whether `repairType` can still be changed on a job that already carries a
+  bill.** `EditJob.tsx` does not mention `repairType` at all, so the editor is elsewhere and was not found before
+  this was written. If the MR Full Edit modal will flip a billed job to GP, **the exclusion is bypassable today**
+  and that is a live gap rather than a historical oddity.
+- **What would answer it:** the per-row `repairType` control in `MrLedger`'s edit modal, and whether anything
+  guards it when `issuedMarks(job)` is non-empty - the predicate that already refuses DELETING a billed row (G3).
+  That same predicate is the natural guard if the change is permitted.

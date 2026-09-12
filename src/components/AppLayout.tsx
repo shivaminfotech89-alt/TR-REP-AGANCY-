@@ -26,6 +26,7 @@ import {
   LifeBuoy,
   ShieldCheck,
   Crown,
+  Download,
   Sun,
   Moon,
   ChevronsUpDown
@@ -50,6 +51,7 @@ import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
 import { agencyGate } from '../lib/loadFailure';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
+import { useInstallPrompt } from '../lib/installPrompt';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
@@ -60,6 +62,9 @@ export default function AppLayout({ user }: { user: User }) {
   const [showThemeModal, setShowThemeModal] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [logoutErrorMsg, setLogoutErrorMsg] = useState<string | null>(null);
+  /** The install offer - see lib/installPrompt.ts for why it cannot be a simple boolean. */
+  const { canInstall, promptInstall, dismissInstall } = useInstallPrompt();
+  const handleInstallClick = async () => { await promptInstall(); setMobileMenuOpen(false); };
 
   // Auto-hide mobile sidebar when route/pathname changes
   useEffect(() => {
@@ -425,6 +430,38 @@ export default function AppLayout({ user }: { user: User }) {
                 />
               </div>
             </button>
+
+            {/* ⚠ THE INSTALL ROW - ONE LINE, DISMISSIBLE, AND NEVER SHOWN TO AN INSTALLED APP (AUDIT G80).
+                Chrome's address-bar install icon is real and unnoticed; this is the same action where the
+                operator already looks. It is NOT a banner: a page-wide prompt for something nobody asked for is
+                the shape this app removes elsewhere.
+
+                ⚠ `prompt()` MAY BE CALLED ONCE PER EVENT, so the saved event is dropped after use and the row
+                hides. If the operator dismisses Chrome's dialog the row stays gone until Chrome fires
+                `beforeinstallprompt` again on a later visit - a "remind me later" that re-prompted from a stored
+                flag would find a spent event and a button that silently does nothing. */}
+            {canInstall && (
+              <div className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center justify-between gap-2 text-xs font-semibold ${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`}>
+                <button
+                  type="button"
+                  onClick={handleInstallClick}
+                  className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+                  title="Install TransRegister as an app on this computer"
+                >
+                  <Download className={`w-4 h-4 shrink-0 ${isLight ? 'text-emerald-600' : 'text-emerald-400'}`} />
+                  <span className="truncate">Install TransRegister</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={dismissInstall}
+                  className={`shrink-0 p-1 rounded ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-slate-500 hover:text-slate-300'}`}
+                  aria-label="Dismiss the install offer"
+                  title="Not now"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
 
             {/* Admin Portal TAB: STRICTLY ONLY VISIBLE TO SUPER ADMIN (shivaminfotech89@gmail.com) */}
             {isSuperAdmin && (
