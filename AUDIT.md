@@ -7269,6 +7269,49 @@ industries", 2026-09-12 05:46 UTC, seeded through the deployed function:
 **Left standing, deliberately:** 340 cells on rows not priced from Schedule-A, and AT 1049's 5 cells for
 `revert-at-1049-12Ab.js`.
 
+### WHAT A PUBLISHED TEMPLATE IS FOR, NOW THAT IT CARRIES NO SCHEDULE-A RATES
+
+**Nothing needs republishing.** `adoptPublishedAt` refuses a template only when one of the five sections is
+missing or empty as an ARRAY. The clear emptied cells, never rows: both templates still hold all five sections
+with every row, so adoption works exactly as before.
+
+**What each of the two templates holds now** - the same in both:
+
+| Section | Rows | Filled cells | Empty |
+|---|---|---|---|
+| CRGO | 32 | **11** - the scrap row (22 at 500) alone | 310 |
+| Overhauling | 5 | 37 - rows 3, 4, 5, 6 | 17 |
+| Amorphous | 13 | 75 | 68 |
+| Wound Core | 13 | 75 | 68 |
+| Circle Limits | 5 | 50 | 0 |
+
+**Every figure that survives is one the tender does not price.** Amorphous, Wound Core and Circle Limits were
+never Schedule-A rows; Overhauling 3-6 have no Schedule-A pairing; the scrap row has no tender figure to fall
+through to. **The Schedule-A-priced CRGO rows are empty by design.**
+
+**What an agency adopting a template today gets.** `adoptPublishedAt` writes onto the AT: `ratesSource`
+(`published:<id>`), `publishedAtVersion`, `ratesUpdatedAt`, the template's `scheduleId`, and the five sections as
+they are - empty cells included. An empty cell resolves through `resolveRate` to the AT's own schedule
+(`SingleJobEstimateReport.tsx:780`), so a 2026 AT prices 1a at 2,079 instead of the 2,061 a copy used to impose.
+**That is the fix working: the adopter reads the tender, not a copy of an older one.**
+
+**⚠ SO A TEMPLATE'S JOB IS SMALLER THAN IT WAS, AND IT IS NOT RATES.** What it actually carries:
+- **Which tender:** `name`, `atNumber`, `notes` (1819's notes record the 7% clause).
+- **Which schedule:** `scheduleId`, and this is the load-bearing one - it travels onto the AT at adoption, so
+  master rows and Schedule-A fallbacks come from the same tender.
+- **The period:** `startDate` / `endDate`, prefilled into the Add AT form and editable, since an agency may join
+  a tender late.
+- **The percentage, where the tender sets one for everybody:** `atPercentage`, prefilled and labelled with its
+  source by `applyTemplateChoice`. The 1819 template carries 7; the 2020 one carries none, so that form stays
+  blank and required.
+- **A version stamp:** adopters behind the current version are listed in Admin, which is the only place drift is
+  visible across all agencies at once.
+- **The rate sections the tender does not price** - Amorphous, Wound Core, Circle Limits, Overhauling 3-6.
+
+**Nobody should expect a template to carry CRGO rates again.** If a tender's Schedule-A figures ever need to
+travel, they belong in `src/lib/ugvclSchedules.ts` as a new schedule id, not in a template's cells - a cell would
+be a copy, and the copy is what this whole entry is about.
+
 **The copy test's retirement** (step 4, making `resolveRate` honour any stored cell above zero) is now unblocked:
 every dry run reads zero. It is still a decision, not a consequence.
 
