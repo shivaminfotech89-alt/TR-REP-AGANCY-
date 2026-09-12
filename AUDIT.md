@@ -7244,6 +7244,20 @@ Run one at a time, each with MODE set to `apply` for the run and back to `dry-ru
 - **MSBT-2** (100 kVA): 13C 51.7 → 51.75, total unchanged at 12,413.26.
 - **No other job moved at all.**
 
+**CONFIRMED AFTER THE CHANGE, FROM THE DATABASE, THAT NOTHING WAS ISSUED AT 2,061.** `jobs/ZoW5Lb44M3ls8kBC47md`,
+OH21 IS-1, read back in full:
+- **Issuing an estimate stamps six fields** (`EstimateGenerate.tsx:574`): `estimateSentDate`, `estimateRefNo`,
+  `estimateAmount`, and `issuedByAgencyId` / `Name` / `Gstin`. **None of the six is present on the job.**
+- **No `billNo`, no `billSentDate`** - what Billing writes - and **no `challanNo` or `vehicleNo`** - what Dispatch
+  writes. `status` is "Internal Done" and `isClosed` is false, so it never reached Billing or Dispatch.
+- **Nothing else in the database references it.** Only its two inspections carry its id. Two apparent hits were
+  the string "1234" inside ZENITH's letterhead and an AT's `letterNo` "12345", not references to this job.
+- **Its MR, 1234, holds six jobs.** Five sit at "Internal Done" with no bill and no challan. The sixth, ASU-2, is
+  dispatched under challan "kj" - a 10 kVA Amorphous job with no `billNo`, and a challan names no rate.
+- **⚠ THE LIMIT OF THIS CHECK.** There is no estimates or bills collection: printing happens in the browser, and
+  the only record is the stamp written when an estimate is SENT. A preview printed without sending leaves no trace
+  in the database, so this proves no estimate was issued through the app, not that no paper was ever printed.
+
 **⚠ AN AGENCY WAS CREATED WHILE THE SEQUENCE RAN, AND IT CAME OUT CLEAN.** "R.K Electricals transformers
 industries", 2026-09-12 05:46 UTC, seeded through the deployed function:
 - its CRGO section carries **only the scrap row** (22 at 500) - no copied cell;
