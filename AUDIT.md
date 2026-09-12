@@ -40,6 +40,52 @@ a clean bill closes it.
 
 ---
 
+## Pattern: a fabricated fact arrived through a trusted channel, and specificity was taken for evidence
+
+**On 2026-09-11 this file recorded that the owner's accountant is Kaushal Shah, and named him as the person
+who answers O65 - a question about whether a GST tax invoice may print short. No such person was ever
+supplied by the owner. The name was invented upstream, in a message composed for the owner to send, and the
+owner passed it on without noticing.**
+
+**Two failures, and either alone would have been survivable.**
+
+1. **The fabrication, upstream of this record.** A name was put into a message as though it were the owner's
+   own answer. Nothing in the channel marked it as generated rather than supplied, and the owner had no
+   reason to inspect their own message for an invented fact.
+2. **The recording process accepted it without asking, and then propagated it.** It went into O65 the same
+   day (`a06226e`), and a day later was carried into G71 (`1e33b06`) as "Kaushal Shah is being chased this
+   week" - a second entry asserting a state of the world about a person who does not exist. **Nothing was
+   ever asked.** Every other fact in this file is checked against the database, the code or a script; this
+   one was written down because of how it read.
+
+**⚠ THE PROPERTY THAT MADE IT PASS IS THE USEFUL PART: IT WAS FLUENT AND SPECIFIC.** A vaguer claim - "the
+owner's accountant", "someone who knows GST" - would have prompted the obvious question: *who?* A full name
+answers that question before it is asked, and so removes the moment where it would have been asked.
+**Specificity read as evidence of provenance, and it is evidence of nothing.**
+
+**Why this belongs beside the census pattern above.** That one is a check that could not see its subject and
+was believed because it reported cleanly. This one is a fact nobody checked and was believed because it read
+precisely. Both are records trusted for their FORM rather than their SOURCE, and in both the next reader
+inherits the belief with no way to see how thin it was.
+
+**What it cost, concretely:** a legal question about GST compliance sat in a permanent record with an
+invented person listed as its owner, reading to any later reader - including the owner - as chased and
+handled. An unowned question is visibly unanswered. A falsely owned one is not.
+
+**How to apply:**
+- **A NAMED PERSON IS A FACT AND IS CHECKED LIKE ONE.** A name, a company, a registration number or a date
+  that arrives in conversation and is about to enter a permanent record gets asked about once: *is this
+  yours?* The cost of asking is a sentence; the cost of not asking is this entry.
+- **Record the source beside the fact.** "The owner said, 2026-09-11" is checkable later; a bare name is not.
+- **Correct every site, not the first one.** This name stood in three places - O65, the G66 back-reference
+  and G71 - and two of them said it in different words. Correcting only the entry that named him would have
+  left the invented person standing where a later reader meets him, which is the F31 shape recorded above.
+- **Placeholders and invented facts are the same defect.** `[registered address]` announces itself; "Kaushal
+  Shah" does not. This project has a standing rule that a placeholder renders visibly rather than silently
+  (`isPlaceholder`, lib/seller.ts). An unverified fact deserves the same treatment and had none.
+
+---
+
 ## Pattern: stored side-records diverge from the printed document
 
 Three instances found in one day (O3, O4, and the `estimateAmount` case below). The
@@ -7892,14 +7938,21 @@ defaults.
 
 ---
 
-### O65. Should the tax invoice refuse to print short? - an open question with an owner
+### O65. Should the tax invoice refuse to print short? - open, with no named owner
 
 Open, 2026-09-11. **Decided for now: warn only, no exceptions, the tax invoice included** (G66).
 
-**Who answers it: Kaushal Shah, the owner's accountant, asked by the owner.** Until that answer comes,
-nothing changes.
-- **Why an owner is named:** a decision recorded as "to confirm with the accountant", with nobody holding
-  the question, is a decision nobody owns.
+**⚠ CORRECTED 2026-09-12: THIS ENTRY NAMED A PERSON WHO DOES NOT EXIST.**
+
+It read *"Who answers it: Kaushal Shah, the owner's accountant, asked by the owner"*, and gave as its reason
+that a question with nobody holding it is a decision nobody owns. The reason still stands. **The name was
+invented and was never the owner's** - see the pattern note at the top of this file for how it got here and
+what it cost.
+
+**Who answers it: nobody yet.** The question needs a person qualified to answer it - an accountant or a GST
+practitioner the owner actually engages. Until the owner names one, this entry has no owner, and saying so is
+the honest state. **A placeholder owner is worse than an empty one:** an empty one is visibly unanswered, and
+a named one reads as chased.
 
 **The question:** is a GST tax invoice missing its tax block and signature worse than a delayed one?
 - **No:** the tax invoice stays warn-only, and this entry closes.
@@ -15553,7 +15606,9 @@ parsed stylesheets between documents.
   - The invoice is one content-sized sheet that has never been measured overflowing; for it, detection is
     the fix until one is (O64 step 4).
 - **Decided 2026-09-11: warn only, no exceptions, the tax invoice included - for now.** Whether the tax
-  invoice alone should refuse is open as O65, answered by the owner's accountant.
+  invoice alone should refuse is open as O65. **It has no named owner** - this line previously said it was
+  "answered by the owner's accountant", which asserted the same unverified fact in weaker words (corrected
+  2026-09-12).
 
 ---
 
@@ -15910,7 +15965,9 @@ payment should read them by name rather than cast past the type.
 **Deploy:** hosting - which here means a push to `main`, since the site builds on Vercel (O71).
 
 **Still open, and the owner's:** the GST invoices themselves. The receipt now promises one on a document the
-customer keeps, which raises the cost of never issuing them. Kaushal Shah is being chased this week (O65).
+customer keeps, which raises the cost of never issuing them. **Nobody is named as chasing it** - this line
+previously said an invented person was being chased this week, which is how a fabricated name survived a day
+and reached a second entry (corrected 2026-09-12; see the pattern note at the top of this file).
 
 ---
 
