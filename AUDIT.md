@@ -15986,3 +15986,86 @@ say, and a recompute would answer it by accident in one direction.
 - **⚠ Not seen rendered.** No test drives the panel; the tests cover the two rules and the counting definition.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G73. Finding an agency among seventeen, and deleting one that holds nothing
+
+**Why.** The Admin Panel listed every agency unfiltered - **17 across 10 owners** - with no search, no status filter,
+and nothing about what any of them contained. Deciding whether one could be removed meant reading the database by
+hand. And there was no delete path at all, although `deleteIfEmpty` already carried an `agencies` guard and
+`guardedDelete.ts` already typed the collection: **only the button was missing.**
+
+### The list
+
+- **Search** across name, contact email, GSTIN, owner email and the document id - the id because the panel prints it
+  and support conversations quote it.
+- **Status chips with counts**, so the distribution is visible before filtering: measured 2026-09-12, GRANTED 10,
+  TRIAL 3, ADMIN 2, ACTIVE 1, NOT BILLED 1.
+- **A "holds nothing" toggle**, and a **Contents column** giving tenders and jobs per agency.
+- **⚠ THE CONTENTS COLUMN IS THE DELETE GUARD'S OWN QUESTION, ASKED BEFORE THE BUTTON IS PRESSED.** It makes a
+  refusal predictable rather than a surprise - and it does **not** promise the delete will succeed, because the
+  server also refuses on inspections, oil and a payment, none of which the row can see.
+- **⚠ THE COUNTS COME FROM AN ADMIN-WIDE READ, NOT FROM `useAgency()`.** That context list is the SIGNED-IN OWNER'S
+  `atMasters`, fetched by `ownerId`: every other owner's agency would have shown 0 tenders and read as empty - a
+  count wrong in the direction that invites a delete. The rules let a super admin list both collections unfiltered.
+- **Cost:** about 77 read units per panel load (14 ATs, 77 jobs), accepted deliberately for a screen only the vendor
+  opens.
+- **Status counts and filtering are null-safe:** when the subscriptions cannot be read the chips say so and the
+  filter hides nothing, rather than showing seventeen agencies as NOT BILLED (G28, G34, G70).
+
+### The delete - it refuses, and never cascades
+
+**Three gaps in the existing guard are closed:**
+1. **⚠ INSPECTIONS, THROUGH THE JOBS AND NOT ONLY THE FIELD.** Of 144 inspections, **only 85 carry `agencyId`**; the
+   other 59 are reachable solely through their job. A guard querying the field alone would find nothing for them,
+   report the agency as empty, and orphan 59 records - a check passing because it cannot see its subject. Both routes
+   now run: the field catches inspections whose job was deleted, the jobs catch the ones carrying no `agencyId`.
+2. **Oil transactions**, by `agencyId`.
+3. **Money.**
+
+**⚠ THE MONEY TEST IS `wasPaid` OR A ROW IN `payments` - NEVER `payment_orders`.** An order is written when checkout
+opens and survives an abandoned one: **GUJARAT ENERGY TRANSMISSION and UPENDRA both carry unpaid orders**, and
+blocking on those would refuse a delete over a window somebody closed. A payment, or a subscription recorded active,
+is money received - and the GST invoice for it is still owed (G30), so the agency it names must go on existing.
+
+**Any AT blocks, empty or not.** An empty tender can be deleted from AT Settings, which is itself guarded, so the
+two-step route is honest. One button that cascaded "only the empty ones" would mean two different things depending
+on data the operator cannot see from the row.
+
+**⚠ AN UNPAID SUBSCRIPTION GOES WITH ITS AGENCY, IN THE SAME TRANSACTION.** `subscriptions/{agencyId}` is
+`allow write: if false` for every client, and this audit records that a subscription is never deleted because an
+invoice points at it and expiry is a status, not an absence.
+- **That rule is about a subscription that EXISTED AND ENDED.** A trial or a grant on an agency that no longer
+  exists is not an ended subscription - it is a record keyed by an id that resolves to nothing. Owner's decision,
+  2026-09-12.
+- **A paid one never gets there:** the payment blocker refuses first, and the transaction re-checks anyway, because a
+  payment could land between the guard and the write.
+- **`payments` and `payment_orders` are never touched, by this or anything else.** They record money, and an
+  abandoned order is still a fact about what happened.
+
+**The blocker framework gained a `find`**, for checks a single query cannot answer - today only inspections and
+money.
+
+### What is to be deleted, and what is not
+
+**The owner's instruction, 2026-09-12: two agencies, both the vendor's own, both admin-created, both empty** -
+`drishiv transformer tech` and `Narayan Transformer`.
+
+**Explicitly not:**
+- **R.K Electricals transformers industries** - empty, but a customer's, created 12 September.
+- **DYNAMIC TRAMSFORMER, IDEAL ENGINEERING COMPANY, vahanvati** - empty, but belonging to three other accounts.
+  "Empty is not mine to judge."
+
+### Verified, and what is not
+
+- tsc; **128 tests, 12 new**; build; hooks guard, 47 files.
+- **⚠ NOT RUN AGAINST THE DATABASE. No agency has been deleted, and the new blockers have never executed** - the
+  first real delete is their first test. The guard is server-side, so it cannot be exercised without deploying.
+- **Indexes:** the new queries - inspections by `agencyId`, inspections by `jobId` (`in`), oilTransactions by
+  `agencyId`, payments by `agencyId` - are admin-only and rare, and inspections and payments are deliberately
+  unindexed (G69), so they scan. Not worth an index for a query that runs on a delete attempt.
+
+**Deploy:** **functions** (the guard and the transaction live there) **and hosting** - a push to `main` (O71). The
+button calls the same callable name as before, so an un-deployed function reports itself as not deployed rather than
+failing silently (F75, F77).

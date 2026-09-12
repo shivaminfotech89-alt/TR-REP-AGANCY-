@@ -95,11 +95,16 @@ function translate(err: any): GuardedDeleteError {
 export async function deleteIfEmpty(
   collection: 'atMasters' | 'agencies',
   id: string,
-): Promise<{ name: string; label: string }> {
+): Promise<{ name: string; label: string; removedSubscription: string | null }> {
   try {
     const call = httpsCallable(functionsClient(), 'deleteIfEmpty');
     const res: any = await call({ collection, id });
-    return { name: String(res?.data?.name || ''), label: String(res?.data?.label || 'record') };
+    return {
+      name: String(res?.data?.name || ''),
+      label: String(res?.data?.label || 'record'),
+      // An unpaid trial or grant is removed with its agency (AUDIT G73); a paid one refuses the delete entirely.
+      removedSubscription: res?.data?.removedSubscription ? String(res.data.removedSubscription) : null,
+    };
   } catch (err) {
     throw translate(err);
   }

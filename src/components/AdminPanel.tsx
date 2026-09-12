@@ -14,6 +14,8 @@ import {
   classifySubscription, daysRemaining, type SubscriptionRecord,
 } from '../lib/subscriptionStatus';
 import { SubscriptionActions } from './SubscriptionActions';
+import { deleteIfEmpty, GuardedDeleteError, type DeleteBlocker } from '../lib/guardedDelete';
+import { countContents, filterAgencies, holdsNothing, statusCounts, type StatusFilter } from '../lib/adminAgencyFilter';
 import { runLiveGatewayCheck } from '../lib/adminSubscription';
 import { CheckoutDismissed, PaymentTakenButUnverified, GatewayDeclined } from '../lib/subscriptionClient';
 import { SupportTicket, TicketStatus, UserRoleRecord, UserRoleType, RazorpaySettings, SystemSettings } from '../types/admin';
@@ -189,6 +191,26 @@ export default function AdminPanel() {
   // UI state for search & modals
   const [searchTerm, setSearchTerm] = useState('');
   const [ticketStatusFilter, setTicketStatusFilter] = useState<string>('ALL');
+
+  /**
+   * FINDING AN AGENCY, AND SEEING WHAT IT HOLDS (AUDIT G73). Seventeen agencies across ten owners, listed
+   * unfiltered and saying nothing about their contents.
+   *
+   * ⚠ THE CONTENTS COLUMN IS THE DELETE GUARD'S OWN QUESTION, ASKED BEFORE THE BUTTON IS PRESSED. `deleteIfEmpty`
+   * refuses an agency that still has ATs or jobs; showing both counts makes the refusal predictable instead of a
+   * surprise. It does NOT promise a delete will succeed - the server also refuses on inspections, oil and a payment,
+   * none of which this row can see.
+   */
+  const [agencySearch, setAgencySearch] = useState('');
+  const [agencyStatus, setAgencyStatus] = useState<StatusFilter>('ALL');
+  const [onlyEmptyAgencies, setOnlyEmptyAgencies] = useState(false);
+  /** Every AT and job on the system - the vendor's view, not the signed-in owner's. See the fetch. */
+  const [adminAts, setAdminAts] = useState<Array<{ agencyId?: string }>>([]);
+  const [adminJobs, setAdminJobs] = useState<Array<{ agencyId?: string }>>([]);
+  const [deletingAgencyId, setDeletingAgencyId] = useState<string | null>(null);
+  const [agencyDeleteNote, setAgencyDeleteNote] = useState<
+    { kind: 'ok' | 'bad'; text: string; blockers?: DeleteBlocker[]; advice?: string } | null
+  >(null);
   
   // Ticket Reply Drawer
   const [selectedTicket, setSelectedTicket] = useState<SupportTicket | null>(null);
@@ -214,6 +236,28 @@ export default function AdminPanel() {
       const agSnap = await getDocs(collection(db, 'agencies'));
       const agList = agSnap.docs.map(d => ({ id: d.id, ...d.data() } as Agency));
       setAllAgencies(agList.length > 0 ? agList : agencies);
+
+      /**
+       * 1b. WHAT SITS UNDER EACH AGENCY - read across every account, which only this screen may do.
+       *
+       * ⚠ NOT `atMasters` FROM useAgency(): that list is the SIGNED-IN OWNER'S, fetched by ownerId, so every other
+       * owner's agency would show 0 ATs and read as empty - a count that is wrong in the direction that invites a
+       * delete. The rules allow a super admin to list both collections unfiltered.
+       */
+      try {
+        const [atSnap, jobSnap] = await Promise.all([
+          getDocs(collection(db, 'atMasters')),
+          getDocs(collection(db, 'jobs')),
+        ]);
+        setAdminAts(atSnap.docs.map(d => d.data() as { agencyId?: string }));
+        setAdminJobs(jobSnap.docs.map(d => d.data() as { agencyId?: string }));
+      } catch (e) {
+        // Left empty on failure - and the Contents column says so rather than printing 0, which would read as
+        // "holds nothing" on the strength of a failed read (AUDIT G34, G70).
+        console.warn('admin contents read failed', e);
+        setAdminAts([]);
+        setAdminJobs([]);
+      }
 
       // 2. Fetch User Roles
       const roleSnap = await getDocs(collection(db, 'user_roles'));
@@ -386,6 +430,56 @@ export default function AdminPanel() {
     } catch (err) {
       console.error('Error saving system settings:', err);
       alert('Failed to update settings.');
+    }
+  };
+
+  // ---- AGENCY LIST: contents, filtering, and the guarded delete (AUDIT G73) ----------------------------------
+  const contentsOf = (agencyId: string) => countContents(agencyId, adminAts, adminJobs);
+  const ownerEmailOf = (a: { id: string }) => (subsByAgency ? subsByAgency[a.id]?.ownerEmail : undefined);
+  const agencyStatusCounts = statusCounts(allAgencies, subsByAgency, Date.now());
+  const visibleAgencies = filterAgencies({
+    agencies: allAgencies,
+    subsByAgency,
+    contentsOf,
+    ownerEmailOf,
+    term: agencySearch,
+    status: agencyStatus,
+    onlyEmpty: onlyEmptyAgencies,
+    now: Date.now(),
+  }) as Agency[];
+
+  const removeAgency = async (agency: Agency) => {
+    const contents = contentsOf(agency.id);
+    const sub = subsByAgency ? (subsByAgency[agency.id] ?? null) : null;
+    const cls = classifySubscription(sub, Date.now());
+    const ok = window.confirm(
+      `Delete "${agency.name || '(unnamed)'}"?\n\n`
+      + `It holds ${contents.ats} tender(s) and ${contents.jobs} job(s).\n`
+      + (sub && !cls.wasPaid ? `Its ${cls.word.toLowerCase()} subscription record goes with it.\n` : '')
+      + `\nThe server refuses if anything is found beneath it, including inspections, oil records or a payment. `
+      + `This cannot be undone.`);
+    if (!ok) return;
+    setDeletingAgencyId(agency.id);
+    setAgencyDeleteNote(null);
+    try {
+      const res = await deleteIfEmpty('agencies', agency.id);
+      setAllAgencies(prev => prev.filter(a => a.id !== agency.id));
+      setAgencyDeleteNote({
+        kind: 'ok',
+        text: `Deleted "${res.name || agency.name}"`
+          + (res.removedSubscription ? `, and its ${res.removedSubscription} subscription record.` : '.')
+          + ' Payments and payment orders were not touched.',
+      });
+    } catch (err) {
+      const e = err as GuardedDeleteError;
+      setAgencyDeleteNote({
+        kind: 'bad',
+        text: e?.message || 'That agency could not be deleted.',
+        blockers: e?.blockers,
+        advice: e?.advice,
+      });
+    } finally {
+      setDeletingAgencyId(null);
     }
   };
 
@@ -892,6 +986,81 @@ export default function AdminPanel() {
             </div>
           </div>
 
+          {/* SEARCH, STATUS, AND "HOLDS NOTHING" (AUDIT G73) */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                placeholder="Search name, email, GSTIN, owner, id..."
+                value={agencySearch}
+                onChange={e => setAgencySearch(e.target.value)}
+                className="pl-9 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 w-72 max-w-full"
+              />
+            </div>
+
+            {/* ⚠ THE COUNTS ARE null WHEN THE SUBSCRIPTIONS COULD NOT BE READ, and the chips say so rather than
+                showing every agency as NOT BILLED (AUDIT G28, G34). */}
+            {([
+              ['ALL', `All ${allAgencies.length}`],
+              ['active', 'Paid'], ['granted', 'Granted'], ['trial', 'Trial'],
+              ['trial_ended', 'Trial ended'], ['expired', 'Expired'], ['admin', 'Admin'], ['none', 'Not billed'],
+            ] as Array<[StatusFilter, string]>).map(([key, label]) => {
+              const n = key === 'ALL' ? null : (agencyStatusCounts ? agencyStatusCounts[key] : null);
+              if (key !== 'ALL' && agencyStatusCounts && n === 0) return null;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setAgencyStatus(key)}
+                  className={`px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors ${
+                    agencyStatus === key
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  {key === 'ALL' ? label : `${label}${n === null ? '' : ` ${n}`}`}
+                </button>
+              );
+            })}
+            {!agencyStatusCounts && (
+              <span className="text-[11px] font-bold text-amber-700">subscriptions not read &mdash; counts unavailable</span>
+            )}
+
+            <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 px-2.5 py-1.5 border border-slate-300 rounded-lg cursor-pointer">
+              <input type="checkbox" checked={onlyEmptyAgencies} onChange={e => setOnlyEmptyAgencies(e.target.checked)} />
+              Holds nothing
+            </label>
+
+            <span className="text-[11px] text-slate-500">
+              {visibleAgencies.length} of {allAgencies.length} shown
+            </span>
+          </div>
+
+          {agencyDeleteNote && (
+            <div role="alert" className={`rounded-lg border px-3 py-2 text-[11px] ${
+              agencyDeleteNote.kind === 'ok'
+                ? 'bg-green-50 border-green-300 text-green-900'
+                : 'bg-red-50 border-red-300 text-red-900'}`}>
+              <div className="flex items-start gap-2">
+                {agencyDeleteNote.kind === 'ok'
+                  ? <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" />
+                  : <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />}
+                <div className="flex-1">
+                  <p className="font-bold">{agencyDeleteNote.text}</p>
+                  {agencyDeleteNote.blockers?.map(b => (
+                    <p key={b.what} className="mt-1">
+                      <span className="font-bold">{b.count} {b.what}{b.count === '1' ? '' : 's'}:</span>{' '}
+                      {b.items.join('; ')}
+                      <span className="block text-[10px] opacity-80">{b.consequence}</span>
+                    </p>
+                  ))}
+                  {agencyDeleteNote.advice && <p className="mt-1 text-[10px] opacity-80">{agencyDeleteNote.advice}</p>}
+                </div>
+                <button type="button" onClick={() => setAgencyDeleteNote(null)} className="font-bold shrink-0">Dismiss</button>
+              </div>
+            </div>
+          )}
+
           {subActionNote && (
             <div className="flex items-start gap-2 bg-green-50 border border-green-300 rounded-lg px-3 py-2">
               <CheckCircle2 className="w-4 h-4 text-green-700 shrink-0 mt-0.5" />
@@ -910,11 +1079,13 @@ export default function AdminPanel() {
                   <th className="p-3">Subscription Status</th>
                   <th className="p-3">Plan Price</th>
                   <th className="p-3">Expiry Date</th>
+                  {/* What the delete guard will ask about, before it is asked (AUDIT G73). */}
+                  <th className="p-3">Contents</th>
                   <th className="p-3 text-right">Admin Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {allAgencies.map((agency) => {
+                {visibleAgencies.map((agency) => {
                   /* ⚠ THIS ROW USED TO INVENT A SUBSCRIPTION. It read
                      `subscriptionStatus || 'active'`, `subscriptionExpiryDate || (now + 365
                      days)` and `subscriptionPlanAmount || 3999` - against a database where NO
@@ -929,6 +1100,8 @@ export default function AdminPanel() {
                      the one person deciding whether to chase them. */
 
                   const sub = subsByAgency ? (subsByAgency[agency.id] ?? null) : null;
+                  const contents = contentsOf(agency.id);
+                  const empty = holdsNothing(contents);
                   const cls = classifySubscription(sub, Date.now());
                   const left = daysRemaining(sub, Date.now());
                   const unread = subsByAgency === null;
@@ -1017,6 +1190,12 @@ export default function AdminPanel() {
                           </span>
                         )}
                       </td>
+                      <td className="p-3">
+                        <span className={empty ? 'text-slate-400' : 'text-slate-700 font-medium'}>
+                          {contents.ats} {contents.ats === 1 ? 'tender' : 'tenders'}
+                          <span className="block">{contents.jobs} {contents.jobs === 1 ? 'job' : 'jobs'}</span>
+                        </span>
+                      </td>
                       <td className="p-3 text-right">
                         {/* ⚠ THESE GO THROUGH A CALLABLE, NOT A CLIENT WRITE (AUDIT G40). The
                             buttons that stood here wrote to the customer's AGENCY document
@@ -1031,10 +1210,37 @@ export default function AdminPanel() {
                           sub={sub}
                           onDone={(msg) => { setSubActionNote(msg); setSubReload(x => x + 1); }}
                         />
+                        {/* ⚠ OFFERED ONLY WHERE THIS ROW CAN SEE NOTHING UNDER IT, AND THE SERVER DECIDES ANYWAY
+                            (AUDIT G73). The guard refuses on inspections, oil and a payment too - none of which is
+                            visible here - so this button is a shortcut past an obvious refusal, not a permission. */}
+                        <div className="mt-1">
+                          {empty ? (
+                            <button
+                              type="button"
+                              onClick={() => removeAgency(agency)}
+                              disabled={deletingAgencyId === agency.id}
+                              className="inline-flex items-center gap-1 text-[11px] font-bold text-red-700 hover:bg-red-50 border border-red-200 rounded px-2 py-1 disabled:opacity-50"
+                            >
+                              {deletingAgencyId === agency.id
+                                ? <Loader2 className="w-3 h-3 animate-spin" />
+                                : <Trash2 className="w-3 h-3" />}
+                              Delete
+                            </button>
+                          ) : (
+                            <span className="text-[10px] text-slate-400" title={`Holds ${contents.ats} tender(s) and ${contents.jobs} job(s)`}>
+                              not empty
+                            </span>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
                 })}
+                {visibleAgencies.length === 0 && (
+                  <tr><td colSpan={7} className="p-4 text-slate-500">
+                    {allAgencies.length === 0 ? 'No agencies found.' : 'No agency matches these filters.'}
+                  </td></tr>
+                )}
               </tbody>
             </table>
           </div>
