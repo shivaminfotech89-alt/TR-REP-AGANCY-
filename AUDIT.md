@@ -16216,3 +16216,63 @@ files.
 - **⚠ Not seen rendered, and not covered by a test.** The card conditions and both messages were read, not exercised.
 
 **Deploy:** **functions** for the refusal sentence, **and hosting** for the cards - a push to `main` (O71).
+
+---
+
+## G76. A dependency documented at the thing that needs it, never at the thing that would break it
+
+**The defect, fixed the same day it was introduced.** G73 made `deleteIfEmpty` delete an unpaid subscription
+alongside its agency. A trial subscription is unpaid. `createAgency` enforces **one trial per account** by querying
+that collection for `status: 'trial'` - so deleting the record left the account eligible for a second free trial,
+silently, with nothing anywhere remembering the first.
+
+**Fixed:** a trial record is **kept** when its agency is deleted; `granted` and `admin` records are still removed;
+a paid one still refuses the delete outright. The callable now returns `keptSubscription`, and the Admin Panel says
+so: *"Its trial record was KEPT - that is what stops this account being granted a second free trial."*
+
+### ⚠ THE SHAPE, WHICH IS WORTH MORE THAN THE FIX
+
+**A record had two purposes. The deletion side could see one of them, and that one was genuinely satisfied.**
+
+- **Purpose visible from the deletion side:** the subscription points at an agency. Once the agency is gone, the
+  pointer is dangling - "a record pointing at nothing" - and removing it is obviously correct.
+- **Purpose invisible from the deletion side:** the record is the **eligibility ledger**. It is the only evidence
+  that this account ever had a trial, and an expired trial must still count, which is why the query has no date
+  filter.
+
+**The second purpose was written down - in a comment on `createAgency.js`:**
+
+> The gap is `deleteIfEmpty` - the vendor CAN remove an agency through it, **and it does not remove the
+> subscription. A deleted trial agency would otherwise leave the account eligible for a second trial.**
+
+That comment names the exact failure that then happened. **It is in the file that NEEDS the record, not the file
+that would destroy it** - and G73 was reasoned about entirely from the deletion side, where that sentence is not
+visible. Reading `deleteIfEmpty` end to end, nothing suggested a subscription had a second job.
+
+**The rule this produces:** *a dependency has to be recorded at both ends - at the thing that needs it AND at the
+thing that could break it.* The end that needs it will be read by someone maintaining it; the end that can break it
+is read by someone who has no reason to look for it.
+
+- **The other provenances have no second job**, which is why the same deletion is right for them. The exception is
+  not "trials are special because they are free" - it is "this record answers a question asked somewhere else".
+- **It is not a test gap.** No test would have caught it: the rule lives in a Cloud Function, the suite covers
+  `src/`, and the two files are not imported by each other. What would have caught it is the comment being in the
+  other file.
+
+**Now stated at both ends:** `deleteIfEmpty` carries the trial exception with its reason and a pointer to
+`createAgency`; `createAgency` carries a pointer back, saying which function can break its check and how.
+
+### What was at risk
+
+**Nothing, in live data.** No agency has been deleted through the new button - it has not been deployed - and the
+only trial subscriptions belong to SAMOR TRANSFORMER, vahanvati and R.K Electricals, none of which was to be
+removed. The two agencies marked for deletion (`drishiv transformer tech`, `Narayan Transformer`) are `admin`
+records, which are still deleted with their agency.
+
+**Verified:** `node --check` on both functions; tsc; 142 tests; build; hooks guard, 47 files.
+- **⚠ NOT COVERED BY A TEST, AND THAT IS STATED RATHER THAN PAPERED OVER.** The rule is in `functions/`, which the
+  suite does not reach, and it cannot be extracted to `src/` without a second source of truth or a sync script - the
+  mechanism this codebase uses for the seed and the config, which is more machinery than a one-line predicate earns.
+  The guard is the comment at both ends and this entry.
+
+**Deploy:** **functions** - the fix lives there.

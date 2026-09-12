@@ -254,12 +254,25 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
   //         "between" - the query above and this line are the same invocation.
   //
   /**
-   * ⚠ AN UNPAID SUBSCRIPTION GOES WITH ITS AGENCY, IN THE SAME TRANSACTION (AUDIT G73).
+   * ⚠ AN UNPAID SUBSCRIPTION GOES WITH ITS AGENCY, IN THE SAME TRANSACTION - EXCEPT A TRIAL (AUDIT G73, G76).
    *
    * `subscriptions/{agencyId}` is `allow write: if false` for every client, and this audit records that a
    * subscription is never deleted because an invoice points at it and expiry is a status, not an absence. That rule
-   * is about a subscription that EXISTED AND ENDED. A trial or a grant on an agency that no longer exists is not an
-   * ended subscription - it is a record pointing at nothing, and the id it is keyed by resolves to no document.
+   * is about a subscription that EXISTED AND ENDED. A grant or an admin record on an agency that no longer exists is
+   * not an ended subscription - it is a record pointing at nothing, and the id it is keyed by resolves to no
+   * document.
+   *
+   * ⚠⚠ A TRIAL RECORD IS NOT ONLY A POINTER. IT IS THE ELIGIBILITY LEDGER, AND IT IS KEPT. ⚠⚠
+   *
+   * `createAgency` enforces ONE TRIAL PER ACCOUNT by querying this collection for `status: 'trial'`, with no date
+   * filter, precisely because an expired trial must still count. Delete the record and that query finds nothing: the
+   * account is granted a second free trial, silently, and nothing else anywhere remembers the first.
+   *
+   * ⚠ G73 DELETED IT, AND THE REASONING LOOKED SOUND FROM HERE. The deletion side can see one of the record's two
+   * purposes - the pointer to an agency - and that purpose IS satisfied once the agency is gone. The other purpose
+   * was written down in a comment on `createAgency.js`, which is the file that NEEDS the record, not the file that
+   * would break it. A dependency documented only at the thing that depends on it is invisible from the only place
+   * that can destroy it. It is now stated at both ends; if this exception is ever removed, read G76 first.
    *
    * A PAID one never reaches here: the payment blocker above refuses the delete outright. The check is repeated
    * inside the transaction anyway, because a payment could land between the guard and this write, and the cost of
@@ -269,6 +282,7 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
    * abandoned order is still a fact about what happened.
    */
   let removedSubscription = null;
+  let keptSubscription = null;
   const subRef = collection === 'agencies' ? db.collection('subscriptions').doc(id) : null;
   await db.runTransaction(async (tx) => {
     const fresh = await tx.get(ref);
@@ -282,8 +296,13 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
         throw new HttpsError('failed-precondition',
           'A payment was recorded against this agency while it was being deleted. Nothing was removed.');
       }
-      tx.delete(subRef);
-      removedSubscription = String(s.status || 'unknown');
+      if (s.status === 'trial') {
+        // KEPT. See the header: this record is what stops a second trial being granted to this account.
+        keptSubscription = 'trial';
+      } else {
+        tx.delete(subRef);
+        removedSubscription = String(s.status || 'unknown');
+      }
     }
     tx.delete(ref);
   });
@@ -296,6 +315,9 @@ export const deleteIfEmpty = onCall({ region: 'us-central1' }, async (request) =
     label: guard.label,
     // What went with it, so the screen can say so rather than implying only the agency was removed.
     removedSubscription,
+    // ⚠ AND WHAT DID NOT. A kept trial record is the reason that account cannot start another trial; a vendor who
+    // is not told it survived would reasonably assume the deletion took everything (AUDIT G76).
+    keptSubscription,
   };
 });
 

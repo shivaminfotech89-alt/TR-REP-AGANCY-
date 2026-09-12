@@ -85,8 +85,14 @@ export function makeCreateAgency(db) {
       // ⚠ THIS CHECK IS NOT REDUNDANT WITH THE AGENCY CHECK BELOW, though it looks it: an
       // account with no agency normally has no subscription either, since subscriptions are
       // per agency and agencies cannot be deleted by a client. The gap is `deleteIfEmpty` -
-      // the vendor CAN remove an agency through it, and it does not remove the subscription.
-      // A deleted trial agency would otherwise leave the account eligible for a second trial.
+      // the vendor CAN remove an agency through it.
+      //
+      // ⚠ AND THAT FUNCTION IS WHERE THIS CHECK CAN BE BROKEN FROM (AUDIT G76). It deletes an unpaid
+      // subscription along with its agency, and a trial subscription is unpaid - so it now carries an
+      // explicit exception that KEEPS a trial record, for this query and nothing else. If that exception
+      // is removed, a vendor deleting a trial agency grants that account a second free trial and nothing
+      // reports it. That dependency used to be recorded only here, in the file that NEEDS the record
+      // rather than the one that would destroy it, which is why the change that broke it looked safe.
       //
       // ⚠ AND A FRESH GOOGLE ACCOUNT DEFEATS THIS. That is accepted rather than defended:
       // stopping it needs a card on file or phone verification, both of which defeat the point

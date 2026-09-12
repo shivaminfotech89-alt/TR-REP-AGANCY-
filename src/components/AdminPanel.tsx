@@ -468,6 +468,10 @@ export default function AdminPanel() {
         kind: 'ok',
         text: `Deleted "${res.name || agency.name}"`
           + (res.removedSubscription ? `, and its ${res.removedSubscription} subscription record.` : '.')
+          // ⚠ SAID OUT LOUD, because it is the reason that account cannot start another trial (AUDIT G76).
+          + (res.keptSubscription === 'trial'
+            ? ' Its trial record was KEPT - that is what stops this account being granted a second free trial.'
+            : '')
           + ' Payments and payment orders were not touched.',
       });
     } catch (err) {
