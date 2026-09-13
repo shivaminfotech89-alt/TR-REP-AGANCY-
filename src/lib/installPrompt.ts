@@ -97,7 +97,19 @@ export function useInstallPrompt() {
   }, []);
 
   return {
+    /** Chrome has an offer in hand and it can be relayed with one click. Chromium only. */
     canInstall: !!deferred && !dismissed && !installed,
+    /**
+     * ⚠ WHETHER THE ROW SHOULD BE HIDDEN ALTOGETHER - A DIFFERENT QUESTION FROM `canInstall` (AUDIT G81).
+     *
+     * These were one value while the row existed only to relay Chrome's offer. They are not the same question:
+     * the row now ALWAYS appears, offering one-click install where Chrome has offered and a link to /install
+     * where it has not, so "there is no offer" must not hide it - that is exactly the Safari case, where there
+     * will never be an offer and the instructions are the whole point.
+     *
+     * It hides for two honest reasons only: the operator dismissed it, or this window IS the installed app.
+     */
+    installOfferHidden: dismissed || installed,
     promptInstall,
     dismissInstall,
     installed,

@@ -66,8 +66,8 @@ export function SellerBlock() {
 }
 
 export function LegalLayout({
-  title, updated, children,
-}: { title: string; updated: string; children: React.ReactNode }) {
+  title, updated, children, showSeller = true,
+}: { title: string; updated: string; children: React.ReactNode; showSeller?: boolean }) {
   const here = typeof window !== 'undefined' ? window.location.pathname.replace(/\/$/, '') : '';
   return (
     <div className="min-h-screen bg-white text-slate-800">
@@ -104,7 +104,14 @@ export function LegalLayout({
 
         <div className="space-y-4 text-[13px] leading-relaxed">{children}</div>
 
-        <SellerBlock />
+        {/* ⚠ THE RULE ABOVE IS NOT WEAKENED BY THIS PROP (AUDIT G81). "The seller identity is on every one of
+            them" is about POLICY pages: a payment processor verifies that the entity taking the money is the
+            entity on the site, and a policy belonging to nobody is worthless. All six still show it, and the
+            default is `true` so a new policy page gets it without asking.
+
+            `/install` is not a policy. It is instructions for putting an icon on a desktop, and a GSTIN block
+            under it would be noise on a page nobody reads for that reason. */}
+        {showSeller && <SellerBlock />}
 
         <p className="text-[10px] text-slate-400 pt-2 border-t border-slate-100">
           © {new Date().getFullYear()} {SELLER.legalName}, trading as {SELLER.tradeName}.

@@ -10,6 +10,7 @@ import LandingPage from './components/LandingPage';
 import {
   TermsPage, PrivacyPage, RefundsPage, ShippingPage, ContactPage, PricingPage,
 } from './components/legal/LegalPages';
+import { InstallPage } from './components/legal/InstallPage';
 
 /**
  * THE PUBLIC POLICY PAGES, RESOLVED BEFORE ANYTHING ELSE (AUDIT G41).
@@ -39,6 +40,12 @@ const PUBLIC_PAGES: Record<string, React.ComponentType> = {
   '/shipping': ShippingPage,
   '/contact': ContactPage,
   '/pricing': PricingPage,
+  /**
+   * ⚠ NOT A POLICY, AND HERE FOR A DIFFERENT REASON (AUDIT G81). The six above are documents a payment reviewer
+   * must reach. This one is instructions the owner sends to an agency BEFORE they have an account - which needs
+   * exactly the same property: resolved from the path, before the auth check, identical signed in or out.
+   */
+  '/install': InstallPage,
 };
 
 function publicPageFor(pathname: string) {

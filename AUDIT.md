@@ -16581,6 +16581,77 @@ into `dist/`.
 
 ---
 
+## G81. An affordance that existed only where the browser cooperated, and was invisible where it was needed most
+
+**G80 put an install row in the sidebar that rendered only when Chrome had fired `beforeinstallprompt`.** That event
+is Chromium-only. **So Safari on Mac and on iPhone showed nothing at all** - and both install perfectly well, by
+hand, through a menu the user has to be told about. **Two of the five routes were invisible to precisely the people
+who needed instructions**, and the app looked to them as though it could not be installed.
+
+**The rule the fix follows:** the affordance is always in the same place, and what varies is only how much the app
+can do once it is clicked. *"Sidebar, bottom - Install TransRegister"* is now true for every customer on every
+browser, which is a sentence the owner can say to an agency without asking what they are running.
+
+### Who can actually install, verified rather than recalled
+
+| Browser | Installs? | How | Row shows |
+|---|---|---|---|
+| Chrome desktop (Win/Mac/Linux) | yes | address-bar icon, or ⋮ → Save and share → Install | one-click |
+| Edge desktop | yes | address-bar icon, or ⋯ → Apps → Install this site as an app | one-click |
+| Chrome Android | yes | ⋮ → Add to Home screen → Install app | one-click |
+| **Safari macOS 14+** | yes | **File → Add to Dock** | **link to /install** |
+| **Safari iOS/iPadOS 16.4+** | yes | **Share → Add to Home Screen** | **link to /install** |
+| Firefox desktop | **no** | not supported; Mozilla removed it | link to /install |
+| Firefox Android | **no** | not supported | link to /install |
+
+**⚠ NO BROWSER LETS A PAGE RAISE ITS OWN INSTALL PROMPT.** Chrome decides when to offer - installability plus a
+user-engagement heuristic of roughly 30 seconds on the domain - the page cannot trigger the event, and `prompt()`
+works once, from a real click. The button relays an offer already made. A popup that "worked sometimes" was
+considered and refused: on the browsers that matter most here it would do nothing at all.
+
+### Built
+
+- **`/install`, a PUBLIC page** in `App.tsx`'s `PUBLIC_PAGES`, resolved from `window.location.pathname` before the
+  auth check. Not a policy - it is there for the property the policies need too: **it can be sent to an agency
+  before they have an account**, and renders identically signed in or out.
+- **`lib/browserInstall.ts`** guesses the browser and **orders** the sections. **⚠ IT NEVER HIDES ONE** - a Safari
+  user shown Chrome's steps alone has been told the app cannot be installed, which is false, whereas ordering
+  wrongly costs a scroll. `orderSections` is asserted to return a **permutation** of the full list, not a filter.
+  Edge is tested before Chrome and iPad before macOS, because every user agent impersonates another and the
+  sequence is the mechanism rather than a style choice.
+- **Firefox gets the truth:** cannot install, use Chrome or Edge, and no third-party add-on is recommended.
+- **The page says there is no offline mode**, plainly: installing does not store data on the device, which is
+  *why* what a customer sees is never a stale copy (G80).
+- **`installOfferHidden` is separated from `canInstall`** in `lib/installPrompt.ts`. They were one value while the
+  row existed only to relay Chrome's offer, and **conflating them is what hid the row from Safari**. The row now
+  hides for two honest reasons only: dismissed, or this window IS the installed app.
+- **⚠ A FULL PAGE LOAD, NOT `<Link>`.** `/install` is resolved before the router exists, so a client-side
+  navigation would leave `AppLayout`'s `<Routes>` with no match and render a blank screen. It opens in a new tab so
+  an operator mid-job keeps their place.
+- **`LegalLayout` gains `showSeller`, defaulting true.** The six policy pages keep the seller block for the G41
+  reason - a policy belonging to nobody is worthless to a payment reviewer. An install how-to is not a policy, and
+  the default means a new policy page still gets it without asking.
+
+### The landing page tells; it does not install
+
+- A section between the call-to-action bar and the footer: *"Works on your phone and your computer. Install it like
+  an app - no store, no download."* Two blocks, phone and computer, each naming what to do, linking to `/install`.
+- **⚠ NO ONE-CLICK BUTTON THERE, DELIBERATELY.** A signed-out prospect has no agency, so installing would give them
+  an app that opens on a login screen - `start_url` is `/`, which renders the landing page again. And the event
+  needs about half a minute of engagement before it fires, **so the button would be absent for most first visits
+  and present for some returning ones. An inconsistent call to action is weaker than a consistent sentence.**
+- **The footer links it after the six policies and outside them**, and it is deliberately **not** added to
+  `LEGAL_PATHS`, which also drives the nav rendered ON the policy documents themselves.
+
+**Verified:** tsc; **163 tests, 11 new**; build; hooks guard, 48 files. "Add to Home Screen" appears in the built
+bundle, so the page ships rather than merely compiling.
+- **⚠ NOT SEEN RENDERED, AND NOT SEEN ON SAFARI.** The guess and the ordering are tested; the page and the row are
+  not. Whether the Safari steps are right is a claim from MDN's own installing guide, not an observation.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
 ### O72. MSBT-12 exists twice, and three jobs belong to no tender - both MEGHA's, both reported not fixed
 
 **Open, 2026-09-12. Nothing here has been written.** MEGHA is the test agency, so neither is urgent; a job number

@@ -63,7 +63,7 @@ export default function AppLayout({ user }: { user: User }) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [logoutErrorMsg, setLogoutErrorMsg] = useState<string | null>(null);
   /** The install offer - see lib/installPrompt.ts for why it cannot be a simple boolean. */
-  const { canInstall, promptInstall, dismissInstall } = useInstallPrompt();
+  const { canInstall, promptInstall, dismissInstall, installOfferHidden } = useInstallPrompt();
   const handleInstallClick = async () => { await promptInstall(); setMobileMenuOpen(false); };
 
   // Auto-hide mobile sidebar when route/pathname changes
@@ -431,31 +431,52 @@ export default function AppLayout({ user }: { user: User }) {
               </div>
             </button>
 
-            {/* ⚠ THE INSTALL ROW - ONE LINE, DISMISSIBLE, AND NEVER SHOWN TO AN INSTALLED APP (AUDIT G80).
-                Chrome's address-bar install icon is real and unnoticed; this is the same action where the
-                operator already looks. It is NOT a banner: a page-wide prompt for something nobody asked for is
-                the shape this app removes elsewhere.
+            {/* ⚠ THE ROW IS ALWAYS HERE. WHAT DIFFERS IS HOW MUCH THE APP CAN DO ONCE IT IS CLICKED (AUDIT G81).
+                It used to render only when Chrome had fired `beforeinstallprompt` - which is Chromium only, so
+                Safari on Mac and iPhone showed NOTHING, though both install perfectly well by hand. Two of the
+                five routes were invisible to the people who needed instructions most.
 
-                ⚠ `prompt()` MAY BE CALLED ONCE PER EVENT, so the saved event is dropped after use and the row
-                hides. If the operator dismisses Chrome's dialog the row stays gone until Chrome fires
-                `beforeinstallprompt` again on a later visit - a "remind me later" that re-prompted from a stored
-                flag would find a spent event and a button that silently does nothing. */}
-            {canInstall && (
+                Now "Sidebar, bottom - Install TransRegister" is true for every customer on every browser: one
+                click where Chrome has offered, a link to /install where it has not. Only the offer varies.
+
+                ⚠ A FULL PAGE LOAD, NOT `<Link>`. `/install` is resolved by App.tsx from
+                `window.location.pathname` BEFORE the router exists; a client-side navigation would leave
+                AppLayout's `<Routes>` with no match and render a blank screen. It opens in a new tab so an
+                operator mid-job does not lose their place.
+
+                ⚠ `prompt()` MAY BE CALLED ONCE PER EVENT, so after use the offer is spent and the row falls back
+                to the instructions link until Chrome fires again. A "remind me later" that re-prompted from a
+                stored flag would find a spent event and a button that silently does nothing. */}
+            {!installOfferHidden && (
               <div className={`px-3 py-2.5 min-h-[42px] rounded-lg flex items-center justify-between gap-2 text-xs font-semibold ${currentTheme.sidebarText} ${currentTheme.sidebarHoverBg}`}>
-                <button
-                  type="button"
-                  onClick={handleInstallClick}
-                  className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
-                  title="Install TransRegister as an app on this computer"
-                >
-                  <Download className={`w-4 h-4 shrink-0 ${isLight ? 'text-emerald-600' : 'text-emerald-400'}`} />
-                  <span className="truncate">Install TransRegister</span>
-                </button>
+                {canInstall ? (
+                  <button
+                    type="button"
+                    onClick={handleInstallClick}
+                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+                    title="Install TransRegister as an app on this computer"
+                  >
+                    <Download className={`w-4 h-4 shrink-0 ${isLight ? 'text-emerald-600' : 'text-emerald-400'}`} />
+                    <span className="truncate">Install TransRegister</span>
+                  </button>
+                ) : (
+                  <a
+                    href="/install"
+                    target="_blank"
+                    rel="noopener"
+                    onClick={handleSidebarItemClick}
+                    className="flex items-center gap-2.5 min-w-0 flex-1 text-left"
+                    title="How to install TransRegister as an app on this device"
+                  >
+                    <Download className={`w-4 h-4 shrink-0 ${isLight ? 'text-slate-400' : 'text-slate-500'}`} />
+                    <span className="truncate">How to install this app</span>
+                  </a>
+                )}
                 <button
                   type="button"
                   onClick={dismissInstall}
                   className={`shrink-0 p-1 rounded ${isLight ? 'text-slate-400 hover:text-slate-700' : 'text-slate-500 hover:text-slate-300'}`}
-                  aria-label="Dismiss the install offer"
+                  aria-label="Hide the install row"
                   title="Not now"
                 >
                   <X className="w-3.5 h-3.5" />

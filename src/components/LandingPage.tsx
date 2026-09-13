@@ -30,7 +30,9 @@ import {
   Clock,
   Send,
   PhoneCall,
-  Menu
+  Menu,
+  Smartphone,
+  Monitor
 } from 'lucide-react';
 import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
@@ -886,6 +888,56 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
         </div>
       </section>
 
+      {/* ⚠ IT TELLS, IT DOES NOT INSTALL (AUDIT G81). No one-click button here, deliberately: a prospect who has
+          not signed in has no agency, so installing would give them an app that opens on a login screen - and
+          `beforeinstallprompt` needs about half a minute of use before it fires at all, so the button would be
+          absent for most first visits and present for some returning ones. An inconsistent call to action is
+          weaker than a consistent sentence. They install once they have something to open. */}
+      <section className="py-10 sm:py-12 bg-white border-t border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="text-center space-y-2">
+            <h2 className="text-lg sm:text-xl font-black tracking-tight text-slate-900">
+              Works on your phone and your computer
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-600 max-w-2xl mx-auto leading-relaxed">
+              Install it like an app &mdash; no store, no download. It gets its own icon and its own window, and it
+              is the same site you are looking at now.
+            </p>
+          </div>
+
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/60">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-blue-600" /> On a phone or tablet
+              </h3>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                <strong>Android:</strong> Chrome offers to install it from the menu.<br />
+                <strong>iPhone and iPad:</strong> Safari&rsquo;s <strong>Share</strong> button, then{' '}
+                <strong>Add to Home Screen</strong>.
+              </p>
+            </div>
+
+            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/60">
+              <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-blue-600" /> On a computer
+              </h3>
+              <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                <strong>Chrome and Edge</strong> install it properly, from the icon in the address bar.<br />
+                <strong>Safari on Mac:</strong> <strong>File &rarr; Add to Dock</strong>.{' '}
+                <strong>Firefox</strong> cannot install web apps.
+              </p>
+            </div>
+          </div>
+
+          <p className="text-center text-xs text-slate-500 mt-4">
+            <a href="/install" className="text-blue-700 underline font-semibold">
+              Step-by-step instructions for every browser
+            </a>
+            {' '}&mdash; it still needs an internet connection; nothing is stored on the device.
+          </p>
+        </div>
+      </section>
+
       {/* Professional Footer */}
       <footer className="bg-slate-950 text-slate-400 py-8 sm:py-10 border-t border-slate-800 text-xs">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -913,6 +965,11 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
               <a href="/refunds" className="hover:text-white transition-colors py-1">Refunds &amp; Cancellation</a>
               <a href="/shipping" className="hover:text-white transition-colors py-1">Delivery</a>
               <a href="/contact" className="hover:text-white transition-colors py-1">Contact</a>
+              <span className="text-slate-600 hidden sm:inline">&bull;</span>
+              {/* ⚠ AFTER THE POLICIES AND OUTSIDE THEM (AUDIT G81). Someone told "install it" months ago looks in
+                  the footer, so it belongs here - but it is not a policy, and it is deliberately NOT added to
+                  LEGAL_PATHS, which also drives the nav ON the policy documents themselves. */}
+              <a href="/install" className="hover:text-white transition-colors py-1">Install the app</a>
               <span className="text-slate-600 hidden sm:inline">&bull;</span>
               {/* ⚠ "24*7 Support" WAS HERE AND WAS NOT TRUE. One person answers a ticket form.
                   A service-level claim the product does not meet is a defect anywhere; in a
