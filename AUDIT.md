@@ -16757,3 +16757,44 @@ This job holds an estimate, an approval, a bill, a payment and a UTR.
 - **What would answer it:** the per-row `repairType` control in `MrLedger`'s edit modal, and whether anything
   guards it when `issuedMarks(job)` is non-empty - the predicate that already refuses DELETING a billed row (G3).
   That same predicate is the natural guard if the change is permitted.
+
+#### ANSWERED 2026-09-13: NOT BYPASSABLE FROM THE APP, AND THE RECORD NEEDS NO FLIP TO EXPLAIN IT
+
+**The premise was wrong: there is no per-row `repairType` control.** The Full Edit modal's row grid renders Job No,
+Capacity, Make, Serial and Core Type - each wired to `handleJobFieldChange(idx, ...)` - and repair type is **not
+among them**.
+
+**In the whole of `MrLedger.tsx` there is exactly ONE `onChange` that writes `repairType`**, at line 1822, and it
+belongs to the **MR-level header select**. Every other mention reads: into state, into a filter, into a heading,
+into the cancel dialog's payload.
+
+**That one control is locked as soon as any unit is saved (G24).** `headerLock.locked` is `savedJobs.length > 0`,
+and the editable `<select>` renders only in the `else` branch. The locked branch renders `LockedMrHeaderField`,
+whose own `reason` prop says it in words: *"Recorded on N saved transformer(s) - editing it here would not change
+theirs."*
+
+**And G11 closes the last path.** The save writes `j.repairType ?? editingMr.repairType`. A saved row always carries
+its own `j.repairType`, so the header value cannot reach an existing job even when the header is unlocked. The
+fallback applies only to a row added in the same sitting.
+
+**No other screen writes it to an existing job.** `EditJob.tsx` does not mention `repairType` at all; the other
+components that name it read it - for filters, headings, estimate logic and reports. `NewJob.tsx` sets it at
+CREATION, which is before any bill exists.
+
+**So a billed OGP job cannot be flipped to GP through any screen in this app. Finding 3 is a historical oddity,
+not a live gap.**
+
+**The record needs no flip to explain it, either.** `isGpJob` was created **2026-08-20** in `e1e6db5`; MSBT-12 was
+billed and paid **2026-08-15** - five days earlier. **When it was billed, no GP exclusion existed anywhere in the
+codebase.** That alone accounts for the money trail, without anyone having edited anything.
+
+**⚠ TWO LIMITS ON THIS ANSWER, STATED RATHER THAN SMOOTHED OVER:**
+- **It is a UI-level finding, and the database does not enforce it.** `firestore.rules` line 154 constrains
+  `repairType` only as an optional string of at most 100 characters - nothing ties it to billing state. A direct
+  SDK write, an admin script, or a screen added later could still change it on a billed job. **The guarantee rests
+  on the screens, not on the data.** Recorded rather than fixed, because today no caller does it.
+- **If a guard is ever wanted, the predicate already exists and already fires here.** `issuedMarks(job)` returns
+  true for this job on **eight** fields - estimate amount, estimate sent, bill no, bill status, paid amount,
+  payment date, payment status, challan no - and is the same test that already refuses DELETING a billed row (G3).
+
+**Finding 3 is closed. Findings 1 and 2 stand as recorded; the billed job is still not to be stamped.**
