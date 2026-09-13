@@ -16897,3 +16897,161 @@ and the offer must still be there.
   the owner looks.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O73. A required field and the refusal that enforces it, shipped in the same commit - so nobody could satisfy it
+
+**G63 was right and its scope was wrong.** An estimate refused to print, download AND send unless its AT carried
+`orderNo` and `orderDate`. **The field did not exist until that same commit created it** (`bd12ac0`,
+2026-09-11), so at the instant it landed **0 of 15 ATs could satisfy it**. There was no interval in which any
+agency could have acted.
+
+### What it cost, measured rather than estimated
+
+`scripts/admin/order-number-blocker.js`, run 2026-09-13:
+
+| | |
+|---|---|
+| ATs that cannot print, download or send | **14 of 15** |
+| Agencies affected | **10 of 18** |
+| Jobs on a blocked AT | **76**, of which **71 are not cancelled** |
+| ATs that CAN print | 1 - BANAS, which has **0 jobs** |
+
+**The one tender that worked was the one nobody was using.** MEGHA alone had 35 live jobs behind the block.
+
+**Did anyone hit it?** No evidence either way, and the honest answer is that the evidence cannot exist: **a
+refused print writes nothing to the database.** Only a successful send records a date. Of 79 jobs, **2 carry any
+estimate mark at all** - MSBT-12 sent 2026-08-15 and STD-1 sent 2026-09-10, both BEFORE the gate. So no estimate
+has been sent since it shipped, and none was sent in the week before either. The block stood for **2 days**.
+
+### ⚠ THE FAILURE IS NOT THE ANALYSIS. THE ANALYSIS WAS COMPLETE.
+
+**O61's own "WHAT IT TAKES" said it in advance:** *"No backfill. From the day it ships, every estimate refuses to
+print or send until its agency types the number: 74 jobs under 14 ATs."* The number was written down, read, and
+approved. **What was never done was to treat it as a decision.** It sat in a list of consequences as though it
+were a detail, and "every customer blocked on day one" is not a detail - it is the whole question.
+
+**This is shared.** The report stated the figure plainly; the owner approved it. Neither of us said out loud what
+the figure meant. **That is a different failure from not knowing**, and the remedy is not more analysis.
+
+### THE RULE THIS DRAWS
+
+> **When a change makes a field required and enforces it in the same commit, the report must state what
+> proportion of existing records can satisfy it on day one - and that number is to be read as a DECISION, not as
+> a detail.**
+
+Nought of fifteen is a decision. Fourteen of fifteen is a decision. A number like that belongs at the top of a
+report with the question attached, not in a consequences list.
+
+### The fix: narrow the gate to the exit that matters
+
+**The harm in O61 was a document LEAVING with a reference naming someone else's tender.** Send is where that
+happens.
+
+- **Print and Word download no longer check the order.** A sheet with `"Order No.:"` blank is visibly
+  incomplete, recoverable in a minute, and **names no other tender** - so it is not the harm.
+- **The send still refuses**, unchanged, for the whole MR whatever view is on screen: it issues the estimates.
+- `blockIfOrderMissing` and `jobsOnPaper` existed only for the two exits now open and are **deleted rather than
+  left dead**; tsc confirms nothing else used them.
+- **The banner turns from red to amber** and from *"cannot be printed, downloaded or sent"* to *"will print with
+  Order No.: blank, and cannot be sent"*. It is now a warning about the paper plus a block on the one blocked
+  exit.
+- The AT badge's hover text and the A/T field's comment say the same. **The old wording was TRUE WHEN WRITTEN and
+  false now**, which is why both are corrected rather than left standing as history.
+- **The printed sheet is unchanged.** The line was already blank when unset, and there is still no fallback to
+  another tender's order.
+
+**3 tests, asserted at the source** because the gate lives at the call sites: `blockIfOrderMissing` must not come
+back, the send refusal must stay, and the banner must stop claiming print is blocked.
+
+**⚠ THIS ENTERS NO ORDER NUMBERS.** `orderNo` stays per-agency and typed from each agency's own A/T letter -
+1 of 15 ATs has one. It unblocks 71 live jobs; it does not fill in a single field.
+
+**Verified:** tsc; **177 tests in 16 files, 3 new**; build; hooks guard, 48 files.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G83. The AT number comes from the tender, so every agency on it writes the same one
+
+**Fifteen ATs on a handful of tenders, each named by hand.** `scripts/admin/at-naming-census.js`, 2026-09-13:
+
+| Agency | atNumber |
+|---|---|
+| MEGHA | `AT 26-27` |
+| ADMIN | `2026_27` |
+| AARATI / suchit | `2026-27` (twice, separately) |
+| UPENDRA | `24-25`, `AT2026-27` |
+| PATEL ELECTRICALS | `UGVCL/EE-T-1/TRANS-REP/2020-21/1087` |
+| SAMOR | `ALLOTMENT NO.25903,DT.10/09/26` |
+
+**The sharpest case: five agencies adopted the 1819 template and produced FIVE DISTINCT `atNumber`s for one
+tender** - from `2026-28` to the full `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819`. Three ATs across three
+agencies collapse to the same string once punctuation is ignored.
+
+### ⚠ FIRST, WHAT THIS IS NOT: NOTHING KEYS ON THE NAME
+
+**Every path resolves an AT by DOCUMENT ID** - `job.atId`, `atMasterId`, `ratesSource: published:<id>`. Searched
+across `src/`, `scripts/` and `functions/` for equality comparisons on `name` or `atNumber`: the only name-based
+matches are on AGENCY names in two console scripts. `orderReference.ts` reads `orderNo`/`orderDate`, never the
+name. Everywhere else it is a display label, `at.atNumber || at.name || at.id`.
+
+**So inconsistent names are untidiness, not a defect - with one exception, and it is not fixed here.** O62: the
+bill's Appr. No. still prefills from `atNumber` (`BillingSystem.tsx:493`, printed at `:519`), so **`AT 26-27` can
+print on a tax invoice as an approval number**. That belongs to O62 and is unchanged by this entry.
+
+**The 15 existing ATs are left alone.** A rename would change what every screen shows for an AT an agency
+recognises, and would fix nothing, because no logic reads it.
+
+### The canonical shape, stated because the two templates disagreed
+
+| | 1819 template | 2020-21 template |
+|---|---|---|
+| `name` | `UGVCL/2026-28/01/AT/1819` | **`UGVCL/EE-T-1/TRANS-REP/2020-21/01/AT/1087`** |
+| `atNumber` | `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819` | **`UGVCL 2020-21 Schedule`** |
+
+**They are inverted on the 2020 one.** Canonical: **`atNumber` holds the full A/T reference, `name` holds a short
+description.** Without correcting it, an agency adopting the 2020 template would be handed *"UGVCL 2020-21
+Schedule"* as its A/T number.
+
+`scripts/admin/revise-2020-template.js` swaps them. **Run by the owner, not automatically.** It locates the
+template by its CURRENT VALUES rather than a doc id typed from a truncated listing, refuses if they have changed,
+refuses if it has gained an adopter, writes exactly two fields, and reads the result back from the database
+rather than reporting its own intention. **It has 0 adopters, so the correction is free.** The version is
+deliberately not bumped: a bump announces drift to adopters, and nothing adopted it.
+
+### What was built
+
+- **`applyTemplateChoice` prefills `atNumber`**, beside the period and the percentage that already arrive from
+  the template, and **labelled the same way** - *"From this tender - change it if your A/T letter differs."* The
+  justification is the one already written for the percentage: **a labelled fact with a source can be confirmed;
+  a silent default can only be missed.**
+- **⚠ THE FULL STRING.** A stripped prefix would be a third variant of the same reference - the problem, not a
+  solution to it.
+- **⚠ EDITABLE, AND THAT IS NOT A COMPROMISE.** The argument for locking is real: if the point is a shared name,
+  an editable field defeats it the first time someone tidies it. **It fails on the data.** SAMOR holds TWO ATs on
+  the 1819 template and one of them is **A/T 1808** - one rate template, two acceptance letters. A locked field
+  would force 1808 to identify itself as 1819, which is worse than untidy: **it is wrong on a document.**
+- **⚠ NEVER `orderNo`.** The A/T order number stays typed, per agency, from that agency's own letter - the same
+  SAMOR reason, recorded in O61 before this. **A test now asserts `applyTemplateChoice` writes no `orderNo` or
+  `orderDate` property**, so it cannot drift in later.
+
+**The reverse direction was asked about and is meaningless.** The template is always chosen first - `openAddForm`
+opens already applied to the newest one, and the selector's option text already reads
+`Copy "<name>" v<n> (AT <atNumber>)`. There is no name control to select FROM.
+
+**⚠ IT REACHES FEWER ATs THAN IT LOOKS.** Only **5 of 15** ATs adopted a template at all; the other 10 took the
+"Enter rates myself later" path, which no prefill touches. This improves the next tender's intake, not the
+existing spread.
+
+**⚠ MY OWN TEST WAS WRONG FIRST.** It matched the bare word `orderNo` and failed on the COMMENT explaining why
+`orderNo` is not prefilled - asserting against prose rather than behaviour. Corrected to match a property write
+(`orderNo:`). That is the third time this session a test of mine asserted the wrong thing and was corrected
+rather than the code.
+
+**Verified:** tsc; **178 tests in 16 files, 1 new**; build; hooks guard, 48 files.
+- **⚠ NOT SEEN RENDERED.** The prefill and its label are asserted at the source, not observed on the form.
+
+**Deploy:** hosting - a push to `main` (O71). The template correction is a separate act the owner runs.
