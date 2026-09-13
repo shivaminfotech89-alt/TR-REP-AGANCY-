@@ -32,11 +32,13 @@ import {
   PhoneCall,
   Menu,
   Smartphone,
-  Monitor
+  Monitor,
+  Download
 } from 'lucide-react';
 import heroBg from '../assets/images/transformer_hero_bg_1786648256385.jpg';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
 import { SELLER } from '../lib/seller';
+import { useInstallPrompt } from '../lib/installPrompt';
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -46,6 +48,14 @@ interface LandingPageProps {
 export default function LandingPage({ onLogin, isLoading = false }: LandingPageProps) {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  /**
+   * ⚠ `installed`, NOT `installOfferHidden` (AUDIT G82). The sidebar row also hides on DISMISSAL, because there
+   * it is a nag an operator asked to be rid of. Here it is page content, not a nag, so a past dismissal leaves
+   * the section standing and merely withholds the button. Only being INSIDE the installed app removes it, where
+   * telling someone to install what they are already running is absurd.
+   */
+  const { canInstall, promptInstall, installed } = useInstallPrompt();
 
   const toggleFaq = (index: number) => {
     setActiveFaq(activeFaq === index ? null : index);
@@ -888,11 +898,24 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
         </div>
       </section>
 
-      {/* ⚠ IT TELLS, IT DOES NOT INSTALL (AUDIT G81). No one-click button here, deliberately: a prospect who has
-          not signed in has no agency, so installing would give them an app that opens on a login screen - and
-          `beforeinstallprompt` needs about half a minute of use before it fires at all, so the button would be
-          absent for most first visits and present for some returning ones. An inconsistent call to action is
-          weaker than a consistent sentence. They install once they have something to open. */}
+      {/* ⚠ A BUTTON WHERE ONE CAN WORK, INSTRUCTIONS WHERE IT CANNOT (AUDIT G82).
+
+          THIS REVERSES G81, WHICH ARGUED THE OPPOSITE IN THIS EXACT PLACE AND WAS WRONG - wrong, not outdated.
+          It said installing would hand a prospect "an app that opens on a login screen", as though that were a
+          permanent property. `start_url` is "/", which is ROLE-ADAPTIVE: signed out it renders this page, signed
+          in it renders the app. So it is a ONE-TIME cost, and the icon is rather the point - a prospect who
+          installs has put this on their home screen before they ever had an account.
+
+          What survives from G81 is its caveat, not its conclusion. Chrome's engagement heuristic means the event
+          often has not fired on a first visit, and site engagement persists per-origin so a returning visitor may
+          get it at once. That argues for instructions being the ALWAYS-PRESENT default and the button being an
+          upgrade over them. It does not argue for having no button. Nothing here is ever absent; only the
+          capability changes.
+
+          ⚠ AND NEVER A BUTTON FOR SAFARI. It fires no `beforeinstallprompt` on macOS or iOS, and no API can raise
+          the install sheet, so a button there would accept a tap and silently achieve nothing - the G24 shape
+          this file's own hook is written to avoid. Safari gets the written steps, which is what the cards are. */}
+      {!installed && (
       <section className="py-10 sm:py-12 bg-white border-t border-slate-200">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center space-y-2">
@@ -903,6 +926,35 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
               Install it like an app &mdash; no store, no download. It gets its own icon and its own window, and it
               is the same site you are looking at now.
             </p>
+          </div>
+
+          {/* ⚠ A RESERVED SLOT OF FIXED HEIGHT (AUDIT G82). The event can arrive while the visitor is reading
+              this very section - the heuristic is roughly thirty seconds, and this sits low on the page - so the
+              button genuinely may appear under their eyes. A block that grows mid-read reads as a fault on a
+              marketing page, so the slot occupies the same space whether it holds the button or the sentence. */}
+          <div className="mt-6 min-h-[92px] flex flex-col items-center justify-center gap-2 text-center">
+            {canInstall ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => { void promptInstall(); }}
+                  className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white text-sm font-bold rounded-xl shadow-sm transition-colors"
+                >
+                  <Download className="w-4 h-4" /> Install TransRegister
+                </button>
+                <p className="text-xs text-slate-500">
+                  Your browser will ask you to confirm. Nothing is downloaded from a store.
+                </p>
+              </>
+            ) : (
+              <p className="text-xs sm:text-sm text-slate-600 max-w-xl leading-relaxed">
+                Your browser installs this from its own menu, in about ten seconds. The steps for yours are
+                below &mdash; or{' '}
+                <a href="/install" className="text-blue-700 underline font-semibold">
+                  follow them one at a time
+                </a>.
+              </p>
+            )}
           </div>
 
           <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -937,6 +989,7 @@ export default function LandingPage({ onLogin, isLoading = false }: LandingPageP
           </p>
         </div>
       </section>
+      )}
 
       {/* Professional Footer */}
       <footer className="bg-slate-950 text-slate-400 py-8 sm:py-10 border-t border-slate-800 text-xs">
