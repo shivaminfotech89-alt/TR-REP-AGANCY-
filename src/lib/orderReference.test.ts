@@ -104,6 +104,31 @@ test('the sheet no longer tells the operator it cannot be printed', () => {
   assert.ok(src.includes('cannot be sent'), 'the banner must still say the send is refused');
 });
 
+/**
+ * ⚠ THE A/T ORDER IS NEVER PREFILLED FROM A TEMPLATE (AUDIT G63, G83).
+ *
+ * The Add AT form now prefills `atNumber` from the chosen template, so that every agency on one
+ * tender writes the same reference. `orderNo` must NOT follow it: SAMOR holds two ATs on the 1819
+ * template and one of them is A/T 1808 - one rate template, two acceptance letters. A prefilled
+ * order number would put 1819's reference on 1808's estimates, which is the O61 harm exactly.
+ */
+test('the Add AT form prefills atNumber from the template but never orderNo', () => {
+  const src = readFileSync(join(process.cwd(), 'src/components/AtSettings.tsx'), 'utf8');
+  const apply = src.slice(
+    src.indexOf('const applyTemplateChoice'),
+    src.indexOf('const copyPercentagesFromPreviousAt'),
+  );
+  assert.ok(apply.length > 0, 'applyTemplateChoice was not found - this test is scanning the wrong shape');
+  assert.ok(apply.includes('atNumber'), 'the template no longer prefills atNumber');
+  // ⚠ A PROPERTY WRITE, NOT THE WORD. The comment in there explains why orderNo is NOT prefilled, so
+  // matching the bare word asserted against prose and failed on the explanation itself.
+  assert.equal(
+    /\borderNo\s*:/.test(apply), false,
+    'the A/T order number is being prefilled from a template - see SAMOR 1808 on the 1819 template',
+  );
+  assert.equal(/\borderDate\s*:/.test(apply), false, 'the A/T order date is being prefilled from a template');
+});
+
 // ⚠ THE DEFECT ITSELF, BY SOURCE. The hardcoded reference and date must not come back into the estimate.
 test('the estimate source no longer carries the hardcoded 2020-21 order or its date', () => {
   const src = readFileSync(join(process.cwd(), 'src/components/SingleJobEstimateReport.tsx'), 'utf8');

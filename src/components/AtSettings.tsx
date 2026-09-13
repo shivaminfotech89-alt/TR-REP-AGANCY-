@@ -566,6 +566,30 @@ export function AtSettings() {
     if (v !== undefined && v !== null && Number.isFinite(Number(v))) {
       setNewAt(prev => ({ ...prev, atPercentage: String(v) }));
     }
+    /**
+     * ⚠ THE TENDER'S OWN REFERENCE, SO EVERY AGENCY ON IT WRITES THE SAME ONE (AUDIT G83).
+     *
+     * Typed per agency, fifteen ATs on the same few tenders produced "AT 26-27", "2026_27",
+     * "2026-27", "24-25" and "UGVCL/EE-T-1/TRANS-REP/2020-21/1087" - and the five agencies that
+     * adopted the 1819 template produced five DISTINCT atNumbers for one tender. Nothing keys on
+     * the value, so this is legibility rather than correctness; it is worth fixing where it is
+     * free, and prefilling from the thing they all chose is free.
+     *
+     * ⚠ THE FULL STRING, NOT A SHORTENED ONE. A stripped prefix would be a third variant of the
+     * same reference, which is the problem rather than a solution to it.
+     *
+     * ⚠ AND IT STAYS EDITABLE, WHICH IS NOT A COMPROMISE. SAMOR holds TWO ATs on the 1819
+     * template and one of them is A/T 1808: one rate template, two acceptance letters. A locked
+     * field would force 1808 to identify itself as 1819, which is worse than untidy - it is wrong
+     * on a document. The label says where the figure came from, the same treatment the percentage
+     * above gets, for the same reason: a labelled fact with a source can be confirmed.
+     *
+     * ⚠ NOT THE A/T ORDER NUMBER. `orderNo` stays typed, per agency, from that agency's own
+     * letter - never from a template. See G63 and the comment on the A/T fields below.
+     */
+    if (String(t.atNumber ?? '').trim()) {
+      setNewAt(prev => ({ ...prev, atNumber: String(t.atNumber).trim() }));
+    }
   };
 
   /** Offer the previous tender's percentages - an act, not a default. */
@@ -1288,6 +1312,14 @@ export function AtSettings() {
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">AT Number</label>
                   <input required type="text" value={newAt.atNumber} onChange={e => setNewAt({...newAt, atNumber: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" placeholder="e.g. AT-2026-27" />
+                  {/* ⚠ PROVENANCE, NOT DECORATION (AUDIT G83). The same treatment the percentage gets:
+                      a prefilled field with no source is a default, and a default is submitted unread. */}
+                  {chosenTemplate?.atNumber && newAt.atNumber === String(chosenTemplate.atNumber).trim() && (
+                    <p className="mt-1 text-[11px] text-emerald-800 leading-relaxed">
+                      From this tender &mdash; <strong className="font-bold">change it if your A/T letter differs</strong>.
+                      Every agency on the same tender carrying the same reference is the point of filling it in.
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Description (Optional)</label>
