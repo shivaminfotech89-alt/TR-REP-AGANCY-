@@ -16798,3 +16798,102 @@ codebase.** That alone accounts for the money trail, without anyone having edite
   payment date, payment status, challan no - and is the same test that already refuses DELETING a billed row (G3).
 
 **Finding 3 is closed. Findings 1 and 2 stand as recorded; the billed job is still not to be stamped.**
+
+---
+
+## G82. A button where a button can work - and the one offer the browser gives, held where both consumers can see it
+
+**The landing page told visitors how to install and gave them nothing to press.** It now presses where pressing
+works and instructs where it does not - the sidebar row's pattern one level up: **same place, same words,
+different capability.**
+
+### THIS IS A REVERSAL OF G81, NOT A REFINEMENT OF IT
+
+**G81 argued the opposite in this exact place, and the reasoning was WRONG - wrong, not outdated.** It said a
+one-click install would hand a prospect *"an app that opens on a login screen"*, as though that were a permanent
+property of installing. It is not. **`start_url` is `/`, which is ROLE-ADAPTIVE**: signed out it renders the
+landing page, signed in it renders the app. So the login screen is a **ONE-TIME cost**, paid once and never again,
+and the icon is rather the point - **a prospect who installs has put this on their home screen before they ever
+had an account.**
+
+The comment at `LandingPage.tsx` that made the old argument is **replaced by one making the new argument, in the
+same place**, because a comment arguing against the code beneath it is worse than no comment.
+
+**What survives from G81 is its caveat, not its conclusion.** Chrome's engagement heuristic means the event often
+has not fired on a first visit, while site engagement persists per-origin so a returning visitor may get it at
+once. **That argues for instructions being the ALWAYS-PRESENT default and the button being an upgrade over them.
+It does not argue for having no button.** The error was treating button and instructions as rivals for one slot.
+Nothing in the section is ever absent; only the capability changes.
+
+### ⚠ THE LOAD-BEARING PART: ONE OFFER, HELD OUTSIDE REACT
+
+**This could not be a LandingPage-only change, and the reason has nothing to do with the landing page.**
+
+`beforeinstallprompt` **fires ONCE per page load**, and the hook held it in its own `useState`. That was correct
+while there was exactly one consumer. There are now two - the sidebar row in `AppLayout` and the button on
+`LandingPage` - and **they sit on opposite sides of the sign-in boundary.**
+
+**Signing in is `signInWithPopup`: no reload.** So a per-component copy meant the landing page would capture the
+only offer there will be, then unmount at sign-in and take it with it, leaving the sidebar row showing *"How to
+install this app"* seconds after Chrome had handed us an offer. Chrome does not re-fire it.
+
+**⚠ THAT FAILURE IS INVISIBLE UNLESS YOU SIGN IN WITHOUT RELOADING, WHICH IS WHAT EVERY REAL VISITOR DOES.** A
+developer testing with a refresh between states would never see it.
+
+**Fixed structurally rather than by coordination:** the deferred event, the installed flag and the dismissal live
+at module scope in `lib/installPrompt.ts`. **There is ONE offer because the browser gives one, so there is one
+place holding it** and components subscribe. Two further consequences, both improvements:
+- **The listener attaches at IMPORT time, not at first mount** - strictly earlier, so an event arriving before
+  React has mounted anything is no longer missed.
+- **`takeInstallEvent()` spends the event on TAKING, not on outcome.** It cannot be prompted twice, so it must
+  stop being offered the moment one consumer commits to it - otherwise a second could prompt a spent event and
+  achieve nothing, which is the G24 shape the hook exists to avoid.
+
+**The hook's public shape is unchanged** - `canInstall`, `installOfferHidden`, `promptInstall`, `dismissInstall`,
+`installed` - so `AppLayout` was not touched.
+
+### What a visitor actually gets
+
+| | |
+|---|---|
+| Installs from the landing page | The icon opens `/`, which renders the landing page while signed out and the app once signed in |
+| Cost of installing before signing up | One sign-in, once |
+| **Do they stay signed in?** | **⚠ A PREDICTION, NOT AN OBSERVATION - see below** |
+
+**⚠ THE STORAGE-PARTITION POINT IS PREDICTED, NOT TESTED.** On Chrome desktop and Android the installed app is
+expected to share the browser profile's storage, so Firebase auth persistence should carry over and the visitor
+may open already signed in. **On iOS, Add to Home Screen has historically used a SEPARATE storage partition from
+Safari, so they would likely sign in once more inside the installed app.** This is platform behaviour as
+understood, **not something observed in this app on a real device**, and it is recorded that way deliberately -
+the same marking G80 and G81 carry. Either way the cost is once.
+
+### The reserved slot, because a marketing page that jumps reads as broken
+
+**The event can arrive while the visitor is reading this very section** - the heuristic is roughly thirty seconds,
+and the section sits low on the page, so a prospect who scrolled there has plausibly already spent it. **The
+button genuinely may appear under their eyes.** So the slot is a **fixed height holding either the button or the
+sentence**, and nothing below it moves when the swap happens.
+
+### ⚠ NEVER A BUTTON FOR SAFARI
+
+Safari fires no `beforeinstallprompt` on macOS or iOS, and **no API can raise the install sheet**. A button there
+would accept a tap and silently achieve nothing - **the G24 shape**. Safari gets the written steps, which is what
+the two cards are; they stay exactly as they were and **both remain visible on every browser**, per G81's rule
+that the sniff may ORDER but never HIDE.
+
+**One deliberate difference from the sidebar:** this section hides on **`installed`**, not on `installOfferHidden`.
+The sidebar row also hides on DISMISSAL, because there it is a nag an operator asked to be rid of. **Here it is
+page content, not a nag**, so a past dismissal leaves the section standing and merely withholds the button. Only
+being inside the installed app removes it, where telling someone to install what they are already running is
+absurd.
+
+**Verified:** tsc; **174 tests in 16 files, 11 new**; build; hooks guard, 48 files. `"Install TransRegister"`
+appears in the built bundle, so it ships rather than merely compiling. The 11 new tests cover the STORE rather
+than the rendering, because **the defect was never about rendering**; the load-bearing one reproduces the
+regression directly - a consumer subscribes, the event fires, that consumer unsubscribes, a second subscribes,
+and the offer must still be there.
+- **⚠ NOT SEEN RENDERED, AND NOT SEEN ON A DESKTOP CHROME.** Whether the event fires on the landing page, and how
+  long a real first-time visitor waits for it, are observations that need a browser. They are predictions until
+  the owner looks.
+
+**Deploy:** hosting - a push to `main` (O71).
