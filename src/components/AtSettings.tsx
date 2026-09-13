@@ -1003,7 +1003,7 @@ export function AtSettings() {
                               {/* The same rule the estimate refuses on, not a second copy of it (AUDIT G63). */}
                               {orderReferenceFor({ at, source: 'own' }, at.atNumber).refusal && (
                                 <span
-                                  title="This tender has no A/T order number and date. Every estimate under it refuses to print, download or send until they are entered - open the AT and use Edit."
+                                  title="This tender has no A/T order number and date. Estimates under it print with the order line blank and CANNOT BE SENT until they are entered - open the AT and use Edit."
                                   className="text-[10px] font-bold uppercase tracking-wider text-rose-700 bg-rose-50 border border-rose-300 px-2 py-0.5 rounded-full flex items-center"
                                 >
                                   <AlertTriangle className="w-3 h-3 mr-1" /> No order no.
@@ -1432,9 +1432,13 @@ export function AtSettings() {
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">End Date</label>
                   <input required type="date" value={newAt.endDate} onChange={e => setNewAt({...newAt, endDate: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white" />
                 </div>
-                {/* THE A/T LETTER (AUDIT G63). Optional here - the letter may not be to hand when the AT is set
-                    up - but every estimate under this AT refuses to print, download or send until both are in.
-                    Never prefilled: not from the previous AT, not from the template (its A/T is not yours). */}
+                {/* THE A/T LETTER (AUDIT G63, narrowed by O73). Optional here - the letter may not be to hand
+                    when the AT is set up. Estimates under this AT PRINT with the order line blank; it is the
+                    SEND that refuses until both are in.
+                    ⚠ The previous wording here said print and download refused too. That was true when it was
+                    written and is false now, which is why it is corrected rather than left as history.
+                    Never prefilled: not from the previous AT, and not from the template - SAMOR holds two ATs
+                    on the 1819 template and one of them is A/T 1808, so a template's A/T is not yours. */}
                 <div>
                   <label className="block text-xs font-bold uppercase text-slate-500 mb-1">A/T Order No. (as on the letter)</label>
                   <input type="text" value={newAt.orderNo} onChange={e => setNewAt({...newAt, orderNo: e.target.value})} className="w-full px-3 py-2 text-xs border rounded-lg bg-white font-mono" placeholder="Exactly as the A/T letter gives it" />

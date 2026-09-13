@@ -351,43 +351,18 @@ export default function EstimateGenerate() {
    *
    * Each sheet prints its job's own A/T reference and date, read from the job's OWN AT only: pricing's
    * `?? activeAtMaster` fallback does not apply to the order, because the active tender's letter is a
-   * different order. Where the AT has none, or the job has no AT, the sheet prints the line blank and
-   * every exit refuses - Print, Word download and Send.
+   * different order. Where the AT has none, or the job has no AT, the sheet prints the line blank.
    *
-   * ⚠ A REFUSAL, NOT A COST. Until each agency types its A/T number, every estimate refuses. A sheet
-   * that will not print is fixed in a minute; one naming the wrong tender sits in a division's file.
+   * ⚠ ONLY THE SEND REFUSES (AUDIT O73). Print and Word download go through with the order line blank,
+   * and the screen says it will be blank. This was narrowed after the gate and the field it requires
+   * shipped in ONE commit: on that day no AT could satisfy it, and 14 of 15 ATs carrying 71 live jobs
+   * could not print an estimate at all. A blank "Order No.:" is visibly incomplete and names no other
+   * tender - which was the whole harm in O61 - whereas a send puts the document in the division's hands.
    *
-   * The forwarding letter and the multi-job sheet print no order number, so printing those alone is not
-   * refused. Send is refused for the whole MR, whatever view is on screen: it issues the estimates.
+   * The forwarding letter and the multi-job sheet print no order number. Send is refused for the whole
+   * MR, whatever view is on screen: it issues the estimates.
    */
   const orderRefFor = (job: any) => orderReferenceFor(atResolutionForJob(job, atMasters), job.jobNo || job.id);
-
-  /** The jobs whose single-job sheets are in the printable container for the current view. */
-  const jobsOnPaper = (): any[] => {
-    if (estimateViewMode === 'batch_all') return selectedJobsData;
-    if (estimateViewMode === 'single_job') {
-      const target = selectedJobsData.find(j => j.id === (activeSingleJobId || selectedJobsData[0]?.id)) || selectedJobsData[0];
-      return target ? [target] : [];
-    }
-    return [];
-  };
-
-  const blockIfOrderMissing = (action: string, jobs: any[]) => {
-    const refusal = orderRefusalFor(jobs.map(job => ({ jobLabel: job.jobNo || job.id, ref: orderRefFor(job) })));
-    if (!refusal) return false;
-    setSetupGap({
-      title: 'No order number to print on this estimate',
-      problem: `The estimate cannot be ${action}. It prints the A/T order it is issued under, and that order has not been entered.`,
-      position: refusal.lines[0],
-      detail: [
-        ...refusal.lines.slice(1),
-        'Nothing is filled in for you. The number and date come from the A/T letter; another tender\'s would put the wrong order on a document going to the division.',
-      ],
-      actionLabel: refusal.at ? 'Open this AT' : 'Open AT settings',
-      actionTo: atSettingsLink(refusal.at),
-    });
-    return true;
-  };
 
   /**
    * Blocks when the estimate master section a job prices from does not contain that
@@ -475,7 +450,8 @@ export default function EstimateGenerate() {
   const handlePrint = () => {
     if (blockIfDiscomIncomplete('printed')) return;
     if (blockIfMasterMisfiled('printed')) return;
-    if (blockIfOrderMissing('printed', jobsOnPaper())) return;
+    // ⚠ NO ORDER CHECK HERE (AUDIT O73). Printing with the line blank is visibly incomplete and
+    // recoverable, and it names no other tender. The refusal lives on Send, where the document leaves.
     if (selectedMrNo) {
       triggerUniversalPrint('printable-estimate-container', `Estimate Report & Forwarding Letter - MR ${selectedMrNo}`, `Estimate_MR_${selectedMrNo}.pdf`);
     } else {
@@ -1808,10 +1784,10 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                   </button>
                   <button 
                     onClick={() => {
-                      // ⚠ THE WORD FILE IS THE PRINTED PAGE, so it is refused on the same order check
-                      // (AUDIT G63). It refused nothing before this, and it still skips Print's DISCOM
-                      // and estimate-master checks - recorded in G63, not changed here.
-                      if (blockIfOrderMissing('downloaded', jobsOnPaper())) return;
+                      // ⚠ THE WORD FILE IS THE PRINTED PAGE, and it is no longer refused for a missing
+                      // order (AUDIT O73). A .doc on the operator's own disk has not left the building,
+                      // and it carries the same blank order line the printed sheet does. It still skips
+                      // Print's DISCOM and estimate-master checks - recorded in G63, not changed here.
                       const container = document.getElementById('printable-estimate-container');
                       if (container) downloadHtmlAsWord(container, `Estimate_Report_${selectedMrNo}.doc`, `Estimate Report & Forwarding Letter - ${selectedMrNo}`);
                     }}

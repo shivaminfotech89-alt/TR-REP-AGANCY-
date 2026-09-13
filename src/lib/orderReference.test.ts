@@ -70,6 +70,40 @@ test('a batch where every estimate has its order refuses nothing', () => {
   assert.equal(orderRefusalFor([]), null);
 });
 
+/**
+ * ⚠ WHICH EXITS THE REFUSAL CLOSES - ASSERTED AT THE SOURCE (AUDIT O73).
+ *
+ * The gate lives at the call sites, not in this module, so these read the components. They exist
+ * because the defect being guarded against is not a wrong sentence but a gate that closed an exit
+ * NOBODY COULD OPEN: the refusal and the field it requires shipped in one commit, leaving 14 of 15
+ * ATs and 71 live jobs unable to print.
+ */
+test('print and Word download do not gate on the order - the helper that blocked them is gone', () => {
+  const src = readFileSync(join(process.cwd(), 'src/components/EstimateGenerate.tsx'), 'utf8');
+  assert.equal(
+    src.includes('blockIfOrderMissing'), false,
+    'print or download can still be refused for a missing order - that is the O73 block returning',
+  );
+});
+
+test('the SEND still refuses when the order is missing', () => {
+  const src = readFileSync(join(process.cwd(), 'src/components/EstimateGenerate.tsx'), 'utf8');
+  assert.ok(src.includes('orderRefusalFor('), 'the screen no longer computes the refusal at all');
+  assert.ok(
+    src.includes('Cannot send: each estimate prints the A/T order'),
+    'the send refusal is gone - an estimate could leave naming no order, which is O61 returning',
+  );
+});
+
+test('the sheet no longer tells the operator it cannot be printed', () => {
+  const src = readFileSync(join(process.cwd(), 'src/components/SingleJobEstimateReport.tsx'), 'utf8');
+  assert.equal(
+    src.includes('cannot be printed, downloaded or sent'), false,
+    'the banner still claims print is blocked, which is now false',
+  );
+  assert.ok(src.includes('cannot be sent'), 'the banner must still say the send is refused');
+});
+
 // ⚠ THE DEFECT ITSELF, BY SOURCE. The hardcoded reference and date must not come back into the estimate.
 test('the estimate source no longer carries the hardcoded 2020-21 order or its date', () => {
   const src = readFileSync(join(process.cwd(), 'src/components/SingleJobEstimateReport.tsx'), 'utf8');

@@ -1486,7 +1486,8 @@ export default function SingleJobEstimateReport({
    * then `atMaster.orderNo`, then printed a hardcoded 2020-21 order number and date (quoted in AUDIT O61,
    * and kept out of this file by a test) - so every estimate named that order whatever its tender, and one went to a division
    * under a 2026 allotment. Unset now prints nothing after "Order No.:", and the screen that issues the
-   * sheet refuses print, Word download and send (orderRefusalFor).
+   * sheet REFUSES THE SEND (orderRefusalFor). Print and Word download are allowed with the line blank
+   * (AUDIT O73): a blank line is visibly incomplete and names no other tender.
    */
   const orderLine = [orderRef.orderNo, orderRef.orderDate ? `Dt.: ${formatDDMMYYYY(orderRef.orderDate)}` : '']
     .filter(Boolean).join(', ');
@@ -1713,9 +1714,9 @@ export default function SingleJobEstimateReport({
             the operator about a SETTING, not part of the estimate the division receives. */}
         {/* ⚠ ON SCREEN ONLY (AUDIT G63). Why "Order No.:" is blank, before the operator meets the refusal. */}
         {orderRef.refusal && (
-          <div className="print:hidden mb-3 rounded-lg border-2 border-rose-300 bg-rose-50 px-3.5 py-2.5">
-            <p className="text-sm font-bold text-rose-900">This estimate cannot be printed, downloaded or sent: it has no order to name</p>
-            <p className="text-xs text-rose-900 mt-1">{orderRef.refusal}</p>
+          <div className="print:hidden mb-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-3.5 py-2.5">
+            <p className="text-sm font-bold text-amber-900">This estimate will print with &ldquo;Order No.:&rdquo; blank, and cannot be sent</p>
+            <p className="text-xs text-amber-900 mt-1">{orderRef.refusal}</p>
           </div>
         )}
         {(estimate.notices?.length ?? 0) > 0 && (
@@ -1950,9 +1951,9 @@ export default function SingleJobEstimateReport({
           the operator about a SETTING, not part of the estimate the division receives. */}
       {/* ⚠ ON SCREEN ONLY (AUDIT G63). Why "Order No.:" is blank, before the operator meets the refusal. */}
       {orderRef.refusal && (
-        <div className="print:hidden mb-3 rounded-lg border-2 border-rose-300 bg-rose-50 px-3.5 py-2.5">
-          <p className="text-sm font-bold text-rose-900">This estimate cannot be printed, downloaded or sent: it has no order to name</p>
-          <p className="text-xs text-rose-900 mt-1">{orderRef.refusal}</p>
+        <div className="print:hidden mb-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-3.5 py-2.5">
+          <p className="text-sm font-bold text-amber-900">This estimate will print with &ldquo;Order No.:&rdquo; blank, and cannot be sent</p>
+          <p className="text-xs text-amber-900 mt-1">{orderRef.refusal}</p>
         </div>
       )}
       {(estimate.notices?.length ?? 0) > 0 && (

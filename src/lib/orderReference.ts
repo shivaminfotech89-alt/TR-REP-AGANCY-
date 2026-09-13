@@ -11,9 +11,18 @@
  * with no AT; the order must not follow it, because the active tender's letter is someone else's
  * order. So this takes the RESOLUTION, which says why there is no AT, not just the AT.
  *
- * ⚠ UNSET IS A REFUSAL, NEVER A DEFAULT. Both fields blank print blank, and `refusal` says why the
- * estimate cannot be printed, downloaded or sent. A document that will not print is recoverable in a
- * minute; one naming the wrong tender goes to a division office and stays in its file.
+ * ⚠ UNSET IS A REFUSAL, NEVER A DEFAULT. Both fields blank print blank, and `refusal` says why. A
+ * document that will not print is recoverable in a minute; one naming the wrong tender goes to a
+ * division office and stays in its file.
+ *
+ * ⚠ WHICH EXITS THE REFUSAL CLOSES WAS NARROWED TO SEND (AUDIT O73). It closed print and Word download
+ * too, and it shipped in the same commit as the field it requires - so on the day it landed NO AT could
+ * satisfy it, and 14 of 15 ATs carrying 71 live jobs could not print an estimate at all.
+ *
+ * `refusal` is still the one sentence saying what is missing, and it is still computed for every exit -
+ * the screen shows it as a WARNING beside a sheet that will print with a blank order line. What changed
+ * is who treats it as a block: only the send, because the send is where the document leaves. A blank
+ * "Order No.:" is visibly incomplete and names no other tender; that was the whole harm in O61.
  *
  * No Firebase import - types only - so the rule is testable under `npm test` (O57).
  */
