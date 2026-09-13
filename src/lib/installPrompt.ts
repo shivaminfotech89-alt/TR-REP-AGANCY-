@@ -18,6 +18,21 @@
  * this app deploys often against rate data that is corrected in place - a cached estimate builder would price from
  * yesterday's masters with nothing on screen saying so, and the person affected could not tell. If one is ever
  * added it must be network-first with no precache. See G80.
+ *
+ * ⚠ THE EVENT LIVES OUTSIDE REACT, AND MUST (AUDIT G82).
+ *
+ * It used to live in the hook's own `useState`, which was correct while there was exactly one consumer. There are
+ * now two - the sidebar row in `AppLayout` and the install button on `LandingPage` - and they are on OPPOSITE
+ * SIDES OF THE SIGN-IN BOUNDARY. `beforeinstallprompt` fires ONCE per page load, and signing in is
+ * `signInWithPopup`: no reload. So a per-component copy meant the landing page captured the only offer there will
+ * be, then unmounted at sign-in and took it with it, leaving the sidebar row showing "How to install this app"
+ * seconds after Chrome had handed us an offer. **That failure is invisible unless you sign in without reloading,
+ * which is what every real visitor does.**
+ *
+ * Module scope fixes it for the structural reason rather than by coordination: there is ONE offer because the
+ * browser gives one, so there is one place holding it and components subscribe. It also attaches the listener at
+ * IMPORT time rather than at first mount, which is strictly earlier - an event that arrives before React has
+ * mounted anything is no longer missed.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -49,56 +64,127 @@ function wasDismissed(): boolean {
   }
 }
 
-export function useInstallPrompt() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [dismissed, setDismissed] = useState(wasDismissed);
-  const [installed, setInstalled] = useState(isStandalone);
+// ----------------------------------------------------------------- the one offer
 
-  useEffect(() => {
-    const onBeforeInstall = (e: Event) => {
-      // Suppress Chrome's own UI so there is one offer, in one place, rather than two.
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-    };
-    const onInstalled = () => {
-      setInstalled(true);
-      setDeferred(null);
-    };
-    window.addEventListener('beforeinstallprompt', onBeforeInstall);
-    window.addEventListener('appinstalled', onInstalled);
-    return () => {
-      window.removeEventListener('beforeinstallprompt', onBeforeInstall);
-      window.removeEventListener('appinstalled', onInstalled);
-    };
-  }, []);
+let deferredEvent: BeforeInstallPromptEvent | null = null;
+let installedNow = false;
+let dismissedNow = false;
+let attached = false;
+
+/** Mounted consumers. A Set because the same component may resubscribe across a remount. */
+const listeners = new Set<() => void>();
+
+function emit(): void {
+  // Copied before iterating: a listener that unsubscribes while being notified is legal.
+  for (const listener of Array.from(listeners)) listener();
+}
+
+/** Subscribe to changes in the offer. Returns the unsubscribe, for `useEffect` cleanup. */
+export function subscribeToInstallOffer(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+/** What every consumer currently sees. One source, so two consumers cannot disagree. */
+export function installOfferSnapshot(): {
+  hasOffer: boolean;
+  installed: boolean;
+  dismissed: boolean;
+} {
+  return { hasOffer: !!deferredEvent, installed: installedNow, dismissed: dismissedNow };
+}
+
+export function handleBeforeInstallPrompt(e: Event): void {
+  // Suppress Chrome's own UI so there is one offer, in one place, rather than two.
+  (e as any)?.preventDefault?.();
+  deferredEvent = e as BeforeInstallPromptEvent;
+  emit();
+}
+
+export function handleAppInstalled(): void {
+  installedNow = true;
+  deferredEvent = null;
+  emit();
+}
+
+export function markInstallOfferDismissed(): void {
+  dismissedNow = true;
+  try {
+    localStorage.setItem(DISMISSED_KEY, '1');
+  } catch {
+    // Dismissal not persisting is a smaller fault than refusing to dismiss.
+  }
+  emit();
+}
+
+/**
+ * Hand the event to a caller that is about to `prompt()` it, and clear it here in the same step.
+ *
+ * ⚠ SPENT ON TAKING, NOT ON OUTCOME. The event cannot be prompted twice, so it must stop being offered the moment
+ * one consumer commits to using it - otherwise a second consumer could prompt a spent event and achieve nothing.
+ */
+export function takeInstallEvent(): BeforeInstallPromptEvent | null {
+  const event = deferredEvent;
+  if (!event) return null;
+  deferredEvent = null;
+  emit();
+  return event;
+}
+
+/**
+ * Attach the window listeners. Idempotent, and called at import below for the real window; tests pass a fake.
+ */
+export function initInstallOffer(win?: any): void {
+  if (attached) return;
+  const target = win ?? (typeof window !== 'undefined' ? window : undefined);
+  if (!target?.addEventListener) return;
+  attached = true;
+  if (!win) {
+    dismissedNow = wasDismissed();
+    installedNow = isStandalone();
+  }
+  target.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+  target.addEventListener('appinstalled', handleAppInstalled);
+}
+
+/** Test-only. The module holds process-wide state, so each test starts from a known one. */
+export function resetInstallOfferForTests(): void {
+  deferredEvent = null;
+  installedNow = false;
+  dismissedNow = false;
+  attached = false;
+  listeners.clear();
+}
+
+if (typeof window !== 'undefined') initInstallOffer();
+
+// ----------------------------------------------------------------- the consumers
+
+export function useInstallPrompt() {
+  // The store is the state; this only re-renders the component when the store says something changed.
+  const [, bump] = useState(0);
+  useEffect(() => subscribeToInstallOffer(() => bump(n => n + 1)), []);
+
+  const snapshot = installOfferSnapshot();
 
   const promptInstall = useCallback(async () => {
-    if (!deferred) return null;
-    deferred.prompt();
+    const event = takeInstallEvent();
+    if (!event) return null;
+    event.prompt();
     let outcome: 'accepted' | 'dismissed' | null = null;
     try {
-      outcome = (await deferred.userChoice).outcome;
+      outcome = (await event.userChoice).outcome;
     } catch {
       outcome = null;
     }
-    // ⚠ SPENT EITHER WAY. Accepted or dismissed, this event cannot be prompted again; the row hides until Chrome
-    // fires a fresh one, which is the honest behaviour rather than a button that stops working.
-    setDeferred(null);
     return outcome;
-  }, [deferred]);
-
-  const dismissInstall = useCallback(() => {
-    setDismissed(true);
-    try {
-      localStorage.setItem(DISMISSED_KEY, '1');
-    } catch {
-      // Dismissal not persisting is a smaller fault than refusing to dismiss.
-    }
   }, []);
+
+  const dismissInstall = useCallback(() => { markInstallOfferDismissed(); }, []);
 
   return {
     /** Chrome has an offer in hand and it can be relayed with one click. Chromium only. */
-    canInstall: !!deferred && !dismissed && !installed,
+    canInstall: snapshot.hasOffer && !snapshot.dismissed && !snapshot.installed,
     /**
      * ⚠ WHETHER THE ROW SHOULD BE HIDDEN ALTOGETHER - A DIFFERENT QUESTION FROM `canInstall` (AUDIT G81).
      *
@@ -109,9 +195,9 @@ export function useInstallPrompt() {
      *
      * It hides for two honest reasons only: the operator dismissed it, or this window IS the installed app.
      */
-    installOfferHidden: dismissed || installed,
+    installOfferHidden: snapshot.dismissed || snapshot.installed,
     promptInstall,
     dismissInstall,
-    installed,
+    installed: snapshot.installed,
   };
 }
