@@ -17532,3 +17532,109 @@ creation date would put a 2026 tender in 1972.
    exists either way.
 
 **Not built, not corrected. Recorded so it is not rediscovered as a bug.**
+
+---
+
+## O76. Scrap oil: nothing needed building, and a documented warning that did not fire
+
+**2026-09-15. THE FINDING IS THAT THE APP IS CORRECT.** A change was requested, scoped, measured - and
+abandoned, because the premise it rested on was wrong. Recorded because the way it nearly shipped is worth more
+than the change would have been.
+
+### The request, and what the code already does
+
+The request: a scrapped transformer's oil stays with the agency, so credit **capacity less 5%** - a 180-litre unit
+credits 171. The owner's later clarification: the 5% applies only to oil **actually present**, so a unit arriving
+empty credits the full amount with no deduction.
+
+**That clarification is the existing formula, character for character.** `jobOilShortage`:
+
+```
+const oilRecd = Math.max(0, oilCap - lessOil);   // oil present in the tank
+return lessOil + oilRecd * 0.05;                  // lessOil + (present x 5%)
+```
+
+`ExternalInspection.tsx:537` computes the stored `netShortage` with the identical arithmetic, so both paths agree
+by construction. Worked through the two cases the owner named:
+
+| job | capacity | lessOil | present | app credits | correct? |
+|---|---|---|---|---|---|
+| MSBT-21 | 120 | 120 (arrived empty) | 0 | **120** | yes - no oil to filter, no loss deducted |
+| MSBT-9 | 240 | 0 (arrived full) | 240 | **12** | yes - 12 IS the filtration loss |
+
+### ⚠ THE TWO LEDGERS, WHICH IS THE WHOLE OF IT
+
+| | measures | MSBT-9 |
+|---|---|---|
+| **The formula** | what the DIVISION OWES THE AGENCY - top-up supplied **+** filtration lost | **12** |
+| **The original request** | oil the AGENCY PHYSICALLY HOLDS after scrapping | 228 |
+
+Different quantities in different ledgers. `oilBalance.ts` is unambiguously the first, and says so in its own
+header, quoting the DISCOM's workbook: *"Total oil in = Opening + Oil required to top up + Filtration loss"*.
+There is no 228 for the division to owe: those litres were never the agency's expense.
+
+**What it would have cost, measured across all 11 scrap jobs before it was abandoned:**
+
+| rule | total | vs today |
+|---|---|---|
+| today | 609.00 L | - |
+| `available x 0.95` | 1121.00 L | **+512.00 (1.8x)** |
+| `capacity x 0.95` | 1643.50 L | **+1034.50 (2.7x)** |
+
+**On a reconciled account, in the agency's favour, against a division that settles from its own workbook.**
+
+### ⚠ THE SHAPE: A DOCUMENTED TRAP, READ, AND WALKED INTO ANYWAY
+
+`oilBalance.ts`'s header does not merely state what the figure measures. **It warns about this exact mistake:**
+
+> *"'Opening balance of oil with agencies' and 'Balance oil with agency' both read as oil physically sitting in
+> the agency's shed, which would make positive a liability. The arithmetic rules that out... The names are loose;
+> the formula is not."*
+
+**That file was read in full while scoping the change. The warning was present, accurate, specific to this
+confusion - and it did not fire.**
+
+The reason it did not is the thing to record: **the premise arrived from the owner, and the premise was not the
+thing being checked.** Every check run was downstream of it - which jobs are scrap, what capacity they hold,
+whether a GP job can be scrapped, what each would credit under the new rule. All of it careful, all of it
+measured, all of it answering questions that only exist if "credit = 95% of capacity" is true. **Nobody tested
+that sentence**, and a warning written against precisely it was read past because it was not addressed to the
+question in hand.
+
+**Verification aimed downstream of an unexamined premise is not verification. It is elaboration.**
+
+### ⚠ IT STARTED WITH THE OWNER, AND WAS CONFIRMED RATHER THAN CHECKED
+
+The owner asked for credit at 95% of capacity - the wrong ledger - and a follow-up message reinforced it with
+worked figures. **The error originated there.** But it was handed to a reader whose job was to check it against
+the code, and that reader instead produced a report headlined *"a scrapped transformer arriving full credits 5% of
+its oil rather than 95%"*, calling 12-versus-228 a **432-litre understatement across MSBT-9 and MSBT-22**.
+
+**A correct app was reported as broken, with a precise figure, which is the most persuasive form a wrong finding
+can take.** It was caught only because the owner re-derived the arithmetic himself and asked whether the app might
+already be right.
+
+### The one thing that IS open: `lessOil` on a scrapped unit
+
+**Not what was asked about, and pointing the other way.**
+
+MSBT-21 credits 120 litres as *"oil required to top up"* - for a transformer **never topped up, because it was
+scrapped**. Four jobs sit in that position:
+
+| job | agency | credited as top-up |
+|---|---|---|
+| SBT-31 (**GP**) | MEGHA | 200 |
+| MSBT-21 | MEGHA | 120 |
+| MSBT-23 | MEGHA | 120 |
+| MSBT-5 | AARATI | 100 |
+| | | **540 L** |
+
+If a scrapped unit is never filled, that term may credit oil the agency never supplied - **an OVER-credit, the
+opposite direction from the change requested.** Unresolved: **no tender clause settles it**, and O46 records that
+A/T 1819 does not resolve the scrap case at all.
+
+**⚠ AND O47 COMES FIRST.** Its fix defines the GP / fresh-oil predicate in ONE place rather than three. SBT-31 is
+GP and scrapped, so any scrap rule needs that predicate - and building one now would write the **fourth** copy of
+the rule O47 exists to unify.
+
+**Nothing built. Nothing corrected. The app was already right.**
