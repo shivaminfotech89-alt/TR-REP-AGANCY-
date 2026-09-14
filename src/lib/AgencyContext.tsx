@@ -1184,6 +1184,26 @@ interface AgencyContextType {
     sections: Record<string, EstimateItem[] | undefined>,
     targetAtIds: string[],
   ) => Promise<void>;
+
+  /**
+   * THE ACTIVE AGENCY'S WORK, READ ONCE (AUDIT O71 fix 3, G84).
+   *
+   * Fifteen screens each queried these for themselves, so opening four screens read the same
+   * jobs four times. That is the pattern O71 measured as exhaustible by twelve customers.
+   *
+   * ⚠ WHAT MUST NOT READ THESE. A cached, agency-scoped, load-once list answers "what is this
+   * agency's work" - it CANNOT answer an account-wide or a moment-of-decision question. The
+   * duplicate MR and job-number checks, the MR rename collision check, the allotment floor and
+   * the job-number counter stay direct queries and say so at their own call sites.
+   */
+  agencyJobs: any[];
+  /** ⚠ OWNER-SCOPED, not agency-scoped - see the loader for why, and for when that changes. */
+  agencyInspections: any[];
+  agencyOil: any[];
+  /** G70's three states for this load, so a failure is never rendered as "no work". */
+  agencyDataLoad: AgenciesLoad;
+  /** Re-read after a write. The writing screens call this instead of querying again. */
+  refreshAgencyData: () => void;
 }
 
 const AgencyContext = createContext<AgencyContextType | undefined>(undefined);
@@ -1229,6 +1249,15 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    */
   const [agencyPointerNotice, setAgencyPointerNotice] = useState<string | null>(null);
   const dismissAgencyPointerNotice = () => setAgencyPointerNotice(null);
+
+  // The active agency's work, held once for every screen. See the loader below.
+  const [agencyJobs, setAgencyJobs] = useState<any[]>([]);
+  const [agencyInspections, setAgencyInspections] = useState<any[]>([]);
+  const [agencyOil, setAgencyOil] = useState<any[]>([]);
+  const [agencyDataLoad, setAgencyDataLoad] = useState<AgenciesLoad>({ status: 'loading', error: null });
+  const [agencyDataAttempt, setAgencyDataAttempt] = useState(0);
+  /** Re-read the agency's work. Called by a screen that has just written some of it. */
+  const refreshAgencyData = () => setAgencyDataAttempt(n => n + 1);
 
   /**
    * ⚠ IT REFUSES AN ID THAT IS NOT IN `agencies`, RATHER THAN POINTING AT NOTHING.
@@ -1549,6 +1578,90 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     }
     // loadAttempt: retryLoad() re-runs this load after a failure.
   }, [auth.currentUser, loadAttempt]);
+
+  /**
+   * THE ACTIVE AGENCY'S JOBS, INSPECTIONS AND OIL - ONE READ, NOT FIFTEEN (AUDIT O71 fix 3, G84).
+   *
+   * Every screen used to query these for itself on mount. Opening the Dashboard, then the ledger,
+   * then billing read the same jobs three times, and O71 recorded that pattern as one twelve
+   * customers can exhaust in a day. This reads them once per agency and the screens read from here.
+   *
+   * ⚠ THIS LIST CANNOT ANSWER EVERY QUESTION, AND THE ONES IT CANNOT ARE NAMED AT THEIR OWN CALL
+   * SITES. It is agency-scoped and it is a snapshot, so it must never be used for:
+   *   - the duplicate MR check or the duplicate job-number check (NewJob) - both are ACCOUNT-WIDE
+   *     by design, because a job number clashing in another agency is still a clash;
+   *   - the MR rename collision check (MrLedger) - same reason, and its own comment already says
+   *     it must ask the database rather than the screen's list;
+   *   - the allotment floor (NewJob, AtAllotments) - a quota refusal must be true at the instant
+   *     it refuses, not at the instant the screen mounted;
+   *   - the job-number counter advance (NewJob) - transactional, and reads inside the transaction.
+   * Each of those stays a direct query. A cached answer there is not slower or staler; it is WRONG,
+   * and wrong in the direction of allowing a duplicate rather than refusing one.
+   *
+   * ⚠ INSPECTIONS ARE OWNER-SCOPED, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT (AUDIT G84).
+   * 59 of 144 inspections in live data carry NO agencyId - they predate the field. Scoping this
+   * query by agency would return 85 and silently drop the other 59 from every screen that reads
+   * it, which is work still in the database going quiet because of a change made to save reads.
+   * Owner-scoped matches exactly what all nine of these screens do today, so nothing moves. Once
+   * `scripts/admin/backfill-inspection-agency.js` has run, this gains the agencyId clause and the
+   * comment goes with it.
+   *
+   * ⚠ A FAILED LOAD CLEARS THE LISTS AND SAYS SO (AUDIT G70). Keeping the previous agency's work
+   * on screen under a new agency's name is worse than showing nothing: the screens read
+   * `agencyDataLoad` and say "could not load" rather than "no work", which is the whole G70 rule.
+   */
+  useEffect(() => {
+    let cancelled = false;
+    async function loadAgencyWork() {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !activeAgencyId) {
+        setAgencyJobs([]);
+        setAgencyInspections([]);
+        setAgencyOil([]);
+        // Nothing to read is a completed load, not a failed one.
+        setAgencyDataLoad({ status: 'loaded', error: null });
+        return;
+      }
+      setAgencyDataLoad({ status: 'loading', error: null });
+      // Cleared BEFORE the read, so a failure cannot leave the previous agency's rows on screen.
+      setAgencyJobs([]);
+      setAgencyInspections([]);
+      setAgencyOil([]);
+      try {
+        const [jobSnap, inspSnap, oilSnap] = await Promise.all([
+          getDocs(query(
+            collection(db, 'jobs'),
+            where('ownerId', '==', uid),
+            where('agencyId', '==', activeAgencyId),
+          )),
+          // Owner-scoped until the backfill - see the warning above.
+          getDocs(query(
+            collection(db, 'inspections'),
+            where('ownerId', '==', uid),
+          )),
+          getDocs(query(
+            collection(db, 'oilTransactions'),
+            where('ownerId', '==', uid),
+            where('agencyId', '==', activeAgencyId),
+          )),
+        ]);
+        // The agency may have been switched while this was in flight; a late answer for the
+        // previous one must not land on the new one's screen.
+        if (cancelled) return;
+        setAgencyJobs(jobSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setAgencyInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setAgencyOil(oilSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+        setAgencyDataLoad({ status: 'loaded', error: null });
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Error loading the agency's work:", err);
+        setAgencyDataLoad({ status: 'failed', error: describeLoadFailure(err) });
+      }
+    }
+    loadAgencyWork();
+    return () => { cancelled = true; };
+    // agencyDataAttempt: refreshAgencyData() re-reads after a screen writes.
+  }, [auth.currentUser, activeAgencyId, agencyDataAttempt]);
 
   /**
    * ⚠ THE STORED POINTER IS VALIDATED ONCE THE LIST IS KNOWN, AND SAYS SO IF IT IS STALE.
@@ -2631,7 +2744,8 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       predictNextJobNo, getJobNoPrefix, syncCountersState,
       publishedAts, publishAtTemplate, adoptPublishedAt, applyRatesToOwnAts, forgetAtMaster,
       atSupersededNotice, dismissAtSupersededNotice,
-      agencyPointerNotice, dismissAgencyPointerNotice, registerCreatedAgencies
+      agencyPointerNotice, dismissAgencyPointerNotice, registerCreatedAgencies,
+      agencyJobs, agencyInspections, agencyOil, agencyDataLoad, refreshAgencyData
     }}>
       {children}
     </AgencyContext.Provider>

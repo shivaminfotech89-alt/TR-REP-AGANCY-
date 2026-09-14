@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
 import { DEFAULT_GUARANTEE_MONTHS } from '../lib/guaranteePeriod';
@@ -7,8 +7,9 @@ import { computeOilBalance, describeOil } from '../lib/oilBalance';
 import { CARD, CARD_PAD, CARD_TITLE, LABEL, NUM, NUM_INLINE, METRIC, CARD_LINK, TONE, cardTone, chip } from '../lib/ui';
 import { AllotmentWidget } from './AllotmentWidget';
 import { AgencyMarkTile } from './AgencyMarkTile';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+// ⚠ NO FIRESTORE IMPORTS HERE ANY MORE (AUDIT G84). This screen reads the agency's work from the
+// data layer, which loads it once per agency. A query added back here re-creates the per-screen
+// fetch pattern O71 measured as one twelve customers can exhaust in a day.
 import { 
   PlusCircle, 
   FileText, Receipt, 
@@ -35,12 +36,19 @@ import {
 } from 'lucide-react';
 
 export default function Dashboard() {
-  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyOil, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [oilTransactions, setOilTransactions] = useState<any[]>([]);
-  /** External inspections — the SHORTAGE side of the oil balance (AUDIT F95). */
-  const [inspections, setInspections] = useState<any[]>([]);
+  /**
+   * ⚠ READ FROM THE DATA LAYER, NOT QUERIED HERE (AUDIT G84).
+   *
+   * These were four pieces of local state filled by this screen's own fetch. The NAMES are kept
+   * deliberately, so the several hundred lines below are untouched: what changed is where the
+   * rows come from, not what they are.
+   */
+
   /**
    * EVERY job of this agency, across all tenders — for guarantee tracking only.
    *
@@ -49,7 +57,23 @@ export default function Dashboard() {
    * previous tender: filtering guarantees to the current tender would report zero the day
    * after a rollover (AUDIT F85).
    */
-  const [allAgencyJobs, setAllAgencyJobs] = useState<any[]>([]);
+  const allAgencyJobs = agencyJobs;
+  const oilTransactions = agencyOil;
+  /** External inspections — the SHORTAGE side of the oil balance (AUDIT F95). */
+  const inspections = agencyInspections;
+  /**
+   * The same rows as `allAgencyJobs`, newest first. The old fetch sorted IN PLACE before storing;
+   * sorting a copy leaves the data layer's list in the order it was read, because other screens
+   * now share that same array and must not have it reordered underneath them.
+   */
+  const jobs = useMemo(
+    () => [...agencyJobs].sort((a: any, b: any) => {
+      const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+      const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+      return dateB - dateA;
+    }),
+    [agencyJobs],
+  );
 
   /**
    * THE DASHBOARD HONOURS THE GLOBAL SCOPE — it no longer has one of its own (AUDIT F87).
@@ -108,86 +132,10 @@ export default function Dashboard() {
     if (!activeAtMaster) return [];
     return oilTransactions.filter((t: any) => String(t.atId ?? '') === activeAtMaster.id);
   }, [oilTransactions, showingAll, activeAtMaster]);
-  const [loading, setLoading] = useState(true);
+  // The data layer's status, so the spinner reflects the one load rather than a local copy of it.
+  const loading = agencyDataLoad.status === 'loading';
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [activeKvaTab, setActiveKvaTab] = useState<'repaired' | 'under_repair' | 'scrap'>('repaired');
-
-  // Fetch real jobs & oil transactions from Firestore
-  const fetchDashboardData = async () => {
-    if (!auth.currentUser || !activeAgency) {
-      setJobs([]);
-      setOilTransactions([]);
-      setInspections([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      // ⚠ THE ACTIVE TENDER (AUDIT F85). Every count on this screen is "how much work is in
-      // each state RIGHT NOW", and right now means the tender being worked. A work list
-      // showing eight jobs awaiting internal inspection, five of them under a closed tender,
-      // is a number the operator cannot act on and should not be chasing.
-      //
-      // GUARANTEES ARE THE ONE EXCEPTION and are fetched agency-wide below - see
-      // guaranteeStats. A GP claim is by definition against a PREVIOUS tender's repair, the
-      // same reason New Job's GP lookup is not filtered either: scoping it to the current
-      // tender would show zero the day after a rollover and hide the entire population that
-      // panel exists to watch.
-      // ONE AGENCY-WIDE READ, scoped in memory. The Dashboard's scope is a LOCAL control
-      // that can be "all tenders", so re-querying on every change would cost a round trip
-      // to answer a question the data already in hand can answer. It also removes the one
-      // way a tender-scoped query and an agency-wide one can disagree: there is only one.
-      //
-      // ⚠ INSPECTIONS ARE READ TOO, and the oil card is the only reason (AUDIT F95). The oil
-      // balance is `shortage − received`, and the SHORTAGE side lives in external inspections,
-      // not in oilTransactions. Reading only transactions is what made this card a receipts
-      // summary wearing the account's name.
-      //
-      // Not agency-filtered, because `inspections` carries no agencyId - it is keyed to jobs.
-      // `computeOilBalance` matches each job to its own inspection, so the extra rows are
-      // inert; the register reads it exactly the same way.
-      const [allJobsSnap, allOilSnap, inspSnap] = await Promise.all([
-        getDocs(query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id)
-        )),
-        getDocs(query(
-          collection(db, 'oilTransactions'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id)
-        )),
-        getDocs(query(
-          collection(db, 'inspections'),
-          where('ownerId', '==', auth.currentUser.uid)
-        ))
-      ]);
-
-      const fetchedAllJobs = allJobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const fetchedJobs = fetchedAllJobs;
-      const fetchedOil = allOilSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      setAllAgencyJobs(fetchedAllJobs);
-
-      // Sort newest jobs first
-      fetchedJobs.sort((a: any, b: any) => {
-        const dateA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
-        const dateB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
-        return dateB - dateA;
-      });
-
-      setJobs(fetchedJobs);
-      setOilTransactions(fetchedOil);
-      setInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'jobs');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, [activeAgency?.id]);
 
   // Extract all available divisions from prefixes and real jobs
   const availableDivisions = useMemo(() => {
@@ -583,7 +531,7 @@ export default function Dashboard() {
             </Link>
             <button 
               type="button"
-              onClick={fetchDashboardData}
+              onClick={refreshAgencyData}
               className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg border border-slate-700 transition-all flex items-center justify-center"
               title="Refresh Data"
             >
@@ -591,6 +539,28 @@ export default function Dashboard() {
             </button>
           </div>
         </div>
+
+        {/* ⚠ A FAILED READ SAYS SO, RATHER THAN RENDERING AN EMPTY WORKSHOP (AUDIT G70, G84).
+            This screen used to alert through handleFirestoreError and then show zeros. Zeros on a
+            dashboard read as "no work" - the O71 shape, in the place an operator looks first. Every
+            count below is derived from lists that are empty after a failed load, so the failure has
+            to be stated here or the screen lies quietly. */}
+        {agencyDataLoad.status === 'failed' && (
+          <div className="mt-3 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2">
+            <p className="text-[11px] font-bold text-rose-200">
+              This agency&rsquo;s work could not be loaded, so every count below reads zero.
+              Nothing has been deleted.
+            </p>
+            <p className="text-[11px] text-rose-300/90 mt-0.5">{agencyDataLoad.error}</p>
+            <button
+              type="button"
+              onClick={refreshAgencyData}
+              className="mt-1.5 text-[11px] font-bold text-rose-100 underline hover:text-white"
+            >
+              Try again
+            </button>
+          </div>
+        )}
 
         {/* COMPACT SCROLLABLE DIVISION FILTER */}
         <div className="mt-3 pt-2.5 border-t border-slate-800/80 flex items-center gap-2 overflow-hidden">
