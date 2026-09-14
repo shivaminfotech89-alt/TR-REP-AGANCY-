@@ -60,3 +60,36 @@ export function issuedMarks(job) {
 export function hasIssuedDocument(job) {
   return issuedMarks(job).length > 0;
 }
+
+/**
+ * THE PRICE-BEARING SUBSET — documents whose FIGURES move if the tender's percentage moves.
+ *
+ * ⚠ NARROWER THAN `hasIssuedDocument`, DELIBERATELY, AND FOR THE OPPOSITE REASON.
+ *
+ * That test is broad because it guards a DELETE: a false positive costs one manual decision, a
+ * false negative destroys the provenance of an invoice. This one is used to COUNT, and a count
+ * is a claim. Telling an operator "3 documents would reprint differently" when one would is
+ * worse than saying nothing, because a specific number invites belief. A challan number, a
+ * dispatch date and an issued-by stamp carry no prices, so they are not here.
+ *
+ * WHY ESTIMATES AND BILLS SPECIFICALLY: the printed estimate sheet and the printed tax invoice
+ * do not read stored figures — they RECOMPUTE at render (AUDIT F72). The ledger values
+ * (`estimateAmount`, `billAmount`) are frozen and never move; the DOCUMENTS do.
+ *
+ * ⚠ EVERY NAME HERE MUST ALSO APPEAR IN `ISSUED_FIELDS`, and a test asserts it. This is a subset
+ * of that vocabulary, not a second one.
+ */
+export const PRICED_DOCUMENT_FIELDS = [
+  'estimateNo',
+  'estimateSentDate',
+  'estimateAmount',
+  'billNo',
+  'billSentDate',
+  'billAmount',
+  'billStatus',
+];
+
+/** True when this job has an estimate or a bill that would REPRINT at a different figure. */
+export function hasPricedDocument(job) {
+  return PRICED_DOCUMENT_FIELDS.some(field => isPresent(job?.[field]));
+}

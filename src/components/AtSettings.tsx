@@ -11,8 +11,22 @@ import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
 import { computeOilBalance, openingMapFrom, describeOil } from '../lib/oilBalance';
 import { otherActiveAts, isUnassigned } from '../lib/AgencyContext';
 import { orderReferenceFor } from '../lib/orderReference';
+import { hasPricedDocument } from '../lib/issuedDocuments.js';
 // ⚠ NO FIRESTORE IMPORTS HERE ANY MORE (AUDIT G85). Both reads this screen made are answered from
 // the shared agency load. The per-AT probe was ONE QUERY PER TENDER on every visit to this screen.
+
+/**
+ * ⚠ IS THE PERCENTAGE ANSWERED? ONE PREDICATE, BOTH FORMS (AUDIT G87).
+ *
+ * A TYPED ZERO IS A REAL ANSWER - bidding at par is legitimate. Blank is not, and the two were
+ * indistinguishable after `Number()`: `Number('')` IS `0`, so a cleared box wrote "at tender
+ * rate" and nothing said so. The create form has refused this since F43; the edit form did not,
+ * and its `|| 0` was only the second half of the same hole.
+ */
+function percentageUnanswered(value: string): boolean {
+  const t = String(value ?? '').trim();
+  return t === '' || t === '-' || t === '.' || t === '-.' || isNaN(Number(t));
+}
 
 // Live hint for an AT percentage field while it's still a string mid-edit (e.g. "-",
 // "-.", "." are valid intermediate states that aren't a usable number yet).
@@ -97,6 +111,18 @@ export function AtSettings() {
   const [deletingAtId, setDeletingAtId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<{ title: string; message: string; advice: string; items: string[] } | null>(null);
   const [confirmDeleteAt, setConfirmDeleteAt] = useState<AtMaster | null>(null);
+  /**
+   * THE PERCENTAGE CONFIRMATION (AUDIT G87). Null when nothing is awaiting an answer.
+   *
+   * ⚠ IT IS RAISED AFTER VALIDATION, NEVER IN PLACE OF IT. Both forms carry `required` and the
+   * create path refuses a blank outright; a dialog that intercepted the submit BEFORE that would
+   * take native validation out of the path and turn a latent defect into a live one.
+   */
+  const [pctConfirm, setPctConfirm] = useState<
+    | { mode: 'create' }
+    | { mode: 'edit'; at: AtMaster; from: number; to: number }
+    | null
+  >(null);
 
   /**
    * THE CLOSING OIL BALANCE OF EACH TENDER, for the carry-forward offer (AUDIT F82).
@@ -610,10 +636,7 @@ export function AtSettings() {
     const pcts: Array<[string, string]> = [
       ['CRGO', newAt.atPercentage],
     ];
-    const unanswered = pcts.filter(([, v]) => {
-      const t = String(v ?? '').trim();
-      return t === '' || t === '-' || t === '.' || t === '-.' || isNaN(Number(t));
-    });
+    const unanswered = pcts.filter(([, v]) => percentageUnanswered(v));
     if (unanswered.length > 0) {
       alert(
         `Enter the estimate percentage for ${unanswered.map(([k]) => k).join(', ')}.
@@ -630,6 +653,16 @@ export function AtSettings() {
       return;
     }
 
+    // ⚠ VALIDATED ABOVE, CONFIRMED HERE, WRITTEN IN `performAdd` (AUDIT G87). The percentage
+    // multiplies every line of every estimate and every bill under this tender for its whole
+    // life, and it is typed once. The dialog states what it will do in rupees before it is saved.
+    setPctConfirm({ mode: 'create' });
+  };
+
+  /** The creation itself, once the operator has confirmed the percentage. */
+  const performAdd = async () => {
+    setPctConfirm(null);
+    if (!activeAgency?.id) return;
     setIsSubmitting(true);
     try {
       const created = await addAtMaster({
@@ -730,6 +763,42 @@ export function AtSettings() {
   const handleSaveEdit = async (atId: string, e: React.FormEvent) => {
     e.preventDefault();
     if (!editFormData) return;
+
+    /**
+     * ⚠ THE SAME REFUSAL THE CREATE FORM HAS HAD SINCE F43, WHICH THIS PATH NEVER GOT (G87).
+     *
+     * `atPercentage: Number(x) || 0` wrote a bid at par for a blank or unparseable box - and
+     * REMOVING `|| 0` alone does not fix it, because `Number('')` is `0` too. The guard is
+     * refusing the value before `Number()` ever sees it.
+     */
+    if (percentageUnanswered(editFormData.atPercentage)) {
+      alert(
+        'Enter the accepted percentage for this tender.\n\n'
+        + 'It is the percentage your agency quoted ABOVE (+) or BELOW (-) the UGVCL schedule, '
+        + 'and it multiplies every line of every estimate and every bill under this tender.\n\n'
+        + 'If the bid was at the schedule rate exactly, type 0.',
+      );
+      return;
+    }
+
+    /**
+     * ⚠ ONLY WHEN IT CHANGED. Confirming a figure nobody touched is noise, and noise is how a
+     * dialog that matters gets clicked through without being read.
+     */
+    const at = atMasters.find(a => a.id === atId);
+    const from = Number(at?.atPercentage);
+    const to = Number(editFormData.atPercentage);
+    if (at && Number.isFinite(from) && Number.isFinite(to) && from !== to) {
+      setPctConfirm({ mode: 'edit', at, from, to });
+      return;
+    }
+    await performSaveEdit(atId);
+  };
+
+  /** The edit itself, once the percentage is unchanged or the operator has confirmed it. */
+  const performSaveEdit = async (atId: string) => {
+    setPctConfirm(null);
+    if (!editFormData) return;
     setIsSubmitting(true);
     try {
       await updateAtMaster(atId, {
@@ -737,7 +806,9 @@ export function AtSettings() {
         name: editFormData.name,
         startDate: editFormData.startDate ? new Date(editFormData.startDate).getTime() : Date.now(),
         endDate: editFormData.endDate ? new Date(editFormData.endDate).getTime() : Date.now(),
-        atPercentage: Number(editFormData.atPercentage) || 0,
+        // Refused above when unanswered, so `Number` cannot be NaN here and `|| 0` is gone with
+        // it - that fallback is what turned a blank into a bid at par (AUDIT F43, G87).
+        atPercentage: Number(editFormData.atPercentage),
         // Written as typed, blank included - clearing the field must clear the order (AUDIT G63).
         orderNo: editFormData.orderNo.trim(),
         orderDate: editFormData.orderDate,
@@ -831,6 +902,101 @@ export function AtSettings() {
 
       {/* THE CARRY-FORWARD CONFIRMATION — the figure, and the tender it closes. */}
       {/* CONFIRM — names what is about to go, and what it is not. */}
+      {/* ⚠ CONFIRM THE PERCENTAGE BEFORE IT IS WRITTEN (AUDIT G87).
+          Typed once, and it multiplies every figure under the tender for its whole life. The
+          sign is the case worth being unmistakable about: "-8" is 8% BELOW, and someone typing
+          it meaning a discount would read a bare "-8%" as correct either way. So the dialog
+          spells the direction in words and shows what it does to a round number in rupees. */}
+      {pctConfirm && (() => {
+        const isEdit = pctConfirm.mode === 'edit';
+        const typed = isEdit ? String(pctConfirm.to) : newAt.atPercentage;
+        const n = Number(typed);
+        const atLabel = isEdit
+          ? (pctConfirm.at.atNumber || pctConfirm.at.name || pctConfirm.at.id)
+          : (newAt.atNumber || '(no number)');
+        const billed = Math.round(10000 * (1 + n / 100));
+        // Free: the shared load already holds this agency's jobs (AUDIT G86). Before that it
+        // would have been a query per AT, which is what made the old per-tender probe costly.
+        const jobsOnAt = isEdit ? agencyJobs.filter((j: any) => j.atId === pctConfirm.at.id) : [];
+        const pricedCount = jobsOnAt.filter(hasPricedDocument).length;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+            <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-5 max-w-md w-full border border-indigo-200">
+              <div className="flex items-center gap-3 mb-3 text-indigo-700">
+                <div className="bg-indigo-100 p-2 rounded-lg shrink-0"><Check className="w-6 h-6" /></div>
+                <h3 className="text-base font-bold text-slate-900">
+                  {isEdit ? 'Change the accepted percentage?' : 'Confirm this tender before it is created'}
+                </h3>
+              </div>
+
+              <p className="text-sm text-slate-700">
+                <span className="font-bold">AT {atLabel}</span>
+              </p>
+
+              {/* atPercentageHint is the one place this vocabulary lives - reused, not restated. */}
+              <p className="mt-2 text-sm font-bold text-slate-900">
+                {atPercentageHint(typed) || 'at tender rate'}
+              </p>
+
+              {n === 0 ? (
+                <p className="mt-1 text-sm text-slate-700">
+                  <strong>0% is a bid at par.</strong> Every estimate bills at exactly the schedule
+                  figure, with nothing added and nothing deducted.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-slate-700">
+                  An estimate of <strong>Rs 10,000</strong> is billed at{' '}
+                  <strong className="tabular-nums">Rs {billed.toLocaleString('en-IN')}</strong>
+                  {n > 0 ? ' — above the schedule.' : ' — below the schedule.'}
+                </p>
+              )}
+
+              {isEdit && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm text-slate-700">
+                    Changing it from <strong>{pctConfirm.from}%</strong> to <strong>{pctConfirm.to}%</strong>
+                    {jobsOnAt.length > 0
+                      ? <> reprices <strong>{jobsOnAt.length} job{jobsOnAt.length === 1 ? '' : 's'}</strong> already booked under this tender.</>
+                      : <>. No jobs are booked under this tender yet.</>}
+                  </p>
+                  {/* ⚠ TWO FACTS, STATED SEPARATELY, BECAUSE THEY DIFFER (AUDIT F72). The ledger
+                      is frozen; the DOCUMENTS recompute at render. */}
+                  <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                    Amounts already recorded on sent estimates and bills <strong>do not change</strong>.
+                  </p>
+                  {pricedCount > 0 ? (
+                    <p className="text-[11px] text-amber-900 bg-amber-50 border border-amber-300 rounded-lg px-3 py-2">
+                      <strong>
+                        {pricedCount} of them {pricedCount === 1 ? 'has an estimate or bill already issued' : 'have an estimate or bill already issued'}.
+                      </strong>{' '}
+                      A reprint recomputes at the new percentage, so it will no longer match the
+                      copy in the division&rsquo;s file.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+                      No estimate or bill has been issued under this tender, so no document in a
+                      division&rsquo;s file is affected.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 mt-4">
+                <button type="button" onClick={() => setPctConfirm(null)}
+                        className="px-4 py-2 text-xs font-bold uppercase text-slate-600 hover:bg-slate-100 rounded-lg">
+                  Go back
+                </button>
+                <button type="button"
+                        onClick={() => { if (isEdit) { void performSaveEdit(pctConfirm.at.id); } else { void performAdd(); } }}
+                        className="px-4 py-2 text-xs font-bold uppercase text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg">
+                  {isEdit ? 'Change it' : 'Create the tender'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {confirmDeleteAt && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
           <div className="bg-white rounded-lg shadow-2xl p-4 sm:p-5 max-w-md w-full border border-rose-200">
@@ -1186,7 +1352,11 @@ export function AtSettings() {
                           </div>
 
                           <div className="border-t border-slate-100 pt-2 mt-2">
-                            <label className="block text-[10px] uppercase font-bold text-slate-600 mb-1.5">Estimate % Above (+) or Below (-) per Core Type</label>
+                            {/* ⚠ "per Core Type" is gone from this label because it was FALSE, not
+                                merely dated: there is ONE percentage per tender and there has been
+                                since the three fields collapsed - A/T 1819 clause 2.0 quotes one
+                                figure covering every core type. See getAtPercentage. */}
+                            <label className="block text-[10px] uppercase font-bold text-slate-600 mb-1.5">Accepted percentage &mdash; above (+) or below (-) the tender schedule</label>
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div className="bg-slate-50 p-2 rounded-lg border border-slate-200">
                                 <label className="block text-[9px] uppercase font-bold text-slate-700 mb-1">
