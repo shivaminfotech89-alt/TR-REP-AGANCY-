@@ -17465,3 +17465,70 @@ the order is what it is.
   the source and by type, not observed in a browser.
 
 **Deploy:** hosting - a push to `main` (O71), **and a rules deploy for the `discom` clause.**
+
+---
+
+## O75. Two tenders that read alike on screen, and one that was created by the prefill
+
+**Open, 2026-09-15. Surfaced while designing a display-only AT-number shortener; NOT caused by it.**
+**The shortener is not built** - it waits behind the browser pass.
+
+### What was found
+
+**UPENDRA stores `UGVCL/2026-28/01/AT/1819` - already the SHORT form.** ZENITH stores the full reference,
+`UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819`. Once a shortener displays the second as the first, **the two tenders
+are indistinguishable on screen while printing differently** - and a difference that exists only on paper is the
+shape this audit keeps recording.
+
+**⚠ AND IT IS NOT THE ONLY COLLISION. `2026-27` IS SHARED TODAY, BEFORE ANY SHORTENER EXISTS:**
+
+| displayed | agency | stored |
+|---|---|---|
+| `UGVCL/2026-28/01/AT/1819` | UPENDRA | `UGVCL/2026-28/01/AT/1819` |
+| | ZENITH | `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819` |
+| `2026-27` | AARATI | `2026-27` |
+| | suchit | `2026-27` |
+
+So the ambiguity is **already live** in the second case. The shortener would add one more, not introduce the class.
+
+### ⚠ THE RECORD WAS CREATED BY THE PREFILL, NOT TYPED FROM A LETTER
+
+UPENDRA's AT `Hw0QkzKmT3n6tmFwkl3H` carries `ratesSource: published:Xe7saY1z…` (the 1819 template),
+`atPercentage: 7` (the template's figure), and **one job is already booked under it**. So it was created through
+G83's template prefill - which writes the template's `atNumber` onto the new AT.
+
+**That matters for what the remedy is.** This is not an agency transcribing its own A/T letter differently; it is
+the app writing a value. Whether it should read the full reference is a question about **what the prefill should
+supply**, and only UPENDRA's A/T letter settles whether the short form is what their letter actually says.
+
+**⚠ NOT CORRECTED. A job is booked under it, and `atNumber` reaches the bill's Appr. No. prefill (O62), so this
+is a value that can reach a tax invoice.** Changing it is a decision about a document, not a tidy-up.
+
+### The count moved, and entries written today say otherwise
+
+**There are 16 atMasters, not 15.** Every census run earlier on 2026-09-14 reported 15, and entries G83, G85,
+G87 and G88-G90 say "15 ATs" or "15 existing ATs" in figures quoted as evidence. **Those figures were true when
+written and are now one short.** Recorded here rather than edited in place: a number that was correct at the time
+is history, and silently revising it would hide that the population changed under a set of conclusions.
+
+**Nothing in those entries' reasoning depends on the count** - they turn on which values exist, not how many - but
+anyone re-running a census will see 16 and should know why.
+
+### ⚠ AND ITS `createdAt` IS NOT A DATE
+
+That AT's `createdAt` reads **1972-01-10T20:56:47Z**. A millisecond value interpreted as a timestamp when it is
+something else - it is the only AT in the database carrying `createdAt` at all; the other fifteen have none. Left
+alone here, but it means **"the most recent AT" cannot be answered from this field**, and any future sort by
+creation date would put a 2026 tender in 1972.
+
+### What would settle it
+
+1. **Ask UPENDRA what their A/T letter says.** If it is the full reference, the stored value is wrong and the
+   prefill wrote it.
+2. **Then decide what the prefill should supply** - the template's full `atNumber`, which is what G83 writes now,
+   or something else. If UPENDRA's letter genuinely reads short, then two agencies on one tender legitimately
+   record it differently and the collision is real rather than an error.
+3. **A shortener does not need this resolved first.** It is display-only and reversible; the collision it surfaces
+   exists either way.
+
+**Not built, not corrected. Recorded so it is not rediscovered as a bug.**
