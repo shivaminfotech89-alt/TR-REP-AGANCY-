@@ -1,5 +1,5 @@
 
-import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, atClause } from '../lib/AgencyContext';
+import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, matchesAtScope } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
@@ -54,7 +54,10 @@ const ROWS_FIRST_PAGE = 14;
 const ROWS_PER_PAGE = 22;
 
 export default function EstimateGenerate() {
-  const { activeAgency, activeAtMaster, atMasters, updateAgency, updateAtMaster, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, atMasters, updateAgency, updateAtMaster, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -65,9 +68,36 @@ export default function EstimateGenerate() {
    * not cost the same.
    */
   const __trial = useTrialGate(activeAgency?.id);
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  /**
+   * FROM THE SHARED LOAD (AUDIT G86). Two queries on mount, and SIX write paths that each patched
+   * `jobs` by hand rather than re-reading - see them below for what that cost.
+   *
+   * ⚠ `matchesAtScope`, NOT A FILTER WRITTEN HERE (AUDIT F99). The in-memory form of the tender
+   * rule is declared beside `atClause` so the two cannot drift, and it handles all three states:
+   * every tender, one tender, and NONE selected, which shows nothing rather than everything.
+   */
+  const jobs = useMemo(
+    () => (agencyDataLoad.status === 'loaded'
+      ? agencyJobs.filter((j: any) => matchesAtScope(j, activeAtMaster, viewingAllTenders))
+      : []),
+    [agencyJobs, agencyDataLoad.status, activeAtMaster, viewingAllTenders],
+  );
+  /**
+   * ⚠ NARROWED TO THIS TENDER'S JOBS, EXACTLY AS THE OLD FETCH DID.
+   *
+   * The previous comment here said inspection records carry no agencyId and that filtering on it
+   * "matched nothing", which silently priced every estimate off capacity defaults. That was TRUE
+   * WHEN WRITTEN and is false now: the G85 backfill stamped all 144 records and both save paths
+   * write one, so the shared load is already agency-scoped. The narrowing below is kept anyway
+   * because it is by JOB, which is narrower still - widening it would be a semantic change made
+   * during a restructure, and extra rows being inert is not a reason to admit them.
+   */
+  const inspections = useMemo(() => {
+    const scopedJobIds = new Set(jobs.map((j: any) => j.id));
+    return agencyInspections.filter((i: any) => i.jobId && scopedJobIds.has(i.jobId));
+  }, [agencyInspections, jobs]);
+  // The shared load's status. Every write path here uses its own flag, so nothing sets it.
+  const loading = agencyDataLoad.status === 'loading';
   
   // Tab state: 'generator' | 'sent' | 'approvals'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'approvals'>('generator');
@@ -185,53 +215,6 @@ export default function EstimateGenerate() {
     setRefBodyText(`With reference to the abvoe subject , we are submitting you inspection reports and estimates of following transformers received from ${currentSelectedDivision}`);
     setClosingText('We Request you to send the approval of above transformers earliest as possible.');
   }, [selectedMrNo, currentSelectedDivision, activeAgency]);
-
-  useEffect(() => {
-    async function fetchData() {
-      if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
-      try {
-        const jobsQ = query(
-          // ⚠ THE ACTIVE TENDER (AUDIT F82). A new AT starts fresh - no MRs, no jobs, no
-          // estimates, bills, challans or testing carry over - so every screen shows the work
-          // of the AT selected in the top bar, exactly as it already shows only the active
-          // agency's. Unassigned work (no atId) matches no tender and is reached through the
-          // unassigned view instead: it is not lost, and it is not pretended to belong here.
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid), 
-          where('agencyId', '==', activeAgency.id),
-          ...atClause(activeAtMaster, viewingAllTenders),
-        );
-        // Inspection records carry no agencyId (neither save path has ever written
-        // one), so filtering on it here matched nothing and this screen silently
-        // priced every estimate off capacity-based defaults instead of the real
-        // inspection. Scope by owner in the query, then by agency in memory via the
-        // job the record belongs to - the same way InternalInspection does it.
-        const inspQ = query(
-          collection(db, 'inspections'),
-          where('ownerId', '==', auth.currentUser.uid)
-        );
-
-        const [jobsSnapshot, inspSnapshot] = await Promise.all([
-          getDocs(jobsQ),
-          getDocs(inspQ)
-        ]);
-
-        const fetchedJobs = jobsSnapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        const agencyJobIds = new Set(fetchedJobs.map(j => j.id));
-        const fetchedInspections = inspSnapshot.docs
-          .map(d => ({ id: d.id, ...d.data() } as any))
-          .filter(i => i.jobId && agencyJobIds.has(i.jobId));
-
-        setJobs(fetchedJobs);
-        setInspections(fetchedInspections);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'jobs');
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, [activeAgency]);
 
   // Inspection lookup maps
   const externalInspMap = useMemo(() => {
@@ -569,25 +552,10 @@ export default function EstimateGenerate() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (j.mrNo === selectedMrNo) {
-          const baseTot = calculateJobTotal(j);
-          const atPct = getAtPercentage(atForJob(j, atMasters) ?? activeAtMaster);
-          const grandTot = Math.round(baseTot * (1 + atPct / 100));
-          return {
-            ...j,
-            estimateSentDate: todayIso,
-            estimateRefNo: refNoText || `UGVCL/EST/${selectedMrNo}`,
-            estimateAmount: grandTot,
-            // Mirrors the batch above, so the in-memory job matches what was written.
-            issuedByAgencyId: activeAgency?.id || '',
-            issuedByAgencyName: activeAgency?.name || '',
-            issuedByAgencyGstin: activeAgency?.gstin || '',
-          };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF MIRRORING THE BATCH BY HAND (AUDIT G86). This recomputed the total a
+      // second time so the in-memory copy would match the write - one figure derived twice, by two
+      // pieces of code that had to be kept in step - and it updated this screen alone.
+      refreshAgencyData();
 
       setSavedSuccessMsg('Estimate Sent Date & Ref No saved to all jobs in this MR!');
       setTimeout(() => setSavedSuccessMsg(''), 4000);
@@ -754,7 +722,14 @@ export default function EstimateGenerate() {
   };
 
   const handleUpdateJobRating = async (jobId: string, newRating: string) => {
-    setJobs(prev => prev.map(j => (j.id === jobId ? { ...j, starRating: newRating, ratingLevel: newRating } : j)));
+    /**
+     * ⚠ THIS USED TO UPDATE THE SCREEN BEFORE THE WRITE, AND NOT PUT IT BACK (AUDIT G86).
+     *
+     * The optimistic patch ran first and the catch below only logs - so a rating that FAILED to
+     * save stayed on screen looking saved, with nothing to tell the operator. Re-reading after the
+     * commit costs a round trip before the new rating appears, and in exchange a failed write
+     * changes nothing at all. That is the better way to be wrong.
+     */
     try {
       const jobRef = doc(db, 'jobs', jobId);
       const batch = writeBatch(db);
@@ -764,6 +739,7 @@ export default function EstimateGenerate() {
         updatedAt: new Date().toISOString()
       });
       await batch.commit();
+      refreshAgencyData();
     } catch (e) {
       console.error('Failed to update job rating in Firestore:', e);
     }
@@ -865,7 +841,7 @@ export default function EstimateGenerate() {
     };
     try {
       await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: rec } as any);
-      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, repairWithinLimitConsent: rec } : j));
+      refreshAgencyData();
     } catch (err) { handleFirestoreError(err, OperationType.WRITE, 'jobs'); }
   };
 
@@ -880,15 +856,15 @@ export default function EstimateGenerate() {
       if (mode === 'REMOVE') {
         // Nothing has left the building. Delete it outright; there is nothing to explain.
         await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: null } as any);
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, repairWithinLimitConsent: null } : j));
       } else {
         // The division holds a sheet stating this figure. Keep the record and mark it.
         const rec = { ...activeConsent(job)!, withdrawnAt: Date.now(),
           withdrawnBy: auth.currentUser?.email || auth.currentUser?.uid || 'unknown',
           withdrawnReason: reason.trim() };
         await updateDoc(doc(db, 'jobs', job.id), { repairWithinLimitConsent: rec } as any);
-        setJobs(prev => prev.map(j => j.id === job.id ? { ...j, repairWithinLimitConsent: rec } : j));
       }
+      // One re-read, whichever branch ran - they are exclusive (AUDIT G86).
+      refreshAgencyData();
     } catch (err) { handleFirestoreError(err, OperationType.WRITE, 'jobs'); }
   };
 
@@ -1007,27 +983,10 @@ export default function EstimateGenerate() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (j.mrNo === sendTargetMr) {
-          const est = getJobFullEstimate(j);
-          const grandTot = Math.round(est.finalAmount);
-          return {
-            ...j,
-            estimateSentDate: sendDate,
-            estimateRefNo: sendRefNo.trim(),
-            estimateAmount: grandTot,
-            estimateStatus: 'Sent',
-            estimateApprovalStatus: j.approvalNo ? 'Approved' : (j.estimateApprovalStatus || 'Pending'),
-            estimateRemarks: sendRemarks || '',
-            // Mirrors the batch above, so the in-memory job matches what was written.
-            issuedByAgencyId: activeAgency?.id || '',
-            issuedByAgencyName: activeAgency?.name || '',
-            issuedByAgencyGstin: activeAgency?.gstin || '',
-          };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF MIRRORING THE BATCH BY HAND (AUDIT G86). Same duplicated total as the
+      // save path above. An estimate marked Sent here was still unsent on the ledger and the
+      // dashboard until a remount.
+      refreshAgencyData();
 
       setShowSendModal(false);
       setSavedSuccessMsg(`Estimate for MR ${sendTargetMr} successfully marked as Sent with Ref: ${sendRefNo}!`);
@@ -1096,20 +1055,9 @@ export default function EstimateGenerate() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (j.mrNo === apprTargetMr) {
-          return {
-            ...j,
-            approvalNo: apprNo.trim(),
-            approvalDate: apprDate,
-            approvedAmount: Number(apprAmounts[j.id]) || 0,
-            estimateApprovalStatus: 'Approved',
-            approvalRemarks: apprRemarks || ''
-          };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF PATCHING A LOCAL COPY (AUDIT G86). An approval recorded here left
+      // every other screen showing the estimate still awaiting one.
+      refreshAgencyData();
 
       setShowApprModal(false);
       setSavedSuccessMsg(`Approval for MR ${apprTargetMr} marked successfully (Appr No: ${apprNo})!`);
