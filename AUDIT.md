@@ -17257,3 +17257,92 @@ Two inputs to every figure, confirmed once each, at different moments. Neither r
   not observed in a browser.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O74. There is no environment where a write can be tested
+
+**Open, 2026-09-14. Recorded as a shape, not a plan - the owner asked for the cost on record before it is needed.**
+
+**Local, preview and production all read and write the SAME Firestore.** `src/lib/firebase.ts:4` imports
+`firebase-applet-config.json` directly - a committed JSON file, not an environment variable - so every build binds
+to project `tr-rep-agancy` and database `ai-studio-trrepagency-…`. `firebase.json` declares no emulator.
+`.env.example` carries only `GEMINI_API_KEY` and `APP_URL`; **there is no Firebase env plumbing to extend.**
+
+**So there is no way to exercise a write without touching customer data.** A dev server, a Vercel preview and the
+live site differ only in who sees the CODE. They do not differ in whose RECORDS are altered.
+
+### Why it is acceptable today, and exactly when it stops being
+
+The owner is the only person testing, and knows whose records are whose. **It stops being fine at two moments,
+either of which can arrive without warning:**
+- **the moment anyone else works on this**, because they will not know; and
+- **the moment a test writes something that cannot be identified afterwards.**
+
+**⚠ NOTHING MARKS A TEST WRITE.** There is no flag, no naming convention, no field that distinguishes a job
+dispatched to see whether a screen refreshes from a job dispatched because a transformer left the yard. After the
+fact the two are the same record. That - not the configuration - is the harm.
+
+**⚠ AND IT HAS ALREADY SHAPED A PLAN.** The fifteen-screen browser check written for Half B proposed *writes* as
+verification steps - dispatch a unit, save an inspection, mark a bill Sent, record a payment - **without flagging
+that each would mutate live customer records mid-tender.** The gap did not cause that; it made it possible for the
+omission to go unnoticed. Recorded because the omission is the risk.
+
+### OPTION A - the Firestore emulator
+
+| | |
+|---|---|
+| Prerequisite | `firebaseConfig` becomes env-driven. **8 files read the committed JSON** |
+| Emulators needed | Firestore, Auth **and Functions** |
+| Seed | ~12 collections, plus an `ownerId` remap |
+| Recurring cost | none |
+| Behaves like production | partly - local latency, local rules, local callables |
+
+**⚠ THE FUNCTIONS EMULATOR IS NOT OPTIONAL.** The client calls SIX callables across five files: `createAgency`
+(`agencyCreate.ts`, `agencyPurchase.ts`) - **an agency cannot come into existence without it** - `deleteIfEmpty`
+(`guardedDelete.ts`, the AT delete path), `adminSubscriptionAction`, `createSubscriptionOrder` and
+`verifySubscriptionPayment`. A Firestore-only emulator leaves nobody able to create an agency to test with.
+
+**The eight files bound to the config:** `src/lib/firebase.ts`, `scripts/admin/_db.js` (every admin script),
+`scripts/sync-functions-config.js` (which keeps `functions/app-config.json` identical, as a deploy step),
+`test_firestore.js`, `scripts/admin/copy-database.js`, `scripts/inspect_estimate_master.ts`,
+`scripts/migrate_estimate_master.ts`.
+
+**⚠ AND THE COST THAT IS NOT OBVIOUS: EVERY RECORD IS KEYED TO A PRODUCTION uid.** `ownerId` is a Firebase uid,
+and **uids are per-project** - an emulator user gets a different one. So production data cannot be copied in and
+used. `copy-database.js` copies faithfully, which is exactly the problem: it would need an `ownerId` remap, on
+every job, inspection, oil transaction, AT and agency. The alternative is starting empty and hand-building an
+agency, an AT, a rate master and a few jobs before any screen shows anything truthful.
+
+**Seeding is not optional for a truthful test.** `public_config/estimate_master` holds the global rate defaults; an
+empty emulator has none, so the app falls to shipped defaults and raises `globalConfigError` - every price on
+screen would then be answering a different question from the one production answers.
+
+### OPTION B - a second Firebase project (staging)
+
+| | |
+|---|---|
+| Prerequisite | the same env-driven config change. **Unavoidable either way** |
+| Setup | new project, Firestore in `asia-south1`, rules + indexes deployed, functions deployed |
+| Seed | same `ownerId` remap as A |
+| Recurring cost | **billed from its first operation** - O71 records the free quota covers one database per project |
+| Behaves like production | closely - real callables, real rules, real latency, shareable with another person |
+
+**Additional to A:** the OAuth client is per-project (`oAuthClientId` in the config), so Google sign-in needs a
+client configured for the new project and its domain before anyone can sign in at all.
+
+### ⚠ THE CHEAPEST USEFUL STEP IS SMALLER THAN EITHER, AND IS THE PREREQUISITE FOR BOTH
+
+**Make `firebaseConfig` env-driven, with the committed JSON as the default.** It changes nothing today - the same
+project, the same database, the same behaviour - and it is the single change that unblocks A or B later.
+**Until it exists, BOTH options are blocked behind the same eight-file edit**, and neither can be started in a
+hurry on the day it is wanted.
+
+### The interim discipline, until one of them exists
+
+- **Read-only verification is safe anywhere**, and it is where nearly all the value is: the failure a refactor
+  produces is a screen showing nothing, and that is visible without writing.
+- **A write test goes only on records whose owner is known** to the person doing it.
+- **A test write cannot be identified afterwards.** That is the thing to weigh before making one.
+
+**Not built. Recorded so the shape is known before it is needed.**
