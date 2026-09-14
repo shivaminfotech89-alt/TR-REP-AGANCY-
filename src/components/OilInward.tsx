@@ -83,7 +83,18 @@ const FRESH_LITRES_PER_BARREL = 210;
 const defaultGrossFor = (barrels: number) => barrels * FRESH_LITRES_PER_BARREL;
 
 export default function OilInward() {
-  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
+  /**
+   * ⚠ `agencyJobs` IS ALIASED, AND THAT IS NOT COSMETIC (AUDIT G86).
+   *
+   * This screen already has its own `agencyJobs` - the agency-wide {mrNo, agencyId} list the G74
+   * unmatched-oil check matches against. Destructuring the context value under the same name
+   * would shadow it, and the check would go on running against the wrong list: every OTHER
+   * tender's receipts reported as unaccounted for, silently, with no type error to catch it.
+   */
+  const {
+    activeAgency, activeAtMaster, atMasters, viewingAllTenders,
+    agencyJobs: sharedJobs, agencyOil, agencyInspections, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /** ⚠ A SOFT GATE, NOT A BOUNDARY - see lib/trialGate.ts. */
   const __trial = useTrialGate(activeAgency?.id);
 
@@ -93,14 +104,50 @@ export default function OilInward() {
    */
   const intakeGate = isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id), viewingAllTenders);
 
-  const [transactions, setTransactions] = useState<OilTransaction[]>([]);
+  /**
+   * ⚠ FROM THE SHARED LOAD, SPLIT EXACTLY AS BEFORE (AUDIT F87, F89, G86).
+   *
+   * `fetchData` read oil, jobs and inspections and filled SEVEN pieces of state from them. The
+   * data layer holds all three now, so each of the seven is a derivation - and the split below is
+   * the old one MOVED, not rewritten. It is equivalent to `matchesAtScope`, but restructuring and
+   * changing a filter in one step is how a subtle fault enters, so the expressions are preserved.
+   *
+   * Sorted on a COPY: the array belongs to the data layer and other screens read it.
+   */
+  const allTx = useMemo(() => {
+    const rows = [...(agencyOil as OilTransaction[])];
+    rows.sort((a, b) => b.date - a.date);
+    return rows;
+  }, [agencyOil]);
+
+  /**
+   * ⚠ "ALL TENDERS" TAKES EVERYTHING, INCLUDING UNASSIGNED (AUDIT F89).
+   *
+   * The agency-wide net is every litre the agency was short and every litre it was issued, across
+   * its whole recorded history. Work belonging to no tender is still work the agency did, so
+   * excluding it here would reproduce the defect the unassigned section exists to fix - and that
+   * section is hidden in this mode precisely because the rows are already counted below.
+   *
+   * A single tender still takes only its own, and unassigned is surfaced separately.
+   */
+  const transactions = useMemo(
+    () => (viewingAllTenders
+      ? allTx
+      // Unassigned is RECOGNISED, never queried for - `isUnassigned` treats an absent atId and an
+      // empty one alike, which is exactly what a Firestore equality could not do.
+      : allTx.filter(t => !isUnassigned(t) && String((t as any).atId) === activeAtMaster?.id)),
+    [allTx, viewingAllTenders, activeAtMaster?.id],
+  );
   /**
    * OIL BELONGING TO NO TENDER — held separately, shown separately, counted in NEITHER
    * balance (AUDIT F87). Folding it into the tender's figures would attribute litres to a
    * tender nobody said they belong to; dropping it is what the broken query already did.
    */
-  const [unassignedTx, setUnassignedTx] = useState<OilTransaction[]>([]);
-  const [unassignedJobCount, setUnassignedJobCount] = useState(0);
+  const unassignedTx = useMemo(() => allTx.filter(isUnassigned), [allTx]);
+  const unassignedJobCount = useMemo(
+    () => sharedJobs.filter(isUnassigned).length,
+    [sharedJobs],
+  );
   const [showUnassignedOil, setShowUnassignedOil] = useState(false);
   /**
    * ⚠ OIL RECEIVED AGAINST AN MR NUMBER NO JOB CARRIES (AUDIT G74).
@@ -113,12 +160,26 @@ export default function OilInward() {
    * ⚠ HELD AGENCY-WIDE, NOT FROM THE TENDER-SCOPED LISTS. `transactions` and `jobs` above are narrowed to the
    * selected tender, and matching against those would report every OTHER tender's receipts as unaccounted for.
    */
-  const [agencyTx, setAgencyTx] = useState<OilTransaction[]>([]);
-  const [agencyJobs, setAgencyJobs] = useState<Array<{ mrNo?: string; agencyId?: string }>>([]);
+  const agencyTx = allTx;
+  const agencyJobs = useMemo(
+    () => sharedJobs.map((j: any) => ({ mrNo: j.mrNo, agencyId: j.agencyId })),
+    [sharedJobs],
+  );
   const [showUnmatchedOil, setShowUnmatchedOil] = useState(false);
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const jobs = useMemo(
+    () => (viewingAllTenders
+      ? sharedJobs
+      : sharedJobs.filter((j: any) => !isUnassigned(j) && String(j.atId) === activeAtMaster?.id)),
+    [sharedJobs, viewingAllTenders, activeAtMaster?.id],
+  );
+  /** External inspections only - the SHORTAGE side of the oil balance (AUDIT F95). */
+  const inspections = useMemo(
+    () => agencyInspections.filter((i: any) => i.type === 'External'),
+    [agencyInspections],
+  );
+  // The shared load's status. Nothing on this screen sets it: the save reports its own failure
+  // through handleFirestoreError and leaves the list alone (AUDIT G86).
+  const loading = agencyDataLoad.status === 'loading';
   const [viewMode, setViewMode] = useState<"transactions" | "summary">(
     "transactions",
   );
@@ -204,107 +265,6 @@ export default function OilInward() {
       setFormData((prev) => ({ ...prev, division: divisions[0] }));
     }
   }, [activeAgency, divisions]);
-
-  useEffect(() => {
-    if (activeAgency && auth.currentUser) {
-      fetchData();
-    } else {
-      setTransactions([]);
-      setJobs([]);
-      setInspections([]);
-      setLoading(false);
-    }
-    // ⚠ THE TENDER IS A DEPENDENCY (AUDIT F89). The read is agency-wide but the SPLIT is
-    // per tender, so changing tender - or switching to "all tenders" - changes what the
-    // register must show. This listed only `activeAgency`, which was survivable while the
-    // query itself was tender-scoped only because switching tender also happened to
-    // remount; it is not survivable now that the split is done here.
-  }, [activeAgency, activeAtMaster?.id, viewingAllTenders]);
-
-  const fetchData = async () => {
-    setLoading(true);
-    try {
-      if (!auth.currentUser || !activeAgency) return;
-
-      // ⚠ ONE AGENCY-WIDE READ, SPLIT IN MEMORY (AUDIT F87). This used to be two
-      // tender-scoped queries, and both were `where("atId","==", <id>)` - which matched NONE
-      // of the four transactions in live data, because every one of them has the field
-      // ABSENT rather than empty and Firestore equality does not match a missing field. The
-      // register rendered empty against oil the DISCOM is owed.
-      //
-      // No query can fix that: "unassigned" is not expressible as a Firestore filter. Reading
-      // the agency's oil and splitting it here is the only way to show BOTH the tender's
-      // transactions and the ones belonging to no tender, and it removes the way two queries
-      // over the same data can disagree.
-      //
-      // OIL IS STILL PER TENDER (AUDIT F82), with one exception: the net balance at the close
-      // of a tender is what the agency owes or is owed, so it carries forward as the next
-      // tender's OPENING balance. Everything else starts empty.
-      const [txSnap, jobsSnap, inspSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, "oilTransactions"),
-            where("ownerId", "==", auth.currentUser.uid),
-            where("agencyId", "==", activeAgency.id),
-          ),
-        ),
-        getDocs(
-          query(
-            collection(db, "jobs"),
-            where("ownerId", "==", auth.currentUser.uid),
-            where("agencyId", "==", activeAgency.id),
-          ),
-        ),
-        getDocs(
-          query(
-            collection(db, "inspections"),
-            where("ownerId", "==", auth.currentUser.uid),
-          ),
-        ),
-      ]);
-
-      const allTx = txSnap.docs.map(
-        (d) => ({ id: d.id, ...d.data() }) as OilTransaction,
-      );
-      allTx.sort((a, b) => b.date - a.date);
-      const allJobs = jobsSnap.docs.map((d) => ({ id: d.id, ...d.data() }) as any);
-
-      /**
-       * ⚠ "ALL TENDERS" TAKES EVERYTHING, INCLUDING UNASSIGNED (AUDIT F89).
-       *
-       * The agency-wide net is every litre the agency was short and every litre it was
-       * issued, across its whole recorded history. Work belonging to no tender is still work
-       * the agency did, so excluding it here would reproduce the defect the unassigned
-       * section exists to fix - and the section is hidden in this mode precisely because the
-       * rows are already counted in the figures below.
-       *
-       * A single tender still takes only its own, and unassigned is surfaced separately.
-       * Two questions, two answers - see `openingForFilter` for the other half of it.
-       */
-      if (viewingAllTenders) {
-        setTransactions(allTx);
-        setJobs(allJobs);
-      } else {
-        // Unassigned is recognised, never queried for - `isUnassigned` treats an absent atId
-        // and an empty one alike, which is exactly what the query could not do.
-        setTransactions(allTx.filter(t => !isUnassigned(t) && String((t as any).atId) === activeAtMaster?.id));
-        setJobs(allJobs.filter(j => !isUnassigned(j) && String(j.atId) === activeAtMaster?.id));
-      }
-      setUnassignedTx(allTx.filter(isUnassigned));
-      setUnassignedJobCount(allJobs.filter(isUnassigned).length);
-
-      // Agency-wide, for the unmatched check only - see the state declaration (AUDIT G74).
-      setAgencyTx(allTx);
-      setAgencyJobs(allJobs.map((j: any) => ({ mrNo: j.mrNo, agencyId: j.agencyId })));
-
-      const inspDocs = inspSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
-      setInspections(inspDocs.filter((i: any) => i.type === "External"));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.LIST, "jobs");
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const handleBarrelsChange = (barrelsStr: string) => {
     const barrels = parseFloat(barrelsStr) || 0;
@@ -411,7 +371,10 @@ ${intakeGate.reason}`);
       }
 
       handleCancelForm();
-      fetchData();
+      // ⚠ ONE RE-READ THROUGH THE DATA LAYER (AUDIT G86). This re-queried oil, jobs AND
+      // inspections for itself; the dashboard's oil card and the AT panel's closing balance read
+      // the same rows and went on showing the pre-save figures until a remount.
+      refreshAgencyData();
     } catch (error) {
       handleFirestoreError(error, editingId ? OperationType.UPDATE : OperationType.CREATE, "jobs");
     }
