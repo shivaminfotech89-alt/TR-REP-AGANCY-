@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
-import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, atClause } from '../lib/AgencyContext';
+import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, matchesAtScope } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { guaranteeMonthsFor, normaliseCoreLabel } from '../lib/guaranteePeriod';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
@@ -57,7 +57,10 @@ export function numberToIndianWords(num: number): string {
 }
 
 export default function BillingSystem() {
-  const { activeAgency, activeAtMaster, atMasters, updateAgency, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, atMasters, updateAgency, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyOil, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -72,10 +75,26 @@ export default function BillingSystem() {
   const params = useParams<{ mrNo?: string }>();
   const navigate = useNavigate();
 
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
-  const [oilTransactions, setOilTransactions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  /**
+   * FROM THE SHARED LOAD (AUDIT G86). These were three queries on mount - jobs, inspections and
+   * oil - and none of the three write paths below re-read afterwards; each patched `jobs` by hand
+   * instead. See those paths for what that cost.
+   *
+   * ⚠ `matchesAtScope`, NOT A FILTER WRITTEN HERE (AUDIT F99). The in-memory form of the tender
+   * rule is declared beside `atClause` so the two cannot drift, and it handles all three states -
+   * every tender, one tender, and NONE selected, which shows nothing rather than everything.
+   */
+  const jobs = useMemo(
+    () => (agencyDataLoad.status === 'loaded'
+      ? agencyJobs.filter((j: any) => matchesAtScope(j, activeAtMaster, viewingAllTenders))
+      : []),
+    [agencyJobs, agencyDataLoad.status, activeAtMaster, viewingAllTenders],
+  );
+  const inspections = agencyInspections;
+  const oilTransactions = agencyOil;
+  // The shared load's status. The write paths use their own flags - savingBillDates,
+  // submittingSendBill, submittingPaid - so nothing here sets it (AUDIT G86).
+  const loading = agencyDataLoad.status === 'loading';
 
   // Tab State: 'generator' | 'sent' | 'payments'
   const [activeTab, setActiveTab] = useState<'generator' | 'sent' | 'payments'>('generator');
@@ -181,50 +200,6 @@ export default function BillingSystem() {
   // `activeAgency.estimateMaster` used to sit here; it never fed pricing, only a
   // useMemo dependency, where it silently failed to invalidate when the Amorphous,
   // Wound Core or Overhauling master changed.
-
-  useEffect(() => {
-    async function fetchData() {
-      if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
-      setLoading(true);
-      try {
-        const [jobsSnap, inspSnap, oilSnap] = await Promise.all([
-          getDocs(query(
-            // ⚠ THE ACTIVE TENDER (AUDIT F82). A new AT starts fresh - no MRs, no jobs, no
-            // estimates, bills, challans or testing carry over - so every screen shows the work
-            // of the AT selected in the top bar, exactly as it already shows only the active
-            // agency's. Unassigned work (no atId) matches no tender and is reached through the
-            // unassigned view instead: it is not lost, and it is not pretended to belong here.
-            collection(db, 'jobs'),
-            where('ownerId', '==', auth.currentUser.uid),
-            where('agencyId', '==', activeAgency.id),
-            ...atClause(activeAtMaster, viewingAllTenders),
-          )),
-          getDocs(query(
-            collection(db, 'inspections'),
-            where('ownerId', '==', auth.currentUser.uid)
-          )),
-          getDocs(query(
-            collection(db, 'oilTransactions'),
-            where('ownerId', '==', auth.currentUser.uid),
-            where('agencyId', '==', activeAgency.id)
-          ))
-        ]);
-
-        const fetchedJobs = jobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const fetchedInsps = inspSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        const fetchedOil = oilSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-
-        setJobs(fetchedJobs);
-        setInspections(fetchedInsps);
-        setOilTransactions(fetchedOil);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'jobs');
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchData();
-  }, [activeAgency]);
 
   // Dynamic divisions list
   const divisions = useMemo(() => {
@@ -1447,30 +1422,12 @@ export default function BillingSystem() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (selectedJobsData.some(sj => sj.id === j.id)) {
-          // Mirrors the batch above, including its skip: a job the batch did not write must
-          // not appear updated in memory either.
-          const atInclusiveAmt = calculateJobTotal(j);
-          if (atInclusiveAmt === null) return j;
-          const atPct = getAtPercentage(atForJob(j, atMasters) ?? activeAtMaster);
-          const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
-          const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
-          const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
-          return {
-            ...j,
-            billSentDate: todayIso,
-            billNo: billNo || `BILL/${selectedMrNo}`,
-            billAmount: totalJobTaxedAmt,
-            // Mirrors the batch above, so the in-memory job matches what was written.
-            issuedByAgencyId: activeAgency?.id || '',
-            issuedByAgencyName: activeAgency?.name || '',
-            issuedByAgencyGstin: activeAgency?.gstin || '',
-          };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF MIRRORING THE BATCH BY HAND (AUDIT G86). This recomputed the same
+      // GST arithmetic a second time - a copy that had to be kept in step with the write above it,
+      // skip for skip - and it updated this screen alone: the ledger and the dashboard went on
+      // showing the MR unbilled until a remount. One re-read updates every screen, and there is no
+      // second copy of the figures to drift.
+      refreshAgencyData();
 
       setSavedSuccessMsg('Bill No & Bill Sent Date saved to all delivered jobs in this MR!');
       setTimeout(() => setSavedSuccessMsg(''), 4000);
@@ -1646,35 +1603,10 @@ export default function BillingSystem() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (j.mrNo === sendTargetMr) {
-          // Mirrors the batch above, including its skip: a job the batch did not write must
-          // not appear updated in memory either.
-          const atInclusiveAmt = calculateJobTotal(j);
-          if (atInclusiveAmt === null) return j;
-          const atPct = getAtPercentage(atForJob(j, atMasters) ?? activeAtMaster);
-          const cgstRate = activeAgency?.cgstPercent !== undefined ? activeAgency.cgstPercent : 9;
-          const sgstRate = activeAgency?.sgstPercent !== undefined ? activeAgency.sgstPercent : 9;
-          const totalJobTaxedAmt = Math.round(atInclusiveAmt * (1 + (cgstRate + sgstRate) / 100));
-          return {
-            ...j,
-            billNo: sendBillNo.trim(),
-            billRefNo: sendBillRefNo.trim(),
-            billSentDate: sendBillDate,
-            billAmount: totalJobTaxedAmt,
-            billTotalMrAmount: grandTotal,
-            billStatus: 'Sent',
-            paymentStatus: j.paymentStatus || 'Unpaid',
-            billRemarks: sendBillRemarks || '',
-            // Mirrors the batch above, so the in-memory job matches what was written.
-            issuedByAgencyId: activeAgency?.id || '',
-            issuedByAgencyName: activeAgency?.name || '',
-            issuedByAgencyGstin: activeAgency?.gstin || '',
-          };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF MIRRORING THE BATCH BY HAND (AUDIT G86). Same duplicated GST
+      // arithmetic as the save path, same staleness everywhere else. A bill marked Sent here was
+      // still unsent on the ledger until a remount.
+      refreshAgencyData();
 
       setShowSendBillModal(false);
       setSavedSuccessMsg(`Bill ${sendBillNo} for MR ${sendTargetMr} successfully marked as Sent (Ref: ${sendBillRefNo})!`);
@@ -1788,23 +1720,9 @@ export default function BillingSystem() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (j.mrNo === paidTargetMr) {
-          return {
-            ...j,
-            paymentStatus: 'Paid',
-            paymentMode: paymentMode,
-            paymentRefNo: paymentRefNo.trim(),
-            paymentDate: paymentDate,
-            paidAmount: Number(paidAmount) || 0,
-            paymentDeductions: Number(paymentDeductions) || 0,
-            paymentBank: paymentBank.trim(),
-            paymentRemarks: paymentRemarks.trim()
-          };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF PATCHING A LOCAL COPY (AUDIT G86). A payment recorded here left
+      // every other screen showing the MR unpaid until a remount.
+      refreshAgencyData();
 
       setShowPaidModal(false);
       setSavedSuccessMsg(`Payment recorded successfully for MR ${paidTargetMr} (Ref: ${paymentRefNo})!`);
