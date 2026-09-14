@@ -3,6 +3,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useAgency, Agency } from '../lib/AgencyContext';
+import { DISCOMS } from '../lib/discoms';
 import {
   defaultEstimateData, defaultAmorphousEstimateData, defaultWoundCoreEstimateData,
   defaultOverhaulingEstimateData, defaultCircleLimitsEstimateData,
@@ -70,6 +71,12 @@ export default function AdminPanel() {
   const [tplTargetId, setTplTargetId] = useState('');
   const [tplName, setTplName] = useState('');
   const [tplAtNumber, setTplAtNumber] = useState('');
+  /**
+   * WHICH BOARD PUBLISHED THIS TENDER (AUDIT G90). Required: a template with no board is
+   * invisible to every agency once the tender list is filtered, and it fails silently - the
+   * admin sees a published template and the agencies see nothing.
+   */
+  const [tplDiscom, setTplDiscom] = useState('');
   const [tplNotes, setTplNotes] = useState('');
   const [tplStart, setTplStart] = useState('');
   /**
@@ -91,14 +98,32 @@ export default function AdminPanel() {
   const [tplMsg, setTplMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  /**
+   * ⚠ EVERY FIELD THE FORM HOLDS, OR THE NEXT TEMPLATE INHERITS IT.
+   *
+   * `tplPct` was missing here: cancelling the form and opening it fresh left the previous
+   * tender's accepted percentage sitting in the box, ready to be published onto a different
+   * tender. It is the same family as the `merge: false` trap on the revise path below - a field
+   * that is forgotten in one of the two places it must be handled. Fixed while adding the board
+   * rather than adding a second instance of the bug beside it (AUDIT G90).
+   */
   const resetTplForm = () => {
-    setTplTargetId(''); setTplName(''); setTplAtNumber(''); setTplNotes('');
-    setTplStart(''); setTplEnd(''); setTplScheduleId('');
+    setTplTargetId(''); setTplName(''); setTplAtNumber(''); setTplDiscom(''); setTplNotes('');
+    setTplStart(''); setTplEnd(''); setTplScheduleId(''); setTplPct('');
   };
 
   const handlePublishNewTemplate = async () => {
     if (!tplName.trim()) {
       alert('Give the template a name operators will recognise, e.g. "UGVCL 2026-28 Schedule A".');
+      return;
+    }
+    if (!tplDiscom) {
+      alert(
+        'Choose the electricity board that published this tender.\n\n'
+        + 'An agency is shown only its own board\'s tenders, so a template without one is '
+        + 'invisible to everybody - and it fails silently: the template looks published here '
+        + 'while no agency can select it.'
+      );
       return;
     }
     if (!tplScheduleId) {
@@ -120,6 +145,7 @@ export default function AdminPanel() {
           id: tplTargetId || undefined,
           name: tplName.trim(),
           atNumber: tplAtNumber.trim(),
+          discom: tplDiscom,
           notes: tplNotes.trim(),
           startDate: tplStart ? new Date(tplStart).getTime() : undefined,
           endDate: tplEnd ? new Date(tplEnd).getTime() : undefined,
@@ -758,6 +784,12 @@ export default function AdminPanel() {
                       if (t) {
                         setTplName(t.name);
                         setTplAtNumber(t.atNumber || '');
+                        // ⚠ LOADED BECAUSE merge:false DELETES WHAT IS NOT SENT (AUDIT G90).
+                        // Revising a template to fix its name would otherwise strip its board,
+                        // and the template would vanish from every agency's tender list with
+                        // nothing on screen saying why - the same failure the percentage below
+                        // was already scarred by.
+                        setTplDiscom(((t as any).discom as string) || '');
                         setTplStart(t.startDate ? new Date(t.startDate).toISOString().split('T')[0] : '');
                         setTplEnd(t.endDate ? new Date(t.endDate).toISOString().split('T')[0] : '');
                         // A template published before this field existed has none. Left
@@ -790,6 +822,23 @@ export default function AdminPanel() {
                   <input value={tplName} onChange={e => setTplName(e.target.value)} maxLength={200}
                          placeholder="UGVCL 2026-28 Schedule A"
                          className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white" />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">Electricity board</label>
+                  <select
+                    value={tplDiscom}
+                    onChange={e => setTplDiscom(e.target.value)}
+                    className={`w-full px-3 py-2 text-xs border rounded-lg bg-white ${tplDiscom ? 'border-slate-300' : 'border-amber-400 bg-amber-50'}`}
+                  >
+                    <option value="">-- choose --</option>
+                    {DISCOMS.map(d => (
+                      <option key={d.code} value={d.code}>{d.label}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-slate-600 leading-relaxed">
+                    Decides which agencies can select this tender. An agency is shown only its own
+                    board&rsquo;s tenders, so a template without one is invisible to everybody.
+                  </p>
                 </div>
                 <div className="md:col-span-2">
                   <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">AT / tender number</label>
@@ -930,6 +979,7 @@ export default function AdminPanel() {
                 <thead>
                   <tr className="text-left text-slate-500 border-b border-slate-200">
                     <th className="py-2 pr-3 font-bold">Template</th>
+                    <th className="py-2 pr-3 font-bold">Board</th>
                     <th className="py-2 pr-3 font-bold">Version</th>
                     <th className="py-2 pr-3 font-bold">Published</th>
                     <th className="py-2 pr-3 font-bold">In use by</th>
@@ -949,6 +999,14 @@ export default function AdminPanel() {
                           <div className="font-bold text-slate-800">{t.name}</div>
                           {t.atNumber && <div className="text-slate-500">AT {t.atNumber}</div>}
                           {t.notes && <div className="text-slate-500 mt-0.5 max-w-md">{t.notes}</div>}
+                        </td>
+                        {/* ⚠ "not set" IS SAID OUT LOUD. A template with no board is invisible to
+                            every agency once the tender list is filtered, and this register is the
+                            only place that is visible at all. */}
+                        <td className="py-2 pr-3">
+                          {(t as any).discom
+                            ? <span className="font-bold text-slate-800">{(t as any).discom}</span>
+                            : <span className="font-bold text-amber-800">not set</span>}
                         </td>
                         <td className="py-2 pr-3 font-mono tabular-nums font-bold text-slate-800">v{t.version}</td>
                         <td className="py-2 pr-3 text-slate-600">

@@ -484,6 +484,17 @@ export interface PublishedAt {
   name: string;
   /** The tender this schedule belongs to, as the DISCOM writes it. */
   atNumber?: string;
+  /**
+   * WHICH ELECTRICITY BOARD PUBLISHED THIS TENDER - a code from lib/discoms.ts (AUDIT G90).
+   *
+   * An agency works with one board, so it is shown only that board's tenders. Without this a
+   * template belongs to everybody, which is why every agency currently sees every tender.
+   *
+   * ⚠ ABSENT MEANS NOT RECORDED, AND SUCH A TEMPLATE IS INVISIBLE TO A FILTERED LIST. Both live
+   * templates predate the field and need it set before the filter ships - see AUDIT G90, and the
+   * `merge: false` warning on the revise form, which deletes any field left out of a republish.
+   */
+  discom?: string;
   /** Free text: what changed in this version, shown when a copy has drifted behind. */
   notes?: string;
   /**
@@ -1187,7 +1198,7 @@ interface AgencyContextType {
   publishedAts: PublishedAt[];
   /** Admin only. Creates a new template, or bumps an existing one's version. */
   publishAtTemplate: (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
+    tpl: { id?: string; name: string; atNumber?: string; discom?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
            atPercentage?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ) => Promise<string>;
@@ -2574,7 +2585,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * leave their `publishedAtVersion` pointing at nothing.
    */
   const publishAtTemplate = async (
-    tpl: { id?: string; name: string; atNumber?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
+    tpl: { id?: string; name: string; atNumber?: string; discom?: string; notes?: string; startDate?: number; endDate?: number; scheduleId?: string;
            atPercentage?: number },
     sections: Record<string, EstimateItem[] | undefined>,
   ): Promise<string> => {
@@ -2630,6 +2641,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     const payload: any = {
       name: tpl.name,
       atNumber: tpl.atNumber || '',
+      // ⚠ WRITTEN ALWAYS, NOT OMITTED WHEN BLANK (AUDIT G90). `setDoc` uses merge:false, so a
+      // field left out is DELETED - and a template silently losing its board becomes invisible to
+      // every filtered list, which is the one failure mode of this whole change. Publishing
+      // refuses a blank board, so '' here would mean a template written outside the form.
+      discom: tpl.discom || '',
       notes: tpl.notes || '',
       version,
       publishedAt: Date.now(),

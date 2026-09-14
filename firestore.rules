@@ -410,6 +410,11 @@ service cloud.firestore {
       return data.name is string && data.name.size() >= 1 && data.name.size() <= 200 &&
              data.version is number &&
              (!('atNumber' in data) || (data.atNumber is string && data.atNumber.size() <= 150)) &&
+             // Which board published the tender - a short code from lib/discoms.ts (AUDIT G90).
+             // Constrained like every other field here rather than left as the one unvalidated
+             // key on the document; the client refuses a blank, and '' is permitted only so a
+             // record written before this field existed can still be revised.
+             (!('discom' in data) || (data.discom is string && data.discom.size() <= 20)) &&
              (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
              (!('publishedAt' in data) || isTimeValue(data.publishedAt)) &&
              (!('publishedBy' in data) || (data.publishedBy is string && data.publishedBy.size() <= 150)) &&
