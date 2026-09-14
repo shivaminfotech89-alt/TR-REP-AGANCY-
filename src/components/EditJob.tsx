@@ -35,6 +35,22 @@ export default function EditJob() {
   const [isDispatched, setIsDispatched] = useState(false);
   const [challanNo, setChallanNo] = useState('');
 
+  /**
+   * ⚠ A DIRECT READ, AND IT MUST STAY ONE (AUDIT G86).
+   *
+   * Fourteen screens now read the agency's work from the data layer, which loads it once. This
+   * one does not, and the reason is not that one document is cheap - it is that the shared list
+   * holds only the ACTIVE agency's jobs, and this screen is reached by ID from a link.
+   *
+   * Served from that list, a job belonging to another of the user's agencies would be ABSENT -
+   * indistinguishable from a job that does not exist. The ownership check below can only reject
+   * a record it has actually fetched; it tells the operator "Unauthorized", which is a different
+   * fact from "not found" and the only one of the two that is true. A cache miss cannot make
+   * that distinction, and the operator would have no way to tell whether the job is there.
+   *
+   * It is also a single `getDoc`, not a collection scan, so it was never part of the
+   * fifteen-fetch pattern O71 measured.
+   */
   useEffect(() => {
     async function fetchJob() {
       if (!jobId) return;
