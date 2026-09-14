@@ -17346,3 +17346,122 @@ hurry on the day it is wanted.
 - **A test write cannot be identified afterwards.** That is the thing to weigh before making one.
 
 **Not built. Recorded so the shape is known before it is needed.**
+
+---
+
+## G88-G90. The board an agency works with becomes a fact the app can match on
+
+**An agency works with one electricity board, and a published tender belongs to one.** Neither was recorded in a
+form anything could filter by, so every agency saw every tender. Three commits: the fixed list and the agency's
+code (G88), the line-ending policy that the work exposed (G89), and the board on the template (G90).
+
+### ⚠ THE FILTER COULD NOT SHIP FIRST, AND THE DATA IS WHY
+
+`discomName` is **free text, and already inconsistent in live data**:
+
+| value | agencies |
+|---|---|
+| `"Uttar Gujarat Vij Company Ltd."` | 8 |
+| *(field absent)* | 4 |
+| `""` | 4 |
+| `"UTTAR GUJARAT VIJ CO LTD."` | 1 |
+| `"Madhya Gujarat Vij Company Ltd."` | 1 |
+
+Rows 1 and 4 are **one board spelled two ways**; a string filter reads them as two. Eight agencies hold nothing
+matchable at all. **Shipping the filter on that string would have shown an empty tender list to half the
+customers** - and an empty list is indistinguishable from "none published yet", which is the failure shape this
+audit keeps recording. So the order was forced: the code first, the backfill second, the filter last.
+
+### G88. A fixed list, and a code that is not the printed name
+
+`lib/discoms.ts` holds **UGVCL, MGVCL, PGVCL, DGVCL** - the four GUVNL distribution companies formed when the
+Gujarat Electricity Board unbundled - and **GETCO**, the transmission company, which one live agency is named for.
+
+- **⚠ THE CODE DOES NOT REPLACE `discomName`, AND MUST NOT.** That field is the board's LEGAL NAME as it prints on
+  a tax invoice and a forwarding letter. **One field cannot be both a printed name and a match key**: the first
+  must be exactly right for a document, the second exactly stable for a filter, and those pull apart - which is
+  precisely how two spellings of one board came to exist.
+- **Matching is on letters only**, so case and punctuation cannot make one board into two.
+- **Three list states, not two** (`tenderListState`): `no-discom`, `none-published`, `ready`. *"No board set"* and
+  *"no tenders for your board"* are different problems with different fixes, and an empty dropdown says neither.
+  **Eight of eighteen agencies have no board, so the first is the COMMON case.**
+- **⚠ TORRENT POWER WAS RAISED AND DELIBERATELY NOT ADDED.** It is a private licensee in Ahmedabad, Gandhinagar and
+  Surat, outside GUVNL, and four unset agencies carry `SABARMATI`/`DEESA` prefixes in that region. The owner
+  confirmed those are UGVCL circle names and that they tender with UGVCL. Recorded because a list that looks
+  complete and is not is worse than one whose edges are known.
+- Agency Settings gains a selector with an explicit **"Not recorded - no tenders will be offered"**. Choosing a
+  board **offers** its legal name only when the name is blank and **never overwrites one** - overwriting would
+  rewrite what prints on a tax invoice as a side effect of setting a filter key. It is in the save summary,
+  because it now decides which tenders an agency can select.
+
+**The backfill (`backfill-agency-discom.js`, owner-run): 9 written, 1 needing an answer, 8 left unset.**
+
+- **⚠ IT DERIVES ONLY FROM `discomName`, NEVER FROM A DIVISION PREFIX.** Four unset agencies carry only `DEESA` or
+  `SABARMATI`. Nothing in this app ties a division to a board, and reading one as a board is inference about
+  geography dressed as a record. They stay unset and are told to set it.
+- **⚠ ONE AGENCY IS EXCLUDED BY ID AND REPORTED RATHER THAN GUESSED.** GUJARAT ENERGY TRANSMISSION records
+  `discomName` as *"Uttar Gujarat Vij Company Ltd."* while its agency name says GETCO. **Two different boards, and
+  the record does not say which is right.** A wrong code is worse than none: it would show that agency one board's
+  tenders and hide the other's, silently. It is excluded by document id - a name can be edited - and **the run
+  refuses if that id stops matching**, because an exclusion that quietly stops applying is the failure it exists
+  to prevent.
+
+### G89. A six-edit change whose diff read 1,434 insertions and 1,367 deletions
+
+`core.autocrlf=true` hands **CRLF working copies** to tools that read from disk while git stores **LF**.
+`EditAgencyForm.tsx` had **mixed CRLF, CR and LF** terminators, and an edit script that detects a file's endings
+before rewriting picked CRLF and normalised every inserted line that way.
+
+**Nothing was wrong in the content** - the diff ignoring carriage returns was identical before and after - **but a
+commit that buries six edits inside 1,366 untouched lines defeats the point of a reviewable history**, which is
+most of what this repository is for. The commit was rebuilt from the committed LF bytes and amended: **67
+insertions, 0 deletions**.
+
+- `.gitattributes` now pins `* text=auto eol=lf`. **⚠ IT CHANGES NO REPOSITORY CONTENT, AND THAT WAS TESTED:**
+  `git ls-files --eol` reports **298 of 303** tracked files already stored as LF, and `git add --renormalize .`
+  staged nothing. The effect is on what git WRITES TO DISK.
+- **⚠ IT MOVES THE PRINTED-SUBTREE HASHES ONCE.** `print-subtree-hashes.js` reads source with `readFileSync` and
+  hashes the extracted text, so those sha256 values follow the bytes on disk. **Baseline captured before the
+  change**, 13 subtrees, in commit `c0609aa`. Its `--compare` side reads index bytes through `git show`, which are
+  LF - so the two sides **agree after this change rather than before it**.
+- `verify-seed-equality.js` is **unaffected**: it hashes canonicalised JSON of a document built in memory, never
+  file bytes, so the functions predeploy step cannot be disturbed.
+- **⚠ EVERY EDIT SCRIPT THIS SESSION USED THAT DETECTION**, and it is safe only on uniformly-terminated files.
+  `AgencyContext.tsx` came through the same commit at 14/0 because it is uniform. Later scripts assert uniformity
+  and refuse a mixed file rather than detecting from it.
+
+### G90. The template records which board issued it
+
+`PublishedAt` gains `discom`; both `publishAtTemplate` signatures and the payload carry it; `firestore.rules`
+validates it like every other field on that document rather than leaving it the one unvalidated key.
+
+- **Publishing REFUSES without a board.** A template with no board is invisible to every agency once the list is
+  filtered, and **it fails silently**: the admin sees a published template while no agency can select it.
+- The register gains a **Board** column that says **"not set"** out loud - the only place a boardless template is
+  visible at all.
+- **⚠ THE `merge: false` TRAP, HANDLED IN BOTH PLACES IT BITES.** A field left out of a republish is DELETED, so
+  the revise form now loads `discom`. Without it, revising a template to correct its NAME would strip its BOARD
+  and the template would vanish from every agency's list with nothing saying why. The percentage already carried a
+  scar from exactly this.
+- **⚠ AND THE SAME BUG WAS ALREADY NEXT DOOR:** `resetTplForm` did not clear `tplPct`, so cancelling and reopening
+  the form left the previous tender's accepted percentage in the box, ready to be published onto a different
+  tender. Fixed in the same edit rather than adding a second instance of it alongside.
+
+### ⚠ WHAT IS NOT DONE, AND WHAT IT BLOCKS
+
+| | |
+|---|---|
+| The agency backfill | **owner-run**; step 4 must not ship before it |
+| `firebase deploy --only firestore:rules` | the `discom` clause is committed, not deployed |
+| Both live templates | predate the field, hold **no board**, and are invisible to a filtered list until republished |
+| The working tree | still CRLF on disk; renormalise, then **re-baseline the 13 hashes deliberately** |
+| **Step 4 - the filtered AT selection** | **not built**, and blocked behind all of the above |
+
+**A filter over agencies that have no code yet hides tenders from eight of eighteen.** That is the whole reason
+the order is what it is.
+
+**Verified:** tsc (exit 0); **202 tests in 19 files, 10 new**; build; hooks guard, 48 files.
+- **⚠ NOT SEEN RENDERED.** The selector, the refusal, the Board column and the three list states are asserted at
+  the source and by type, not observed in a browser.
+
+**Deploy:** hosting - a push to `main` (O71), **and a rules deploy for the `discom` clause.**
