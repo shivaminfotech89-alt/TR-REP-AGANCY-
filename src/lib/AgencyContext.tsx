@@ -1197,7 +1197,7 @@ interface AgencyContextType {
    * the job-number counter stay direct queries and say so at their own call sites.
    */
   agencyJobs: any[];
-  /** ⚠ OWNER-SCOPED, not agency-scoped - see the loader for why, and for when that changes. */
+  /** The active agency's inspections. Agency-scoped since the G85 backfill - see the loader. */
   agencyInspections: any[];
   agencyOil: any[];
   /** G70's three states for this load, so a failure is never rendered as "no work". */
@@ -1598,13 +1598,16 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
    * Each of those stays a direct query. A cached answer there is not slower or staler; it is WRONG,
    * and wrong in the direction of allowing a duplicate rather than refusing one.
    *
-   * ⚠ INSPECTIONS ARE OWNER-SCOPED, DELIBERATELY, AND THAT IS NOT AN OVERSIGHT (AUDIT G84).
-   * 59 of 144 inspections in live data carry NO agencyId - they predate the field. Scoping this
-   * query by agency would return 85 and silently drop the other 59 from every screen that reads
-   * it, which is work still in the database going quiet because of a change made to save reads.
-   * Owner-scoped matches exactly what all nine of these screens do today, so nothing moves. Once
-   * `scripts/admin/backfill-inspection-agency.js` has run, this gains the agencyId clause and the
-   * comment goes with it.
+   * ⚠ INSPECTIONS ARE NOW AGENCY-SCOPED, AND THEY COULD NOT BE UNTIL 2026-09-14 (AUDIT G85).
+   * 59 of 144 inspections carried NO agencyId - they predate the field - so this clause would
+   * have returned 85 and silently dropped the other 59 from every screen that reads it: work
+   * still in the database going quiet because of a change made to save reads. Each of the 59
+   * carried a jobId resolving to exactly one job in exactly one agency, so
+   * `scripts/admin/backfill-inspection-agency.js` stamped them; the database now reads 144/144.
+   * ⚠ IF A RECORD EVER LACKS agencyId AGAIN IT WILL NOT APPEAR HERE. The write paths set it
+   * (ExternalInspection, InternalInspection); a future one that forgets will look like missing
+   * work rather than like a bug, so the coverage script is the thing to re-run if inspections
+   * ever seem short.
    *
    * ⚠ A FAILED LOAD CLEARS THE LISTS AND SAYS SO (AUDIT G70). Keeping the previous agency's work
    * on screen under a new agency's name is worse than showing nothing: the screens read
@@ -1634,10 +1637,10 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
             where('ownerId', '==', uid),
             where('agencyId', '==', activeAgencyId),
           )),
-          // Owner-scoped until the backfill - see the warning above.
           getDocs(query(
             collection(db, 'inspections'),
             where('ownerId', '==', uid),
+            where('agencyId', '==', activeAgencyId),
           )),
           getDocs(query(
             collection(db, 'oilTransactions'),

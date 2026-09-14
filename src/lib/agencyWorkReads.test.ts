@@ -69,6 +69,22 @@ test('⚠ the allotment floor is still read fresh at the moment it refuses', () 
   );
 });
 
+test('⚠ the shared loader scopes all three collections to the active agency', () => {
+  const context = src('src/lib/AgencyContext.tsx');
+  const loader = context.slice(
+    context.indexOf('async function loadAgencyWork'),
+    context.indexOf('loadAgencyWork();'),
+  );
+  assert.ok(loader.length > 0, 'the shared loader was not found - this test is scanning the wrong shape');
+  // Three collections, and every one of them narrowed by agency. Inspections were owner-scoped
+  // until the G85 backfill stamped the 59 records that had no agencyId; if that clause is ever
+  // dropped again the screens quietly widen to every agency on the account.
+  assert.equal(
+    (loader.match(/where\('agencyId', '==', activeAgencyId\)/g) ?? []).length, 3,
+    'one of jobs/inspections/oilTransactions is no longer scoped to the active agency',
+  );
+});
+
 test('the shared loader carries the G70 status rather than an empty list', () => {
   const context = src('src/lib/AgencyContext.tsx');
   assert.ok(context.includes('agencyDataLoad'), 'the shared load has no status');
