@@ -17167,3 +17167,93 @@ the staleness.
   is the structural fix; the letterhead move is the one that shifts the bytes.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G87. The accepted percentage is confirmed before it is written - and the dialog would have opened a hole
+
+**The percentage is typed once and multiplies every line of every estimate and every bill under that tender for
+its whole life.** Nothing confirmed it. It now does, on creation and on any edit that **changes** it - not on one
+that does not, because a dialog raised over an untouched figure is how a dialog that matters gets clicked through.
+
+### What it says
+
+- **The AT number as typed, as the subject line - not separately confirmed.** Nothing keys on it (G83), and its
+  only reach onto paper is the bill's Appr. No. prefill (O62), which is editable before the invoice goes out. It
+  answers "which tender am I changing", not "do you agree to this".
+- **The direction in words**, from `atPercentageHint` - the one place that vocabulary lives, reused not restated.
+- **What it does to a round number:** *"An estimate of Rs 10,000 is billed at Rs 10,700 - above the schedule."* A
+  negative reads *"Rs 9,200 - below"*.
+  - **⚠ THE SIGN IS THE CASE WORTH BEING UNMISTAKABLE ABOUT.** `-8` is 8% **below**, and someone typing it meaning
+    a discount would read a bare "-8%" as correct either way. Words and rupees remove the ambiguity that a sign
+    alone carries.
+- **Zero gets its own sentence**, never "+0% above": *"0% is a bid at par. Every estimate bills at exactly the
+  schedule figure."*
+
+**⚠ THE NEGATIVE CASE IS PROSPECTIVE, NOT LIVE.** All 15 ATs carry **4, 5 or 7** - zero negative, zero at par, zero
+unset. The dialog guards the next one rather than a present mistake.
+
+### On an edit, three further facts
+
+- **The job count it reprices.** MEGHA's `AT 26-27` holds **35**, ADMIN's `2026_27` holds **20**, and eight of
+  fifteen ATs hold none.
+- **⚠ THE TWO F72 FACTS, STATED SEPARATELY, BECAUSE THEY DIFFER.** Amounts already recorded on sent estimates and
+  bills **do not change** - the ledger is frozen. But a **reprint recomputes at render** (F72: *"the printed
+  estimate sheet and the printed tax invoice do not read stored figures"*), so it will no longer match the copy in
+  the division's file.
+- **⚠ IT NAMES THE LIVE CASE RATHER THAN WARNING GENERICALLY:** *"1 of them has an estimate or bill already
+  issued."* Today that is true of exactly one tender - **SAMOR's `ALLOTMENT NO.25903`**, carrying STD-1's estimate
+  sent 2026-09-10. MSBT-12 is billed and paid but carries **no `atId`**, so no AT edit reaches it. A counted claim
+  is a stronger warning than "reprints may differ", and the data to count it was already in memory.
+
+### ⚠ THE DEFECT THIS HAD TO SHIP WITH
+
+**`AtSettings` wrote `atPercentage: Number(x) || 0` on the EDIT path** - the fallback the create path deleted at
+F43, whose comment reads *"that fallback is what turned a blank into a bid at par"*. AUDIT records at length why a
+silent 0 is worse than a wrong number: *"4 is a suspicious round number and invites a check; 'at tender rate' reads
+like a decision to bid at par."*
+
+**It was latent only because the input carries `required` and native validation runs before `onSubmit`. A
+confirmation dialog is precisely what takes native validation out of the path.** Shipping the dialog by itself
+would have converted a latent defect into a live one - which is why the two went in one commit.
+
+**⚠ AND REMOVING `|| 0` ALONE DOES NOT FIX IT, BECAUSE `Number('')` IS `0` TOO.** The real guard is refusing the
+value before `Number()` ever sees it. Create has had that since F43; edit never got it. Both now share ONE
+`percentageUnanswered` predicate instead of two copies, and the dialog is raised **after** validation, never in
+place of it.
+
+### `hasPricedDocument`, beside `hasIssuedDocument` in the same file
+
+**`hasIssuedDocument` is deliberately BROAD** - it guards a DELETE, where a false positive costs one manual
+decision and a false negative destroys an invoice's provenance. It counts challan numbers, dispatch dates and the
+issued-by stamp.
+
+**This one feeds a COUNT shown to an operator, and a count is a claim.** A challan carries no prices, so it cannot
+reprint differently; counting it would say *"3 documents would reprint"* when one would - **worse than saying
+nothing, because a specific number invites belief.** One file still owns the vocabulary; two genuinely different
+questions get two named answers, and a test asserts the subset cannot drift from `ISSUED_FIELDS`.
+
+**⚠ THE COUNT IS FREE, AND G86 IS WHY.** `AtSettings` already holds `agencyJobs` from the shared load, so counting
+issued documents on a tender is a filter over rows in memory. **Before Half B this would have been a query per
+AT** - the same cost that made the old per-tender emptiness probe expensive enough to remove.
+
+### Also corrected, and it was false rather than dated
+
+The edit form's label read **"per Core Type"**. There is ONE percentage per tender and has been since the three
+fields collapsed - A/T 1819 clause 2.0 quotes one figure covering every core type (`getAtPercentage`). A label
+telling an operator that percentages vary by core type contradicts the field beneath it.
+
+### It does not duplicate the schedule gate
+
+| | Schedule gate | This |
+|---|---|---|
+| asks | which **rate table** prices this tender | what **multiplier** sits on it |
+| fires | at the first estimate **send** | at AT **create / save** |
+
+Two inputs to every figure, confirmed once each, at different moments. Neither restates the other.
+
+**Verified:** tsc (exit 0); **192 tests in 18 files, 8 new**; build; hooks guard, 48 files.
+- **⚠ NOT SEEN RENDERED.** The dialog, its arithmetic and the issued count are asserted at the source and by type,
+  not observed in a browser.
+
+**Deploy:** hosting - a push to `main` (O71).
