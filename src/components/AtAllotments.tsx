@@ -54,6 +54,20 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   const [correctionError, setCorrectionError] = useState<string | null>(null);
   const [atJobs, setAtJobs] = useState<Array<{ division?: string; coreType?: string; repairType?: string }> | null>(null);
 
+  /**
+   * ⚠ A DIRECT QUERY, DELIBERATELY - THIS MUST NOT READ THE SHARED LIST (AUDIT G85).
+   *
+   * The data layer holds the active agency's jobs, and nine screens now read them instead of
+   * querying. This one does not, for two reasons that are both about correctness rather than
+   * cost:
+   *
+   *   - IT IS A FLOOR, AND A FLOOR MUST BE TRUE WHEN IT REFUSES. The shared list is a snapshot
+   *     taken when the agency was selected. A job booked in another tab since then must still be
+   *     counted, or a correction slips under a quota that is already committed.
+   *   - IT IS SCOPED BY TENDER ACROSS THE ACCOUNT (`atId`), not by agency.
+   *
+   * The cost is one query when this panel opens, for an action taken a few times a year.
+   */
   useEffect(() => {
     let live = true;
     (async () => {

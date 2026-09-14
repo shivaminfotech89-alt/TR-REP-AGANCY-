@@ -243,6 +243,11 @@ export default function AdminPanel() {
        * ⚠ NOT `atMasters` FROM useAgency(): that list is the SIGNED-IN OWNER'S, fetched by ownerId, so every other
        * owner's agency would show 0 ATs and read as empty - a count that is wrong in the direction that invites a
        * delete. The rules allow a super admin to list both collections unfiltered.
+       *
+       * ⚠ AND NOT `agencyJobs` FROM useAgency() EITHER (AUDIT G85). The shared load holds ONE agency's jobs - the
+       * signed-in admin's own active one. This column counts what sits under EVERY agency on EVERY account, which
+       * is the one question no per-agency cache can answer. So it stays unfiltered, and it is the largest single
+       * read in the app: it grows with every customer, and only this screen makes it.
        */
       try {
         const [atSnap, jobSnap] = await Promise.all([

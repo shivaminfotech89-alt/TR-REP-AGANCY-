@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, AtMaster, AtSeedReport } from '../lib/AgencyContext';
 import { selectableSchedules, DEFAULT_SCHEDULE_ID, SCHEDULES, ScheduleId, isScheduleId } from '../lib/ugvclSchedules';
@@ -11,8 +11,8 @@ import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
 import { computeOilBalance, openingMapFrom, describeOil } from '../lib/oilBalance';
 import { otherActiveAts, isUnassigned } from '../lib/AgencyContext';
 import { orderReferenceFor } from '../lib/orderReference';
-import { db, auth } from '../lib/firebase';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+// ⚠ NO FIRESTORE IMPORTS HERE ANY MORE (AUDIT G85). Both reads this screen made are answered from
+// the shared agency load. The per-AT probe was ONE QUERY PER TENDER on every visit to this screen.
 
 // Live hint for an AT percentage field while it's still a string mid-edit (e.g. "-",
 // "-.", "." are valid intermediate states that aren't a usable number yet).
@@ -27,7 +27,11 @@ function atPercentageHint(value: string): string {
 }
 
 export function AtSettings() {
-  const { activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster, forgetAtMaster, publishedAts, adoptPublishedAt } = useAgency();
+  const {
+    activeAgency, atMasters, activeAtMaster, setActiveAtMasterId, addAtMaster, updateAtMaster,
+    forgetAtMaster, publishedAts, adoptPublishedAt,
+    agencyJobs, agencyInspections, agencyOil, agencyDataLoad,
+  } = useAgency();
   const [showAddForm, setShowAddForm] = useState(false);
   /**
    * The published template to copy onto the AT being CREATED. '' means "enter rates later".
@@ -66,46 +70,33 @@ export function AtSettings() {
   const [activeAtTab, setActiveAtTab] = useState<'divisions' | 'allotments'>('divisions');
 
   /**
-   * HOW MANY JOBS SIT UNDER EACH AT — read from Firestore, not held in context.
+   * WHICH TENDERS HAVE NO JOBS — derived from the shared agency load (AUDIT G85).
    *
-   * The delete button exists only where this is 0. It is a COUNT FOR THE UI, not the guard:
-   * the guard runs inside the callable, in the same invocation as the delete, and refuses
-   * whatever this screen believed (AUDIT F77). A number read at render is stale the moment
-   * another tab saves an intake, so it decides what to SHOW and nothing else.
+   * This was ONE QUERY PER TENDER, in a loop, on every visit: an agency with eight ATs read
+   * eight times to decide which buttons to draw. The jobs the data layer already holds answer
+   * it, because every AT looped here belongs to the active agency and so does every job of it.
    *
-   * `limit(1)` - the question is "any?", not "how many?". Reading a whole agency's jobs to
-   * decide whether to draw a button is a cost paid on every visit for an action taken twice
-   * a year.
+   * It is still a COUNT FOR THE UI, not the guard: the guard runs inside the callable, in the
+   * same invocation as the delete, and refuses whatever this screen believed (AUDIT F77).
+   *
+   * ⚠ ONLY WHEN THE LOAD SUCCEEDED, AND THIS IS THE DANGEROUS DIRECTION. The old loop left an AT
+   * OUT of the set when its read failed, which HID the delete button - the safe way to be wrong.
+   * An empty shared list after a FAILED load would make every AT look empty and offer delete on
+   * all of them. So loading or failed yields an empty set, and no delete button is drawn at all.
    */
-  const [emptyAtIds, setEmptyAtIds] = useState<Set<string>>(new Set());
+  const emptyAtIds = useMemo(() => {
+    if (agencyDataLoad.status !== 'loaded' || !activeAgency) return new Set<string>();
+    const withJobs = new Set(agencyJobs.map((j: any) => String(j.atId ?? '')).filter(Boolean));
+    return new Set(
+      atMasters
+        .filter(t => t.agencyId === activeAgency.id)
+        .map(t => t.id)
+        .filter(id => !withJobs.has(id)),
+    );
+  }, [agencyJobs, agencyDataLoad.status, atMasters, activeAgency?.id]);
   const [deletingAtId, setDeletingAtId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<{ title: string; message: string; advice: string; items: string[] } | null>(null);
   const [confirmDeleteAt, setConfirmDeleteAt] = useState<AtMaster | null>(null);
-
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    if (!uid || !activeAgency) { setEmptyAtIds(new Set()); return; }
-    let cancelled = false;
-    (async () => {
-      const empty = new Set<string>();
-      for (const at of atMasters.filter(t => t.agencyId === activeAgency.id)) {
-        try {
-          const snap = await getDocs(query(
-            collection(db, 'jobs'),
-            where('ownerId', '==', uid),
-            where('atId', '==', at.id),
-            limit(1),
-          ));
-          if (snap.empty) empty.add(at.id);
-        } catch {
-          // A failed read means UNKNOWN, and unknown must not read as empty - leaving it out
-          // of the set hides the button, which is the safe direction.
-        }
-      }
-      if (!cancelled) setEmptyAtIds(empty);
-    })();
-    return () => { cancelled = true; };
-  }, [atMasters, activeAgency?.id, auth.currentUser?.uid]);
 
   /**
    * THE CLOSING OIL BALANCE OF EACH TENDER, for the carry-forward offer (AUDIT F82).
@@ -117,60 +108,41 @@ export function AtSettings() {
    * A tender's closing balance is what it OPENED with plus what it moved - a tender that
    * opened at +210 and recorded no movement still stands at +210.
    */
-  const [oilByAt, setOilByAt] = useState<Record<string, { net: number; jobs: number; txns: number; byDivision: Record<string, number> }>>({});
-
-  useEffect(() => {
-    const uid = auth.currentUser?.uid;
-    // BEFORE the guard and before any await. An early return must not leave a stale count
-    // standing, and the no-agency case is exactly when a stale one would be wrong.
-    if (!uid || !activeAgency) { setOilByAt({}); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const [jobSnap, inspSnap, txSnap] = await Promise.all([
-          getDocs(query(collection(db, 'jobs'), where('ownerId', '==', uid), where('agencyId', '==', activeAgency.id))),
-          getDocs(query(collection(db, 'inspections'), where('ownerId', '==', uid))),
-          getDocs(query(collection(db, 'oilTransactions'), where('ownerId', '==', uid), where('agencyId', '==', activeAgency.id))),
-        ]);
-        const jobs = jobSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        const inspections = inspSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-        const txns = txSnap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
-
-        const out: Record<string, { net: number; jobs: number; txns: number; byDivision: Record<string, number> }> = {};
-        for (const at of atMasters.filter(t => t.agencyId === activeAgency.id)) {
-          const b = computeOilBalance({
-            // Unassigned rows fall out here on their own: `String(x.atId ?? '')` is '' for
-            // both shapes and '' is never an AT id. Correct, and NOT the same as them being
-            // accounted for - a tender carrying an approximate opening says so on its card.
-            jobs: jobs.filter(j => String(j.atId ?? '') === at.id),
-            inspections,
-            transactions: txns.filter(t => String(t.atId ?? '') === at.id),
-          });
-          // ⚠ THE OPENING BALANCE IS ADDED PER DIVISION, not to the total alone (AUDIT F86).
-          // A tender that opened at +40 in SABARMATI still stands at +40 there, and folding
-          // that into one number would let another division's surplus cancel it - which is
-          // the concealment the per-division split exists to prevent.
-          const openingMap = ((at as any).openingOilBalanceByDivision || {}) as Record<string, number>;
-          const closing = openingMapFrom(b);
-          for (const [div, v] of Object.entries(openingMap)) {
-            closing[div] = Number(((closing[div] || 0) + (Number(v) || 0)).toFixed(2));
-          }
-          const opening = Number((at as any).openingOilBalance);
-          out[at.id] = {
-            net: Number(((Number.isFinite(opening) ? opening : 0) + b.net).toFixed(2)),
-            jobs: b.jobsCounted,
-            txns: b.transactionsCounted,
-            byDivision: closing,
-          };
-        }
-        if (!cancelled) setOilByAt(out);
-      } catch {
-        if (!cancelled) setOilByAt({});   // unknown, and an unknown figure is never shown
+  const oilByAt = useMemo(() => {
+    // Unknown is never shown: a load that is running or has failed yields nothing rather than a
+    // balance computed from an empty list, which would read as "this tender moved no oil".
+    if (agencyDataLoad.status !== 'loaded' || !activeAgency) {
+      return {} as Record<string, { net: number; jobs: number; txns: number; byDivision: Record<string, number> }>;
+    }
+    const out: Record<string, { net: number; jobs: number; txns: number; byDivision: Record<string, number> }> = {};
+    for (const at of atMasters.filter(t => t.agencyId === activeAgency.id)) {
+      const b = computeOilBalance({
+        // Unassigned rows fall out here on their own: `String(x.atId ?? '')` is '' for both
+        // shapes and '' is never an AT id. Correct, and NOT the same as them being accounted
+        // for - a tender carrying an approximate opening says so on its card.
+        jobs: agencyJobs.filter((j: any) => String(j.atId ?? '') === at.id),
+        inspections: agencyInspections,
+        transactions: agencyOil.filter((t: any) => String(t.atId ?? '') === at.id),
+      });
+      // ⚠ THE OPENING BALANCE IS ADDED PER DIVISION, not to the total alone (AUDIT F86).
+      // A tender that opened at +40 in SABARMATI still stands at +40 there, and folding that
+      // into one number would let another division's surplus cancel it - which is the
+      // concealment the per-division split exists to prevent.
+      const openingMap = ((at as any).openingOilBalanceByDivision || {}) as Record<string, number>;
+      const closing = openingMapFrom(b);
+      for (const [div, v] of Object.entries(openingMap)) {
+        closing[div] = Number(((closing[div] || 0) + (Number(v) || 0)).toFixed(2));
       }
-    })();
-    return () => { cancelled = true; };
-  }, [atMasters, activeAgency?.id, auth.currentUser?.uid]);
-
+      const opening = Number((at as any).openingOilBalance);
+      out[at.id] = {
+        net: Number(((Number.isFinite(opening) ? opening : 0) + b.net).toFixed(2)),
+        jobs: b.jobsCounted,
+        txns: b.transactionsCounted,
+        byDivision: closing,
+      };
+    }
+    return out;
+  }, [agencyJobs, agencyInspections, agencyOil, agencyDataLoad.status, atMasters, activeAgency?.id]);
 
   const runDelete = async (at: AtMaster) => {
     setConfirmDeleteAt(null);
@@ -178,7 +150,9 @@ export function AtSettings() {
     setDeleteError(null);
     try {
       await deleteIfEmpty('atMasters', at.id);
-      setEmptyAtIds(prev => { const n = new Set(prev); n.delete(at.id); return n; });
+      // ⚠ NOTHING TO PRUNE HERE ANY MORE (AUDIT G85). `emptyAtIds` is derived from the tenders the
+      // context holds, and `forgetAtMaster` below drops this one - so it leaves the set on its own.
+      // The old line maintained a piece of local state that no longer exists.
 
       // ⚠ TELL THE CONTEXT. The delete happened in a Cloud Function, so nothing in the
       // client knows unless it is told - and an earlier version of this line claimed "the
