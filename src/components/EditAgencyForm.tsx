@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { stateCodeFromGstin, gstinScopeError } from '../lib/utils';
 import { auth } from '../lib/firebase';
 import { useAgency } from '../lib/AgencyContext';
+import { DISCOMS, discomFor, codeFromDiscomName } from '../lib/discoms';
 import { CARD, CARD_PAD } from '../lib/ui';
 import { AgencyMarkTile } from './AgencyMarkTile';
 import { AgencyMark, AgencyMarkColour, MARK_COLOURS, COLOUR_LABEL,
@@ -109,6 +110,17 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
   const [showPageNumbers, setShowPageNumbers] = useState<boolean>(agency.showPageNumbers !== false);
 
   // DISCOM / Client (Buyer) & Tax Details
+  /**
+   * WHICH BOARD, AS A CODE (AUDIT G88).
+   *
+   * ⚠ IT FALLS BACK TO DERIVING FROM THE NAME, so the nine agencies whose board is already
+   * readable from `discomName` see it selected the moment this form opens - before the backfill
+   * script has run, and whether or not it ever does. An agency whose name says nothing gets '',
+   * which renders as "Not recorded" rather than as a board nobody chose.
+   */
+  const [discomCode, setDiscomCode] = useState(
+    agency.discomCode || codeFromDiscomName(agency.discomName) || '',
+  );
   const [discomName, setDiscomName] = useState(agency.discomName || '');
   const [discomGstin, setDiscomGstin] = useState(agency.discomGstin || '');
   const [discomPan, setDiscomPan] = useState(agency.discomPan || '');
@@ -160,6 +172,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
     setEmail(agency.email || '');
     setMsmeNo(agency.msmeNo || '');
 
+    setDiscomCode(agency.discomCode || codeFromDiscomName(agency.discomName) || '');
     setDiscomName(agency.discomName || '');
     setDiscomGstin(agency.discomGstin || '');
     setDiscomPan(agency.discomPan || '');
@@ -329,6 +342,15 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
       checkChange('Access email (who can use this agency)', agency.email, email);
       checkChange('MSME / Udyam No', agency.msmeNo, msmeNo);
 
+      /**
+       * ⚠ IT IS IN THE SUMMARY BECAUSE IT NOW DECIDES WHAT THE AGENCY CAN SEE (AUDIT G88).
+       *
+       * The board is no longer a label on a letter - it filters which published tenders appear
+       * when an AT is created. Changing it silently would change what an operator is able to
+       * select, with nothing on screen saying so.
+       */
+      checkChange('Electricity board (decides which tenders you can select)',
+                  agency.discomCode || codeFromDiscomName(agency.discomName) || '', discomCode);
       checkChange('DISCOM Name', agency.discomName, discomName);
       checkChange('DISCOM GSTIN', agency.discomGstin, discomGstin);
       checkChange('DISCOM PAN', agency.discomPan, discomPan);
@@ -393,6 +415,7 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
         msmeNo,
 
         // DISCOM details
+        discomCode,
         discomName,
         discomGstin,
         discomPan,
@@ -814,6 +837,46 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* ⚠ A CODE FOR MATCHING, A NAME FOR PRINTING - TWO FIELDS, DELIBERATELY (AUDIT G88).
+                  `discomName` is free text and live data already holds two spellings of one board,
+                  so a tender filter keyed on it reads them as two and shows one of them nothing.
+                  The selector below writes a stable code; the name underneath still prints on the
+                  tax invoice and the forwarding letter, and stays editable for exactly that. */}
+              <div className="md:col-span-2">
+                <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
+                  Electricity board
+                </label>
+                <select
+                  value={discomCode}
+                  onChange={e => {
+                    const code = e.target.value;
+                    setDiscomCode(code);
+                    /**
+                     * ⚠ IT OFFERS THE LEGAL NAME, AND NEVER OVERWRITES ONE ALREADY THERE.
+                     *
+                     * Filling a BLANK name is a convenience. Replacing a name someone typed would
+                     * rewrite what prints on a tax invoice as a side effect of setting a filter
+                     * key - and one live agency's name is spelled differently from the rest while
+                     * its invoices presumably read correctly today.
+                     */
+                    const d = discomFor(code);
+                    if (d && !discomName.trim()) setDiscomName(d.name);
+                  }}
+                  className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
+                >
+                  {/* Never a silent default: "not recorded" is a state the app says out loud. */}
+                  <option value="">Not recorded &mdash; no tenders will be offered</option>
+                  {DISCOMS.map(d => (
+                    <option key={d.code} value={d.code}>{d.label}</option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-slate-500 leading-relaxed">
+                  Decides which published tenders you can select when creating an AT. Set it and
+                  only your board&rsquo;s tenders are offered; leave it unset and you are told to
+                  set it rather than shown an empty list.
+                </p>
+              </div>
+
               <div className="md:col-span-2">
                 <label className="block text-xs font-bold uppercase tracking-widest text-slate-600 mb-1">
                   DISCOM / Company Full Name *
@@ -825,6 +888,10 @@ export default function EditAgencyForm({ agency }: { agency: any }) {
                   className="w-full px-3 py-2 text-sm font-bold border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 bg-white"
                   placeholder="e.g. Uttar Gujarat Vij Company Ltd."
                 />
+                <p className="mt-1 text-[11px] text-slate-500">
+                  Printed on estimates, bills and forwarding letters, so it must read exactly as
+                  the board expects.
+                </p>
               </div>
 
               <div>

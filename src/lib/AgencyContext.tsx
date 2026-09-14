@@ -113,6 +113,20 @@ export interface Agency {
   ifscCode?: string;
 
   // DISCOM / Client (Buyer) & Tax Details
+  /**
+   * WHICH BOARD, AS A STABLE CODE - one of lib/discoms.ts (AUDIT G88).
+   *
+   * ⚠ SEPARATE FROM `discomName`, AND IT HAS TO BE. That field is the LEGAL NAME printed on a tax
+   * invoice and a forwarding letter, and live data already holds two spellings of one board -
+   * "Uttar Gujarat Vij Company Ltd." on eight agencies and "UTTAR GUJARAT VIJ CO LTD." on a
+   * ninth. A tender filter keyed on that string reads them as two boards and shows one of them
+   * nothing. The code matches; the name prints.
+   *
+   * ⚠ ABSENT MEANS NOT RECORDED, NEVER A DEFAULT BOARD. Eight of eighteen agencies have none, so
+   * this is the common case rather than the edge one: they are shown "set your electricity board"
+   * rather than another board's tenders.
+   */
+  discomCode?: string; // e.g. "UGVCL"
   discomName?: string; // e.g. "Uttar Gujarat Vij Company Ltd."
   discomGstin?: string; // e.g. "24AAACU6551F1ZI"
   discomPan?: string; // e.g. "AAACU6551F"
