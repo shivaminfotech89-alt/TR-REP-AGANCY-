@@ -1,0 +1,47 @@
+# LINE ENDINGS ARE LF, IN THE REPOSITORY AND IN THE WORKING TREE (AUDIT G89).
+#
+# WHY THIS EXISTS
+# ---------------
+# `core.autocrlf=true` on this machine handed CRLF working copies to tools that read files from
+# disk, while git stored them as LF. One file - src/components/EditAgencyForm.tsx - ended up with
+# MIXED CRLF, CR and LF terminators, and an edit script that detects the file's endings before
+# rewriting picked CRLF and normalised every inserted line that way. The result was a commit whose
+# diff read 1434 insertions and 1367 deletions for a SIX-EDIT change: the real change was 67 lines,
+# and 1,366 lines of untouched code were rewritten around it.
+#
+# Nothing was wrong in the content - the diff ignoring carriage returns was identical before and
+# after - but a commit that buries six edits inside 1,366 unchanged lines defeats the point of a
+# reviewable history, which is most of what this repository is for.
+#
+# WHAT IT CHANGES
+# ---------------
+# ⚠ NOT THE REPOSITORY'S CONTENT. `git ls-files --eol` reports 298 of 303 tracked files already
+# stored as LF in the index; the remaining 5 are the PNGs, correctly detected as binary. So this
+# normalises what git WRITES TO DISK on checkout, not what it stores.
+#
+# ⚠ IT MOVES THE PRINTED-SUBTREE HASHES ONCE, AND THAT IS EXPECTED.
+# `scripts/admin/print-subtree-hashes.js` reads source with `readFileSync(f, 'utf8')` and hashes
+# the extracted subtree text, so those sha256 values follow the bytes ON DISK. Today those bytes
+# carry CRLF; afterwards they carry LF, so every hash moves - once, in the direction of matching
+# what the repository actually stores. Re-baseline deliberately after the working tree is
+# renormalised, rather than discovering the change later and wondering what altered a document.
+#
+# Its `--compare` side reads index bytes through `git show`, which are LF already - so the two
+# sides agree AFTER this change rather than before it.
+#
+# `scripts/admin/verify-seed-equality.js` is unaffected: it hashes canonicalised JSON of a document
+# built in memory, never file bytes, so the functions predeploy step cannot be disturbed by this.
+
+# Text files: git decides what is text, and every text file is LF on disk and in the index.
+* text=auto eol=lf
+
+# Binary, stated explicitly rather than relying on detection - a mangled PNG is silent.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.xlsx binary

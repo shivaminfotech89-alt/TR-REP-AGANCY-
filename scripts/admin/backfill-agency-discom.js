@@ -37,6 +37,29 @@ const MODE = 'dry-run'; // 'dry-run' | 'apply'
 /** The fixed list. Must stay in step with src/lib/discoms.ts. */
 const CODES = ['UGVCL', 'MGVCL', 'PGVCL', 'DGVCL', 'GETCO'];
 
+/**
+ * ⚠ AGENCIES WHOSE BOARD IS AMBIGUOUS, EXCLUDED BY ID AND REPORTED RATHER THAN GUESSED.
+ *
+ * GUJARAT ENERGY TRANSMISSION records `discomName` as "Uttar Gujarat Vij Company Ltd." - which
+ * derives to UGVCL - while its AGENCY NAME says GETCO. Those are two different boards, and the
+ * record does not say which is right. Writing either would be confidently wrong half the time,
+ * and a wrong code is worse than none: it would silently show that agency one board's tenders
+ * and hide the other's, with nothing on screen saying why.
+ *
+ * An agency whose board is ambiguous should be VISIBLY UNSET. It sees "set your electricity
+ * board", which is honest, and one click fixes it once someone has asked them.
+ *
+ * Keyed on the document id, not the name: a name can be edited, and an exclusion that silently
+ * stops applying is the failure this is meant to prevent. The run REFUSES if the id is gone.
+ */
+const AMBIGUOUS = [
+  {
+    id: 'zT54N8IsciUzZbancxBy',
+    name: 'GUJARAT ENERGY TRANSMISSION',
+    why: 'discomName says UGVCL, agency name says GETCO - ask the agency which board they tender with',
+  },
+];
+
 /** Match on letters only, so case and punctuation cannot make one board into two. */
 const norm = v => String(v ?? '').toUpperCase().replace(/[^A-Z]/g, '');
 
@@ -60,16 +83,32 @@ const planned = [];
 const leftUnset = [];
 const already = [];
 
+const excluded = [];
+
 for (const a of agencies) {
   const existing = String(a.discomCode ?? '').trim();
   const derived = codeFor(a.discomName);
-  if (existing) {
+  const ambiguous = AMBIGUOUS.find(x => x.id === a.id);
+  if (ambiguous) {
+    // Reported, never written - see AMBIGUOUS above.
+    excluded.push({ a, why: ambiguous.why });
+  } else if (existing) {
     already.push({ a, existing });
   } else if (derived) {
     planned.push({ id: a.id, name: a.name, from: a.discomName, code: derived });
   } else {
     leftUnset.push(a);
   }
+}
+
+// ⚠ AN EXCLUSION THAT NO LONGER MATCHES IS A SILENT FAILURE. If the agency was deleted or its id
+// changed, this script would quietly go back to writing a value nobody decided on.
+const missing = AMBIGUOUS.filter(x => !agencies.some(a => a.id === x.id));
+if (missing.length > 0) {
+  console.log('REFUSING: an ambiguous-agency exclusion no longer matches any agency.');
+  for (const m of missing) console.log(`  ${m.id}  ${m.name}`);
+  console.log('  Re-check whether that agency still exists before running this.');
+  process.exit(1);
 }
 
 console.log(`${agencies.length} agency/agencies\n`);
@@ -83,6 +122,15 @@ if (already.length > 0) {
 console.log(`WOULD WRITE (${planned.length}):`);
 for (const p of planned) {
   console.log(`  ${String(p.name).slice(0, 32).padEnd(32)} discomCode=${p.code.padEnd(6)} from ${JSON.stringify(p.from)}`);
+}
+
+if (excluded.length > 0) {
+  console.log(`\n⚠ NEEDS AN ANSWER — excluded deliberately (${excluded.length}):`);
+  for (const e of excluded) {
+    console.log(`  ${String(e.a.name).slice(0, 32).padEnd(32)} discomName=${JSON.stringify(e.a.discomName ?? null)}`);
+    console.log(`${' '.repeat(34)}${e.why}`);
+  }
+  console.log('  Left unset on purpose. Ask the agency, then set it in Agency Settings.');
 }
 
 console.log(`\n⚠ LEFT UNSET — nothing on the record names a board (${leftUnset.length}):`);
