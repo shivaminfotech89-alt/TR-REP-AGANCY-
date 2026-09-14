@@ -12,7 +12,7 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useAgency, highWaterJobNos, atClause, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
+import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
 import { mrStageSummary } from '../lib/inspectionStage';
@@ -180,7 +180,10 @@ function LockedMrHeaderField({ label, mix, reason }: {
 }
 
 export default function MrLedger() {
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -191,7 +194,9 @@ export default function MrLedger() {
    * not cost the same.
    */
   const __trial = useTrialGate(activeAgency?.id);
-  const [loading, setLoading] = useState(true);
+  // The shared load's status (AUDIT G86): one spinner for one read, rather than a local copy of
+  // a question the data layer already answers.
+  const loading = agencyDataLoad.status === 'loading';
   /**
    * WORK THAT BELONGS TO NO TENDER (AUDIT F82).
    *
@@ -217,43 +222,68 @@ export default function MrLedger() {
     [activeAtMaster, atMasters, activeAgency?.id],
   );
 
-  const [unassignedJobs, setUnassignedJobs] = useState<any[]>([]);
+  /**
+   * ⚠ DERIVED FROM THE SHARED LOAD, AND STILL NOT A QUERY (AUDIT F87, G86).
+   *
+   * Firestore has no "field is missing" predicate, so "unassigned" cannot be expressed as a
+   * filter at all - it is recognised after reading, where `isUnassigned` treats absent and empty
+   * alike. That was true when this screen read the database for itself and it is still true. What
+   * changed is that the agency-wide read it needed is the one the data layer already makes.
+   *
+   * ⚠ EMPTY WHILE LOADING OR AFTER A FAILURE, WHICH IS NOT THE SAME AS "NONE". The old catch set
+   * an empty list, and the comment beside it said a failed read must not be reported as "none" -
+   * while an empty list was exactly how it was reported. Gating on `loaded` is what finally makes
+   * that true: a failure now shows no banner at all rather than a false all-clear.
+   */
+  const unassignedJobs = useMemo(
+    () => (agencyDataLoad.status === 'loaded' ? agencyJobs.filter(isUnassigned) : []),
+    [agencyJobs, agencyDataLoad.status],
+  );
   const [showUnassigned, setShowUnassigned] = useState(false);
 
-  useEffect(() => {
-    if (!auth.currentUser || !activeAgency) { setUnassignedJobs([]); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        // ⚠ AGENCY-WIDE READ, FILTERED IN MEMORY — AND IT CANNOT BE A QUERY (AUDIT F87).
-        //
-        // This was `where('atId','==','')`, which found 4 of the 12. Firestore equality does
-        // not match a document whose field is ABSENT, and 8 of the 12 predate the field
-        // entirely - including MSBT-12, the estimated, billed and PAID job this banner exists
-        // to keep reachable. It reported a plausible wrong count for a fortnight, which is
-        // worse than reporting none: a banner reading "4 jobs belong to no tender" asserts
-        // that four is the number, and nobody re-counts an answer that looks like one.
-        //
-        // There is no query that fixes it. Firestore has no "field is missing" predicate, so
-        // "unassigned" cannot be expressed as a filter at all - it can only be recognised
-        // after reading, where `isUnassigned` treats absent and empty alike. The cost is one
-        // agency-wide read; the alternative is a number that is quietly wrong.
-        const snap = await getDocs(query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser!.uid),
-          where('agencyId', '==', activeAgency.id),
-        ));
-        const rows = snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(isUnassigned);
-        if (!cancelled) setUnassignedJobs(rows);
-      } catch {
-        // A failed read must not be reported as "none" - that is the same lie as hiding them.
-        if (!cancelled) setUnassignedJobs([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [activeAgency?.id, auth.currentUser?.uid]);
+  /**
+   * THE MRs ON SCREEN, GROUPED FROM THE SHARED LOAD (AUDIT G86).
+   *
+   * This was a query on mount AND again after every write - four reads of one agency's jobs in a
+   * session that edited three MRs. The data layer holds them, so the tender filter is a filter
+   * over rows already in hand.
+   *
+   * ⚠ `matchesAtScope`, NOT A FILTER WRITTEN HERE (AUDIT F99). The in-memory form of the tender
+   * rule is declared beside `atClause` precisely so the two cannot drift, and F87 is what drift
+   * costs: a JavaScript `?? ''` guard and a Firestore `== ''` clause were assumed to agree and
+   * did not. It handles all three states - every tender, one tender, and NONE selected, which
+   * shows nothing rather than everything.
+   *
+   * ⚠ EMPTY UNTIL THE LOAD SUCCEEDS. An empty ledger after a failed read would say "this agency
+   * has no work", which is the O71 shape; the banner keyed on `agencyDataLoad` says otherwise.
+   */
+  const mrGroups = useMemo<MrGroup[]>(() => {
+    if (agencyDataLoad.status !== 'loaded' || !activeAgency) return [];
+    const scoped = agencyJobs.filter((j: any) => matchesAtScope(j, activeAtMaster, viewingAllTenders));
 
-  const [mrGroups, setMrGroups] = useState<MrGroup[]>([]);
+    const groups: Record<string, MrGroup> = {};
+    scoped.forEach((job: any) => {
+      const mrKey = job.mrNo || 'UNKNOWN-MR';
+      if (!groups[mrKey]) {
+        groups[mrKey] = {
+          mrNo: job.mrNo,
+          dateOfIssue: job.dateOfIssue || '',
+          division: job.division || 'Unknown',
+          repairType: job.repairType || 'OGP',
+          isCancelled: false,
+          jobs: [],
+        };
+      }
+      groups[mrKey].jobs.push(job);
+    });
+
+    // An MR is cancelled only when every job on it is.
+    Object.values(groups).forEach(g => {
+      g.isCancelled = g.jobs.length > 0 && g.jobs.every(j => j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled');
+    });
+
+    return [...Object.values(groups)].sort(byDateDesc((g: any) => g.dateOfIssue));
+  }, [agencyJobs, agencyDataLoad.status, activeAgency?.id, activeAtMaster, viewingAllTenders]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CANCELLED'>('ALL');
@@ -268,26 +298,7 @@ export default function MrLedger() {
    * that nobody puts side by side. That is F87 exactly, and it cost a fortnight last time.
    * `inspections` carries no agencyId, so this is owner-scoped and matched per job.
    */
-  const [mrInspections, setMrInspections] = useState<any[]>([]);
-  useEffect(() => {
-    if (!auth.currentUser) { setMrInspections([]); return; }
-    let cancelled = false;
-    (async () => {
-      try {
-        const snap = await getDocs(query(
-          collection(db, 'inspections'),
-          where('ownerId', '==', auth.currentUser!.uid),
-        ));
-        if (!cancelled) setMrInspections(snap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch {
-        // Unknown, not empty. An empty list would render every MR as "not started",
-        // which is a claim; leaving it empty and saying so is not.
-        if (!cancelled) setMrInspections([]);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [auth.currentUser?.uid]);
-
+  const mrInspections = agencyInspections;
   /**
    * WHAT AN MR ACTUALLY HOLDS — counted, never collapsed to one value (AUDIT G10/G11).
    *
@@ -347,65 +358,6 @@ export default function MrLedger() {
   // Reactivate MR State
   const [reactivateConfirmMr, setReactivateConfirmMr] = useState<MrGroup | null>(null);
   const [isReactivatingMr, setIsReactivatingMr] = useState(false);
-
-  const fetchJobs = async () => {
-    if (!auth.currentUser || !activeAgency) {
-      setMrGroups([]);
-      setLoading(false);
-      return;
-    }
-    
-    try {
-      const q = query(
-        // ⚠ THE ACTIVE TENDER (AUDIT F82). A new AT starts fresh - no MRs, no jobs, no
-        // estimates, bills, challans or testing carry over - so every screen shows the work
-        // of the AT selected in the top bar, exactly as it already shows only the active
-        // agency's. Unassigned work (no atId) matches no tender and is reached through the
-        // unassigned view instead: it is not lost, and it is not pretended to belong here.
-        collection(db, 'jobs'),
-        where('ownerId', '==', auth.currentUser.uid),
-        where('agencyId', '==', activeAgency.id),
-        ...atClause(activeAtMaster, viewingAllTenders),
-      );
-      const snapshot = await getDocs(q);
-      const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
-      
-      // Group by MR No
-      const groups: Record<string, MrGroup> = {};
-      fetchedJobs.forEach(job => {
-        const mrKey = job.mrNo || 'UNKNOWN-MR';
-        if (!groups[mrKey]) {
-          groups[mrKey] = {
-            mrNo: job.mrNo,
-            dateOfIssue: job.dateOfIssue || '',
-            division: job.division || 'Unknown',
-            repairType: job.repairType || 'OGP',
-            isCancelled: false,
-            jobs: []
-          };
-        }
-        groups[mrKey].jobs.push(job);
-      });
-
-      // Mark MR as cancelled if all its jobs are marked Cancelled
-      Object.values(groups).forEach(g => {
-        g.isCancelled = g.jobs.length > 0 && g.jobs.every(j => j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled');
-      });
-      
-      // Sort MRs by date (newest first)
-      const sortedGroups = [...Object.values(groups)].sort(byDateDesc((g: any) => g.dateOfIssue));
-      
-      setMrGroups(sortedGroups);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'jobs');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchJobs();
-  }, [activeAgency]);
 
   // Extract unique divisions for filter
   const divisions = useMemo(() => {
@@ -717,9 +669,13 @@ The units already on this MR can still be edited.` };
      *   2. OIL DID NOT FOLLOW. `oilTransactions` is its own collection with its own `mrNo`, matched to an MR by
      *      plain string equality - so a rename detached the litres the division issued, silently.
      *
-     * ⚠ THE COLLISION IS CHECKED AGAINST THE ACCOUNT, NOT AGAINST WHAT THIS SCREEN FETCHED. `fetchJobs` is scoped
-     * to the active tender, so an MR under another tender would not be in `mrGroups` and a merge with it would pass
-     * unseen. The query below asks the database.
+     * ⚠ THE COLLISION IS CHECKED AGAINST THE ACCOUNT, NOT AGAINST WHAT THIS SCREEN HOLDS. `mrGroups` is scoped to
+     * the active tender, so an MR under another tender would not be in it and a merge with it would pass unseen.
+     * The query below asks the database.
+     *
+     * ⚠ AND NOT THE SHARED AGENCY LIST EITHER (AUDIT G86). That list is one AGENCY's jobs; this asks about the whole
+     * ACCOUNT, because an MR number taken in another agency is still taken. Narrower AND staler, in a check whose
+     * only job is to catch a clash.
      */
     const newMrNo = editingMr.mrNo.trim();
     const oldMrNo = String(editingMr.originalMrNo ?? '').trim();
@@ -842,6 +798,10 @@ The units already on this MR can still be edited.` };
      */
     let inspectionsToDelete: string[] = [];
     if (editingMr.deletedJobIds.length > 0) {
+      // ⚠ READ FRESH, NOT FROM `agencyInspections` (AUDIT G86). This decides what a save is about
+      // to STRAND, at the moment it commits. An inspection recorded since the agency was selected
+      // is missing from the shared snapshot, and missing here means silently orphaned rather than
+      // deleted - so the count the operator confirms would be wrong in the direction of loss.
       try {
         const inspSnap = await getDocs(query(
           collection(db, 'inspections'),
@@ -1023,7 +983,8 @@ The units already on this MR can still be edited.` };
       setTimeout(() => setNotification(null), 5000);
 
       setEditingMr(null);
-      await fetchJobs();
+      // The data layer re-reads and every screen sharing it updates (AUDIT G86).
+      refreshAgencyData();
     } catch (err) {
       console.error('Error saving full MR edit:', err);
       handleFirestoreError(err, OperationType.UPDATE, 'jobs');
@@ -1073,7 +1034,7 @@ The units already on this MR can still be edited.` };
       if (editingMr?.originalMrNo === cancelConfirmMr.mrNo) {
         setEditingMr(null);
       }
-      await fetchJobs();
+      refreshAgencyData();
     } catch (err) {
       console.error('Error cancelling MR:', err);
       handleFirestoreError(err, OperationType.UPDATE, 'jobs');
@@ -1093,7 +1054,15 @@ The units already on this MR can still be edited.` };
     if (!auth.currentUser || !activeAgency) return;
     setIsReactivatingMr(true);
     try {
-      // Check if any job number is currently used by another active job in the agency
+      /**
+       * ⚠ A DIRECT QUERY, AND IT MUST NOT READ THE SHARED LIST (AUDIT G86).
+       *
+       * This decides whether a job number is free AT THE INSTANT of reactivation. The shared list
+       * is a snapshot taken when the agency was selected, so it can report a number free that was
+       * booked ten minutes ago in another tab - and this guard exists to refuse exactly that. The
+       * shape is the same as the shared query, which is what makes the substitution tempting and
+       * wrong: what differs is not the filter but WHEN it was read.
+       */
       const q = query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
@@ -1133,7 +1102,7 @@ The units already on this MR can still be edited.` };
       });
       setTimeout(() => setNotification(null), 5000);
       setReactivateConfirmMr(null);
-      await fetchJobs();
+      refreshAgencyData();
     } catch (err) {
       console.error('Error reactivating MR:', err);
       handleFirestoreError(err, OperationType.UPDATE, 'jobs');
