@@ -17055,3 +17055,115 @@ rather than the code.
 - **⚠ NOT SEEN RENDERED.** The prefill and its label are asserted at the source, not observed on the form.
 
 **Deploy:** hosting - a push to `main` (O71). The template correction is a separate act the owner runs.
+
+---
+
+## G84-G86. The agency's work read once, and fifteen screens reading it (O71 fix 3, Half B)
+
+**Fifteen screens each queried `jobs`, `inspections` and `oilTransactions` for themselves on mount.** Opening the
+Dashboard, then the ledger, then billing read the same jobs three times. O71 measured that pattern as one twelve
+customers can exhaust in a day. The data layer now loads the active agency's work ONCE and the screens read it.
+
+### G84. The loader
+
+`AgencyContext` holds `agencyJobs`, `agencyInspections`, `agencyOil`, `agencyDataLoad` and `refreshAgencyData()`,
+loaded in one effect keyed on the active agency.
+- **`agencyDataLoad` carries G70's three states**, so every screen can tell a failed read from an empty one - the
+  distinction O71 was about.
+- **A failed load CLEARS the lists.** Keeping the previous agency's rows on screen under a new agency's name is
+  worse than showing nothing, so they are cleared before the read and the status carries the reason. A `cancelled`
+  flag stops a late answer for the previous agency landing on the new one.
+- The listener attaches at import, and the Dashboard was the first consumer: its fetch, its only `useEffect` and
+  both Firestore import lines are gone.
+
+### G85. Inspections could not be agency-scoped until the data allowed it
+
+**59 of 144 inspections carried NO `agencyId`.** Scoping the shared query by agency would have returned 85 and
+**silently dropped the other 59 from every screen that reads it** - work still in the database going quiet because
+of a change made to save reads. That is a worse fault than the cost it removes, and it was measured BEFORE a line
+was written (`scripts/admin/agency-scope-coverage.js`).
+
+**All 59 resolved through `jobId` to exactly one job in exactly one agency: 0 ambiguous, 0 unresolvable** - MEGHA
+43, ADMIN 14, AARATI 2. `backfill-inspection-agency.js` stamped them; the database reads **144/144**. The script
+refuses the whole run if any orphan fails to resolve, checks the inspection's owner matches the job's owner before
+taking an agency from it, and reads every result back from the database.
+
+**⚠ WHAT THE SCOPING ACTUALLY SAVES, MEASURED (`inspection-read-cost.js`):**
+
+| | before | after |
+|---|---|---|
+| rows, per load, summed across agencies holding inspections | 217 | **144** |
+| read units (Enterprise bills by bytes, 4 KiB units) | 35 | **25** |
+
+**⚠ AND WHAT IT DOES NOT.** The saving is **ZERO for an owner with one agency** - owner-scoped and agency-scoped
+are the same set - and only **3 of 12 owners have more than one**. AARATI is nearly the whole effect: 73 rows read
+to use 2. MEGHA saves 2 rows. **This is correctness of scope far more than it is cost.**
+
+### G86. The screens
+
+**Four read-only:** Dashboard, AtSettings, AtAllotments, AdminPanel. **Eleven writing.** AtSettings' per-AT
+emptiness probe was **one query PER TENDER on every visit** and is now derived from the jobs already held.
+
+**⚠ THE READS THAT STAY DIRECT, EACH SAYING WHY AT ITS OWN CALL SITE.** A cached, agency-scoped, load-once list
+answers "what is this agency's work". It cannot answer an account-wide or a moment-of-decision question, and a
+cached answer there is not staler but WRONG - wrong in the direction of allowing a duplicate rather than refusing
+one:
+- the duplicate **MR** check and the duplicate **job-number** check (NewJob) - account-wide by design;
+- NewJob's agency-wide job-number map - **the same shape as the shared list**, which is what makes substituting it
+  tempting; what differs is not the filter but WHEN it was read;
+- the **MR rename collision** check (MrLedger) - one agency's list cannot see a clash in another;
+- the **reactivation** job-number check (MrLedger) - free at the instant it reactivates, not at mount;
+- the **orphan-inspection** check before a delete - it decides what a save is about to STRAND;
+- the **allotment floor** (NewJob, AtAllotments) - true when it refuses, or an intake passes a committed quota;
+- the **counter advance** (NewJob) - transactional, reads inside the transaction;
+- **AdminPanel's unfiltered read** - every agency on every account, the one question no per-agency cache answers;
+- **EditJob** - one job by ID from a link, where a cache miss would be indistinguishable from "not found".
+
+**⚠ THE LOCAL-STATE PATCHES WERE THE LARGER FIND.** DispatchChallan, Reports, BillingSystem (×3) and
+EstimateGenerate (×6) each patched their own list after writing instead of re-reading. Four of those recomputed
+**GST or estimate totals a second time** so the in-memory copy would match the batch - one figure derived twice by
+two pieces of code that had to be kept in step, skip for skip. They updated their own screen and nothing else: a
+bill marked Sent was still unsent on the ledger until a remount. Removing them removes the duplication as well as
+the staleness.
+
+**THREE FAULTS FIXED ON THE WAY, none of them the point of the work:**
+- **EstimateGenerate's rating patch updated the screen BEFORE the write and its catch only logs** - so a rating
+  that failed to save stayed on screen looking saved. Re-reading after the commit costs a round trip; in exchange a
+  failed write now changes nothing.
+- **Two MrLedger catch blocks set an empty list on failure** while the comments beside them said a failed read must
+  not be reported as "none". Both derivations are now gated on a LOADED status.
+- **TestingReport re-queried whenever its form closed, including a CANCELLED form** - reading the whole agency to
+  reflect nothing. One re-read after the write REMOVES a read.
+
+### ⚠ MY OWN FAILURES IN THIS WORK, AND THE RULE THEY DRAW
+
+- **A knowingly-partial script pointed at MrLedger.** Its own last line printed "PARTIAL - review before
+  continuing", and it would have produced `const q = 0 && query(` and an `await` inside a memo. Discarded unrun.
+- **Stripping imports broke the build twice.** `handleFirestoreError`/`OperationType` and `auth` live in WRITE
+  paths; `collection` is how `doc(collection(db, 'inspections'))` gets a new id. After the second, the firestore
+  imports were left alone deliberately - unused imports are not type errors and tree-shaking handles the bundle.
+- **Collapsing `loading` into one derived value broke three screens.** It answers two questions - "the shared read
+  is in flight" and "this screen's write is in flight" - and a derived value cannot be set. Screens whose writes
+  set it keep a local `busy`; the rest derive. **Checkable in advance, and checked in advance thereafter.**
+- **An anchor reconstructed from grep output failed** on trailing whitespace invisible in grep. The script
+  validated before writing, so nothing was touched.
+- **⚠ THE BUILD PASSED WITH 10 TYPE ERRORS PRESENT, AND AGAIN WITH 2. So did all 184 tests.** Vite does not
+  typecheck. "Build passes" had been cited in these commits as though it carried type correctness; it does not,
+  and only `tsc` caught any of it - which a shell pipeline nearly hid, because `$?` after `tsc | grep -v` is
+  GREP's status, and grep exits 1 when it prints nothing.
+
+> **THE RULE: convert ONE screen per commit.** Both batched attempts (three screens, then two) produced type
+> errors. Every single-screen commit - MrLedger, NewJob, OilInward, BillingSystem, EstimateGenerate - was clean
+> first time.
+
+**Verified:** tsc (exit 0); **184 tests in 17 files, 6 new**; build; hooks guard, 48 files.
+- **⚠ NOT SEEN RENDERED, AND THE SAVING IS NOT MEASURED END TO END.** Every screen's behaviour is asserted at the
+  source or by type, not observed. The per-load figures above are counted from live data; what a day actually
+  costs is not.
+- **⚠ THE LETTERHEADS ARE UNTOUCHED, AND THEY ARE THE LARGER COST FOR THE ACCOUNTS THAT HAVE THEM.** MEGHA's
+  agency document is **167.4 KiB, of which 144.4 KiB (86%) is the letterhead image**; ZENITH is 129.5 KiB with
+  112 KiB. Per sign-in: two owners read **230.9 KiB** (4 agencies) and **145.2 KiB** (2), while the other ten read
+  **0.9-18 KiB with no letterhead at all**. Against that, the largest agency's whole work is 65 documents. Half B
+  is the structural fix; the letterhead move is the one that shifts the bytes.
+
+**Deploy:** hosting - a push to `main` (O71).
