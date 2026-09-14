@@ -8,7 +8,10 @@ import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { matchesAtScope } from '../lib/AgencyContext';
 import { OtherTenderNote } from './OtherTenderNote';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
+// ⚠ READS COME FROM THE DATA LAYER NOW (AUDIT G86); the inspection write stays here - and so does
+// `collection`, which the write needs: `doc(collection(db, 'inspections'))` is how a NEW inspection
+// gets its id. It was never a read-only import.
+import { writeBatch, doc, collection } from 'firebase/firestore';
 import { ClipboardCheck, Loader2, ArrowLeft, Search, Save, Filter, Download, Printer, Sparkles, Scale, Cpu, AlertTriangle, CheckCircle2, X } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
@@ -91,7 +94,10 @@ export const getStandardOilCapacity = (kva: number | string): number => {
 };
 
 export default function ExternalInspection() {
-  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, atMasters, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -102,8 +108,25 @@ export default function ExternalInspection() {
    * not cost the same.
    */
   const __trial = useTrialGate(activeAgency?.id);
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
+  /**
+   * ⚠ FROM THE SHARED LOAD, SPLIT BY TYPE IN MEMORY (AUDIT G86).
+   *
+   * This screen queried on mount AND again after every save. The data layer holds all of it, so
+   * the type split is a filter over rows already in hand. Live data carries `type` on 144 of 144
+   * records - exactly 'Internal' (69) and 'External' (75) - so the split is exhaustive rather
+   * than a guess that silently drops a third value.
+   *
+   * ⚠ `jobs` STAYS AGENCY-WIDE ACROSS EVERY TENDER, DELIBERATELY. `scopedJobs` narrows to the
+   * selected tender and `otherTenderPending` counts what that narrowing hides - both from this
+   * one list. Scoping it here would make the second number permanently zero, which is exactly
+   * what the note on screen exists to prevent.
+   */
+  const jobs = agencyJobs;
+  /** External-type only. */
+  const inspections = useMemo(
+    () => agencyInspections.filter((i: any) => i.type === 'External'),
+    [agencyInspections],
+  );
 
   /**
    * ⚠ THE SCOPE IS APPLIED HERE, NOT AT THE QUERY — AND THAT IS THE POINT (AUDIT F99).
@@ -130,7 +153,9 @@ export default function ExternalInspection() {
       j.status !== 'Cancelled' && !j.isCancelled && j.mrStatus !== 'Cancelled' &&
       !isJobExternallyDone(j, inspections)).length;
   }, [jobs, inspections, activeAtMaster, viewingAllTenders]);
-  const [loading, setLoading] = useState(true);
+  // The shared load's status. This screen's save uses `isSubmitting`, so nothing here sets it -
+  // which is why it can be derived rather than kept as state (AUDIT G86).
+  const loading = agencyDataLoad.status === 'loading';
   
   const [selectedMrNo, setSelectedMrNo] = useState<string | null>(null);
   const [externalInspectionDate, setExternalInspectionDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -143,36 +168,6 @@ export default function ExternalInspection() {
   const [pendingChange, setPendingChange] = useState<PendingChange | null>(null);
   
   const [statusFilter, setStatusFilter] = useState<'Pending' | 'Completed'>('Pending');
-
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!auth.currentUser || !activeAgency) return;
-      try {
-        setLoading(true);
-        const jobsQ = query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', activeAgency.id)
-        );
-        const [jobsSnap, inspSnap] = await Promise.all([
-          getDocs(jobsQ),
-          getDocs(query(
-            collection(db, 'inspections'),
-            where('ownerId', '==', auth.currentUser.uid),
-            where('type', '==', 'External')
-          ))
-        ]);
-        
-        setJobs(jobsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
-        setInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.LIST, null);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, [activeAgency]);
 
   const handleSelectMr = (mrNo: string, allJobs = jobs, allInspections = inspections) => {
     const jobsForMr = allJobs.filter(j => j.mrNo === mrNo);
@@ -623,22 +618,10 @@ export default function ExternalInspection() {
 
       await batch.commit();
 
-      // Refresh data
-      const jobsQ = query(
-        collection(db, 'jobs'),
-        where('ownerId', '==', auth.currentUser.uid),
-        where('agencyId', '==', activeAgency.id)
-      );
-      const [jobsSnap, inspSnap] = await Promise.all([
-        getDocs(jobsQ),
-        getDocs(query(
-          collection(db, 'inspections'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('type', '==', 'External')
-        ))
-      ]);
-      setJobs(jobsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any)));
-      setInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+      // ⚠ ONE RE-READ THROUGH THE DATA LAYER (AUDIT G86). This re-queried jobs AND inspections
+      // for itself, which updated this screen and nothing else: the ledger, the dashboard and the
+      // internal inspection screen all went on showing the pre-save state until a remount.
+      refreshAgencyData();
       
       setSelectedMrNo(null);
     } catch (error) {
