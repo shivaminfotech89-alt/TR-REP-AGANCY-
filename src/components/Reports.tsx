@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency, getEstimateMasterForCore, atClause } from '../lib/AgencyContext';
+import { useAgency, getEstimateMasterForCore, matchesAtScope } from '../lib/AgencyContext';
 import { CARD, CARD_PAD, LABEL, NUM, TABLE, TH, TD } from '../lib/ui';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
+// ⚠ READS COME FROM THE DATA LAYER NOW (AUDIT G86); only the lifecycle-date write remains, and
+// `auth` stays because that write refuses without a signed-in user.
+import { db, auth } from '../lib/firebase';
+import { doc, writeBatch } from 'firebase/firestore';
 import { 
   Loader2, 
   FileSpreadsheet, 
@@ -35,10 +37,26 @@ import { resolveScrapCharge, getScrapItemCodeForCore, getJobFullEstimate } from 
 import { atForJob } from '../lib/AgencyContext';
 
 export default function Reports() {
-  const { activeAgency, activeAtMaster, atMasters, viewingAllTenders } = useAgency();
-  const [jobs, setJobs] = useState<any[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const {
+    activeAgency, activeAtMaster, atMasters, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
+  /**
+   * THE REPORT'S ROWS, FROM THE SHARED LOAD (AUDIT G86).
+   *
+   * Sorted by job number on a COPY: the array belongs to the data layer and other screens read
+   * it, so sorting it in place - which the old fetch did before storing - would reorder theirs.
+   */
+  const jobs = useMemo(
+    () => (agencyDataLoad.status === 'loaded'
+      ? [...agencyJobs]
+          .filter((j: any) => matchesAtScope(j, activeAtMaster, viewingAllTenders))
+          .sort((a: any, b: any) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }))
+      : []),
+    [agencyJobs, agencyDataLoad.status, activeAtMaster, viewingAllTenders],
+  );
+  const inspections = agencyInspections;
+  const loading = agencyDataLoad.status === 'loading';
   const [activeTab, setActiveTab] = useState<'master' | 'pending' | 'testing_ready' | 'delivered' | 'scrap'>('master');
   
   // Filters
@@ -64,51 +82,6 @@ export default function Reports() {
     paymentAmount: '',
     paymentRefNo: ''
   });
-
-  const fetchData = async () => {
-    if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
-    setLoading(true);
-    try {
-      const jobsQ = query(
-        // ⚠ THE ACTIVE TENDER (AUDIT F82). A new AT starts fresh - no MRs, no jobs, no
-        // estimates, bills, challans or testing carry over - so every screen shows the work
-        // of the AT selected in the top bar, exactly as it already shows only the active
-        // agency's. Unassigned work (no atId) matches no tender and is reached through the
-        // unassigned view instead: it is not lost, and it is not pretended to belong here.
-        collection(db, 'jobs'),
-        where('ownerId', '==', auth.currentUser.uid), 
-        where('agencyId', '==', activeAgency.id),
-        ...atClause(activeAtMaster, viewingAllTenders),
-      );
-
-      const inspQ = query(
-        collection(db, 'inspections'),
-        where('ownerId', '==', auth.currentUser.uid)
-      );
-
-      const [jobsSnap, inspSnap] = await Promise.all([
-        getDocs(jobsQ),
-        getDocs(inspQ)
-      ]);
-
-      const fetchedJobs = jobsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      const fetchedInsps = inspSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-      
-      // Sort jobs numeric order by jobNo
-      fetchedJobs.sort((a: any, b: any) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
-      
-      setJobs(fetchedJobs);
-      setInspections(fetchedInsps);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.LIST, 'jobs');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, [activeAgency]);
 
   // Extract unique divisions
   const divisions = useMemo(() => {
@@ -429,13 +402,10 @@ export default function Reports() {
 
       await batch.commit();
 
-      // Update local state
-      setJobs(prev => prev.map(j => {
-        if (targetJobs.some(tj => tj.id === j.id)) {
-          return { ...j, ...updatePayload };
-        }
-        return j;
-      }));
+      // ⚠ RE-READ INSTEAD OF PATCHING A LOCAL COPY (AUDIT G86). This patched its own `jobs` and
+      // nothing else, so the ledger and the dashboard kept showing the old dates until a remount -
+      // the divergence this part exists to remove. One re-read updates every screen at once.
+      refreshAgencyData();
 
       setIsDateModalOpen(false);
       setEditingJob(null);
@@ -558,7 +528,7 @@ export default function Reports() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={fetchData}
+            onClick={refreshAgencyData}
             className="flex items-center gap-2 px-3 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 rounded hover:bg-slate-50 transition-colors shadow-sm"
             title="Refresh Data"
           >

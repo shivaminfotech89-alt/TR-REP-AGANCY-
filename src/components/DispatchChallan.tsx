@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { useAgency, atClause } from '../lib/AgencyContext';
+import { useAgency, matchesAtScope } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, writeBatch, doc } from 'firebase/firestore';
+// ⚠ READS COME FROM THE DATA LAYER NOW (AUDIT G86); only the dispatch write remains - which is
+// why the error reporter stays: it is the WRITE that still needs to explain itself.
+import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { writeBatch, doc } from 'firebase/firestore';
 import { 
   Loader2, 
   Printer, 
@@ -36,7 +38,10 @@ import { downloadHtmlAsWord } from '../lib/wordExport';
 import { confirmWholeBeforePrint, triggerUniversalPrint } from '../lib/printUtils';
 
 export default function DispatchChallan() {
-  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, viewingAllTenders,
+    agencyJobs, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -47,8 +52,29 @@ export default function DispatchChallan() {
    * not cost the same.
    */
   const __trial = useTrialGate(activeAgency?.id);
-  const [allJobs, setAllJobs] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  /**
+   * THE AGENCY'S JOBS, FROM THE SHARED LOAD (AUDIT G86).
+   *
+   * ⚠ `matchesAtScope`, NOT A FILTER WRITTEN HERE (AUDIT F99). The in-memory form of the tender
+   * rule is declared beside `atClause` so the two cannot drift, and it handles all three states -
+   * every tender, one tender, and NONE selected, which shows nothing rather than everything.
+   */
+  const allJobs = useMemo(
+    () => (agencyDataLoad.status === 'loaded'
+      ? agencyJobs.filter((j: any) => matchesAtScope(j, activeAtMaster, viewingAllTenders))
+      : []),
+    [agencyJobs, agencyDataLoad.status, activeAtMaster, viewingAllTenders],
+  );
+  /**
+   * ⚠ TWO DIFFERENT QUESTIONS, AND THEY MUST NOT SHARE A FLAG (AUDIT G86).
+   *
+   * `busy` is THIS SCREEN'S dispatch in flight - it disables the button and spins it. The shared
+   * status is the DATA LAYER'S read in flight. Collapsing them into one derived value is what
+   * broke the build: the write path still needed something it could set, and a derived value
+   * cannot be set. The screen shows a spinner for either, so the render reads the union.
+   */
+  const [busy, setBusy] = useState(false);
+  const loading = busy || agencyDataLoad.status === 'loading';
   
   const [activeTab, setActiveTab] = useState<'pending' | 'history'>('pending');
   
@@ -77,39 +103,6 @@ export default function DispatchChallan() {
   const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
   
   const [printData, setPrintData] = useState<any>(null); // To handle printing past challans
-
-  // Fetch Jobs from Firestore
-  const fetchJobs = async () => {
-    if (!auth.currentUser || !activeAgency) {
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const q = query(
-        // ⚠ THE ACTIVE TENDER (AUDIT F82). A new AT starts fresh - no MRs, no jobs, no
-        // estimates, bills, challans or testing carry over - so every screen shows the work
-        // of the AT selected in the top bar, exactly as it already shows only the active
-        // agency's. Unassigned work (no atId) matches no tender and is reached through the
-        // unassigned view instead: it is not lost, and it is not pretended to belong here.
-        collection(db, 'jobs'),
-        where('ownerId', '==', auth.currentUser.uid), 
-        where('agencyId', '==', activeAgency.id),
-        ...atClause(activeAtMaster, viewingAllTenders),
-      );
-      const snapshot = await getDocs(q);
-      const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as any));
-      setAllJobs(fetchedJobs);
-    } catch (err: any) {
-      handleFirestoreError(err, OperationType.LIST, 'jobs');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchJobs();
-  }, [activeAgency?.id]);
 
   // Derived pending jobs (includes both Tested Repairable jobs and Scrap Jobs ready for return)
   const pendingJobs = useMemo(() => {
@@ -417,7 +410,7 @@ export default function DispatchChallan() {
         return;
     }
     
-    setLoading(true);
+    setBusy(true);
     try {
       const batch = writeBatch(db);
       for (const job of selectedJobs) {
@@ -446,24 +439,12 @@ export default function DispatchChallan() {
       }
       await batch.commit();
       
-      setAllJobs(prev => prev.map(job => {
-          if (selectedJobIds.has(job.id)) {
-              return {
-                  ...job,
-                  status: 'Dispatched',
-                  challanNo: challanNo.trim(),
-                  challanDate,
-                  vehicleNo: vehicleNo.trim().toUpperCase(),
-                  deliveryDate,
-                  isClosed: true,
-                  // Mirrors the batch above, so the in-memory job matches what was written.
-                  issuedByAgencyId: activeAgency?.id || '',
-                  issuedByAgencyName: activeAgency?.name || '',
-                  issuedByAgencyGstin: activeAgency?.gstin || ''
-              };
-          }
-          return job;
-      }));
+      // ⚠ RE-READ INSTEAD OF PATCHING A LOCAL COPY (AUDIT G86). This rebuilt its own list to
+      // mirror the batch - fifteen lines that had to be kept in step with the write above, and
+      // that updated nothing else: the ledger and the dashboard went on showing the job as
+      // undispatched until a remount. One re-read updates every screen from the database, and
+      // there is no second copy of the payload to drift.
+      refreshAgencyData();
 
       const dataToPrint = {
           jobs: selectedJobs,
@@ -491,7 +472,7 @@ export default function DispatchChallan() {
       alert("Error: " + (err.message || err.toString()));
       handleFirestoreError(err, OperationType.UPDATE, 'jobs');
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 

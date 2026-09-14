@@ -5,8 +5,10 @@ import { CARD, CARD_PAD, NUM } from '../lib/ui';
 import { OtherTenderNote } from './OtherTenderNote';
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, writeBatch } from 'firebase/firestore';
+// ⚠ READS COME FROM THE DATA LAYER NOW (AUDIT G86); only the testing write remains. `auth` stays
+// for the printed sheet, which names the signing engineer.
+import { db, auth } from '../lib/firebase';
+import { doc, writeBatch } from 'firebase/firestore';
 import { Loader2, ArrowLeft, Search, Activity, CheckSquare, Square, Save, Printer, Edit, FileSpreadsheet } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
@@ -74,7 +76,10 @@ const defaultTestingData: TestingData = {
 };
 
 export default function TestingReport() {
-  const { activeAgency, activeAtMaster, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, viewingAllTenders,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -86,8 +91,15 @@ export default function TestingReport() {
    */
   const __trial = useTrialGate(activeAgency?.id);
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [inspections, setInspections] = useState<any[]>([]);
+  /**
+   * ⚠ AGENCY-WIDE AND ACROSS EVERY TENDER, DELIBERATELY (AUDIT F99, G86).
+   *
+   * `scopedJobs` below narrows to the selected tender, and `otherTenderPending` COUNTS the work
+   * this tender is not showing - both from this one list. Narrowing it here would make the second
+   * number permanently zero, which is the thing the note on screen exists to prevent.
+   */
+  const jobs = agencyJobs as Job[];
+  const inspections = agencyInspections;
 
   /**
    * ⚠ THE SCOPE IS APPLIED HERE, NOT AT THE QUERY (AUDIT F99). The fetch is agency-wide and
@@ -106,7 +118,12 @@ export default function TestingReport() {
       !matchesAtScope(j, activeAtMaster, viewingAllTenders) &&
       (j as any).status === 'Internal Done').length;
   }, [jobs, activeAtMaster, viewingAllTenders]);
-  const [loading, setLoading] = useState(true);
+  /**
+   * ⚠ TWO DIFFERENT QUESTIONS, AND THEY MUST NOT SHARE A FLAG (AUDIT G86). `busy` is this screen's
+   * save in flight; the shared status is the data layer's read. The render wants either.
+   */
+  const [busy, setBusy] = useState(false);
+  const loading = busy || agencyDataLoad.status === 'loading';
   
   const [tab, setTab] = useState<'Pending' | 'Completed'>('Pending');
   const [divisionFilter, setDivisionFilter] = useState<string>('All');
@@ -120,31 +137,6 @@ export default function TestingReport() {
   
   const [testingDate, setTestingDate] = useState(new Date().toISOString().split('T')[0]);
   const [formsData, setFormsData] = useState<Record<string, TestingData>>({});
-
-  useEffect(() => {
-    async function fetchJobs() {
-      if (!auth.currentUser || !activeAgency) { setLoading(false); return; }
-      try {
-        const q = query(collection(db, 'jobs'), where('ownerId', '==', auth.currentUser.uid), where('agencyId', '==', activeAgency.id));
-        const [snapshot, extInspSnap, intInspSnap] = await Promise.all([
-          getDocs(q),
-          getDocs(query(collection(db, 'inspections'), where('ownerId', '==', auth.currentUser.uid), where('type', '==', 'External'))),
-          getDocs(query(collection(db, 'inspections'), where('ownerId', '==', auth.currentUser.uid), where('type', '==', 'Internal'))),
-        ]);
-        const fetchedJobs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Job));
-        setJobs(fetchedJobs);
-        setInspections([
-          ...extInspSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-          ...intInspSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-        ]);
-      } catch (err) {
-        handleFirestoreError(err, OperationType.LIST, 'jobs');
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchJobs();
-  }, [activeAgency, isFormOpen]); // Refetch when returning from form
 
   const divisions = useMemo(() => {
     const divs = new Set(scopedJobs.map(j => j.division || 'Unknown'));
@@ -357,7 +349,7 @@ export default function TestingReport() {
       return;
     }
 
-    setLoading(true);
+    setBusy(true);
     try {
       const batch = writeBatch(db);
       Array.from<string>(selectedJobIds).forEach((id: string) => {
@@ -371,13 +363,18 @@ export default function TestingReport() {
         });
       });
       await batch.commit();
+      // ⚠ ONE EXPLICIT RE-READ, REPLACING A REFETCH ON FORM CLOSE (AUDIT G86). The effect used to
+      // re-query whenever `isFormOpen` went false - including a CANCELLED form, which read the
+      // whole agency again to reflect nothing. Asking after the write that actually changed
+      // something is both narrower and correct, and it refreshes every other screen too.
+      refreshAgencyData();
       alert('Testing reports saved successfully!');
       closeForm();
     } catch (err) {
       console.error(err);
       alert('Failed to save testing reports');
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
