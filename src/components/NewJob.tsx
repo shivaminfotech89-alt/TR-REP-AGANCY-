@@ -205,7 +205,11 @@ export function calculateGpWarranty(
 
 export default function NewJob() {
   const navigate = useNavigate();
-  const { activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState, setActiveAtMasterId, viewingAllTenders } = useAgency();
+  const {
+    activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState,
+    setActiveAtMasterId, viewingAllTenders,
+    agencyJobs, agencyDataLoad, refreshAgencyData,
+  } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
    * rules do not enforce it - see lib/trialGate.ts for why enforcing it in rules would cap
@@ -250,9 +254,30 @@ export default function NewJob() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [autoFillNotice, setAutoFillNotice] = useState<string | null>(null);
 
-  // Past jobs cache across ALL user data / ATs for instant global lookup
-  const [pastJobs, setPastJobs] = useState<any[]>([]);
-  const [pastJobsLoading, setPastJobsLoading] = useState(true);
+  /**
+   * THE GP LOOKUP LIST, FROM THE SHARED LOAD (AUDIT G86).
+   *
+   * This screen read the agency's jobs for itself on mount, purely to answer "has this
+   * transformer been here before". The data layer holds exactly that list: agency-scoped and
+   * across every tender, which is what a guarantee claim needs, because the repair being claimed
+   * against is by definition on a PREVIOUS tender (AUDIT F85).
+   *
+   * Newest first, sorted on a COPY - other screens share this array and must not have it
+   * reordered underneath them.
+   */
+  const pastJobs = useMemo(
+    () => [...agencyJobs].sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0)),
+    [agencyJobs],
+  );
+  /**
+   * ⚠ THIS GATES THE JOB-NUMBER PREFILL, SO IT MUST NOT READ "DONE" OVER AN EMPTY LIST.
+   *
+   * The OGP auto-numbering effect waits on this before suggesting a number. If it said "loaded"
+   * while the jobs were still arriving, the suggestion would be computed from nothing and offer a
+   * number already taken - caught at save by the duplicate check below, but only after the
+   * operator has typed a whole intake. This is the data layer's own status for the one read.
+   */
+  const pastJobsLoading = agencyDataLoad.status === 'loading';
   const [showPastPickerRowIndex, setShowPastPickerRowIndex] = useState<number | null>(null);
   // More than one past job matched the value typed - the operator must choose which
   // physical transformer this is. Never auto-applied: job numbers are not uniquely
@@ -399,31 +424,6 @@ export default function NewJob() {
       });
     }
   }, [commonData.division, commonData.repairType, activeAgency, activeAtMaster, pastJobs, pastJobsLoading]);
-
-  // Past jobs for the GP lookup: across all AT masters of the CURRENT AGENCY.
-  useEffect(() => {
-    if (auth.currentUser && activeAgency) {
-      const loadPastJobs = async () => {
-        setPastJobsLoading(true);
-        try {
-          const q = query(
-            collection(db, 'jobs'),
-            where('ownerId', '==', auth.currentUser!.uid),
-            where('agencyId', '==', activeAgency.id)
-          );
-          const snap = await getDocs(q);
-          const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-          list.sort((a: any, b: any) => (b.createdAt || 0) - (a.createdAt || 0));
-          setPastJobs(list);
-        } catch (err) {
-          console.error('Error loading past jobs for GP lookup:', err);
-        } finally {
-          setPastJobsLoading(false);
-        }
-      };
-      loadPastJobs();
-    }
-  }, [auth.currentUser, activeAgency?.id]);
 
   /** Rows refused at save because their number is taken, with a replacement offer. */
   const [refusalPrompt, setRefusalPrompt] = useState<
@@ -1307,6 +1307,13 @@ ${intakeGate.reason}`);
         }
       }
 
+      /**
+       * ⚠ A DIRECT QUERY, AND IT MUST NOT READ THE SHARED LIST (AUDIT G86).
+       *
+       * It asks the whole ACCOUNT whether this MR number is taken. The shared list is one
+       * AGENCY's jobs, so it is both narrower and a snapshot - and a duplicate MR that slips
+       * through is two intakes wearing one number.
+       */
       // Check MR No duplication (ignoring cancelled MRs)
       const mrQuery = query(
         collection(db, 'jobs'), 
@@ -1346,6 +1353,15 @@ ${intakeGate.reason}`);
         normKey(a.make) === normKey(b.make) &&
         Number(a.capacityKva) === Number(b.capacityKva);
 
+      /**
+       * ⚠ THE SAME SHAPE AS THE SHARED LIST, AND DELIBERATELY NOT IT (AUDIT G86).
+       *
+       * ownerId + agencyId is exactly what the data layer loads, which is what makes substituting
+       * it tempting. What differs is not the filter but WHEN it was read: this runs at save time
+       * to decide whether a job number is free, and the shared list is a snapshot taken when the
+       * agency was selected. It would call free a number booked in another tab since - and being
+       * wrong in that direction is what this guard exists to prevent.
+       */
       const agencyJobsSnap = await getDocs(query(
         collection(db, 'jobs'),
         where('ownerId', '==', auth.currentUser.uid),
@@ -1459,6 +1475,12 @@ ${intakeGate.reason}`);
           countsToAdd[cType] = (countsToAdd[cType] || 0) + 1;
         }
         
+        /**
+         * ⚠ A DIRECT QUERY, AND IT MUST NOT READ THE SHARED LIST (AUDIT G86). The allotment floor
+         * has to be true at the instant it refuses: a job booked since this form opened still
+         * consumes quota, and a stale count lets an intake through a quota already committed.
+         * Scoped by TENDER across the account, not by agency.
+         */
         const snap = await getDocs(query(
             collection(db, 'jobs'),
             where('ownerId', '==', auth.currentUser.uid),
@@ -1553,6 +1575,10 @@ ${intakeGate.reason}`);
            return;
         }
 
+        // ⚠ A DIRECT QUERY PER NUMBER, AND IT MUST NOT READ THE SHARED LIST (AUDIT G86).
+        // Account-wide, and read at the moment of saving: a job number booked in another tab
+        // since this form was opened is invisible to the shared snapshot, and this is the check
+        // that exists to catch it.
         // Check active jobs in database
         for (const jn of jobNos) {
            const jnQuery = query(
@@ -1749,6 +1775,11 @@ ${intakeGate.reason}`);
 
       setSavedJobsForReceipt(createdJobsList);
       setShowReceiptModal(true);
+
+      // ⚠ THE JOBS JUST CREATED ARE NOT IN THE SHARED LIST YET (AUDIT G86). Every screen reads
+      // that list now, so without this the ledger, the dashboard and this screen's own GP lookup
+      // would each be one intake behind until the agency was switched or the page reloaded.
+      refreshAgencyData();
 
     } catch (err) {
       console.error("Submission Error", err);
