@@ -747,6 +747,58 @@ ${intakeGate.reason}`);
   }, [filteredSummary]);
 
   /**
+   * ONE ROW PER SCRAPPED TRANSFORMER, CARRYING ITS ADJUSTMENT IF ONE EXISTS (AUDIT O79).
+   *
+   * ⚠ GENERATED FROM THE JOBS, NOT FROM THE ADJUSTMENTS. The question this tab answers is
+   * "which scrapped units still have no adjustment", and a list built from entered records
+   * cannot answer it - it can only show what is already there. So every scrap job appears and
+   * the STATE column is the answer.
+   *
+   * ⚠ `agencyInspections`, NOT THE LOCAL `inspections` LIST, which is narrowed to External
+   * records (AUDIT O80). Scrap is declared on the INTERNAL inspection: the narrow list would
+   * drop every `declaredOn` and would classify nothing by inspection, silently losing ASU-2 -
+   * whose job says `Dispatched` with an empty `condition` while its inspection says Scrap.
+   *
+   * ⚠ `retained` IS THE STORED `oilAvailable`, NOT A RE-DERIVATION. ExternalInspection.tsx
+   * records `oilCapLtrs - lessOilLtrs` at inspection time; recomputing it here would be another
+   * copy of arithmetic that already exists in five places. All twelve live scrap jobs carry
+   * one, so the kVA fallback is never reached - and where it is absent the row shows nothing
+   * rather than inventing a capacity.
+   *
+   * ⚠ `declaredOn` IS null WHERE NOTHING RECORDS IT. Four of twelve have no internal
+   * inspection date, and a write timestamp or today's date rendered in its place would be a
+   * proxy dressed as a fact. The billing cutoff filters on this date.
+   */
+  const scrapRows = useMemo(() => {
+    if (!activeAgency) return [] as any[];
+    return (sharedJobs as any[])
+      .filter((j: any) => String(j.agencyId ?? '') === activeAgency.id)
+      .filter((j: any) => isScrapJob(j, agencyInspections))
+      .map((j: any) => {
+        const internal: any = (agencyInspections as any[]).find(
+          (i: any) => String(i.jobId ?? '') === String(j.id) && i.type === 'Internal',
+        );
+        const external: any = inspectionFor(j, inspections);
+        const declared = internal?.data?.inspectionDate ?? internal?.inspectionDate;
+        const storedAvailable = external?.data?.oilAvailable;
+        const cap = external?.data?.oilCapLtrs;
+        return {
+          jobId: String(j.id),
+          jobNo: j.jobNo || '(no job number)',
+          mrNo: j.mrNo || '(blank)',
+          division: j.division || '(none)',
+          atId: String(j.atId ?? '').trim(),
+          declaredOn: declared && String(declared).trim() ? String(declared) : null,
+          capacity: cap === undefined || cap === null || String(cap).trim() === '' ? null : Number(cap),
+          retained: storedAvailable === undefined || storedAvailable === null ? 0 : Number(storedAvailable) || 0,
+          evidence: scrapEvidence(j, agencyInspections).matched,
+          adjustment: (transactions as any[]).find((t: any) => String(t.jobId ?? '') === String(j.id)) || null,
+        };
+      })
+      .sort((a, b) => b.retained - a.retained);
+  }, [sharedJobs, agencyInspections, inspections, transactions, activeAgency?.id]);
+
+  /**
    * THE BALANCE THIS TENDER OPENED WITH — a recorded figure, not a computed one.
    *
    * Absent is NOT zero and is not shown as zero: an AT with no carried balance has had none
@@ -1468,6 +1520,29 @@ ${intakeGate.reason}`);
               <BarChart2 className="w-4 h-4 mr-2" />
               MR Wise Shortage Summary
             </button>
+            {/* ⚠ SCRAP ADJUSTMENTS ARE NOT INWARD RECEIPTS, SO THEY ARE NOT IN THAT LIST
+                (AUDIT O79). One arrives in barrels from the division; the other is oil the
+                agency kept from a unit it scrapped. Mixing them would make the Inward log say
+                a barrel arrived when none did.
+
+                It resets the form exactly as the other two do, so each view owns the entry
+                form once - the reason this is a third TAB rather than a second table nested
+                inside the transactions view. */}
+            <button
+              onClick={() => {
+                setViewMode("scrap");
+                setShowAddForm(false);
+                setEditingId(null);
+              }}
+              className={`px-4 py-2 text-sm font-bold rounded transition-colors flex items-center ${
+                viewMode === "scrap"
+                  ? "bg-white text-sky-700 shadow-sm border border-slate-200"
+                  : "text-slate-500 hover:bg-slate-200 border border-transparent"
+              }`}
+            >
+              <Droplet className="w-4 h-4 mr-2" />
+              Scrap Adjustments
+            </button>
           </div>
 
           <div className="flex space-x-2">
@@ -1919,6 +1994,113 @@ ${intakeGate.reason}`);
                         .toFixed(2)}
                     </td>
                     <td></td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          ) : viewMode === "scrap" ? (
+            /**
+             * ⚠ ONE LIST, GENERATED FROM THE SCRAP JOBS - NOT FROM THE ADJUSTMENTS (AUDIT O79).
+             *
+             * Two lists would need a join to answer "which scrap jobs are still unadjusted",
+             * which is the question this tab exists for, and they would drift the moment one was
+             * entered. So every scrap job appears, carrying its adjustment if one exists, and
+             * the STATE column is the answer.
+             *
+             * ⚠ THE WIDEST SCRAP TEST, VIA `agencyInspections` (AUDIT O80). Four tests exist and
+             * they disagree by more than half the population - 5, 11 and 12 of 12. The narrow
+             * ones would silently drop ASU-2, whose job record says `Dispatched` with an empty
+             * condition while its INTERNAL inspection declares Scrap.
+             *
+             * ⚠ THE DATE COLUMN SHOWS WHAT EXISTS AND NOTHING ELSE. Nothing records WHEN scrap
+             * was declared; the internal inspection's own date is the closest real thing and 4
+             * of 12 do not have one. A write timestamp or today's date rendered here would be a
+             * proxy dressed as a fact, and the billing cutoff filters on this date.
+             */
+            <table className={TABLE}>
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500 font-bold border-b border-slate-200">
+                <tr>
+                  <th className={`${TH}`}>Job No.</th>
+                  <th className={`${TH}`}>MR No.</th>
+                  <th className={`${TH}`}>Division</th>
+                  <th className={`${TH}`}>Scrap declared</th>
+                  <th className={`${TH} text-right`}>Capacity (LTR)</th>
+                  <th className={`${TH} text-right text-sky-700 font-bold`}>Oil retained (LTR)</th>
+                  <th className={`${TH}`}>Declared by</th>
+                  <th className={`${TH} text-center`}>State</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                      Loading records&hellip;
+                    </td>
+                  </tr>
+                ) : scrapRows.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                      No scrapped transformers in this selection. A scrap adjustment is raised
+                      per transformer, so this list is empty until a unit is declared scrap.
+                    </td>
+                  </tr>
+                ) : (
+                  scrapRows.map((row) => (
+                    <tr key={row.jobId} className="hover:bg-slate-50">
+                      <td className={`${TD} font-medium text-slate-900`}>{row.jobNo}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{row.mrNo}</td>
+                      <td className={`${TD} whitespace-nowrap`}>{row.division}</td>
+                      <td className={`${TD} whitespace-nowrap`}>
+                        {row.declaredOn ? (
+                          formatDDMMYYYY(row.declaredOn)
+                        ) : (
+                          <span className="text-amber-800 text-[11px] font-semibold" title="Nothing records when scrap was declared for this unit. The date must be taken from the paperwork.">
+                            (not recorded)
+                          </span>
+                        )}
+                      </td>
+                      <td className={`${TD} text-right font-mono tabular-nums`}>
+                        {row.capacity === null ? '—' : row.capacity.toFixed(2)}
+                      </td>
+                      <td className={`${TD} text-right font-mono tabular-nums font-bold text-sky-900`}>
+                        {row.retained.toFixed(2)}
+                      </td>
+                      <td className={`${TD} text-[10px] uppercase tracking-wide text-slate-500`}>
+                        {row.evidence.join(' + ')}
+                      </td>
+                      <td className={`${TD} text-center`}>
+                        {row.adjustment ? (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-emerald-100 text-emerald-800">
+                            recorded
+                          </span>
+                        ) : row.retained <= 0 ? (
+                          /* ⚠ AN EMPTY TANK HAS NOTHING TO ADJUST. Five of the twelve arrived
+                             empty - their entire shortage is top-up, and they retain nothing.
+                             Offering an entry of 0.00 would invite a row that records nothing. */
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-slate-100 text-slate-500" title="This unit arrived empty, so no oil was retained from it.">
+                            nothing retained
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
+                            awaiting
+                          </span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
+                {!loading && scrapRows.length > 0 && (
+                  <tr className="bg-slate-100 font-bold text-slate-900 border-t-2 border-slate-300">
+                    <td colSpan={5} className="px-4 py-3 text-right uppercase text-xs tracking-wider">
+                      Retained, awaiting entry:
+                    </td>
+                    <td className={`${TD} text-right font-mono tabular-nums text-sky-900`}>
+                      {scrapRows
+                        .filter((r) => !r.adjustment)
+                        .reduce((sum, r) => sum + r.retained, 0)
+                        .toFixed(2)}
+                    </td>
+                    <td colSpan={2}></td>
                   </tr>
                 )}
               </tbody>

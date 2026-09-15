@@ -69,3 +69,44 @@ for (const j of scrap) {
   console.log(`   ${String(j.jobNo || '(none)').padEnd(11)} ${agName(j.agencyId).padEnd(28)}`
     + ` atId ${String(j.atId ?? '').trim() ? 'yes' : 'NO '}   matched: ${e.matched.join('+')}`);
 }
+
+/**
+ * THE ROWS THE SCRAP TAB WILL RENDER, PRINTED HERE TOO (AUDIT F87/O79).
+ *
+ * ⚠ THE SAME COLUMNS THE SCREEN SHOWS, SO THE TWO CAN BE COMPARED OUT LOUD. A script and a
+ * screen measuring one thing by different means, never printed side by side, is the shape this
+ * audit keeps recording. If a row here disagrees with the list, that is the bug.
+ *
+ * ⚠ THE DATE IS SHOWN EXACTLY AS THE LIST MUST SHOW IT: the INTERNAL inspection's own
+ * `inspectionDate` where one exists, and `(not recorded)` where it does not - never a write
+ * timestamp, never the external inspection's date, never today. Nothing stores WHEN scrap was
+ * declared, so a proxy dressed as a date is the one thing this column must not do.
+ */
+console.log('\n================ THE ROWS THE SCRAP TAB WILL SHOW ================\n');
+const rows = scrap.map((j: any) => {
+  const internal: any = inspections.find((i: any) =>
+    String(i.jobId ?? '') === String(j.id) && i.type === 'Internal');
+  const ext: any = inspections.find((i: any) =>
+    String(i.jobId ?? '') === String(j.id) && (i.type === 'External' || !i.type));
+  const declared = internal?.data?.inspectionDate ?? internal?.inspectionDate;
+  const available = ext?.data?.oilAvailable;
+  const adjustment = txns.find((t: any) => String(t.jobId ?? '') === String(j.id));
+  return {
+    job: j.jobNo || '(none)',
+    mr: j.mrNo || '(blank)',
+    agency: agName(j.agencyId),
+    division: j.division || '(none)',
+    declaredOn: declared && String(declared).trim() ? String(declared) : '(not recorded)',
+    capacity: ext?.data?.oilCapLtrs ?? '(none)',
+    retainedRaw: available === undefined || available === null ? '(unknown)' : Number(available).toFixed(2),
+    evidence: scrapEvidence(j, inspections).matched.join('+'),
+    state: adjustment ? 'recorded' : 'awaiting',
+  };
+});
+console.table(rows);
+
+const withDate = rows.filter(r => r.declaredOn !== '(not recorded)').length;
+console.log(`\n${withDate} of ${rows.length} have a declaration date; ${rows.length - withDate} do NOT.`);
+console.log(`total retained, raw: ${rows.reduce((s, r) => s + (Number(r.retainedRaw) || 0), 0).toFixed(2)} LTR`);
+console.log(`state: ${rows.filter(r => r.state === 'awaiting').length} awaiting, `
+  + `${rows.filter(r => r.state === 'recorded').length} recorded`);
