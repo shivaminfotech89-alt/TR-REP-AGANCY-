@@ -18519,3 +18519,45 @@ classification defect that happens to have been found through an oil census, and
 how it would end up with a fifth definition.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O81. When an instruction names a mechanism and a behaviour, and they disagree
+
+**A working rule, stated by the owner after it had been applied twice in one day.**
+
+> **When an instruction names a mechanism and a behaviour and they conflict, the behaviour is the instruction.**
+
+### The two instances
+
+**1. `oilType: 'Used'` for a scrap adjustment, asked for twice (O79).** Every behaviour named alongside it was
+explicit and settled: **raw quantity**, **zero filtration**, a **third term** in the account, and **off the
+printed statement**. `Used` contradicts all four - it forces `filtrationLossPercent: 5`, and `isScrapAdjustment`
+tests for `'Scrap'`, so the row would have been counted as **inward**: the third term collapsing back into the
+second, the litres printing on the division's Inward Oil Received Log, and the invoice's oil deduction moving.
+**Three decisions the owner had made deliberately, undone by one field value.**
+
+The owner's own account: *"I said 'Used type' as shorthand for 'no new field, no rules deploy' - and the field
+value was the part I got wrong, not the intent."*
+
+**2. "Move every persistent banner you found" (G93).** Taken literally it would have removed New Job's
+closed-intake panel - **which is the entire screen, not a banner on it** - and the two Save-button replacements.
+Those are fallback renders: moving them deletes the explanation for a missing control rather than decluttering a
+screen. The behaviour asked for was a quieter screen that still explains itself.
+
+### ⚠ THE RULE HAS A SECOND HALF, AND IT IS THE HALF THAT MAKES IT SAFE
+
+**Diverging silently is not permitted by this rule.** Both times the divergence was flagged **before** the work
+landed, naming the exact instruction not followed and the specific consequence of following it - and in the
+`Used` case, flagged **twice**, once when it was first given and once when it was repeated.
+
+**The flag is what makes the divergence correctable.** An assistant that quietly "knows better" is indistinguishable
+from one that has misread the request, and the owner has no way to tell which until the damage shows. The change
+was also kept to **one field value**, so reverting it would have been a single line had the literal reading been
+the intended one.
+
+**Neither instance is a case of the owner being careless.** Both are shorthand standing in for an intent stated
+clearly elsewhere in the same message. The failure mode this rule prevents is not disobedience - it is
+**obedience to the least important half of an instruction.**
+
+**Deploy:** hosting - a push to `main` (O71).
