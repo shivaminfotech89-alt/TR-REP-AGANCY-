@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { BrowserRouter } from 'react-router-dom';
 import { auth } from './lib/firebase';
-import { onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import {
+  onAuthStateChanged, User, signInWithPopup, GoogleAuthProvider,
+  // ⚠ PUBLIC API, and the retry in handleLogin depends on it being public (AUDIT O86).
+  updateCurrentUser,
+} from 'firebase/auth';
 import { AgencyProvider } from './lib/AgencyContext';
 import { ThemeProvider } from './lib/ThemeContext';
 import { Loader2 } from 'lucide-react';
@@ -67,46 +71,87 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  /**
+   * THE INDEXEDDB-CLOSED FAILURE, WHICH IS NOT A FirebaseError (AUDIT O85/O86).
+   *
+   * `@firebase/auth` 1.13.4 throws a bare `new Error('Database is closing/hidden')` from
+   * `IndexedDBLocalPersistence._openDb()` when `isHiding` is set - which happens on
+   * `visibilitychange` to hidden, i.e. when the app-switch to Google's sign-in screen
+   * backgrounds the page. It carries NO `code`, which is why every `auth/*` diagnosis was wrong.
+   *
+   * Matched on the message because there is nothing else to match on. Deliberately narrow: this
+   * must never swallow a real auth failure.
+   */
+  const isHiddenDbFailure = (err: unknown): boolean =>
+    /database is (closing|closed|hidden)/i.test(String((err as any)?.message ?? ''));
+
   const handleLogin = async () => {
     setIsAuthenticating(true);
     const provider = new GoogleAuthProvider();
+    let retried = false;
     try {
-      await signInWithPopup(auth, provider);
+      try {
+        await signInWithPopup(auth, provider);
+      } catch (err) {
+        /**
+         * ⚠ ONE RETRY, AND IT DOES *NOT* RETRY THE POPUP (AUDIT O86).
+         *
+         * Retrying `signInWithPopup` is impossible: the user gesture is spent by the time the
+         * first attempt rejects, so a second `window.open` is blocked by every mobile browser -
+         * turning this fault into `auth/popup-blocked` and looking like a new bug.
+         *
+         * Authentication ALREADY SUCCEEDED. Only the persistence write failed:
+         * `directlySetCurrentUser` sets `this.currentUser = user` and THEN awaits the IndexedDB
+         * write, and `notifyAuthListeners()` sits after that await - so the write threw, no
+         * listener ever fired, and `user` stayed null while the session existed in memory.
+         *
+         * So the retry re-runs the COMMIT, not the sign-in. `updateCurrentUser` is public API
+         * and walks the same path, which by now has a visible page and a reopenable database.
+         *
+         * ⚠ IT FAILS SAFE. If a future SDK sets `currentUser` after the write instead of before,
+         * this finds `null`, does nothing, and behaviour returns to exactly what it is today -
+         * an alert - rather than a silent wrong result.
+         *
+         * ⚠ AND IT WORKS WITH THE SDK, NOT AROUND IT. `_withRetries` abandons its own retry loop
+         * while hidden (`if (this.isHiding) throw e`) BEFORE exhausting its retry count. That is
+         * a deliberate choice, not an oversight, so resuming once the page is visible is picking
+         * up precisely where the SDK stopped.
+         */
+        if (!isHiddenDbFailure(err) || document.visibilityState !== 'visible') throw err;
+        const pending = auth.currentUser;
+        if (!pending) throw err;
+
+        retried = true;
+        console.warn('SSO: persistence write failed while hidden; committing once now.', err);
+        // A beat for the SDK's own `onPageShow` to clear `isHiding`. If it has not run yet the
+        // retry throws the same error and falls through to the alert - one retry, never a loop.
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        await updateCurrentUser(auth, pending);
+      }
     } catch (err) {
       console.error(err);
       /**
-       * ⚠ THE CODE IS THE ONLY FACT WORTH HAVING, AND THIS THREW IT AWAY (AUDIT O84).
+       * ⚠ REPORT WHAT THREW, IN FULL - THIS IS WHAT FOUND THE CAUSE (AUDIT O84/O85/O86).
        *
-       * Every sign-in failure produced the same sentence, so a blocked popup, a closed popup,
-       * a cancelled double-tap, an unauthorized domain and a network timeout were
-       * indistinguishable from outside the browser console - which is not reachable on Chrome
-       * for Android without a cable and USB debugging.
+       * This once said one sentence for every failure, so a blocked popup, a closed popup, a
+       * cancelled double-tap, an unauthorized domain and a network timeout were
+       * indistinguishable from outside the browser console - not reachable on Chrome for Android
+       * without a cable. Reporting `code` alone then returned "unknown error", and THAT was the
+       * finding: no `code` means not a FirebaseError, which excluded every `auth/*` cause at once
+       * and sent the investigation to the persistence layer, where the real fault was.
        *
-       * That cost an afternoon on a live customer failure: the code separates remedies that are
-       * OPPOSITE. `popup-blocked` / `popup-closed-by-user` mean the popup never survives and the
-       * answer is `signInWithRedirect`; `network-request-failed` is the cross-origin
-       * `__/auth/iframe` timing out, where redirect does not help and a same-origin `authDomain`
-       * does. Picking either without the code is a guess.
+       * So all four fields stay. `name` separates TypeError from DOMException from FirebaseError,
+       * `message` carries the text that names the fault, and the type tag catches a thrown
+       * string, null or non-Error object. An error message that discards its own cause is a
+       * defect on its own terms - permanent, not a diagnostic, nothing here to remove.
        *
-       * ⚠ NOT A DIAGNOSTIC AND NOT GATED. An error message that discards its own cause is a
-       * defect on its own terms, so this is permanent - there is nothing here to remove once
-       * this particular investigation closes.
+       * ⚠ AND IT SAYS WHETHER THE RETRY RAN. A failed retry and a failure that never qualified
+       * for one are different findings: the first means `isHiding` had not cleared in time, the
+       * second means the guard rejected it. Reporting them identically would waste the next
+       * attempt.
        *
-       * `(err as any)` because a catch binding is not typed, and the shape of a thrown value is
-       * not guaranteed to carry `code` at all.
-       */
-      /**
-       * ⚠ THE CODE CAME BACK EMPTY, WHICH IS ITSELF THE FINDING (AUDIT O85).
-       *
-       * The previous revision reported `err.code` and the tablet showed "unknown error" - so the
-       * thrown value carries NO `code`, and therefore is NOT a FirebaseError. That EXCLUDES every
-       * `auth/*` cause at once: popup-blocked, popup-closed-by-user, cancelled-popup-request,
-       * network-request-failed and unauthorized-domain all arrive as FirebaseError with a code.
-       *
-       * So the question is no longer "which auth failure" but "what else is throwing", and a
-       * single field cannot answer it. `name` separates TypeError from DOMException from
-       * FirebaseError; `message` carries the text that names a failed module fetch or a blocked
-       * API; the type tag catches a thrown string, null, or a non-Error object.
+       * `(err as any)` because a catch binding is not typed, and a thrown value is not guaranteed
+       * to carry `code` at all.
        */
       const e = err as any;
       console.error('SSO fail:', e?.code, e?.name, e?.message, e?.customData, err);
@@ -115,8 +160,9 @@ export default function App() {
         + `code: ${e?.code ?? 'none'}\n`
         + `name: ${e?.name ?? 'none'}\n`
         + `message: ${e?.message ?? String(err)}\n`
-        + `type: ${Object.prototype.toString.call(err)}\n\n`
-        + 'Send these four lines exactly as they appear.',
+        + `type: ${Object.prototype.toString.call(err)}\n`
+        + `retry: ${retried ? 'attempted and failed' : 'not attempted'}\n\n`
+        + 'Send these five lines exactly as they appear.',
       );
     } finally {
       setIsAuthenticating(false);
