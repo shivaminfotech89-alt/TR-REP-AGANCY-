@@ -17806,9 +17806,19 @@ genuinely a guarantee return.
 **⚠ AND `repairType: 'GP'` WITH `isGp: false` CONTRADICT EACH OTHER** on the billed, paid job - the O72 record.
 `isGpJob` reads either, so the same document is GP to one caller and OGP to another.
 
+> **⚠ RETRACTED - SEE G92.** The contradiction is real; **"GP to one caller and OGP to another" is not.**
+> Every caller tests `repairType` FIRST, so none of them disagrees today. It is real in the DATA and inert in the
+> CODE, and those need different responses. **Also wrong in the table above: `isGp` is not `false` on that job, it
+> is ABSENT** - a reader chasing a written `false` would not find one.
+
 **⚠ THE THIRD IS A STRAIGHT VIOLATION.** `BxVxraTs…` is a **different transformer** - serial `312132135`, make
 `DVDVDFV`, 25 KVA - carrying a number already in use. It fails `isSameTransformer` outright, so the guard either
 did not run or was bypassed. That job is not explained by the GP exception at all.
+
+> **⚠ RETRACTED - SEE G92.** The violation is real; **"the guard either did not run or was bypassed" is not.**
+> That job was created 2026-08-18 and the guard landed 2026-08-21 - it PREDATES it by three days. One `git log -S`
+> would have settled that before the sentence was written. The real hole was a second intake path with no guard
+> at all, found only by continuing to look after this claim had already named a culprit.
 
 **Neither finding is fixed here.** Recorded because the first says the banner is honest and the second says a
 guard is weaker than its own comment claims.
@@ -17816,5 +17826,103 @@ guard is weaker than its own comment claims.
 **Verified:** tsc (exit 0); **202 tests in 19 files**; build; hooks guard, 48 files.
 - **⚠ NOT SEEN RENDERED.** The button, the badge and the form opening behind it are asserted at the source and by
   type, not observed.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G92. Two intake paths, one guard - and two corrections to this audit's own findings
+
+**New Job has refused duplicate job numbers since 2026-08-21 (`e09bdb3`). MrLedger's Full Edit "add transformer"
+writes jobs through the same collection and checked nothing** - it validated that a job number was non-empty and
+wrote it. **The rule was enforced at one door and not the other**, which is the F87 shape applied to a guard
+rather than to a number.
+
+`lib/jobNumberGuard.ts` now holds the predicate once - `isSameTransformer` (serial, make and capacity: the metal,
+not the repair type), `holdsItsNumber` (a cancelled MR frees its numbers), `jobNumberClashes`,
+`duplicateWithinBatch`. **A second copy is how a guard comes to agree with its sibling only by coincidence.**
+
+The refusal names every clashing row, each existing holder with its MR, serial, capacity and make, and the row
+being added - so a typo can be told from a genuine GP return without leaving the screen.
+
+### ⚠ NEW ROWS ONLY, AND THAT IS WHAT KEEPS FIVE MRs EDITABLE
+
+| cluster | holders | same unit? |
+|---|---|---|
+| **MSBT-12** | MR 85558 (serial `312132135`, 25 kVA), MR 9344 (serial `12`, 100 kVA), MR 1 (serial `12`, 100 kVA) | **NO** |
+| **MSBT-10** | MR 85558, MR 6652 | yes - a legitimate GP return |
+| **MSBT-1** | MR 2555 (serial `HJ`, 63 kVA), MR 9344 (serial `xc`, 100 kVA) | **NO** |
+
+**Re-validating existing rows would refuse a save on any of those five MRs** - punishing an operator for history
+they did not make, on a screen that offers no way to fix it. The gate is `j.isNew || !j.id`, the same test the AT
+precondition above it uses: one definition of "this save adds a row", not two. **The reason is stated at the
+code**, because a future reader seeing a guard that skips existing rows would otherwise read it as laziness rather
+than as the thing keeping 85558, 9344, 1, 6652 and 2555 editable.
+
+It reads FRESH rather than from `agencyJobs` (G86) - a number booked in another tab since the modal opened is
+absent from a snapshot, and absent means the clash is not seen. **A failed read aborts the save.**
+
+### ⚠ CORRECTION 1: "THE GUARD WAS BYPASSED" WAS WRONG
+
+G91 recorded that the third MSBT-12 - a different transformer on a used number - meant the guard "either did not
+run or was bypassed". **It was created 2026-08-18; the guard landed 2026-08-21.** It predates it by three days.
+**One `git log -S` would have established that before the sentence was written.**
+
+**The claim invented a defect and named a culprit.** The real hole was elsewhere, and was found only by continuing
+to look past an answer that already sounded like one: not a bypassed guard, but a second door with no guard at all.
+
+### ⚠ CORRECTION 2: "THE CALLERS DISAGREE" WAS WRONG, AND THIS IS THE MORE USEFUL RETRACTION
+
+G91 recorded that on a job with `repairType: 'GP'`, "`isGpJob` reads either, so the same document is GP to one
+caller and OGP to another" - and the accompanying report cited `NewJob:383` as filtering on `!j.isGp` alone.
+
+**It does not.** Lines `:378-384` are a SINGLE compound filter testing `repairType !== 'GP'` **and** `!j.isGp`
+together; `MrLedger:524` has the same shape. **All 16 `isGpJob` call sites and all four inline checks test
+`repairType` first, so no caller disagrees today.** (G91's table is wrong in a second, smaller way: it prints
+`isGp: false` where the field is **absent**.)
+
+**The contradiction is real in the DATA and inert in the CODE**, and those are different problems:
+
+| | a contradiction causing wrong behaviour | a contradiction that is inert |
+|---|---|---|
+| urgency | fix now - figures are wrong | fix when convenient |
+| risk of fixing | must be fixed carefully | a migration, no behaviour change |
+| what it needs | a correctness fix | tidying, and a guard against future divergence |
+
+**Reported as the first, it would have been prioritised ahead of a live intake hole** - which is why this is the
+more useful of the two retractions. It is the second.
+
+### The isGp normalisation - a plan, not a build
+
+**Nothing has been silently flipped.** `MrLedger:873` began writing `isGp` from `repairType` on 2026-09-01
+(`7c7b388`). **All 14 jobs whose `isGp` is absent were last updated between 2026-08-13 and 2026-08-23** - every one
+before that line existed. The two contradictory jobs are simply ones nobody has opened since.
+
+- **12 of the 14 are OGP**, where an absent `isGp` is harmless: both readings return false.
+- **2 are `repairType: 'GP'` with `isGp` absent** - MSBT-6 and MSBT-12 (the billed one).
+- **A migration would write `isGp: true` for those two and `false` for the other twelve**, which is what every
+  current reader already concludes. **No figure moves.**
+- **⚠ OPENING EITHER IN FULL EDIT AND SAVING DOES IT ANYWAY**, one job at a time, silently. The migration's
+  value is that it happens deliberately and at once rather than as a side effect nobody notices.
+
+### Three duplicate clusters - what renumbering would touch
+
+**Renumbering is cheap in the data and expensive on paper.**
+
+- **Nothing else stores a job number as a string** except `prevJobNo`. Inspections link by `jobId`, oil by `mrNo` -
+  neither is touched.
+- **⚠ BUT ALL SEVEN HOLDERS CARRY AN ISSUED CHALLAN.** Renumbering any of them changes a number already
+  printed on a delivery challan in a division office, so the paper and the record would disagree. The billed
+  MSBT-12 on MR 1 additionally carries an estimate, a bill and a payment.
+- **MSBT-10's GP link survives a renumber**: `gpSource: 'linked'` with a real `gpPriorJobId`, resolving by document
+  id rather than by string.
+- **⚠ MSBT-112'S DOES NOT, AND IS ALREADY AMBIGUOUS.** It points at `prevJobNo: 'MSBT-1'` with `gpSource:
+  null` and no `gpPriorJobId` - while TWO different transformers hold that number. **The link already fails to say
+  which unit it claims against**, independently of any renumbering.
+
+**Not renumbered. It is a decision about documents already issued, and the app cannot make it.**
+
+**Verified:** tsc (exit 0); **215 tests in 20 files, 13 new**; build; hooks guard, 48 files.
+- **⚠ NOT SEEN RENDERED.** The refusal dialog is asserted at the source and by type, not observed.
 
 **Deploy:** hosting - a push to `main` (O71).

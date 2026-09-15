@@ -15,6 +15,7 @@ import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
+import { jobNumberClashes, duplicateWithinBatch, describeHolder } from '../lib/jobNumberGuard';
 import { mrStageSummary } from '../lib/inspectionStage';
 import { CARD, LABEL, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import { inspectionsForJob } from '../lib/inspectionLink.js';
@@ -653,6 +654,86 @@ The units already on this MR can still be edited.` };
       }
       if (!j.capacityKva || isNaN(Number(j.capacityKva))) {
         alert(`Transformer #${i + 1} has an invalid KVA capacity.`);
+        return;
+      }
+    }
+
+    /**
+     * ⚠ A JOB NUMBER ADDED HERE IS CHECKED THE SAME WAY NEW JOB CHECKS ONE (AUDIT G92).
+     *
+     * There were TWO intake paths and ONE guard. New Job has refused duplicates since 2026-08-21; this
+     * path writes jobs through the same collection and checked nothing - it validated that a job number
+     * was non-empty and wrote it. The rule was enforced at one door and not the other.
+     *
+     * ⚠ NEW ROWS ONLY, AND THAT IS NOT LAZINESS - IT IS WHAT KEEPS FIVE MRs EDITABLE.
+     *
+     * Live data already holds three duplicate clusters, created before New Job's guard existed:
+     * MSBT-12 on MRs 85558, 9344 and 1; MSBT-10 on 6652 and 85558; MSBT-1 on 2555 and 9344. Two of the
+     * three are DIFFERENT transformers sharing a number. If this guard re-validated existing rows,
+     * opening any of those five MRs to correct a serial number would be REFUSED mid-edit - punishing an
+     * operator for history they did not make, on a screen that offers no way to fix it. Existing rows
+     * are the subject of O-series entries and of a renumbering decision, not of this refusal.
+     *
+     * `j.isNew || !j.id` is the same test the AT precondition above uses, deliberately: one definition
+     * of "this save adds a row".
+     *
+     * ⚠ READ FRESH, NOT FROM `agencyJobs` (AUDIT G86). The shared list is a snapshot taken when the
+     * agency was selected. A number booked in another tab since this modal opened is absent from it, and
+     * absent means the clash is not seen - which is the one thing this guard exists to catch.
+     */
+    const addedRows = editingMr.jobs.filter((j: any) => j.isNew || !j.id);
+    if (addedRows.length > 0) {
+      // The same number typed onto two new rows of one save. Not offerable: the operator typed one
+      // number onto two transformers, and which keeps it is theirs to decide.
+      const twice = duplicateWithinBatch(addedRows);
+      if (twice) {
+        alert(
+          `Job Number "${twice.jobNo}" appears twice in this MR (Unit #${twice.first + 1} and #${twice.second + 1}).`
+          + '\n\nA job number identifies one physical transformer.',
+        );
+        return;
+      }
+
+      let agencyJobsForGuard: any[] = [];
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'jobs'),
+          where('ownerId', '==', auth.currentUser.uid),
+          where('agencyId', '==', activeAgency.id),
+        ));
+        agencyJobsForGuard = snap.docs.map(d => ({ id: d.id, ...(d.data() as any) }));
+      } catch (readErr) {
+        // ⚠ A FAILED READ ABORTS THE SAVE. Adding a row without knowing whether its number is free is
+        // exactly the state this guard exists to prevent, and an unchecked write is worse than a retry.
+        console.error('Could not check the job number(s):', readErr);
+        alert('Could not check whether those job numbers are already in use. Nothing was saved - try again.');
+        return;
+      }
+
+      // A row already saved on this MR is not a clash with itself.
+      const existingIds = new Set(
+        (editingMr.jobs as any[]).filter((j: any) => j.id && !j.isNew).map((j: any) => String(j.id)),
+      );
+      const clashes = jobNumberClashes(
+        addedRows,
+        agencyJobsForGuard.filter(j => !existingIds.has(String(j.id))),
+      );
+
+      if (clashes.length > 0) {
+        const lines = clashes.map(c => [
+          `Job Number "${String(c.row.jobNo ?? '').trim()}" is already in use:`,
+          ...c.existing.map(e => `    ${describeHolder(e)}`),
+          `  This row - Serial ${c.row.serialNo || '-'}, ${c.row.capacityKva || '-'} KVA, Make ${c.row.make || '-'}.`,
+        ].join('\n'));
+        alert([
+          `${clashes.length} job number(s) on this MR belong to a different transformer.`,
+          '',
+          ...lines,
+          '',
+          'A job number identifies one physical transformer. It may repeat only when the SAME unit returns '
+          + 'under guarantee - serial number, make and capacity must all match. Use a free number, or correct '
+          + 'the serial, make and capacity if this really is the same transformer coming back.',
+        ].join('\n'));
         return;
       }
     }
