@@ -38,6 +38,8 @@ import {
   List,
   Edit2,
   Download,
+  // The stat cards' disclosure on a phone (AUDIT O82). No chevron was imported here before.
+  ChevronDown,
 } from "lucide-react";
 
 export interface OilTransaction {
@@ -202,6 +204,28 @@ export default function OilInward() {
   const [viewMode, setViewMode] = useState<"transactions" | "summary" | "scrap">(
     "transactions",
   );
+
+  /**
+   * THE STAT CARDS, COLLAPSED TO ONE FIGURE ON A PHONE (AUDIT O82).
+   *
+   * Five cards stacked at 380px run to roughly 420px of header - so the register an operator
+   * opened the screen for started two screens down. That is the space complaint the
+   * notifications work began with, arriving on a different screen.
+   *
+   * ⚠ NET BALANCE IS THE ONE THAT CANNOT BE HIDDEN. It is the answer; the other four are its
+   * working, and a mobile view that showed the working while hiding the answer would be
+   * backwards. Collapsed it is ~80px; expanded, the rest appear two to a row.
+   *
+   * ⚠ NOT PERSISTED, DELIBERATELY. It is a per-view convenience, not a preference - and this
+   * screen carries enough state already.
+   *
+   * ⚠ ONE COPY OF EACH CARD, VISIBILITY BY CLASS. A separate mobile tree would be five cards
+   * written twice, and the second copy is where a figure silently stops matching the first.
+   */
+  const [cardsExpanded, setCardsExpanded] = useState(false);
+  const detailCardCls = cardsExpanded
+    ? 'order-3 w-[calc(50%-0.375rem)] sm:w-auto'
+    : 'hidden sm:block';
   const [filterDivision, setFilterDivision] = useState<string>("All");
   const [filterDateMode, setFilterDateMode] = useState<"all" | "upto" | "exact">("all");
   const [filterUptoDate, setFilterUptoDate] = useState<string>("");
@@ -1239,13 +1263,12 @@ ${intakeGate.reason}`);
             Every tender &mdash; net from movement alone
           </p>
           <p className="text-xs text-indigo-900">
-            <strong>Opening balances are excluded.</strong> An opening balance is not oil; it is a
-            bookkeeping figure carried from one tender to the next, and every litre behind it is
-            already counted in the shortage and inward records below. Including it would count
-            those litres twice. This net is
-            {' '}<strong>total shortage &minus; total oil received</strong>, across every tender,
-            which is the same subtraction the DISCOM&rsquo;s oil account performs without its
-            opening column.
+            {/* ⚠ THE FACT STAYS, THE MECHANISM GOES (AUDIT O82). What an operator needs is that
+                opening balances are out and why that is not an omission. How the DISCOM performs
+                the same subtraction without its opening column explains the machinery and is
+                recorded in F89, where a reader who needs it will be looking. */}
+            <strong>Opening balances are excluded.</strong> Every litre behind them is already
+            counted in the records below, so including them would count those litres twice.
           </p>
           {/* ⚠ A CAVEAT WITH NO REMEDY IN THE APP, AND IT STILL HAS TO BE SAID (AUDIT F94).
               It used to end with a link to a manual "record your day-one position" form. That
@@ -1294,11 +1317,11 @@ ${intakeGate.reason}`);
                   {oilWithoutMr.length} oil receipt{oilWithoutMr.length === 1 ? '' : 's'}
                   {' '}({litres.toFixed(2)} LTR) record no MR number
                 </p>
+                {/* The four-destination enumeration explained the mechanism; the fact is that the
+                    litres are out of the balance, and the action is to record the number (O82). */}
                 <p className="text-xs text-rose-800 mt-0.5">
-                  These litres are left out of the oil balance entirely &mdash; they do not reach the Dashboard,
-                  the statement printed for the division, or the balance carried into the next tender, though the
-                  transactions list below still counts them. Open the receipt and record the MR number from the
-                  paperwork it came in on.
+                  These litres are left out of the oil balance entirely. Open the receipt and record
+                  the MR number from the paperwork it came in on.
                 </p>
               </div>
             </div>
@@ -1406,14 +1429,25 @@ ${intakeGate.reason}`);
               <Droplet className="w-6 h-6 mr-3 text-blue-600" />
               Oil Ledger & Shortage Account - {activeAgency.name}
             </h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Manage inward oil, filter by concern division and up to MR date to cross-check billing shortage subtotals.
-            </p>
+            {/* The subtitle described the screen the operator is already looking at (AUDIT O82).
+                17 words naming the controls visible beneath them. Cut. */}
           </div>
 
           {/* Quick Stat Cards */}
           <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
-            <div className="bg-amber-50 border border-amber-200 rounded px-3 py-2 text-right">
+            {/* ⚠ MOBILE ONLY. Above `sm` every card is shown and this is not rendered, so the
+                desktop row is exactly what it was. */}
+            <button
+              type="button"
+              onClick={() => setCardsExpanded((o) => !o)}
+              aria-expanded={cardsExpanded}
+              className="sm:hidden order-2 w-full flex items-center justify-center gap-1.5 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-500 hover:text-slate-800 transition-colors"
+            >
+              {cardsExpanded ? 'Hide' : 'Show'} shortage, inward, scrap &amp; opening
+              <ChevronDown className={`w-3.5 h-3.5 shrink-0 transition-transform ${cardsExpanded ? 'rotate-180' : ''}`} />
+            </button>
+
+            <div className={`bg-amber-50 border border-amber-200 rounded px-3 py-2 text-right ${detailCardCls}`}>
               <div className="text-[10px] uppercase font-bold text-amber-700">
                 Sub Total Shortage
               </div>
@@ -1434,33 +1468,7 @@ ${intakeGate.reason}`);
               )}
             </div>
 
-            {/* ⚠ A QUANTITY DELIBERATELY OUTSIDE EVERY BALANCE ON THIS SCREEN (AUDIT O79).
-                When a transformer is scrapped its oil stays with the agency. Whether those
-                litres belong on the account is an open question with the division, so the
-                figure is REPORTED and never APPLIED - it is in no total here, and it does not
-                reach the printed statement, which stays matched to the division's four terms.
-
-                The note names the question rather than gesturing at uncertainty, so the number
-                and the reason it is uncertain arrive together. */}
-            {subTotalRetained > 0 && (
-              <div className="bg-sky-50 border border-sky-200 rounded px-3 py-2 text-right max-w-xs">
-                <div className="text-[10px] uppercase font-bold text-sky-800">
-                  Retained scrap oil &mdash; not in this balance
-                </div>
-                <div className="text-base font-mono tabular-nums font-bold text-sky-900">
-                  {subTotalRetained.toFixed(2)} LTR
-                </div>
-                <p className="text-[9px] text-sky-800/90 leading-snug mt-1 text-left">
-                  Oil left with the agency from scrapped units. Its treatment is{' '}
-                  <strong>not yet confirmed with the division</strong> &mdash; asked: when a
-                  transformer is scrapped, does your oil account show the top-up quantity, and
-                  does it show the oil we retain? Until that is answered both figures are shown
-                  and neither is applied.
-                </p>
-              </div>
-            )}
-
-            <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-right">
+            <div className={`bg-blue-50 border border-blue-200 rounded px-3 py-2 text-right ${detailCardCls}`}>
               <div className="text-[10px] uppercase font-bold text-blue-700">
                 Inward Received
               </div>
@@ -1469,10 +1477,56 @@ ${intakeGate.reason}`);
               </div>
             </div>
 
+            {/**
+              * ⚠ THIS CARD REPLACED ONE THAT WAS ABOUT TO START LYING (AUDIT O82).
+              *
+              * It read "Retained scrap oil - NOT IN THIS BALANCE" over `subTotalRetained`. That
+              * was true while retained oil sat outside the account, and false the moment a
+              * recorded adjustment became the third deduction: after KLL-6 is entered the card
+              * would claim 250 litres are not in the balance while the net has already fallen by
+              * exactly 250. **False by precisely the amount it had moved.**
+              *
+              * ⚠ AND THE CARD ROW HAD STOPPED SUMMING TO ITS OWN NET. The term went into
+              * `tenderNetMovement` and into the summary table's new column, and NOT here - so the
+              * row showed `opening + shortage - inward - ? = net` with the deduction that moved
+              * the figure missing entirely. The same shape as the per-MR rows not summing to
+              * their subtotal, one commit apart, found the same way: by someone asking where a
+              * figure would appear rather than by any check.
+              *
+              * Both quantities survive because they are different questions: `scrapAdjustment` is
+              * what has been RECORDED and is in the balance; the sub-line is what the scrap jobs
+              * still hold UNRECORDED, which is in nothing.
+              */}
+            {(subTotalScrapAdjustment > 0 || subTotalRetained > 0) && (
+              <div className={`bg-sky-50 border border-sky-200 rounded px-3 py-2 text-right ${detailCardCls}`}>
+                <div className="text-[10px] uppercase font-bold text-sky-800">
+                  Scrap Adjustment
+                </div>
+                <div className="text-base font-mono tabular-nums font-bold text-sky-900">
+                  {subTotalScrapAdjustment.toFixed(2)} LTR
+                </div>
+                {subTotalRetained > subTotalScrapAdjustment && (
+                  <div className="text-[10px] text-sky-800 border-t border-sky-200 mt-1 pt-1">
+                    retained, not yet recorded:{' '}
+                    <strong className="font-mono tabular-nums font-bold">
+                      {(subTotalRetained - subTotalScrapAdjustment).toFixed(2)}
+                    </strong>
+                  </div>
+                )}
+                <p className="text-[9px] text-sky-800/90 leading-snug mt-1 text-left">
+                  Treatment <strong>not yet confirmed with the division</strong>.
+                </p>
+              </div>
+            )}
+
             {/* WHAT CARRIED IN FROM THE PREVIOUS TENDER, shown beside what this one moved.
                 Absent is not zero: an AT with no carried balance has had none CONFIRMED, and
                 saying "0.00" would assert that the previous tender closed level (AUDIT F82). */}
-            <div className={`border rounded px-3 py-2 text-right ${
+            {/* ⚠ IT EXPANDS WITH ITS PER-DIVISION BREAKDOWN, NEVER SUMMARISED INTO THE NET
+                (AUDIT O82, F86). Hiding those lines on a phone would recreate precisely what F86
+                records: one division owed oil while another holds it, concealed behind a single
+                figure - and that figure is what gets settled. */}
+            <div className={`border rounded px-3 py-2 text-right ${detailCardCls} ${
               !activeAtMaster ? 'bg-slate-50 border-slate-200 text-slate-500'
                 : hasOpeningBalance ? 'bg-indigo-50 border-indigo-200 text-indigo-900'
                 : 'bg-amber-50 border-amber-300 text-amber-900'}`}>
@@ -1507,7 +1561,10 @@ ${intakeGate.reason}`);
               )}
             </div>
 
-            <div className={`border rounded px-3 py-2 text-right ${subTotalNetBalance > 0 ? 'bg-rose-50 border-rose-200 text-rose-900' : subTotalNetBalance < 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-slate-50 border-slate-200 text-slate-900'}`}>
+            {/* ⚠ THE ONE CARD NEVER HIDDEN, AND FIRST ON A PHONE (AUDIT O82). It is the answer;
+                the other four are its working. `order-first` puts it above the disclosure button
+                below `sm`, and `sm:order-none` returns it to the end of the row above it. */}
+            <div className={`border rounded px-3 py-2 text-right order-first w-full sm:order-none sm:w-auto ${subTotalNetBalance > 0 ? 'bg-rose-50 border-rose-200 text-rose-900' : subTotalNetBalance < 0 ? 'bg-emerald-50 border-emerald-200 text-emerald-900' : 'bg-slate-50 border-slate-200 text-slate-900'}`}>
               <div className="text-[10px] uppercase font-bold opacity-80">
                 Net Balance
               </div>
@@ -1665,11 +1722,13 @@ ${intakeGate.reason}`);
               <span className="font-bold uppercase tracking-wider text-[10px] bg-blue-600 text-white px-2 py-0.5 rounded">
                 Billing Reconciliation
               </span>
+              {/* ⚠ THE THREE FIGURES ARE GONE; THE SCOPE LINE STAYS (AUDIT O82). Shortage, Inward
+                  and Net Due are all in the cards a few inches above, reduced over the SAME
+                  filtered set - so this restated them. What the cards do NOT say is which filter
+                  produced them, and that is the one thing this banner contributes. */}
               <span>
-                Cumulative oil account for <strong>{filterDivision}</strong> up to <strong>{formatDDMMYYYY(filterUptoDate)}</strong>.
-                Sub Total Shortage: <strong className="font-mono tabular-nums">{subTotalShortage.toFixed(2)} LTR</strong> |
-                Total Inward: <strong className="font-mono tabular-nums">{subTotalReceived.toFixed(2)} LTR</strong> |
-                Net Due: <strong className="font-mono tabular-nums">{subTotalNetBalance >= 0 ? '+' : ''}{subTotalNetBalance.toFixed(2)} LTR</strong>.
+                Cumulative oil account for <strong>{filterDivision}</strong> up to{' '}
+                <strong>{formatDDMMYYYY(filterUptoDate)}</strong>.
               </span>
             </div>
           </div>
@@ -1677,60 +1736,111 @@ ${intakeGate.reason}`);
       </div>
 
       <div className={CARD}>
-        <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50">
-          <div className="flex space-x-2">
+        {/* ⚠ STACKS BEFORE IT SQUEEZES (AUDIT O82). `flex justify-between items-center` with no
+            wrap put the three tabs and the two action buttons on one row; at 380px the tabs
+            overflowed and the buttons beside them were crushed. Below `sm` the two groups sit on
+            separate rows, each free to wrap within itself. */}
+        <div className="p-3 sm:p-4 border-b border-slate-200 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3 bg-slate-50">
+          {/**
+            * THE THREE VIEWS, AND WHICH ONE YOU ARE ON (AUDIT O82).
+            *
+            * ⚠ SELECTION WAS A WHITE FILL ON A SLATE-50 STRIP - almost no contrast - and the only
+            * other cue was the LABEL colour, which was `blue-700` on two of the three tabs. Two
+            * selected states were identical and the third differed by one step of hue. Nothing
+            * carried `aria-current`, so a screen reader had no selected tab at all.
+            *
+            * Now: one accent per tab on a 2px bottom border, the selected label in slate-900 bold
+            * against slate-500 medium, `aria-current="page"`, and the row count in the tab so the
+            * size of each list is known before opening it.
+            *
+            * ⚠ THE CLASS STRINGS ARE WRITTEN OUT PER TAB, NOT COMPOSED. Tailwind scans source text
+            * for literals, so `border-${accent}-600` is not in the build and renders unstyled.
+            *
+            * ⚠ `flex-wrap`, BECAUSE THREE TABS DO NOT FIT A PHONE. At 380px these run to roughly
+            * 520px of content; the strip used `flex space-x-2` with no wrap, so it overflowed its
+            * own container and squeezed the export and entry buttons beside it.
+            *
+            * Each resets the entry form, so a view owns that form exactly once - which is why
+            * scrap is a third TAB rather than a second table inside the transactions view: two
+            * lists competing for one form is the state this avoids.
+            */}
+          <div className="flex flex-wrap gap-1 sm:gap-2" role="tablist">
             <button
+              role="tab"
+              aria-current={viewMode === "transactions" ? "page" : undefined}
+              aria-selected={viewMode === "transactions"}
               onClick={() => {
                 setViewMode("transactions");
                 setShowAddForm(false);
                 setEditingId(null);
               }}
-              className={`px-4 py-2 text-sm font-bold rounded transition-colors flex items-center ${
+              className={`px-2.5 sm:px-4 py-2 text-xs sm:text-sm rounded-t transition-colors flex items-center gap-1.5 border-b-2 ${
                 viewMode === "transactions"
-                  ? "bg-white text-blue-700 shadow-sm border border-slate-200"
-                  : "text-slate-500 hover:bg-slate-200 border border-transparent"
+                  ? "bg-white text-slate-900 font-bold border-blue-600"
+                  : "text-slate-500 font-medium border-transparent hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
-              <List className="w-4 h-4 mr-2" />
-              Inward Transactions
+              <List className={`w-4 h-4 shrink-0 ${viewMode === "transactions" ? "text-blue-600" : ""}`} />
+              <span>Inward</span>
+              <span className="hidden sm:inline">Transactions</span>
+              <span className={`${NUM} text-[10px] px-1.5 py-0.5 rounded-full ${
+                viewMode === "transactions" ? "bg-blue-100 text-blue-800" : "bg-slate-200 text-slate-600"
+              }`}>
+                {filteredTransactions.length}
+              </span>
             </button>
+
             <button
+              role="tab"
+              aria-current={viewMode === "summary" ? "page" : undefined}
+              aria-selected={viewMode === "summary"}
               onClick={() => {
                 setViewMode("summary");
                 setShowAddForm(false);
                 setEditingId(null);
               }}
-              className={`px-4 py-2 text-sm font-bold rounded transition-colors flex items-center ${
+              className={`px-2.5 sm:px-4 py-2 text-xs sm:text-sm rounded-t transition-colors flex items-center gap-1.5 border-b-2 ${
                 viewMode === "summary"
-                  ? "bg-white text-blue-700 shadow-sm border border-slate-200"
-                  : "text-slate-500 hover:bg-slate-200 border border-transparent"
+                  ? "bg-white text-slate-900 font-bold border-emerald-600"
+                  : "text-slate-500 font-medium border-transparent hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
-              <BarChart2 className="w-4 h-4 mr-2" />
-              MR Wise Shortage Summary
+              <BarChart2 className={`w-4 h-4 shrink-0 ${viewMode === "summary" ? "text-emerald-600" : ""}`} />
+              <span>MR Wise</span>
+              <span className="hidden sm:inline">Shortage Summary</span>
+              <span className={`${NUM} text-[10px] px-1.5 py-0.5 rounded-full ${
+                viewMode === "summary" ? "bg-emerald-100 text-emerald-800" : "bg-slate-200 text-slate-600"
+              }`}>
+                {filteredSummary.length}
+              </span>
             </button>
-            {/* ⚠ SCRAP ADJUSTMENTS ARE NOT INWARD RECEIPTS, SO THEY ARE NOT IN THAT LIST
-                (AUDIT O79). One arrives in barrels from the division; the other is oil the
-                agency kept from a unit it scrapped. Mixing them would make the Inward log say
-                a barrel arrived when none did.
 
-                It resets the form exactly as the other two do, so each view owns the entry
-                form once - the reason this is a third TAB rather than a second table nested
-                inside the transactions view. */}
+            {/* ⚠ SCRAP ADJUSTMENTS ARE NOT INWARD RECEIPTS (AUDIT O79). One arrives in barrels
+                from the division; the other is oil the agency kept from a unit it scrapped.
+                Mixing them would make the Inward log say a barrel arrived when none did. */}
             <button
+              role="tab"
+              aria-current={viewMode === "scrap" ? "page" : undefined}
+              aria-selected={viewMode === "scrap"}
               onClick={() => {
                 setViewMode("scrap");
                 setShowAddForm(false);
                 setEditingId(null);
               }}
-              className={`px-4 py-2 text-sm font-bold rounded transition-colors flex items-center ${
+              className={`px-2.5 sm:px-4 py-2 text-xs sm:text-sm rounded-t transition-colors flex items-center gap-1.5 border-b-2 ${
                 viewMode === "scrap"
-                  ? "bg-white text-sky-700 shadow-sm border border-slate-200"
-                  : "text-slate-500 hover:bg-slate-200 border border-transparent"
+                  ? "bg-white text-slate-900 font-bold border-sky-600"
+                  : "text-slate-500 font-medium border-transparent hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
-              <Droplet className="w-4 h-4 mr-2" />
-              Scrap Adjustments
+              <Droplet className={`w-4 h-4 shrink-0 ${viewMode === "scrap" ? "text-sky-600" : ""}`} />
+              <span>Scrap</span>
+              <span className="hidden sm:inline">Adjustments</span>
+              <span className={`${NUM} text-[10px] px-1.5 py-0.5 rounded-full ${
+                viewMode === "scrap" ? "bg-sky-100 text-sky-800" : "bg-slate-200 text-slate-600"
+              }`}>
+                {scrapRows.length}
+              </span>
             </button>
           </div>
 
@@ -1863,11 +1973,12 @@ ${intakeGate.reason}`);
               </div>
             </div>
 
+            {/* ⚠ CUT FROM 43 WORDS TO 11 (AUDIT O82). The confirm dialog states the same thing at
+                the moment it matters - immediately before the write - so repeating it here spent
+                four lines explaining a mechanism the operator is about to be told about anyway.
+                What survives is the fact: this reduces what the division owes. */}
             <p className="text-[10px] text-sky-900/80 mt-3 leading-snug">
-              This is a deduction against what the division owes &mdash; the agency holds oil it did
-              not buy. It does <strong>not</strong> appear on the printed Inward Oil Received Log or
-              in the invoice&rsquo;s oil deduction, which stay matched to the division&rsquo;s four
-              terms.
+              A deduction against what the division owes &mdash; the agency holds oil it did not buy.
             </p>
           </div>
         )}

@@ -18595,3 +18595,100 @@ clearly elsewhere in the same message. The failure mode this rule prevents is no
 **obedience to the least important half of an instruction.**
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O82. The Oil Register restyled - and a term that reached three surfaces out of four, twice
+
+**The screen had accumulated prose, a tab strip that barely said which tab was selected, and a header that
+pushed every table below the fold on a phone.** All three are fixed. **Two findings came out of it**, and the
+second is the more useful.
+
+### The rule for the prose, stated by the owner
+
+> **Keep what states a fact or names an action. Cut what explains a mechanism.**
+
+Roughly **150 words** went, against the Estimate Master restructure's 446 on the same principle.
+
+| where | was | now |
+|---|---|---|
+| header subtitle | 17w describing the screen you are looking at | **gone** |
+| all-tenders panel | 64w, ending in how the DISCOM performs the same subtraction | **the fact only** - opening balances are out, and why that is not an omission |
+| unmatched-oil banner | 47w enumerating four destinations the litres fail to reach | **the fact and the action** - out of the balance; record the number |
+| scrap card | 51w including the verbatim question put to the division | **six words** |
+| scrap entry footer | 43w restating what the confirm dialog says moments later | **11 words** |
+| reconciliation banner | three figures already in the cards above it | **the scope line only** - which division, up to which date |
+
+**⚠ TWO WERE KEPT WHOLE ON THE OWNER'S INSTRUCTION, AND THE TEST IS WORTH RECORDING.** The all-tenders
+history caveat and the rollover's "Approximate" disclosure both survive intact because **they bound what a number
+may be used for.** That is the line: prose that limits a figure's use is not explanation, it is part of the
+figure.
+
+**⚠ AND MY OWN PROPOSAL WAS SELF-CONTRADICTORY ON ONE ROW.** I wrote "keep the figures, cut the label" for
+the reconciliation banner, having just said it *restates three numbers already in the cards*. If the numbers are
+the redundancy, the numbers are what goes. Flagged rather than silently resolved either way.
+
+### The tab strip
+
+Selection was **a white fill on a slate-50 strip** - almost no contrast - and the only other cue was the label
+colour, which was `blue-700` on **two of the three tabs**. Two selected states were identical and the third
+differed by one step of hue. **Nothing carried `aria-current`**, so a screen reader had no selected tab at all.
+
+Now one accent per tab on a 2px bottom border, selected in `slate-900` bold against `slate-500` medium,
+`aria-current="page"`, and the row count in each tab. Class strings are written out per tab rather than composed,
+because Tailwind scans source text for literals and `border-${accent}-600` is not in the build.
+
+### Mobile at 380px
+
+- **Tables were already right** - `TABLE_WRAP` is `overflow-x-auto` with `whitespace-nowrap` cells, so all three
+  scroll sideways by design. Left alone.
+- **The strip overflowed.** Three tabs ran to ~520px in `flex space-x-2` with no wrap, pushing the export and
+  entry buttons out of their own container. Now `flex-wrap`, with the two groups on separate rows below `sm`.
+- **Five stacked cards ran to ~420px of header**, so the register started two screens down - **the space
+  complaint the notifications work began with, on a different screen.** Collapsed to **Net Balance alone** (~80px)
+  with a disclosure; the rest expand two to a row. Not persisted: a per-view convenience, not a preference.
+- **⚠ THE OPENING CARD EXPANDS WITH ITS PER-DIVISION BREAKDOWN INTACT.** Summarising those lines into a
+  single net on a phone would recreate exactly what F86 records - one division owed oil while another holds it,
+  hidden behind one figure, and that figure is what gets settled.
+- **One copy of each card, visibility by class.** A separate mobile tree is five cards written twice, and the
+  second copy is where a figure stops matching the first.
+
+### ⚠ THE FINDING: A FORMULA GAINED A TERM AND REACHED THREE SURFACES OUT OF FOUR. TWICE.
+
+The scrap adjustment was added to `tenderNetMovement`, to the summary table's new column - and **not to the stat
+cards**. So the card row displayed `opening + shortage - inward - ? = net`, **silently omitting the deduction
+that moved its own total.**
+
+**One commit earlier, the identical shape:** the term went into the cards and not into the per-MR rows or the
+Excel rows, so **neither table summed to its own subtotal.**
+
+| | got the term | missed it |
+|---|---|---|
+| commit A | `tenderNetMovement`, the cards | per-MR rows, Excel rows |
+| commit B | `tenderNetMovement`, summary table, Excel | **the stat cards** |
+
+> **When a formula gains a term, every surface that displays that formula needs it - and nothing in the checks
+> can see a surface that was missed.**
+
+**Not tsc. Not 274 tests. Not the build. Not the hooks guard.** None of them can see an arithmetic relationship
+between a row and a total, or between a card row and its own net. **Both were found the same way: the owner
+asking where a figure would appear.**
+
+The stale card is the sharpest illustration. It read **"Retained scrap oil - not in this balance"**, which was
+true until a recorded adjustment became the third deduction - and then **false by exactly the amount the net had
+already moved.** Replaced by a Scrap Adjustment card showing the deduction, with the unrecorded remainder as a
+sub-line, so both quantities survive and neither asserts something untrue.
+
+**What would actually catch this** is a test asserting that the displayed components sum to the displayed total,
+per surface. **Not built here** - it is a different piece of work from a restyle, and building it inside one is
+how it would be scoped to this screen alone.
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 186 insertions, 75
+deletions, identical with and without `--ignore-cr-at-eol`.
+- **⚠ THE PRINTED SHEET IS UNTOUCHED, PROVED RATHER THAN ASSUMED.** `BillingSystem.tsx` is byte-identical
+  before and after - git `e2bf0d93cc3922284f502ad3f849b7cf4209ce4d`, SHA-256 `81339f90...29cd387`. `OilInward`
+  contains no print markup at all, which made the proof cheap.
+- **⚠ NOT SEEN RENDERED.** A tab strip is exactly the kind of change where a class typo shows as nothing at
+  all.
+
+**Deploy:** hosting - a push to `main` (O71).
