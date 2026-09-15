@@ -17638,3 +17638,89 @@ GP and scrapped, so any scrap rule needs that predicate - and building one now w
 the rule O47 exists to unify.
 
 **Nothing built. Nothing corrected. The app was already right.**
+
+---
+
+## O77. A scrapped unit credits a top-up it never received - 550 litres, left in place deliberately
+
+**Open, 2026-09-15. THE APP IS PROBABLY WRONG HERE, AND RECORDING IS STILL THE RIGHT ACTION.** That combination
+is the finding: a known-suspect figure left standing because **the counterparty's document is the authority and
+nobody has read it on this point.**
+
+### What the figure is
+
+`jobOilShortage` returns `lessOil + (present x 0.05)`. `lessOil` means **"oil required to top up a failed
+transformer"** - F88 takes that term from the DISCOM's own workbook. **A scrapped transformer is never topped up.**
+It is declared scrap and returned; the agency fills nothing. So for a scrap job that term credits the agency for
+oil it never bought.
+
+| job | agency | top-up | filtration | total |
+|---|---|---|---|---|
+| SBT-31 **(GP)** | MEGHA | **200.00** | 0.00 | 200.00 |
+| MSBT-21 | MEGHA | **120.00** | 0.00 | 120.00 |
+| MSBT-23 | MEGHA | **120.00** | 0.00 | 120.00 |
+| MSBT-5 | AARATI | **100.00** | 0.00 | 100.00 |
+| AMKLL-9 | MEGHA | **10.00** | 5.50 | 15.50 |
+| six other scrap jobs | | 0.00 | 53.50 | 53.50 |
+| **11 scrap jobs** | | **550.00** | **59.00** | **609.00** |
+
+### ⚠ THE SPLIT IS THE PART THAT REFRAMES IT: 550 TOP-UP, 59 FILTRATION
+
+Two rounds of this investigation argued about the **5% filtration term**, which governs **59 litres**. The
+**top-up term governs 550** - **90% of everything scrap jobs contribute** - and nobody had looked at it. The
+smaller half was the one being debated, by both parties, without either knowing which half it was.
+
+**⚠ AND THE COUNT WAS WRONG, IN THIS AUDIT, TWICE OVER.** O76 records "540 litres across four jobs". It is **550
+across FIVE**. The four were the jobs that arrived EMPTY; the question is which credit a top-up that never
+happened, and **AMKLL-9 arrived 110 litres full while still recording `lessOil: 10`**. The figure answered a
+neighbouring question - the same defect O76 exists to record, repeated inside the entry recording it.
+
+### What settles it, and why it is not settled
+
+**F88 IS SILENT ON SCRAP.** It records the workbook's four terms - `Opening + top-up + filtration loss`, less
+`Oil Issued` - verified against three named agency rows, and names the sheets **SGP / RGP / OGP**.
+
+**⚠ NO INFERENCE IS DRAWN FROM THOSE SHEET NAMES.** It is tempting to read "SGP" as a scrap sheet. F88's own
+closing rule forbids exactly that: *"do not derive its direction from the application's own labels... derive it
+from the counterparty's document, and prefer its arithmetic to its column headings."* Guessing a three-letter
+abbreviation is weaker evidence than the column-heading reading that already produced one backwards
+implementation.
+
+**THE SETTLING QUESTION IS EXTERNAL AND SMALL: what does the division's sheet do with a scrapped unit?** One
+question to a division office, or one row of that workbook, resolves 90% of what scrap jobs contribute. **It has
+not been asked.**
+
+### O47 is orthogonal, and an earlier claim in this audit does not bind
+
+O76 states that building a scrap rule would write "the fourth copy of the rule O47 exists to unify". **That is
+wrong for these five jobs.** O47 governs the **5%** term and needs `isGpJob`; this governs the **top-up** term and
+needs `isScrap`. Different predicates, different terms, no overlap.
+
+**SBT-31 proves it: it is GP and scrapped, and its filtration component is exactly 0.00 litres.** Its entire 200
+is top-up. **O47's fix would not move it by a single litre.** The two questions can be answered in either order.
+
+### Why recording rather than changing
+
+The adjustment-entry form was explored first and **rejected for three independent reasons, any one sufficient**:
+the division's workbook has four terms and **no adjustment column**; a third `oilType` **prints** - the Oil Account
+Sheet's "Inward Oil Received Log" renders `tx.oilType` inside a printed subtree, so an adjustment would appear as
+a **received** row on a document to a division office; and the arithmetic **inverts** - cancelling a shortage
+through `oilTransactions` means recording oil as RECEIVED, asserting the division issued something it did not.
+
+So the question returned to the formula, and the formula is being left alone:
+
+1. **The only counterparty document available is silent on scrap.** Changing 550 litres on a reconciled account
+   with no corresponding line in their sheet is reasoning-instead-of-checking - what F88 records as having already
+   produced one backwards implementation.
+2. **A formula change is invisible.** 550 litres would disappear with nothing saying where they went, and unlike
+   a ledger row it leaves no artefact to reconcile against.
+3. **It is 90% of the scrap contribution and it moves against the agency.** The largest correction available in
+   this ledger should not rest on a premise nobody has confirmed.
+4. **The last two premises on this subject were both wrong** - one from the owner, one from this audit - and both
+   were caught only by someone re-deriving the arithmetic.
+
+**A wrong figure that MATCHES the counterparty is less dangerous than a right figure that does not.** If the
+division's sheet computes the same way, both are over-crediting and the accounts agree. If it does not, this
+register is 550 litres high across MEGHA and AARATI.
+
+**Not changed. The owner will ask a division office.**
