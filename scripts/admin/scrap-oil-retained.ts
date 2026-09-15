@@ -156,6 +156,23 @@ for (const ag of agencies) {
       + ` -> x0.95 ${describeOil(now.net - add95).signed.padStart(12)}`
       + `   (${inThisAt.length} scrap job(s) in this tender)`,
     );
+    /**
+     * ⚠ THE DECOMPOSITION THE OIL ACCOUNT SUMMARY SHOWS, PRINTED HERE TOO (AUDIT F87).
+     *
+     * A script and a screen measuring one quantity by different means, never printed side by
+     * side, is how a banner reported 4 of 12 for a fortnight. The read-only scrap breakdown on
+     * the Oil Account shows exactly these four figures, so they are emitted here to be compared
+     * against it. If the two ever disagree, that is the bug.
+     */
+    const scrapShortage = inThisAt.reduce((s, r) => s + r._shortage, 0);
+    const repairShortage = now.shortage - scrapShortage;
+    console.log(
+      `      shortage ${n2(now.shortage).padStart(9)}`
+      + `  = repair ${n2(repairShortage).padStart(9)}`
+      + ` + scrap ${n2(scrapShortage).padStart(9)}`
+      + `   received ${n2(now.received).padStart(9)}`
+      + `   retained (NOT in the balance) ${n2(addRaw).padStart(9)}`,
+    );
   }
   console.log('');
 }

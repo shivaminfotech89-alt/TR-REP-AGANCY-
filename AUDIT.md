@@ -18329,8 +18329,53 @@ The owner will put it to a division office, and it covers both entries at once:
 > **When a transformer is scrapped, does your oil account show the top-up quantity, and does it show the oil we
 > retain?**
 
-**Not built.** 1,180 litres, crossing zero, on a premise nobody has checked - and O77's reasoning applies here
-with more force, not less, because this moves nearly twice as many litres.
+**The WRITE is not built.** 1,180 litres, crossing zero - and the owner, who has settled this account with UGVCL
+for years, has since confirmed that a scrap adjustment DOES move the balance with the division and that this is
+its purpose. **That is domain authority and it is accepted**; the objection was epistemic - a document not read -
+and it is withdrawn. The write waits on ONE question, put to the owner rather than decided here:
+
+> **For a scrapped unit, does the top-up shortage REMAIN on the account, or does the retained oil REPLACE it?**
+
+The retained entry is confirmed; the shortage is not. If it remains, the two together overstate by
+`lessOil + 5% of available` - **640.00 L of phantom top-up on the five units that arrived empty**, which retain
+nothing to offset it.
+
+**Settled for when the answer comes:** record it as an existing **`Used`** receipt with **gross = available**, so
+the app's own `filtrationLossPercent` nets it to `available x 0.95` - **no third `oilType`, no new column, no
+rules deploy** (MEGHA: gross 1120.00, net 1064.00). **The twelve existing jobs are listed for manual entry, never
+generated**: none has an honest declaration date, and six are `Dispatched`, which
+`InternalInspection.tsx:582-583` skips outright.
+
+---
+
+### ⚠ WHAT *WAS* BUILT: THE READ-ONLY BREAKDOWN - IT CHANGES NO FIGURE
+
+The Oil Account summary now says what the shortage is MADE OF. **MEGHA AT 26-27 reads shortage 1177.60, of which
+scrap 506.00; retained scrap oil 1120.00, not in this balance.**
+
+- **⚠ THE OWNER'S EXAMPLE FIGURES WERE WRONG IN THREE PLACES AND THE SCREEN DOES NOT REPRODUCE THEM.** They
+  read "shortage 757.60, of which 699.00, retained 1,180.50". **757.60 is the NET**, not the shortage; **699.00 is
+  all twelve jobs across four agencies**, where MEGHA's nine contribute 506.00; and 1,180.00 includes GETCO's
+  60.00. The card is built from the live decomposition instead.
+- **⚠ `scrapShortage` IS A PART OF THE TOTAL, ACCUMULATED FROM THE SAME `netShortage`** already added to it,
+  and `retained` reuses the `oilRecd` already computed for the filtration term. **Nothing is recalculated** - so
+  the breakdown cannot disagree with the total it decomposes, and this did not become a SIXTH copy of the
+  shortage arithmetic (`oilBalance.ts`, `ExternalInspection.tsx:537`, `oil-net-census.js`, BillingSystem's
+  `allMrSummary`, and `mrSummary` itself already carry one).
+- **⚠ BOTH FIGURES FOLLOW THE DIVISION AND DATE FILTERS**, reduced over `filteredSummary` exactly as the two
+  totals beside them are. An agency-wide scrap figure shown beside a division-filtered shortage is the F86 fault
+  verbatim.
+- **⚠ `retained` IS IN NO TOTAL ANYWHERE.** Showing the quantity states a fact; subtracting it would assert a
+  treatment nobody has confirmed. The note names the question rather than gesturing at uncertainty, so the number
+  and the reason it is uncertain arrive together.
+- **⚠ IT DOES NOT REACH THE PRINTED SHEET, CONFIRMED BY HASH.** `BillingSystem.tsx` is byte-identical before
+  and after - git `c9c315aa9c85f9b9be37413a1a83c6ba96a293c8`, SHA-256 `a20161d0...78f59fa`. The statement sent to
+  a division office stays matched to the division's four terms.
+
+**⚠ AND IT READS `agencyInspections`, NOT THE SCREEN'S LOCAL `inspections` LIST**, which is narrowed to
+External records. Scrap is declared on the INTERNAL inspection, so the narrow list would have found no scrap by
+inspection at all and **silently understated by ASU-2's 90 litres** - the exact miscount O80 records, very nearly
+repeated inside the code written to report it.
 
 ---
 

@@ -17,6 +17,11 @@ import {
 import { formatDDMMYYYY, getMrDateIso } from '../lib/utils';
 import { describeOil } from '../lib/oilBalance';
 import { oilRowsMissingMrNumber, litresOf } from '../lib/mrRename';
+// ⚠ THE WIDEST SCRAP TEST, FROM ITS OWN MODULE (AUDIT O80). Four different tests for "is this
+// job scrap" existed and they disagree by more than half the population - 5, 11 and 12 of 12.
+// The predicate lives in lib/scrapState.ts rather than here on purpose: defining it inside the
+// oil feature is how it would acquire a fifth definition.
+import { isScrapJob } from '../lib/scrapState';
 import { CARD, CARD_PAD, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import {
   Droplet,
@@ -477,6 +482,23 @@ ${intakeGate.reason}`);
         division: string;
         totalShortage: number;
         totalReceived: number;
+        /**
+         * HOW MUCH OF `totalShortage` SITS ON SCRAPPED UNITS (AUDIT O79/O80).
+         *
+         * ⚠ A PART OF THE TOTAL, NOT AN ADDITION TO IT. It is accumulated from the SAME
+         * `netShortage` added to `totalShortage` two lines above - never recomputed - so the two
+         * cannot drift and this cannot become a sixth copy of the shortage arithmetic.
+         */
+        scrapShortage: number;
+        /**
+         * OIL THE AGENCY RETAINED FROM SCRAPPED UNITS - AND THIS ONE IS **NOT** IN ANY TOTAL.
+         *
+         * ⚠ REPORTED, NEVER APPLIED. Whether these litres belong on the account is O79's open
+         * question and the division has not been asked. Showing the quantity states a fact;
+         * subtracting it would assert a treatment. It is deliberately absent from
+         * `totalReceived` and from every balance on this screen.
+         */
+        retained: number;
       }
     > = {};
 
@@ -492,6 +514,8 @@ ${intakeGate.reason}`);
           division: job.division || "",
           totalShortage: 0,
           totalReceived: 0,
+          scrapShortage: 0,
+          retained: 0,
         };
       } else if (summary[mrNo].mrDate === "-" && mrDate !== "-") {
         summary[mrNo].mrDate = mrDate;
@@ -522,6 +546,25 @@ ${intakeGate.reason}`);
         : (baseShortage + filterLoss);
 
       summary[mrNo].totalShortage += netShortage;
+
+      /**
+       * ⚠ THE SCRAP SPLIT, TAKEN FROM THE FIGURES ALREADY COMPUTED HERE (AUDIT O79).
+       *
+       * `netShortage` is the same value added to the total above, and `oilRecd` is the oil that
+       * was in the tank - `Math.max(0, oilCap - lessOil)`, computed for the filtration term a
+       * few lines up. Nothing is recalculated, so the breakdown cannot disagree with the total
+       * it decomposes.
+       *
+       * ⚠ `agencyInspections`, NOT THE LOCAL `inspections` LIST. That one is narrowed to
+       * External records (see its useMemo), which is right for `inspectionFor` and WRONG here:
+       * scrap is declared on the INTERNAL inspection. Passing the External list would find no
+       * scrap by inspection at all and silently understate by ASU-2's 90 litres - the exact
+       * miscount O80 records, repeated in the code written to report it.
+       */
+      if (isScrapJob(job, agencyInspections)) {
+        summary[mrNo].scrapShortage += netShortage;
+        summary[mrNo].retained += oilRecd;
+      }
     });
 
     // Group received oil from transactions
@@ -536,6 +579,8 @@ ${intakeGate.reason}`);
           division: tx.division || "",
           totalShortage: 0,
           totalReceived: 0,
+          scrapShortage: 0,
+          retained: 0,
         };
       } else if (summary[mrNo].mrDate === "-" && txMrDate !== "-") {
         summary[mrNo].mrDate = txMrDate;
@@ -546,7 +591,7 @@ ${intakeGate.reason}`);
     return Object.values(summary).sort(
       (a, b) => b.totalShortage - a.totalShortage,
     );
-  }, [jobs, inspections, transactions]);
+  }, [jobs, inspections, agencyInspections, transactions]);
 
   const availableMrDates = useMemo(() => {
     const dates = new Set<string>();
@@ -598,6 +643,26 @@ ${intakeGate.reason}`);
 
   const subTotalReceived = useMemo(() => {
     return filteredSummary.reduce((sum, item) => sum + item.totalReceived, 0);
+  }, [filteredSummary]);
+
+  /**
+   * THE SCRAP DECOMPOSITION OF WHAT IS ON SCREEN (AUDIT O79).
+   *
+   * ⚠ REDUCED OVER `filteredSummary`, EXACTLY AS THE TWO TOTALS ABOVE ARE. The division and
+   * date filters narrow that list, so an agency-wide scrap figure shown beside a
+   * division-filtered shortage would be the F86 fault verbatim: a total from one population
+   * presented as a part of a total from another. Filter to KALOL and both move together.
+   *
+   * `scrapShortage` is a PART of `subTotalShortage`. `retained` is in NEITHER total - it is the
+   * quantity O79 is about, shown because the operator should see it, and left out of every
+   * balance because the division has not been asked which treatment is right.
+   */
+  const subTotalScrapShortage = useMemo(() => {
+    return filteredSummary.reduce((sum, item) => sum + (item.scrapShortage || 0), 0);
+  }, [filteredSummary]);
+
+  const subTotalRetained = useMemo(() => {
+    return filteredSummary.reduce((sum, item) => sum + (item.retained || 0), 0);
   }, [filteredSummary]);
 
   /**
@@ -1020,7 +1085,45 @@ ${intakeGate.reason}`);
               <div className="text-base font-mono tabular-nums font-bold text-amber-900">
                 {subTotalShortage.toFixed(2)} LTR
               </div>
+              {/* ⚠ HOW MUCH OF THIS TOTAL RESTS ON UNITS NOBODY REPAIRED (AUDIT O79). A scrapped
+                  transformer is never topped up, so the top-up term credits oil the agency did
+                  not supply - and until now the screen showed the total with nothing saying what
+                  it contained. This CHANGES NO FIGURE; it says what the figure is made of. */}
+              {subTotalScrapShortage > 0 && (
+                <div className="text-[10px] text-amber-800 border-t border-amber-200 mt-1 pt-1">
+                  of which scrap:{' '}
+                  <strong className="font-mono tabular-nums font-bold">
+                    {subTotalScrapShortage.toFixed(2)}
+                  </strong>
+                </div>
+              )}
             </div>
+
+            {/* ⚠ A QUANTITY DELIBERATELY OUTSIDE EVERY BALANCE ON THIS SCREEN (AUDIT O79).
+                When a transformer is scrapped its oil stays with the agency. Whether those
+                litres belong on the account is an open question with the division, so the
+                figure is REPORTED and never APPLIED - it is in no total here, and it does not
+                reach the printed statement, which stays matched to the division's four terms.
+
+                The note names the question rather than gesturing at uncertainty, so the number
+                and the reason it is uncertain arrive together. */}
+            {subTotalRetained > 0 && (
+              <div className="bg-sky-50 border border-sky-200 rounded px-3 py-2 text-right max-w-xs">
+                <div className="text-[10px] uppercase font-bold text-sky-800">
+                  Retained scrap oil &mdash; not in this balance
+                </div>
+                <div className="text-base font-mono tabular-nums font-bold text-sky-900">
+                  {subTotalRetained.toFixed(2)} LTR
+                </div>
+                <p className="text-[9px] text-sky-800/90 leading-snug mt-1 text-left">
+                  Oil left with the agency from scrapped units. Its treatment is{' '}
+                  <strong>not yet confirmed with the division</strong> &mdash; asked: when a
+                  transformer is scrapped, does your oil account show the top-up quantity, and
+                  does it show the oil we retain? Until that is answered both figures are shown
+                  and neither is applied.
+                </p>
+              </div>
+            )}
 
             <div className="bg-blue-50 border border-blue-200 rounded px-3 py-2 text-right">
               <div className="text-[10px] uppercase font-bold text-blue-700">
