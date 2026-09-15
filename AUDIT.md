@@ -18835,6 +18835,78 @@ identical with and without `--ignore-cr-at-eol`.
 
 ---
 
+## O85. The empty code was the finding - and the method that produced it
+
+**O86 records the conclusion. This records how it was reached**, which was not analysis: it was shipping an alert
+that reported more than one field and reading what came back from the tablet.
+
+### What the tablet said, and what one missing field ruled out
+
+O84 shipped an alert reporting `err.code`. The tablet returned **"Login failed (unknown error)"** - the branch
+that fires when `code` is absent.
+
+⚠ **AN ABSENT CODE IS NOT A DISAPPOINTING RESULT. IT IS A POSITIVE ONE.** `popup-blocked`,
+`popup-closed-by-user`, `cancelled-popup-request`, `network-request-failed` and `unauthorized-domain` **all**
+arrive as a `FirebaseError` carrying a `code`. No code means not a `FirebaseError`, which **excluded the entire
+O84 candidate table at once** rather than leaving five causes unconfirmed - and sent the investigation to the
+persistence layer, where the fault actually was (O86).
+
+**One reading of one field killed an afternoon's worth of hypotheses.** That is the argument for reporting the
+cause rather than a sentence about it.
+
+### ⚠ AND THE WORDING PROVED THE TABLET WAS ON THE NEW BUNDLE
+
+The reasoning above is worthless if the device was running old code. The previous message was *"Login failed.
+Please check popup permissions and try again."* - **no parentheses.** `"(unknown error)"` can only come from the
+shipped change, so the text of the report was itself the proof that the report was current.
+
+Corroborated independently rather than left on one observation:
+
+- **No service worker** anywhere in `src/`, `index.html`, `public/` or `vite.config` - so there is no cache layer
+  that could serve a stale bundle.
+- **The build emits exactly one chunk**, so "failed to fetch dynamically imported module" - the obvious candidate
+  for a silent non-Firebase throw - **cannot apply to the Firebase SDK**. The only dynamic import in the codebase
+  is `adminSubscription.ts:102` for Razorpay, nowhere near sign-in.
+
+### Why one more field would not have been enough
+
+What remained after `FirebaseError` was excluded were four possibilities that **`code` alone cannot separate, and
+that any single additional field also cannot**: a promise rejecting with a non-object (`undefined`, `null` or a
+string - all of which produce exactly "unknown error"), a `TypeError` from inside the SDK, a `DOMException` from a
+blocked browser API, or something thrown by an extension or in-app browser wrapper.
+
+So the alert took all four: `name` separates `TypeError` from `DOMException` from `FirebaseError`, `message`
+carries the text that names the fault, and the type tag catches a thrown string, `null` or non-`Error` object.
+**It returned `name: Error`, `message: Database is closing/hidden`** - and O86 begins there.
+
+**No remedy was chosen here.** `authDomain`, popup-vs-redirect and console configuration all stayed untouched
+until the thrown value was identified. Two of the plausible remedies were opposite, and this investigation had
+already spent an afternoon on an unconfirmed premise once (O84).
+
+### ⚠ THIS ENTRY WAS SKIPPED, AND THE SKIP IS PART OF THE RECORD
+
+**This number sat empty until a grep checking something else returned O84 and O86 with nothing between them.**
+The commit shipped (`67fe1b2`), the reasoning went into the commit message, and the note script that writes the
+audit entry **was never run** - because the commit touched **one file**, and a one-file change does not feel like
+it has an entry in it. The audit step was carried by habit rather than by anything that checks.
+
+⚠ **A NUMBERED SEQUENCE WITH A HOLE IN IT IS THE AUDIT'S OWN VERSION OF A CLAIM NOBODY CHECKED.** Every
+other defect recorded today was a fact asserted on one surface and absent from another; this was the same shape,
+with the audit as the surface that missed it. **Nothing detects it** - not tsc, not the tests, not the hooks
+guard, none of which read this file.
+
+⚠ **AND IT IS INSERTED HERE RATHER THAN APPENDED AT THE END**, which is what every other entry this session
+did. O85's work happened between O84 and O86 and the number is the ordering claim; appending would have replaced
+a hole with a sequence out of order, which is a different defect rather than a fix.
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 21 insertions, 4 deletions,
+identical with and without `--ignore-cr-at-eol`.
+- ⚠ **SHIPPED TO PRODUCTION**, and judged by whether the next attempt named the thrown value. It did.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
 ## O86. The app-switch closes IndexedDB, and Firebase throws an Error with no code
 
 **The cause, read from source rather than inferred.** `@firebase/auth` 1.13.4 throws a bare
