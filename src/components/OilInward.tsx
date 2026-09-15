@@ -416,6 +416,46 @@ ${intakeGate.reason}`);
   };
 
   /**
+   * AN MR NUMBER ONE CHARACTER AWAY FROM THIS ONE, IN THIS AGENCY (AUDIT G91).
+   *
+   * ⚠ A SUGGESTION, NEVER AN ANSWER, AND NEVER APPLIED. The operator is about to retype a
+   * number, and the likely one is computable: live data holds a receipt on MR 5585 while the
+   * same agency booked MR 5545. That is worth showing and NOT worth acting on - the app cannot
+   * tell a typo from two genuinely different numbers, and silently correcting a receipt would
+   * move 2,110 litres onto an MR on the strength of a string distance.
+   *
+   * ⚠ SAME AGENCY ONLY. A near-match in another agency is not a candidate for this receipt; it
+   * is a different agency's MR that happens to look similar, and offering it would invite
+   * attributing one agency's oil to another's work.
+   *
+   * Distance 1 only, and only between numbers of the same length, so "989" is not offered for
+   * "8989" - a missing leading digit is a different mistake from a mistyped one, and the
+   * evidence for it is weaker.
+   */
+  const nearMrFor = useMemo(() => {
+    const norm = (v: unknown) => String(v ?? '').trim();
+    const mine = [...new Set(
+      sharedJobs
+        .filter((j: any) => String(j.agencyId ?? '') === String(activeAgency?.id ?? ''))
+        .map((j: any) => norm(j.mrNo))
+        .filter(Boolean),
+    )];
+    const dist1 = (a: string, b: string) => {
+      if (a.length !== b.length) return false;
+      let diff = 0;
+      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+      return diff === 1;
+    };
+    return (mrNo: unknown): string | null => {
+      const t = norm(mrNo);
+      if (!t) return null;
+      const hits = mine.filter(m => dist1(m, t));
+      // Exactly one candidate, or none. Two candidates is not a suggestion, it is a guess.
+      return hits.length === 1 ? hits[0] : null;
+    };
+  }, [sharedJobs, activeAgency?.id]);
+
+  /**
    * Oil receipts naming an MR that does not exist, or naming none at all (AUDIT G74). Shown in every tender mode:
    * unlike the unassigned banner - which hides under "all tenders" because those rows are counted in the figures
    * there - a receipt attached to no MR is unattributed whichever tender is selected.
@@ -857,26 +897,48 @@ ${intakeGate.reason}`);
 
             {showUnmatchedOil && (
               <div className="border-t-2 border-rose-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
-                {unmatchedOil.map(({ tx, reason }) => (
-                  <div key={tx.id} className="p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
-                    <span className="font-mono tabular-nums font-bold text-slate-900">
-                      MR {tx.mrNo || '(none)'}
-                    </span>
-                    <span className="text-slate-600">{tx.division || '(no division)'}</span>
-                    <span className="font-mono tabular-nums font-bold text-slate-900">
-                      {(Number((tx as any).netLiters) || 0).toFixed(2)} LTR
-                    </span>
-                    <span className="text-slate-500">
-                      {(() => {
-                        const ms = parseDateToTimestamp((tx as any).date);
-                        return ms ? formatDDMMYYYY(new Date(ms).toISOString().slice(0, 10)) : '(no date)';
-                      })()}
-                    </span>
-                    <span className="text-rose-700 font-semibold">
-                      {reason === 'no-mr-number' ? 'no MR number recorded' : 'no transformer carries this MR number'}
-                    </span>
-                  </div>
-                ))}
+                {/* ⚠ THE ROW OPENS ITS OWN RECEIPT (AUDIT G91). The banner above tells the operator to
+                    "correct the number on the receipt here" and, until this, gave them nothing to click:
+                    they had to close the banner, find the row in the register below, and match it by eye
+                    on MR and litres. `handleEdit` already fills the form, opens it, switches to the
+                    transactions view - the form renders in no other - and scrolls to it. */}
+                {unmatchedOil.map(({ tx, reason }) => {
+                  const near = nearMrFor(tx.mrNo);
+                  return (
+                    <button
+                      key={tx.id}
+                      type="button"
+                      onClick={() => handleEdit(tx as any)}
+                      className="w-full text-left p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs hover:bg-rose-50 focus:bg-rose-50 focus:outline-none"
+                      title="Open this receipt to correct its MR number"
+                    >
+                      <span className="font-mono tabular-nums font-bold text-slate-900">
+                        MR {tx.mrNo || '(none)'}
+                      </span>
+                      <span className="text-slate-600">{tx.division || '(no division)'}</span>
+                      <span className="font-mono tabular-nums font-bold text-slate-900">
+                        {(Number((tx as any).netLiters) || 0).toFixed(2)} LTR
+                      </span>
+                      <span className="text-slate-500">
+                        {(() => {
+                          const ms = parseDateToTimestamp((tx as any).date);
+                          return ms ? formatDDMMYYYY(new Date(ms).toISOString().slice(0, 10)) : '(no date)';
+                        })()}
+                      </span>
+                      <span className="text-rose-700 font-semibold">
+                        {reason === 'no-mr-number' ? 'no MR number recorded' : 'no transformer carries this MR number'}
+                      </span>
+                      {/* ⚠ OFFERED, NOT APPLIED. See nearMrFor - the app cannot tell a typo from two
+                          different numbers, and the operator has the paperwork. */}
+                      {near && (
+                        <span className="text-amber-800 bg-amber-50 border border-amber-300 rounded px-1.5 py-0.5 font-semibold">
+                          this agency booked MR {near} &mdash; check the receipt
+                        </span>
+                      )}
+                      <span className="ml-auto text-rose-700 font-bold underline">Open receipt</span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
