@@ -420,6 +420,116 @@ ${intakeGate.reason}`);
     }
   };
 
+  /**
+   * RECORDING A SCRAP ADJUSTMENT — its own state and its own write (AUDIT O79).
+   *
+   * ⚠ NOT `handleSave`, AND THAT IS NOT DUPLICATION. Three of that handler's behaviours are
+   * wrong here and each would be a silent fault:
+   *
+   *   1. it derives `netLiters` through `calculateNetLiters`, which applies 5% to anything not
+   *      Fresh - and scrap oil is never filtered, so net MUST equal gross;
+   *   2. it stamps `atId: activeAtMaster!.id`, but an adjustment belongs to the tender the JOB
+   *      was booked under, not the one selected today;
+   *   3. it refuses when `intakeGate` is closed, which tests TODAY's tender. An adjustment
+   *      records something that already happened against a tender the job is already in;
+   *      refusing it because the current tender is closed would block recording history.
+   *
+   * The trial gate DOES apply, for the same reason it applies everywhere: it is about whether
+   * this account may write at all.
+   */
+  const [scrapEntry, setScrapEntry] = useState<null | {
+    jobId: string; jobNo: string; mrNo: string; division: string; atId: string;
+    retained: number; declaredOn: string; hadStoredDate: boolean;
+  }>(null);
+  const [scrapSaving, setScrapSaving] = useState(false);
+
+  const beginScrapEntry = (row: any) => {
+    setShowAddForm(false);
+    setEditingId(null);
+    setScrapEntry({
+      jobId: row.jobId,
+      jobNo: row.jobNo,
+      mrNo: row.mrNo,
+      division: row.division,
+      atId: row.atId,
+      retained: row.retained,
+      // ⚠ PRE-FILLED ONLY WHERE SOMETHING IS RECORDED, AND BLANK OTHERWISE. Four of the twelve
+      // have no internal inspection date; defaulting those to today would put an invented date
+      // on a row the billing cutoff filters by. `hadStoredDate` lets the form say which it is.
+      declaredOn: row.declaredOn || '',
+      hadStoredDate: Boolean(row.declaredOn),
+    });
+  };
+
+  const cancelScrapEntry = () => setScrapEntry(null);
+
+  const saveScrapAdjustment = async () => {
+    if (!scrapEntry) return;
+    if (!__trial.canWrite) { alert(trialRefusal(__trial.expiryDate)); return; }
+    if (!activeAgency || !auth.currentUser) return;
+
+    const when = scrapEntry.declaredOn.trim();
+    if (!when) {
+      alert('Enter the date scrap was declared, from the paperwork.\n\nNothing in this app records it, so it cannot be filled in for you - and the date decides which bill these litres fall before.');
+      return;
+    }
+    if (!(scrapEntry.retained > 0)) {
+      alert('This transformer retained no oil, so there is nothing to record.');
+      return;
+    }
+    // ⚠ THE TENDER COMES FROM THE JOB. `firestore.rules` requires one on create (`hasTender`),
+    // and an adjustment stamped with today's tender would sit in a period the work never
+    // belonged to. All twelve live scrap jobs carry one; this refuses rather than guessing.
+    if (!scrapEntry.atId) {
+      alert(`${scrapEntry.jobNo} does not record which tender it was booked under, so an adjustment cannot be attributed to one. Assign the job to its AT first.`);
+      return;
+    }
+
+    const ok = window.confirm(
+      `Record ${scrapEntry.retained.toFixed(2)} litres retained from ${scrapEntry.jobNo}?\n\n`
+      + `MR ${scrapEntry.mrNo} · ${scrapEntry.division} · declared ${formatDDMMYYYY(when)}\n\n`
+      + 'This is a deduction against what the division owes. It does NOT appear on the printed '
+      + 'Inward Oil Received Log or in the invoice\'s oil deduction, which stay matched to the '
+      + 'division\'s four terms.',
+    );
+    if (!ok) return;
+
+    setScrapSaving(true);
+    try {
+      await addDoc(collection(db, 'oilTransactions'), {
+        agencyId: activeAgency.id,
+        ownerId: auth.currentUser.uid,
+        // ⚠ THE JOB LINK. An oil row normally names an MR and nothing finer; a scrap adjustment
+        // is raised per transformer, and this is what marks the job as already adjusted.
+        jobId: scrapEntry.jobId,
+        mrNo: scrapEntry.mrNo.trim(),
+        mrDate: when,
+        date: new Date(when).getTime(),
+        division: scrapEntry.division,
+        // ⚠ 'Scrap', NEVER 'Used'. `isScrapAdjustment` tests this field: a row written as Used
+        // would be counted as INWARD - swept into `totalReceived`, collapsing the third term,
+        // printed on the division's log, and deducted on the invoice.
+        oilType: SCRAP_OIL_TYPE,
+        barrels: 0,
+        grossLiters: scrapEntry.retained,
+        grossLitersManual: false,
+        // ⚠ RAW. The 5% is a filtration allowance for oil that goes back INTO a transformer.
+        // A scrapped unit is never repaired, so its oil is never filtered: net === gross.
+        filtrationLossPercent: 0,
+        netLiters: scrapEntry.retained,
+        atId: scrapEntry.atId,
+        createdAt: serverTimestamp(),
+      });
+      setScrapEntry(null);
+      // One re-read through the data layer, as every other write here does (AUDIT G86).
+      refreshAgencyData();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.CREATE, 'oilTransactions');
+    } finally {
+      setScrapSaving(false);
+    }
+  };
+
   const handleEdit = (tx: OilTransaction) => {
     setFormData({
       mrNo: tx.mrNo,
@@ -985,6 +1095,47 @@ ${intakeGate.reason}`);
       const totalNet = filteredTransactions.reduce((sum, item) => sum + item.netLiters, 0);
       wsData.push([]);
       wsData.push(["Sub Total", "", "", "", "", "", Number(totalGross.toFixed(2)), "", "", Number(totalNet.toFixed(2))]);
+    } else if (viewMode === "scrap") {
+      /**
+       * ⚠ THE SCRAP TAB EXPORTED THE MR SUMMARY UNDER A "Scrap_Adjustments" SHEET NAME
+       * (AUDIT O79). The sheet name was made three-way and the CONTENT branch was not, so the
+       * file said one thing on its tab and carried another inside it. Recorded as knowingly
+       * wrong in the previous commit rather than half-fixed; fixed here.
+       */
+      wsData.push(["SCRAP OIL ADJUSTMENTS — oil retained from scrapped transformers"]);
+      wsData.push([`Agency: ${activeAgency?.name || ""}`, filterInfo]);
+      wsData.push([]);
+      wsData.push(["This is NOT oil issued by the division. It is oil left with the agency when a transformer was scrapped, recorded as a deduction against what the division owes."]);
+      wsData.push(["It is EXCLUDED from the printed Inward Oil Received Log and from the invoice's oil deduction, which stay matched to the division's four terms. Its treatment is not yet confirmed with the division."]);
+      wsData.push([]);
+      wsData.push(["Job No.", "MR No.", "Division", "Scrap declared", "Capacity (LTR)", "Oil retained (LTR)", "Declared by", "State"]);
+      scrapRows.forEach((row) => {
+        wsData.push([
+          row.jobNo,
+          row.mrNo,
+          row.division,
+          // ⚠ THE SPREADSHEET SAYS "(not recorded)" TOO. A blank cell in a file someone opens
+          // months later reads as an oversight; this says nothing records it.
+          row.declaredOn ? formatDDMMYYYY(row.declaredOn) : "(not recorded)",
+          row.capacity === null ? "" : Number(row.capacity.toFixed(2)),
+          Number(row.retained.toFixed(2)),
+          row.evidence.join(" + "),
+          row.adjustment ? "recorded" : row.retained <= 0 ? "nothing retained" : "awaiting",
+        ]);
+      });
+      wsData.push([]);
+      wsData.push([
+        "Retained, awaiting entry",
+        "", "", "", "",
+        Number(scrapRows.filter(r => !r.adjustment).reduce((s, r) => s + r.retained, 0).toFixed(2)),
+        "", "",
+      ]);
+      wsData.push([
+        "Recorded as adjustments",
+        "", "", "", "",
+        Number(subTotalScrapAdjustment.toFixed(2)),
+        "", "",
+      ]);
     } else {
       wsData.push(["OIL MR-WISE SHORTAGE & INWARD SUMMARY"]);
       wsData.push([`Agency: ${activeAgency?.name || ""}`, filterInfo]);
@@ -1571,6 +1722,102 @@ ${intakeGate.reason}`);
           </div>
         </div>
 
+        {/**
+          * RECORDING ONE SCRAP ADJUSTMENT (AUDIT O79).
+          *
+          * ⚠ THE JOB'S OWN FIELDS ARE SHOWN, NOT TYPED. MR, division, tender and quantity all
+          * come from the transformer; offering them as inputs would create a second source for
+          * a figure the division is settled against. The ONE thing an operator supplies is the
+          * date, because it is the one thing nothing in this app records.
+          */}
+        {viewMode === "scrap" && scrapEntry && (
+          <div className="p-4 border-b border-slate-200 bg-sky-50/40">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+              <h3 className="text-sm font-black text-sky-900">
+                Record scrap adjustment &mdash; {scrapEntry.jobNo}
+              </h3>
+              <span className="text-[11px] text-sky-800">
+                MR {scrapEntry.mrNo} &middot; {scrapEntry.division}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
+                  Oil retained (LTR)
+                </label>
+                <div className="px-3 py-2 rounded border border-slate-300 bg-white font-mono tabular-nums font-bold text-sky-900">
+                  {scrapEntry.retained.toFixed(2)}
+                </div>
+                {/* ⚠ RAW, AND SAID SO WHERE IT IS ENTERED. The 5% filtration allowance is for
+                    oil put back into a transformer; this unit is gone. */}
+                <p className="text-[10px] text-slate-500 mt-1">
+                  From the external inspection &mdash; capacity less oil missing. No filtration
+                  deducted: the unit was scrapped, so the oil is never filtered.
+                </p>
+              </div>
+
+              <div className="lg:col-span-2">
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">
+                  Date scrap was declared <span className="text-rose-600">*</span>
+                </label>
+                <input
+                  type="date"
+                  value={scrapEntry.declaredOn}
+                  onChange={(e) =>
+                    setScrapEntry((prev) => (prev ? { ...prev, declaredOn: e.target.value } : prev))
+                  }
+                  className="w-full px-3 py-2 rounded border border-slate-300 focus:ring-2 focus:ring-sky-500/40 outline-none"
+                />
+                {/* ⚠ THE DATE IS THE HONEST CONSTRAINT, AND THE FORM SAYS WHICH CASE THIS IS.
+                    Nothing records when scrap was declared. Where an internal inspection date
+                    exists it is offered - but it dates the INSPECTION SESSION, shared across the
+                    MR, so it can be a real date of the wrong event. The billing cutoff filters
+                    on this field. */}
+                {scrapEntry.hadStoredDate ? (
+                  <p className="text-[10px] text-amber-800 mt-1">
+                    Pre-filled from this unit&rsquo;s internal inspection. That date belongs to the
+                    inspection session, not to the scrap decision &mdash; <strong>check it against
+                    the paperwork and correct it if they differ.</strong>
+                  </p>
+                ) : (
+                  <p className="text-[10px] text-rose-700 mt-1">
+                    <strong>Nothing records this date for {scrapEntry.jobNo}.</strong> Enter it from
+                    the paperwork &mdash; it decides which bill these litres fall before.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex items-end gap-2">
+                <button
+                  type="button"
+                  onClick={saveScrapAdjustment}
+                  disabled={scrapSaving}
+                  className="flex items-center px-4 py-2 text-sm font-bold uppercase tracking-wider bg-sky-700 text-white rounded hover:bg-sky-800 disabled:opacity-60 transition-colors"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  {scrapSaving ? "Recording…" : "Record"}
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelScrapEntry}
+                  disabled={scrapSaving}
+                  className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-slate-500 hover:bg-slate-100 rounded transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+
+            <p className="text-[10px] text-sky-900/80 mt-3 leading-snug">
+              This is a deduction against what the division owes &mdash; the agency holds oil it did
+              not buy. It does <strong>not</strong> appear on the printed Inward Oil Received Log or
+              in the invoice&rsquo;s oil deduction, which stay matched to the division&rsquo;s four
+              terms.
+            </p>
+          </div>
+        )}
+
         {viewMode === "transactions" && showAddForm && (
           <div className="p-4 border-b border-slate-200 bg-blue-50/30">
             <form
@@ -2081,9 +2328,17 @@ ${intakeGate.reason}`);
                             nothing retained
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase bg-amber-100 text-amber-800">
-                            awaiting
-                          </span>
+                          /* ⚠ THE ACTION IS ON THE AWAITING ROW ONLY. A recorded row has its
+                             entry, and a row that retained nothing has nothing to enter - an
+                             action on either would offer a write that should not happen. */
+                          <button
+                            type="button"
+                            onClick={() => beginScrapEntry(row)}
+                            className="px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wide bg-amber-100 text-amber-900 border border-amber-300 hover:bg-amber-200 transition-colors"
+                            title={`Record the ${row.retained.toFixed(2)} litres retained from ${row.jobNo}`}
+                          >
+                            Record adjustment
+                          </button>
                         )}
                       </td>
                     </tr>
