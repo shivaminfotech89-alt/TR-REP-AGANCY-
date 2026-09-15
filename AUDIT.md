@@ -18832,3 +18832,99 @@ identical with and without `--ignore-cr-at-eol`.
   customer, and its correctness is judged by whether the next attempt names a code.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O86. The app-switch closes IndexedDB, and Firebase throws an Error with no code
+
+**The cause, read from source rather than inferred.** `@firebase/auth` 1.13.4 throws a bare
+`new Error('Database is closing/hidden')` from `IndexedDBLocalPersistence._openDb()` when `isHiding` is set -
+which `onVisibilityChange` sets the moment `document.visibilityState === 'hidden'`. **The app-switch to Google's
+sign-in screen backgrounds the page**, `onPageHide` closes the database and nulls `dbPromise`, and the write that
+lands on return finds the store shut.
+
+It is a plain `Error`, not a `FirebaseError`. **That is why every `auth/*` diagnosis was wrong**, and why the
+empty `code` was the finding rather than a disappointment.
+
+### ⚠ AUTHENTICATION SUCCEEDED. ONLY THE WRITE FAILED - AND THE ORDER IS FATAL
+
+```
+_signInWithCredential  :5891   await auth._updateCurrentUser(userCredential.user)
+_updateCurrentUser     :2883   queue(async () => {
+                                 await this.directlySetCurrentUser(user);   <- throws here
+                                 this.notifyAuthListeners();                <- never reached
+                               })
+directlySetCurrentUser :3130   this.currentUser = user;                     <- set BEFORE the await
+                               await this.assertedPersistence.setCurrentUser(user);
+```
+
+`notifyAuthListeners()` sits **after** the awaited write, so no listener ever fired, `App.tsx`'s `user` stayed
+null, and the landing page rendered over a session that existed.
+
+### The retry does NOT retry the popup, and that is the whole design
+
+**A literal retry of `signInWithPopup` is impossible.** The user gesture is spent by the time the first attempt
+rejects, so a second `window.open` is blocked by every mobile browser - **turning this fault into
+`auth/popup-blocked` and looking like a new bug.** The obvious shape of "retry once" is the wrong one.
+
+So the retry re-runs the **commit**, not the sign-in: `updateCurrentUser(auth, auth.currentUser)`, public API,
+walking the same path once the page is visible and the database reopenable. Gated on the message matching
+`/database is (closing|closed|hidden)/i` **and** `visibilityState === 'visible'` **and** a non-null
+`currentUser`. One retry. Never a loop.
+
+- **⚠ IT FAILS SAFE.** If a future SDK sets `currentUser` **after** the write instead of before, the retry
+  finds `null`, does nothing, and behaviour returns to exactly what it is today - an alert - rather than a silent
+  wrong result.
+- **⚠ IT WORKS WITH THE SDK, NOT AROUND IT.** `_withRetries` abandons its own loop while hidden
+  (`if (this.isHiding) throw e`) **before** exhausting its retry count. That is deliberate. Resuming when the page
+  is visible picks up precisely where the SDK stopped.
+
+### ⚠ "ADD A PERSISTENCE FALLBACK" IS THE OBVIOUS FIX AND IT IS UNAVAILABLE
+
+Stated plainly because **someone will propose it again**, and it would be a regression.
+
+`getAuth` already installs `[indexedDBLocalPersistence, browserLocalPersistence, browserSessionPersistence]` -
+the proposed chain, near-verbatim. But `PersistenceUserManager.create` (`:2133`) calls `_isAvailable()` **once**,
+at creation, takes the first available store, and **never revisits it.**
+
+**The chain is a startup preference, not a runtime fallback.** Nothing downgrades from IndexedDB to
+`localStorage` when the chosen store begins throwing mid-session, which is exactly this fault. And
+`setPersistence` could only **narrow** the list - pinning the one store that fails, for every user including
+desktop.
+
+### ⚠ REDIRECT IS PROBABLE, NOT CERTAIN - AND THE DISTINCTION MATTERS
+
+`signInWithRedirect` stores the **pending** user in `browserSessionPersistence` (`:10734`), which has no
+connection to close. But **`getRedirectResult` still completes through the same IndexedDB write.**
+
+**So redirect avoids this by never writing while hidden, not by being immune to it.** The redirect return lands on
+a fresh page load with the tab visible; the popup's write lands while the page is still backgrounded. That is a
+timing property, and it is weaker than "uses a different store" - which is what a hastier entry would have
+claimed.
+
+**Not taken yet.** It changes sign-in for all 20 accounts including the 15 who signed in this week without
+trouble - a large blast radius for a fault reported once. **If the retry does not hold, take it.**
+
+### ⚠ A GAP BETWEEN TWO OF THE SDK'S OWN SURFACES
+
+After this failure, **`auth.currentUser` is populated while every listener believes there is no user.** Recorded
+whatever the fix turns out to be, because someone will find it and reach for it. This retry is the one defensible
+use: it degrades to the status quo rather than to a wrong answer, and it does not read the value to decide
+whether the user is signed in - only to hand back the object the SDK already holds.
+
+### Verification, and its limits
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 78 insertions, 32 deletions,
+identical with and without `--ignore-cr-at-eol`. **Live and confirmed by served bundle hash**, not by a
+successful push - `index-C1_8DJUr.js` to `index-BK8uREpx.js`.
+
+- **⚠ NOT TESTED, AND NOT TESTABLE FROM HERE.** The fault needs a real app-switch on a real device, and **it
+  does not reproduce on desktop Chrome**, where `visibilityState` never goes hidden during the write.
+- **⚠ THE 250ms BEAT IS CHOSEN, NOT DERIVED.** It gives the SDK's own `onPageShow` time to clear `isHiding`.
+  If it has not run by then, the retry throws the same error and falls through to the alert.
+- **The five-line error report is kept - it is what found this** - and now reports whether the retry ran. A failed
+  retry and a failure that never qualified for one are different findings: the first means `isHiding` had not
+  cleared in time, the second that the guard rejected it. **Reporting them identically would waste the next
+  attempt.**
+
+**Deploy:** hosting - a push to `main` (O71).
