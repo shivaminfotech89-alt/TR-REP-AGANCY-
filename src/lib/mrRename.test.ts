@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  collisionJobs, oilRowsForMr, unmatchedOilRows, litresOf, describeRename, isCancelledJob,
+  collisionJobs, oilRowsForMr, oilRowsMissingMrNumber, litresOf, describeRename, isCancelledJob,
   type RenameJobLike, type OilRowLike,
 } from './mrRename';
 
@@ -83,28 +83,39 @@ test('and says plainly when there is no oil to move', () => {
 
 // ---------------------------------------------------------------- ⚠ oil matching no MR at all
 
-test('an oil receipt whose MR number no job carries is unmatched - the live MR 5585 case', () => {
-  const out = unmatchedOilRows(oil, jobs, A);
-  assert.deepEqual(out.map(u => [u.tx.id, u.reason]), [['o3', 'no-jobs']]);
-  assert.equal(litresOf(out.map(u => u.tx)), 2110);
+test('⚠ AN MR WITH OIL AND NO TRANSFORMERS IS NORMAL BUSINESS, AND IS NOT REPORTED (AUDIT O78)', () => {
+  // The division raises an MR for oil issue alone. `o3` is MR 5585 carrying 2,110 litres that no job names -
+  // the live row the deleted 'no-jobs' rule cited as proof of a fault. It is correctly recorded.
+  assert.deepEqual(oilRowsMissingMrNumber(oil, A), []);
+  assert.deepEqual(oilRowsMissingMrNumber(oil), []);
 });
 
-test('an oil row carrying no MR number at all is reported separately', () => {
-  const out = unmatchedOilRows([{ id: 'x', mrNo: '  ', agencyId: A, netLiters: 5 }], jobs, A);
-  assert.deepEqual(out.map(u => u.reason), ['no-mr-number']);
+test('an oil row carrying no MR number at all IS reported - the balance drops it', () => {
+  const out = oilRowsMissingMrNumber([{ id: 'x', mrNo: '  ', agencyId: A, netLiters: 5 }], A);
+  assert.deepEqual(out.map(t => t.id), ['x']);
 });
 
-test('⚠ a cancelled MR still counts as matched - its jobs exist and carry the number', () => {
-  const cancelledOnly: RenameJobLike[] = [{ id: 'c1', mrNo: '9000', agencyId: A, status: 'Cancelled' }];
-  const rows: OilRowLike[] = [{ id: 'o9', mrNo: '9000', agencyId: A, netLiters: 100 }];
-  assert.deepEqual(unmatchedOilRows(rows, cancelledOnly, A), []);
+test('⚠ WHITESPACE IS THE REACHABLE CASE - an empty mrNo is refused by the form and the rules', () => {
+  const rows: OilRowLike[] = [
+    { id: 'blank', mrNo: '', agencyId: A, netLiters: 1 },
+    { id: 'spaces', mrNo: '   ', agencyId: A, netLiters: 2 },
+    { id: 'tab', mrNo: '\t', agencyId: A, netLiters: 3 },
+    { id: 'real', mrNo: '1234', agencyId: A, netLiters: 4 },
+  ];
+  assert.deepEqual(oilRowsMissingMrNumber(rows, A).map(t => t.id), ['blank', 'spaces', 'tab']);
 });
 
-test('⚠ matching is scoped: another agency holding that MR number is not a match', () => {
-  // Agency B's only job is MR 5555, so its MR-1234 receipt (o4) is unattributed FOR B - even though agency A does
-  // have an MR 1234. Oil belongs to the agency that received it, and a number shared across agencies is a
-  // coincidence, not a link.
-  assert.deepEqual(unmatchedOilRows(oil, jobs, B).map(u => u.tx.id), ['o4']);
-  // Unscoped, o4 matches agency A's MR 1234 and only the genuinely absent 5585 remains.
-  assert.deepEqual(unmatchedOilRows(oil, jobs).map(u => u.tx.id), ['o3']);
+test('it is scoped to the agency, and unscoped when no agency is given', () => {
+  const rows: OilRowLike[] = [
+    { id: 'a1', mrNo: ' ', agencyId: A, netLiters: 1 },
+    { id: 'b1', mrNo: ' ', agencyId: B, netLiters: 2 },
+  ];
+  assert.deepEqual(oilRowsMissingMrNumber(rows, A).map(t => t.id), ['a1']);
+  assert.deepEqual(oilRowsMissingMrNumber(rows, B).map(t => t.id), ['b1']);
+  assert.deepEqual(oilRowsMissingMrNumber(rows).map(t => t.id), ['a1', 'b1']);
+});
+
+test('litresOf still totals what is reported', () => {
+  const rows: OilRowLike[] = [{ id: 'x', mrNo: ' ', agencyId: A, netLiters: 5 }];
+  assert.equal(litresOf(oilRowsMissingMrNumber(rows, A)), 5);
 });

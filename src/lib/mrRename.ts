@@ -15,10 +15,21 @@
  *      one - they regroup by string on the next fetch, with no record of which jobs came from which. New Job checks
  *      for a duplicate MR at intake; the rename had no such check.
  *
- * ⚠ AND AN OIL ROW CAN MATCH NO MR AT ALL. Measured 2026-09-12: the single live oil transaction is MR 5585, 2,110
- * litres, DEESA - and no job anywhere carries that number. That is not a bug to fix in code: either the receipt was
- * entered against the wrong MR or the jobs were booked under a different one, and only the agency's paper says which.
- * It is surfaced on the Oil Account so an operator sees it, rather than being found by a census.
+ * ⚠ AN OIL ROW WHOSE MR CARRIES NO JOBS IS NORMAL BUSINESS, AND THIS FILE USED TO SAY OTHERWISE (AUDIT O78).
+ *
+ * The paragraph that stood here read: "either the receipt was entered against the wrong MR or the jobs were booked
+ * under a different one, and only the agency's paper says which." It admitted exactly two explanations and left out
+ * the true one - THE DIVISION RAISES AN MR FOR OIL ISSUE ALONE, WITH NO TRANSFORMERS ON IT. MR 5585 with 2,110
+ * litres was cited here as the evidence of a fault; it is a correctly recorded oil-only MR.
+ *
+ * The premise was never stated as a claim to be checked, and the data contradicted it from the first day: the
+ * detector fired on 100% of live oil, 2 receipts of 2, and that was written down as a check that had been run
+ * rather than read as evidence about the check. `unmatchedOilRows` and its 'no-jobs' reason are gone with it.
+ *
+ * ⚠ WHAT REMAINS IS A DIFFERENT QUESTION. A receipt naming NO MR at all is still worth finding - not because the
+ * division issues against some other reference (it does not; an oil row carries no challan, letter or order
+ * number) but because `computeOilBalance` SKIPS a row with a blank `mrNo`, so its litres drop out of the figure
+ * the DISCOM is settled against while still showing in the register's own sub-total.
  */
 
 export interface RenameJobLike {
@@ -75,35 +86,26 @@ export function oilRowsForMr(mrNo: string, agencyId: string, transactions: OilRo
   return transactions.filter(t => sameMr(t.mrNo, mrNo) && String(t.agencyId ?? '') === agencyId);
 }
 
-export type UnmatchedReason = 'no-mr-number' | 'no-jobs';
-
-export interface UnmatchedOil {
-  tx: OilRowLike;
-  reason: UnmatchedReason;
-}
-
 /**
- * OIL RECEIVED AGAINST AN MR THE APP CANNOT FIND.
+ * OIL RECEIPTS NAMING NO MR AT ALL — which the balance silently drops (AUDIT O78).
  *
- * ⚠ A CANCELLED MR STILL COUNTS AS MATCHED. Its jobs exist and carry the number; the receipt belongs to it whatever
- * became of the work. Only "no job carries this number at all" is unmatched - that is the case nobody can explain
- * from inside the app.
+ * ⚠ THIS DELIBERATELY DOES NOT LOOK AT JOBS. Its predecessor did, and reported every receipt whose MR carried no
+ * transformers as a fault; the division raises MRs for oil alone, so that flagged correct data 100% of the time.
+ * The `jobs` parameter went with the rule - a function that still accepted it would invite the join back.
+ *
+ * ⚠ WHY A BLANK NUMBER IS STILL WORTH FINDING. `computeOilBalance` skips a row with no `mrNo` (oilBalance.ts:191),
+ * and so does the MR-wise summary (OilInward) - so the litres vanish from the Dashboard, the printed statement,
+ * the closing offer and the carried opening balance, while the transactions tab still shows them. One screen, two
+ * received totals, and the difference is invisible.
+ *
+ * ⚠ THE REACHABLE CASE IS WHITESPACE, NOT EMPTY. An empty `mrNo` is refused twice - the form's `required` and
+ * `firestore.rules` `size() >= 1`. A rule cannot trim, and nothing in the form does, so `" "` passes end-to-end
+ * and every consumer that trims then reads it as blank. That is what the trim below catches.
  */
-export function unmatchedOilRows(transactions: OilRowLike[], jobs: RenameJobLike[], agencyId?: string): UnmatchedOil[] {
-  const scoped = (t: OilRowLike) => agencyId === undefined || String(t.agencyId ?? '') === agencyId;
-  const numbers = new Set(
-    jobs
-      .filter(j => agencyId === undefined || String(j.agencyId ?? '') === agencyId)
-      .map(j => String(j.mrNo ?? '').trim())
-      .filter(Boolean));
-  const out: UnmatchedOil[] = [];
-  for (const tx of transactions) {
-    if (!scoped(tx)) continue;
-    const n = String(tx.mrNo ?? '').trim();
-    if (!n) { out.push({ tx, reason: 'no-mr-number' }); continue; }
-    if (!numbers.has(n)) out.push({ tx, reason: 'no-jobs' });
-  }
-  return out;
+export function oilRowsMissingMrNumber(transactions: OilRowLike[], agencyId?: string): OilRowLike[] {
+  return transactions.filter(tx =>
+    (agencyId === undefined || String(tx.agencyId ?? '') === agencyId)
+    && !String(tx.mrNo ?? '').trim());
 }
 
 /** Litres across a set of oil rows, for a sentence that has to state the quantity. */

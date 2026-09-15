@@ -16,7 +16,7 @@ import {
 } from "firebase/firestore";
 import { formatDDMMYYYY, getMrDateIso } from '../lib/utils';
 import { describeOil } from '../lib/oilBalance';
-import { unmatchedOilRows, litresOf } from '../lib/mrRename';
+import { oilRowsMissingMrNumber, litresOf } from '../lib/mrRename';
 import { CARD, CARD_PAD, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import {
   Droplet,
@@ -148,7 +148,7 @@ export default function OilInward() {
     () => sharedJobs.filter(isUnassigned).length,
     [sharedJobs],
   );
-  const [showUnassignedOil, setShowUnassignedOil] = useState(false);
+  // (The unassigned-oil Show/Hide went with its header - AUDIT G93. The rows are always shown.)
   /**
    * ⚠ OIL RECEIVED AGAINST AN MR NUMBER NO JOB CARRIES (AUDIT G74).
    *
@@ -165,7 +165,7 @@ export default function OilInward() {
     () => sharedJobs.map((j: any) => ({ mrNo: j.mrNo, agencyId: j.agencyId })),
     [sharedJobs],
   );
-  const [showUnmatchedOil, setShowUnmatchedOil] = useState(false);
+  // (The unmatched-oil Show/Hide went with its header - AUDIT G93. The receipts are always shown.)
   const jobs = useMemo(
     () => (viewingAllTenders
       ? sharedJobs
@@ -416,53 +416,35 @@ ${intakeGate.reason}`);
   };
 
   /**
-   * AN MR NUMBER ONE CHARACTER AWAY FROM THIS ONE, IN THIS AGENCY (AUDIT G91).
+   * ⚠ THE NEAR-MATCH SUGGESTION IS GONE, AND IT WAS THE MOST DANGEROUS THING ON THIS SCREEN
+   * (AUDIT O78).
    *
-   * ⚠ A SUGGESTION, NEVER AN ANSWER, AND NEVER APPLIED. The operator is about to retype a
-   * number, and the likely one is computable: live data holds a receipt on MR 5585 while the
-   * same agency booked MR 5545. That is worth showing and NOT worth acting on - the app cannot
-   * tell a typo from two genuinely different numbers, and silently correcting a receipt would
-   * move 2,110 litres onto an MR on the strength of a string distance.
+   * It offered the MR number one character away - "this agency booked MR 5545, check the
+   * receipt" - beside a row that opened the editable receipt in one click. It was built as a
+   * safeguard against a typo (G91), and it was carefully restrained: same agency only,
+   * distance 1 only, equal lengths only, exactly one candidate, never auto-applied.
    *
-   * ⚠ SAME AGENCY ONLY. A near-match in another agency is not a candidate for this receipt; it
-   * is a different agency's MR that happens to look similar, and offering it would invite
-   * attributing one agency's oil to another's work.
+   * Every one of those restraints was sound and none of them mattered, because the premise was
+   * wrong. THE DIVISION RAISES AN MR FOR OIL ISSUE ALONE. MR 5585 with 2,110 litres is not a
+   * mistyped 5545; it is a correctly recorded oil-only MR. So the suggestion pointed at correct
+   * data and invited an operator to retype a right number onto an unrelated transformer's MR -
+   * THE ONLY ROUTE IN THIS SYSTEM THAT WOULD GENUINELY CORRUPT THE OIL BALANCE. A safeguard
+   * whose premise is false does not degrade to useless; it inverts.
    *
-   * Distance 1 only, and only between numbers of the same length, so "989" is not offered for
-   * "8989" - a missing leading digit is a different mistake from a mistyped one, and the
-   * evidence for it is weaker.
+   * Nothing replaces it. There is no evidence available to this screen that distinguishes a
+   * typo from an oil-only MR, and offering a guess dressed as a lead is what went wrong.
    */
-  const nearMrFor = useMemo(() => {
-    const norm = (v: unknown) => String(v ?? '').trim();
-    const mine = [...new Set(
-      sharedJobs
-        .filter((j: any) => String(j.agencyId ?? '') === String(activeAgency?.id ?? ''))
-        .map((j: any) => norm(j.mrNo))
-        .filter(Boolean),
-    )];
-    const dist1 = (a: string, b: string) => {
-      if (a.length !== b.length) return false;
-      let diff = 0;
-      for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
-      return diff === 1;
-    };
-    return (mrNo: unknown): string | null => {
-      const t = norm(mrNo);
-      if (!t) return null;
-      const hits = mine.filter(m => dist1(m, t));
-      // Exactly one candidate, or none. Two candidates is not a suggestion, it is a guess.
-      return hits.length === 1 ? hits[0] : null;
-    };
-  }, [sharedJobs, activeAgency?.id]);
 
   /**
-   * Oil receipts naming an MR that does not exist, or naming none at all (AUDIT G74). Shown in every tender mode:
-   * unlike the unassigned banner - which hides under "all tenders" because those rows are counted in the figures
-   * there - a receipt attached to no MR is unattributed whichever tender is selected.
+   * Oil receipts recording no MR number at all (AUDIT O78). Shown in every tender mode, because a receipt the
+   * balance cannot place is misplaced whichever tender is selected.
+   *
+   * ⚠ THIS NO LONGER REPORTS "AN MR WITH NO TRANSFORMERS". The division raises an MR for oil issue alone, so
+   * that was correct data reported as a fault - on 100% of live oil, every day since it shipped.
    */
-  const unmatchedOil = useMemo(
-    () => unmatchedOilRows(agencyTx as any, agencyJobs as any, activeAgency?.id),
-    [agencyTx, agencyJobs, activeAgency?.id],
+  const oilWithoutMr = useMemo(
+    () => oilRowsMissingMrNumber(agencyTx as any, activeAgency?.id),
+    [agencyTx, activeAgency?.id],
   );
 
   const mrSummary = useMemo(() => {
@@ -863,84 +845,71 @@ ${intakeGate.reason}`);
           </p>
         </div>
       )}
-      {/* ⚠ OIL RECEIVED AGAINST AN MR NUMBER NO JOB CARRIES (AUDIT G74). The same treatment the unassigned oil
-          gets below, for a different question: that one belongs to no TENDER, this one to no MR. It is shown in
-          every tender mode, because an unattributed receipt is unattributed whichever tender is selected. */}
-      {unmatchedOil.length > 0 && (() => {
-        const litres = litresOf(unmatchedOil.map(u => u.tx));
+      {/* ⚠ A RECEIPT THAT RECORDS NO MR NUMBER, WHICH THE BALANCE THEN DROPS (AUDIT O78).
+
+          This banner used to report "oil naming an MR with no transformers" and it was wrong every time it
+          fired. THE DIVISION RAISES AN MR FOR OIL ISSUE ALONE - an MR with litres and no transformers is
+          normal business, correctly recorded - so the rule flagged 100% of live oil as a fault, told the
+          operator to correct a number that was already right, and offered a near-match one click from the
+          editable receipt. That suggestion was the only route in the system that could genuinely corrupt the
+          balance, and it is gone.
+
+          What is left is the case where litres really do go missing: a receipt with a BLANK MR number.
+          `computeOilBalance` skips it (oilBalance.ts:191) and so does the MR-wise summary above, so it never
+          reaches the Dashboard, the printed statement, the closing offer or the balance carried into the next
+          tender - while the transactions list below still shows it. One screen, two received totals.
+
+          Shown in every tender mode: a receipt the balance cannot place is misplaced whichever tender is
+          selected. */}
+      {oilWithoutMr.length > 0 && (() => {
+        const litres = litresOf(oilWithoutMr);
         return (
           <div className="bg-rose-50 border-2 border-rose-300 rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowUnmatchedOil(o => !o)}
-              className="w-full text-left p-3.5 flex items-start gap-2.5 hover:bg-rose-100/60"
-            >
+            <div className="w-full text-left p-3.5 flex items-start gap-2.5">
               <Droplet className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-rose-900 flex flex-wrap items-center gap-x-1 gap-y-0.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-600 shrink-0" />
-                  {unmatchedOil.length} oil receipt{unmatchedOil.length === 1 ? '' : 's'}
-                  {' '}({litres.toFixed(2)} LTR) name an MR with no transformers
+                  {oilWithoutMr.length} oil receipt{oilWithoutMr.length === 1 ? '' : 's'}
+                  {' '}({litres.toFixed(2)} LTR) record no MR number
                 </p>
                 <p className="text-xs text-rose-800 mt-0.5">
-                  These litres were issued by the division and are counted in the received total, but no job carries
-                  the MR number on them &mdash; so they belong to no MR&rsquo;s account. Either the receipt was
-                  entered against the wrong MR, or the transformers were booked under a different number. The
-                  agency&rsquo;s paperwork says which: correct the number on the receipt here, or rename the MR in
-                  the MR Ledger, which moves its oil with it.
+                  These litres are left out of the oil balance entirely &mdash; they do not reach the Dashboard,
+                  the statement printed for the division, or the balance carried into the next tender, though the
+                  transactions list below still counts them. Open the receipt and record the MR number from the
+                  paperwork it came in on.
                 </p>
               </div>
-              <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-rose-600 text-white">
-                {showUnmatchedOil ? 'Hide' : 'Show'}
-              </span>
-            </button>
+            </div>
 
-            {showUnmatchedOil && (
-              <div className="border-t-2 border-rose-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
-                {/* ⚠ THE ROW OPENS ITS OWN RECEIPT (AUDIT G91). The banner above tells the operator to
-                    "correct the number on the receipt here" and, until this, gave them nothing to click:
-                    they had to close the banner, find the row in the register below, and match it by eye
-                    on MR and litres. `handleEdit` already fills the form, opens it, switches to the
-                    transactions view - the form renders in no other - and scrolls to it. */}
-                {unmatchedOil.map(({ tx, reason }) => {
-                  const near = nearMrFor(tx.mrNo);
-                  return (
-                    <button
-                      key={tx.id}
-                      type="button"
-                      onClick={() => handleEdit(tx as any)}
-                      className="w-full text-left p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs hover:bg-rose-50 focus:bg-rose-50 focus:outline-none"
-                      title="Open this receipt to correct its MR number"
-                    >
-                      <span className="font-mono tabular-nums font-bold text-slate-900">
-                        MR {tx.mrNo || '(none)'}
-                      </span>
-                      <span className="text-slate-600">{tx.division || '(no division)'}</span>
-                      <span className="font-mono tabular-nums font-bold text-slate-900">
-                        {(Number((tx as any).netLiters) || 0).toFixed(2)} LTR
-                      </span>
-                      <span className="text-slate-500">
-                        {(() => {
-                          const ms = parseDateToTimestamp((tx as any).date);
-                          return ms ? formatDDMMYYYY(new Date(ms).toISOString().slice(0, 10)) : '(no date)';
-                        })()}
-                      </span>
-                      <span className="text-rose-700 font-semibold">
-                        {reason === 'no-mr-number' ? 'no MR number recorded' : 'no transformer carries this MR number'}
-                      </span>
-                      {/* ⚠ OFFERED, NOT APPLIED. See nearMrFor - the app cannot tell a typo from two
-                          different numbers, and the operator has the paperwork. */}
-                      {near && (
-                        <span className="text-amber-800 bg-amber-50 border border-amber-300 rounded px-1.5 py-0.5 font-semibold">
-                          this agency booked MR {near} &mdash; check the receipt
-                        </span>
-                      )}
-                      <span className="ml-auto text-rose-700 font-bold underline">Open receipt</span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
+            <div className="border-t-2 border-rose-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
+              {/* ⚠ THE ROW OPENS ITS OWN RECEIPT (AUDIT G91). Without this the operator had to close the
+                  banner, find the row in the register below and match it by eye on litres - for a receipt
+                  the app had already identified. `handleEdit` fills the form, opens it, switches to the
+                  transactions view and scrolls to it. */}
+              {oilWithoutMr.map(tx => (
+                <button
+                  key={tx.id}
+                  type="button"
+                  onClick={() => handleEdit(tx as any)}
+                  className="w-full text-left p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs hover:bg-rose-50 focus:bg-rose-50 focus:outline-none"
+                  title="Open this receipt to record its MR number"
+                >
+                  <span className="text-slate-600">{tx.division || '(no division)'}</span>
+                  <span className="font-mono tabular-nums font-bold text-slate-900">
+                    {(Number((tx as any).netLiters) || 0).toFixed(2)} LTR
+                  </span>
+                  <span className="text-slate-500">
+                    {(() => {
+                      const ms = parseDateToTimestamp((tx as any).date);
+                      return ms ? formatDDMMYYYY(new Date(ms).toISOString().slice(0, 10)) : '(no date)';
+                    })()}
+                  </span>
+                  <span className="text-rose-700 font-semibold">no MR number recorded</span>
+                  <span className="ml-auto text-rose-700 font-bold underline">Open receipt</span>
+                </button>
+              ))}
+            </div>
           </div>
         );
       })()}
@@ -957,15 +926,18 @@ ${intakeGate.reason}`);
         const litres = unassignedTx.reduce((s, t) => s + (Number((t as any).netLiters) || 0), 0);
         return (
           <div className="bg-amber-50 border-2 border-amber-300 rounded-xl overflow-hidden">
-            <button
-              type="button"
-              onClick={() => setShowUnassignedOil(o => !o)}
-              className="w-full text-left p-3.5 flex items-start gap-2.5 hover:bg-amber-100/60"
-            >
+            {/* ⚠ THE HEADLINE MOVED TO THE BELL (AUDIT G93) - this was the THIRD drawing of one
+                fact, after the MR Register and the Dashboard, all from `isUnassigned`. The
+                notification counts the jobs and the oil rows together. The caveat that matters
+                to THIS screen stays: the balance below is the selected tender's alone. */}
+            <div className="w-full text-left p-3.5 flex items-start gap-2.5">
               <Droplet className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-bold text-amber-900 flex flex-wrap items-center gap-x-1 gap-y-0.5">
                   <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0`} />
+                  The balance below does not include work belonging to no tender
+                </p>
+                <p className="text-xs text-amber-800 mt-0.5">
                   {unassignedTx.length > 0 && (
                     <>{unassignedTx.length} oil transaction{unassignedTx.length === 1 ? '' : 's'}
                     {' '}({litres.toFixed(2)} LTR){unassignedJobCount > 0 ? ' and ' : ' '}</>
@@ -973,21 +945,15 @@ ${intakeGate.reason}`);
                   {unassignedJobCount > 0 && (
                     <>{unassignedJobCount} job{unassignedJobCount === 1 ? '' : 's'} </>
                   )}
-                  belong to no tender
-                </p>
-                <p className="text-xs text-amber-800 mt-0.5">
-                  They carry no AT, so they are in no tender&rsquo;s balance &mdash; not this
-                  one&rsquo;s and not any other&rsquo;s. Until each is attributed to the tender its
-                  MR belongs to, the balance below is the selected tender&rsquo;s alone and does
-                  not account for {unassignedTx.length > 0 ? `these ${litres.toFixed(2)} litres` : 'these jobs'}.
+                  carry no AT, so they are in no tender&rsquo;s balance &mdash; not this
+                  one&rsquo;s and not any other&rsquo;s. Until each is attributed, the figure below
+                  is the selected tender&rsquo;s alone and does not account
+                  for {unassignedTx.length > 0 ? `these ${litres.toFixed(2)} litres` : 'these jobs'}.
                 </p>
               </div>
-              <span className="shrink-0 text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-600 text-white">
-                {showUnassignedOil ? 'Hide' : 'Show'}
-              </span>
-            </button>
+            </div>
 
-            {showUnassignedOil && unassignedTx.length > 0 && (
+            {unassignedTx.length > 0 && (
               <div className="border-t-2 border-amber-300 bg-white divide-y divide-slate-100 max-h-72 overflow-y-auto">
                 {unassignedTx.map(t => (
                   <div key={t.id} className="p-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs">
