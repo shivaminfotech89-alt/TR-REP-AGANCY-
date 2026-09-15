@@ -95,11 +95,28 @@ export default function App() {
        * `(err as any)` because a catch binding is not typed, and the shape of a thrown value is
        * not guaranteed to carry `code` at all.
        */
-      const code = (err as any)?.code || 'unknown error';
+      /**
+       * ⚠ THE CODE CAME BACK EMPTY, WHICH IS ITSELF THE FINDING (AUDIT O85).
+       *
+       * The previous revision reported `err.code` and the tablet showed "unknown error" - so the
+       * thrown value carries NO `code`, and therefore is NOT a FirebaseError. That EXCLUDES every
+       * `auth/*` cause at once: popup-blocked, popup-closed-by-user, cancelled-popup-request,
+       * network-request-failed and unauthorized-domain all arrive as FirebaseError with a code.
+       *
+       * So the question is no longer "which auth failure" but "what else is throwing", and a
+       * single field cannot answer it. `name` separates TypeError from DOMException from
+       * FirebaseError; `message` carries the text that names a failed module fetch or a blocked
+       * API; the type tag catches a thrown string, null, or a non-Error object.
+       */
+      const e = err as any;
+      console.error('SSO fail:', e?.code, e?.name, e?.message, e?.customData, err);
       alert(
-        `Login failed (${code}).\n\n`
-        + 'If a sign-in window opened and closed, try again without switching away from it. '
-        + 'If this repeats, send this code - it says which of several different faults this is.',
+        'Login failed.\n\n'
+        + `code: ${e?.code ?? 'none'}\n`
+        + `name: ${e?.name ?? 'none'}\n`
+        + `message: ${e?.message ?? String(err)}\n`
+        + `type: ${Object.prototype.toString.call(err)}\n\n`
+        + 'Send these four lines exactly as they appear.',
       );
     } finally {
       setIsAuthenticating(false);
