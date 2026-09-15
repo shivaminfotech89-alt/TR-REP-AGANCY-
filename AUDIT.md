@@ -18307,6 +18307,40 @@ carry `internalInspectionDate 2026-09-14` - one batch session three weeks later.
 puts three weeks of oil on the wrong side of the billing cutoff, which is the defect fixed in O78's third commit
 arriving by another road.
 
+> **⚠ RETRACTED - THE PREMISE WAS WRONG, AND SO WAS THE MSBT-21/22 EXAMPLE.** The owner: **scrap is declared
+> AT internal inspection**, so `insp.data.inspectionDate` **IS** the declaration date, not a stand-in for one.
+> Eight of the twelve carry a correct value that should pre-fill and be accepted without warning.
+>
+> **MSBT-21 and MSBT-22's 2026-09-14 is right**, not "a real date of the wrong event": it is corroborated three
+> ways - `job.internalInspectionDate`, `insp.inspectionDate`, `insp.data.inspectionDate` - with `createdAt` on
+> the same day. A unit received in August and internally inspected on 14 September is ordinary workflow.
+>
+> **What survives is narrower and was MEASURED rather than argued.** For the four with no inspection date, is
+> the record's `createdAt` an honest answer? Across the eight that DO record one it agrees on **seven** - and
+> **diverges by 168 days on 21GETS-44**, inspected `2026-03-27`, written `2026-09-11`. Backdated entry happens
+> here, so `createdAt` dates the TYPING. **KLL-6, ASU-2, AMKLL-9 and MSBT-5 stay operator-typed**, with the write
+> date offered as a labelled hint beside the field and never inside it.
+> (`scripts/admin/scrap-declaration-date-source.ts`.)
+
+### ⚠ A SECOND CORRECTION: THE ROWS STOPPED ADDING UP TO THEIR OWN TOTAL
+
+When the third deduction was added to `tenderNetMovement`, the summary **cards** began subtracting it and the
+**per-MR rows did not** - on screen at `filteredSummary.map`, and in the Excel summary export. So each table's
+rows no longer summed to the SUB TOTAL beneath them, **with nothing on the screen or in the sheet saying why**.
+
+**That is precisely the fault this file's own export comment was written about** - *"the exported total was right
+while the rows above it did not add up to it - a spreadsheet that fails its own arithmetic check with no line to
+explain the difference"* - reintroduced by the commit that added the term.
+
+**It was not caught by tsc, by 274 tests, by the build or by the hooks guard, because none of them can see an
+arithmetic relationship between a row and a total.** The owner found it by asking where a recorded adjustment
+would appear.
+
+Fixed by making the decomposition visible per MR rather than only in the cards: a **`Scrap Adj. (LTR)`** column
+in both the on-screen table and the Excel export, `pending` becoming `shortage - received - scrapAdjustment` in
+both, and a dash rather than `0.00` where no adjustment exists - an MR with none is not an MR whose adjustment is
+nil.
+
 **So: a receipt could be dated honestly for a NEW declaration, never for an existing one.** Four jobs have no
 inspection date at all; two are demonstrably wrong; six are merely plausible, and plausible is not recorded.
 

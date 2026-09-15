@@ -440,6 +440,8 @@ ${intakeGate.reason}`);
   const [scrapEntry, setScrapEntry] = useState<null | {
     jobId: string; jobNo: string; mrNo: string; division: string; atId: string;
     retained: number; declaredOn: string; hadStoredDate: boolean;
+    /** When the inspection record was WRITTEN - shown as a hint only, never pre-filled. */
+    recordWrittenOn: string | null;
   }>(null);
   const [scrapSaving, setScrapSaving] = useState(false);
 
@@ -453,11 +455,19 @@ ${intakeGate.reason}`);
       division: row.division,
       atId: row.atId,
       retained: row.retained,
-      // ⚠ PRE-FILLED ONLY WHERE SOMETHING IS RECORDED, AND BLANK OTHERWISE. Four of the twelve
-      // have no internal inspection date; defaulting those to today would put an invented date
-      // on a row the billing cutoff filters by. `hadStoredDate` lets the form say which it is.
+      /**
+       * ⚠ SCRAP IS DECLARED AT INTERNAL INSPECTION, SO THAT DATE *IS* THE DECLARATION DATE
+       * (AUDIT O79). It pre-fills and is accepted - an earlier revision warned about it as a
+       * proxy, which was wrong. Eight of the twelve carry one.
+       *
+       * ⚠ THE OTHER FOUR STAY BLANK AND OPERATOR-TYPED. Defaulting them to today, or to the
+       * record's write timestamp, would put an invented date on the field the billing cutoff
+       * filters by - and the write timestamp is measurably unreliable here: it diverges from
+       * the recorded inspection date by 168 days on 21GETS-44.
+       */
       declaredOn: row.declaredOn || '',
       hadStoredDate: Boolean(row.declaredOn),
+      recordWrittenOn: row.recordWrittenOn ?? null,
     });
   };
 
@@ -899,6 +909,28 @@ ${intakeGate.reason}`);
           division: j.division || '(none)',
           atId: String(j.atId ?? '').trim(),
           declaredOn: declared && String(declared).trim() ? String(declared) : null,
+          /**
+           * WHEN THE INSPECTION RECORD WAS WRITTEN - A HINT, NEVER A VALUE (AUDIT O79).
+           *
+           * ⚠ SHOWN ONLY WHERE NO INSPECTION DATE EXISTS, AND NEVER PRE-FILLED. Measured across
+           * the eight scrap jobs that DO record a date, this falls on the same day for seven and
+           * diverges by 168 days for 21GETS-44 - inspected 2026-03-27, written 2026-09-11.
+           * Backdated entry happens here, so this can orient an operator and must not become the
+           * date the billing cutoff filters on.
+           *
+           * ⚠ THREE SHAPES (AUDIT F58). `createdAt` is a Firestore Timestamp, a number or a
+           * string depending on which write produced it; a wrong conversion would print an
+           * invented date beside a field whose purpose is refusing invented dates.
+           */
+          recordWrittenOn: (() => {
+            const raw: any = internal?.createdAt;
+            if (raw === null || raw === undefined || raw === '') return null;
+            const ms = typeof raw?.toDate === 'function' ? raw.toDate().getTime()
+              : typeof raw?.seconds === 'number' ? raw.seconds * 1000
+              : typeof raw === 'number' ? raw
+              : Date.parse(String(raw));
+            return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
+          })(),
           capacity: cap === undefined || cap === null || String(cap).trim() === '' ? null : Number(cap),
           retained: storedAvailable === undefined || storedAvailable === null ? 0 : Number(storedAvailable) || 0,
           evidence: scrapEvidence(j, agencyInspections).matched,
@@ -1142,15 +1174,21 @@ ${intakeGate.reason}`);
       wsData.push([]);
       pushScopeNote(6);
       pushOpeningRows(6);
-      wsData.push(["MR No.", "MR Date", "Division", "Total Shortage (LTR)", "Oil Received (LTR)", "Net Pending / Shortage (LTR)"]);
+      // ⚠ THE SAME THIRD COLUMN AS THE SCREEN (AUDIT O79). The exported rows summed to
+      // `shortage - received` while the SUB TOTAL below them carried the scrap deduction, so
+      // the sheet failed its own arithmetic check - with no line to explain the difference,
+      // which is precisely what the note above this function warns about.
+      wsData.push(["MR No.", "MR Date", "Division", "Total Shortage (LTR)", "Oil Received (LTR)", "Scrap Adjustment (LTR)", "Net Pending / Shortage (LTR)"]);
       filteredSummary.forEach((summary) => {
-        const pending = summary.totalShortage - summary.totalReceived;
+        const scrapAdj = summary.scrapAdjustment || 0;
+        const pending = summary.totalShortage - summary.totalReceived - scrapAdj;
         wsData.push([
           summary.mrNo,
           summary.mrDate,
           summary.division,
           Number(summary.totalShortage.toFixed(2)),
           Number(summary.totalReceived.toFixed(2)),
+          Number(scrapAdj.toFixed(2)),
           Number(pending.toFixed(2))
         ]);
       });
@@ -1774,16 +1812,32 @@ ${intakeGate.reason}`);
                     exists it is offered - but it dates the INSPECTION SESSION, shared across the
                     MR, so it can be a real date of the wrong event. The billing cutoff filters
                     on this field. */}
+                {/* ⚠ SCRAP IS DECLARED AT INTERNAL INSPECTION, SO THAT DATE *IS* THE DECLARATION
+                    DATE (AUDIT O79) - not a stand-in for it. An earlier revision warned about it
+                    as a proxy; that was wrong, and the warning is gone.
+
+                    ⚠ `createdAt` IS STILL NOT AN ANSWER FOR THE FOUR THAT RECORD NO DATE, and
+                    this was measured rather than assumed: across the eight scrap jobs that DO
+                    record one, the inspection's write timestamp falls on the same day for seven -
+                    and diverges by 168 days for 21GETS-44, inspected 2026-03-27 and written
+                    2026-09-11. Backdated entry demonstrably happens here, so the write date is
+                    offered as a HINT and never filled into the field the billing cutoff reads. */}
                 {scrapEntry.hadStoredDate ? (
-                  <p className="text-[10px] text-amber-800 mt-1">
-                    Pre-filled from this unit&rsquo;s internal inspection. That date belongs to the
-                    inspection session, not to the scrap decision &mdash; <strong>check it against
-                    the paperwork and correct it if they differ.</strong>
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    From this unit&rsquo;s internal inspection, where scrap was declared.
                   </p>
                 ) : (
                   <p className="text-[10px] text-rose-700 mt-1">
-                    <strong>Nothing records this date for {scrapEntry.jobNo}.</strong> Enter it from
-                    the paperwork &mdash; it decides which bill these litres fall before.
+                    <strong>No internal inspection date is recorded for {scrapEntry.jobNo}.</strong>{' '}
+                    Enter the date scrap was declared, from the paperwork &mdash; it decides which
+                    bill these litres fall before.
+                    {scrapEntry.recordWrittenOn && (
+                      <span className="block text-slate-500 font-normal mt-0.5">
+                        Its inspection record was written on{' '}
+                        {formatDDMMYYYY(scrapEntry.recordWrittenOn)} &mdash; that is when it was
+                        typed, which is not always when the unit was inspected.
+                      </span>
+                    )}
                   </p>
                 )}
               </div>
@@ -2373,6 +2427,13 @@ ${intakeGate.reason}`);
                   <th className={`${TH} text-right text-blue-700`}>
                     Oil Received (LTR)
                   </th>
+                  {/* ⚠ THE THIRD DEDUCTION, PER MR (AUDIT O79). The summary CARDS subtracted it
+                      and these rows did not, so the rows stopped adding up to their own SUB
+                      TOTAL - the "spreadsheet that fails its own arithmetic check" fault this
+                      file's export comment was written about, reintroduced here by me. */}
+                  <th className={`${TH} text-right text-sky-700`}>
+                    Scrap Adj. (LTR)
+                  </th>
                   <th className={`${TH} text-right text-slate-900 font-bold`}>
                     Net Pending / Shortage (LTR)
                   </th>
@@ -2440,7 +2501,7 @@ ${intakeGate.reason}`);
                 {loading ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       Loading summary...
@@ -2449,7 +2510,7 @@ ${intakeGate.reason}`);
                 ) : filteredSummary.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={6}
+                      colSpan={7}
                       className="px-4 py-8 text-center text-slate-500"
                     >
                       No external inspections or oil records found for this
@@ -2458,8 +2519,15 @@ ${intakeGate.reason}`);
                   </tr>
                 ) : (
                   filteredSummary.map((summary, idx) => {
+                    /**
+                     * ⚠ THREE DEDUCTIONS PER ROW, AS IN THE TOTAL (AUDIT O79). This read
+                     * `shortage - received` while the SUB TOTAL beneath it carried
+                     * `subTotalNetBalance`, which subtracts the scrap adjustment - so the rows
+                     * did not sum to their own total and nothing on the screen said why.
+                     */
+                    const scrapAdj = summary.scrapAdjustment || 0;
                     const pending =
-                      summary.totalShortage - summary.totalReceived;
+                      summary.totalShortage - summary.totalReceived - scrapAdj;
                     return (
                       <tr key={idx} className="hover:bg-slate-50">
                         <td className={`${TD} font-medium text-slate-900`}>
@@ -2476,6 +2544,11 @@ ${intakeGate.reason}`);
                         </td>
                         <td className={`${TD} text-right font-mono tabular-nums text-blue-700`}>
                           {summary.totalReceived.toFixed(2)}
+                        </td>
+                        {/* A dash, not 0.00, where no adjustment exists: an MR with none is not
+                            an MR whose adjustment is nil. */}
+                        <td className={`${TD} text-right font-mono tabular-nums text-sky-700`}>
+                          {scrapAdj > 0 ? scrapAdj.toFixed(2) : <span className="text-slate-300">&mdash;</span>}
                         </td>
                         <td className={`${TD} text-right font-mono tabular-nums font-bold`}>
                           <span
@@ -2515,6 +2588,11 @@ ${intakeGate.reason}`);
                     </td>
                     <td className={`${TD} text-right font-mono tabular-nums text-blue-700 font-bold`}>
                       {subTotalReceived.toFixed(2)}
+                    </td>
+                    <td className={`${TD} text-right font-mono tabular-nums text-sky-700 font-bold`}>
+                      {subTotalScrapAdjustment > 0
+                        ? subTotalScrapAdjustment.toFixed(2)
+                        : <span className="text-slate-300">&mdash;</span>}
                     </td>
                     <td className={`${TD} text-right`}>
                       <span className={`font-mono tabular-nums font-black ${d.agencyIsOwed ? 'text-red-700' : d.sign ? 'text-emerald-700' : 'text-slate-900'}`}>
