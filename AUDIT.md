@@ -17781,6 +17781,14 @@ strict and the banner is telling the truth.
 ever booked under. ⚠ The one actionable lead is **`5545`, in ADMIN's own agency, one character from `5585`** -
 which is why the near-match badge exists, and why it stops at showing.
 
+> **⚠ RETRACTED IN FULL - SEE O78.** Every load-bearing sentence above is wrong. **THE DIVISION RAISES AN MR FOR
+> OIL ISSUE ALONE, WITH NO TRANSFORMERS ON IT** - so a receipt whose MR carries no jobs is normal business. The
+> rule IS at fault, the banner is NOT telling the truth, and this is NOT a data-entry pattern: MR 5585 (2,110 L)
+> and MR 8989 (420 L) are correctly recorded oil-only MRs. **The 100% figure was the finding**, and it was written
+> down here as a check that had been run rather than read as evidence about the rule. The near-match badge is
+> worse than inert: offering `5545` for a legitimate oil-only `5585` invites retyping a correct number onto an
+> unrelated transformer's MR, which is the only route in the system that would actually corrupt the balance.
+
 ---
 
 ### FINDING 2: THREE jobs are numbered MSBT-12, and the duplicate rule permits two of them
@@ -17924,5 +17932,284 @@ before that line existed. The two contradictory jobs are simply ones nobody has 
 
 **Verified:** tsc (exit 0); **215 tests in 20 files, 13 new**; build; hooks guard, 48 files.
 - **⚠ NOT SEEN RENDERED.** The refusal dialog is asserted at the source and by type, not observed.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O78. An MR is not always raised for transformers - and a banner shipped on the opposite, unstated
+
+**THE DIVISION RAISES AN MR FOR OIL ISSUE ALONE, WITH NO TRANSFORMERS ON IT.** An oil receipt whose MR carries no
+jobs is therefore **normal business**, correctly recorded. The unmatched-oil banner has been reporting correct data
+as a fault since the day it shipped.
+
+### ⚠ THE ASSUMPTION WAS NEVER STATED, AND THE DATA CONTRADICTED IT FROM DAY ONE
+
+`unmatchedOilRows` builds its set of known numbers from **job** `mrNo`s alone (`mrRename.ts:94-98`), so
+`reason: 'no-jobs'` fires for every oil-only MR **by definition, always**. The premise - that every MR has
+transformers - appears nowhere as a claim to be checked. The file's own header admits exactly two explanations
+(`mrRename.ts:18-21`): the receipt was entered against the wrong MR, or the jobs were booked under a different
+number. **"The MR was raised for oil alone" is not among them.**
+
+**100% of live oil was flagged from the first day** - 2 of 2 receipts, 2,530 litres. G91 checked whether those MR
+numbers existed anywhere, found they did not, and concluded the rule was sound and the data was wrong. **A rule
+that flags everything it sees is evidence about the rule.** That was written down as a check that had been run,
+and then reasoned past. It is the same shape as the scrap-oil error in O76: a premise accepted, and only the
+arithmetic downstream of it tested.
+
+### ⚠ THE ARITHMETIC WAS NEVER WRONG - THE FRAMING WAS
+
+**No site double-counts, mis-signs or zeroes an oil-only MR's litres**, because `computeOilBalance` never joins
+oil to jobs. It runs two flat loops (`oilBalance.ts:178-198`) grouped by **division**; `mrNo` is only ever a
+presence test. Received litres land correctly, no shortage is invented, the net falls - which is the DISCOM's own
+`Total oil in - Oil issued`. Correct at the Dashboard, the rollover carry, the closing offer, the MR summary, the
+invoice deduction and `oil-net-census.js`.
+
+| site | verdict |
+|---|---|
+| `oilBalance.ts:171-215`, `utils.ts:170-186`, `OilInward.tsx:468-546`, rollover + billing deduction | **correct** |
+| **`MrLedger.tsx:261-287` the MR register** | **DROPPED - INVISIBLE AND UNREACHABLE** |
+| `mrRename.ts:92-107` + `OilInward.tsx:869-943` | **misreported** |
+| `lib/notifications.ts:240-252` (unshipped) | **misreported, and its detail is false** |
+| `BillingSystem.tsx:1130-1135` | **misreported edge - a `'-'` date escapes the cutoff** |
+
+- **⚠ THE MR REGISTER CANNOT SHOW AN OIL-ONLY MR AT ALL.** It groups `agencyJobs` only, and never reads
+  `agencyOil` for listing. The MR is absent from the register, the counts and the division filter - and since
+  `handleOpenFullMrEdit` takes a group that never exists, **it can never be opened, edited or renamed.** G74's
+  rename-moves-the-oil repair is structurally unreachable for exactly these MRs. `MrLedger.tsx:643` refuses to let
+  an MR lose its last transformer, so they can only be born in Oil Inward and never worked on again.
+- **⚠ THE NEAR-MATCH SUGGESTION IS A LEVER FOR THE FAULT IT GUARDS AGAINST.** `OilInward.tsx:930-934` offers a
+  distance-1 neighbour and `:905-908` opens the editable receipt one click away. Against a legitimate oil-only MR
+  it invites retyping a correct number onto an unrelated transformer's MR - **the only route in the system that
+  would genuinely corrupt the balance.**
+- **⚠ A BILL CAN CARRY OIL ISSUED AFTER IT.** `BillingSystem.tsx:1130-1135` keeps any row whose timestamp is
+  `0`, and `'-'` parses to `0`, so an oil-only MR with no usable date escapes the "up to" bound and is deducted on
+  every bill for that division - including bills dated before the oil was issued.
+
+### What survives, and it is not what was assumed either
+
+The `'no-jobs'` branch must go. **`'no-mr-number'` survives - but not because "the division issues against a
+reference".** It does not: an oil row carries no challan, letter, allotment or order number. Its entire identifier
+surface is `mrNo`, `division` and a date. It survives because **a blank-MR row is silently dropped from every
+balance while still appearing in the register's sub-total** (`oilBalance.ts:191`, `OilInward.tsx:526`) - so its
+litres vanish from the Dashboard, the printed statement, the closing offer and the carried opening balance, while
+the transactions tab still shows them. One screen, two received totals, no explanation.
+
+**⚠ AND THE REACHABLE VERSION IS THE ONE NOBODY GUARDS.** An empty `mrNo` is refused twice - the HTML
+`required` at `OilInward.tsx:1322` and `firestore.rules:356`. A **whitespace-only** `mrNo` is refused nowhere:
+no trim in the form, no JS check in `handleSave` at all, and a Firestore rule cannot trim, so `" "` passes
+end-to-end and every consumer that trims then reads it as blank. Live data holds none today.
+
+### Has the oil-only MR to be recorded as a concept?
+
+**It has no representation at all.** There is no MR document (`mrRename.ts:4`); `oilType` is material grade, not
+purpose; no `purpose`, `oilOnly`, `mrType` or `entryType` exists in `src/`. So the predicate **cannot distinguish
+a deliberate oil-only MR from a typo'd number**, and any future feature that materialises "the set of MRs" by
+grouping jobs will drop them again - as the register and three job-only census scripts already do.
+
+**Recommended: visibility, not declaration.** A flag must be set at entry and can be forgotten, and a forgotten
+flag returns to inferring. The register grouping jobs and transactions makes the MR real wherever MRs are listed,
+with no new field. **The one thing a flag buys that visibility does not** is telling "deliberately oil-only" from
+"typed the wrong number" at the moment of entry - which is the real cost of deleting the `no-jobs` branch. **Not
+decided here.**
+
+### O77 and the scrap-oil question - unaffected
+
+Shortage is per-job from inspections; received is bulk from transactions; they are reconciled only at division
+level and never per MR. Bulk issue against its own MR is not an anomaly the arithmetic must absorb - **it is the
+shape the arithmetic already assumed.** O77's scrapped unit crediting a 550-litre top-up it never received is a
+question about `jobOilShortage` on one job, and nothing here bears on it.
+
+### ⚠ TWO DEFECTS IN CODE WRITTEN THE SAME DAY, CAUGHT BEFORE IT SHIPPED
+
+The notifications panel (G93, unshipped and uncommitted) carried the assumption forward and made it worse:
+`notifications.ts:245` titles **both** reason codes "name an MR with no transformers", and `:246` states the
+litres "sit in no tender's balance" - **which is false**: the receipt carries `atId`, so `computeOilBalance`
+counts it, and Oil Inward's own banner says so correctly at `:156-158`. **A claim stronger than the one inherited,
+invented while relaying it.**
+
+### Reported, not fixed
+
+- `oilBalance.ts:179`'s comment - "the register keys on MR" - **is wrong about its own function**, which keys on
+  division. A standing invitation to add the join this entry exists to remove.
+- `getMrDateIso` compares with raw `===` (`utils.ts:176`, `:183`) while `oilRowsForMr` compares trimmed
+  (`mrRename.ts:49`). **Two equality rules for one join.**
+- Editing an oil row never stamps `atId` (`OilInward.tsx:333-345`), so correcting an unassigned receipt leaves it
+  unassigned however many times it is edited.
+- `handleSave`'s trial branch returns without `preventDefault()` (`OilInward.tsx:301-304`), so a trial-expired
+  submit falls through to a native form submission.
+- `functions/index.js:139-143` describes oil rows with `d.type` and `d.quantity ?? d.litres`, **none of which
+  exist** on an oil transaction, so the agency-delete blocker always prints "transaction - ? litres".
+- `delete-unassigned.js:158-162` calls an MR that ends up oil-only **"STRANDED"**; `assign-at.js:85` reports it as
+  an unresolved case. Both only wording - that script correctly refuses to write.
+
+**Reported first, on instruction. Then built, in the order the owner set.**
+
+---
+
+### ⚠ WHAT WAS BUILT - THE NEAR-MATCH FIRST, AND ON ITS OWN
+
+**`9611f81`.** The suggestion went before anything else, because it was the only thing here that could
+destroy data rather than merely misdescribe it. Its restraints were all sound - same agency, distance 1,
+equal length, exactly one candidate, never auto-applied - and **none of them mattered, because the premise
+was false.** Against a correctly recorded oil-only MR it invited retyping a RIGHT number onto an unrelated
+transformer's MR. **A safeguard whose premise is false does not degrade to useless; it inverts.**
+
+Nothing replaces it: the screen holds no evidence separating a typo from an oil-only MR, and **offering a
+guess dressed as a lead is what went wrong**.
+
+The `'no-jobs'` branch went with it, along with its reason type and the `jobs` parameter that would have
+invited the join back. `unmatchedOilRows` is now **`oilRowsMissingMrNumber`** - a name still saying
+"unmatched" would have carried the framing forward.
+
+**The owner's reasoning for deleting it rather than reframing it is worth keeping**: *"a check that fires on
+100% of correct data catches nothing - it has already trained me to ignore it. Losing a detector that never
+worked costs nothing."*
+
+### The register now shows an MR raised for oil alone
+
+**`262a155`.** Grouped from **jobs ∪ oil**, with scope taken from the **oil row's own `atId`** through the
+same `matchesAtScope` the jobs use - one rule, not two that can drift (F99). A receipt with a blank MR number
+never creates a group: it belongs to no MR by definition.
+
+| what changed | before | after |
+|---|---|---|
+| the MR list | invisible | listed, openable, renameable |
+| `activeCount` | excluded it | includes it - the count means "active MRs", not "active MRs with work" |
+| division filter | its division absent | appears, from the oil row's own division |
+| Full Edit | could not open | opens; header **unlocked**, since `headerLock` keys on SAVED JOBS and there are none |
+| the save | **refused** - "MR must contain at least one transformer" | permitted when the MR carries oil |
+| rename | unreachable | works; the oil renumber at step 3 is outside the jobs loop, so the batch is not empty |
+
+- **⚠ THE GUARD WAS NARROWED, NOT REMOVED.** Emptying a real MR by deleting its last unit is still
+  refused, and now says to cancel the MR instead - which releases the job numbers and keeps the record. What
+  it no longer refuses is an MR that never had transformers.
+- **⚠ TWO OIL-ONLY MRs COULD HAVE BEEN MERGED SILENTLY.** `collisionJobs` asks about jobs, which sufficed
+  only while a jobless MR could not be opened. `collisionOilRows` closes it, filtering the snapshot the rename
+  **already fetches**, so it costs no extra read. Four tests.
+- **⚠ NO INVENTED REPAIR TYPE.** `repairType` is left **blank** for a group with no jobs - in the
+  grouping, in `handleOpenFullMrEdit`, and in the sentence saying what an added unit inherits. It feeds the
+  job-number counter gate as well as the header, and an MR with no transformers has none.
+
+### Two figures with money attached
+
+**`f0e188a`.** Both found while correcting the rule, both independent of it.
+
+- **⚠ A BILL COULD CARRY OIL ISSUED AFTER IT WAS DATED.** `divisionMrList`'s filter read
+  `itemTimestamp > 0 && itemTimestamp > uptoTimestamp`. The first clause was meant as "only compare dates we
+  could parse"; its effect was the opposite. **Every unparseable date funnels to `0`** - `'-'` at `:925`, a
+  falsy value at `:919`, an unrecognised string at `:943`, anything else at `:945`, and never `NaN` - so the
+  row failed the first test and **was kept whatever the cutoff said**, reaching the printed
+  "LESS: OIL SHORTAGE DEDUCTION" line. Now excluded: a row that cannot be shown to fall before the cutoff has
+  not been shown to belong in the statement.
+- **⚠ A WHITESPACE MR NUMBER COST LITRES FROM THE DISCOM'S FIGURE.** An empty `mrNo` is refused twice;
+  `" "` was refused nowhere - a Firestore rule cannot trim and `handleSave` had no check. Trimmed at **both**
+  writes, the create path included, since create is what produces new rows.
+
+### ⚠ FOUND, NOT FIXED
+
+- **`parseDateToTimestamp` EXISTS TWICE, CHARACTER-FOR-CHARACTER** - `BillingSystem.tsx:918` and
+  `OilInward.tsx:204` - and it decides what lands on an invoice. Two copies of one rule is the F87 shape, and
+  the bug above lived in one of them.
+- **`oilBalance.ts:179`'s comment is wrong about its own function.** "The register keys on MR" - it keys on
+  **division**. A standing invitation to add the join this entry exists to remove.
+- **Whether an oil-only MR should be recordable as a concept stays open.** Recommended: visibility, not
+  declaration - a flag can be forgotten, and a forgotten flag returns to inferring. The one thing a flag would
+  buy is telling "deliberately oil-only" from "typed the wrong number" **at entry**, which is the real cost of
+  deleting the `no-jobs` branch.
+
+**Verified across all three:** tsc (exit 0); **257 tests in 22 files**, 4 new; build; hooks guard, 49 files.
+Numstat identical with and without `--ignore-cr-at-eol`.
+- **⚠ NOT SEEN RENDERED, AND NO LIVE ROW EXERCISES ANY OF IT.** No oil-only MR exists to open - both live
+  receipts name MRs that carry jobs - no receipt has a blank MR number, and none resolves to a `'-'` date.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G93. Sixty-six banners nobody could clear, and the reflex that taught
+
+**The app carried 66 persistent banners across 24 files and NOT ONE could be dismissed.** The reasoning was
+visibility. The effect was its opposite, and the owner named it exactly: *"an operator who cannot clear a
+message learns to look past it, which is the outcome the reasoning was trying to avoid."*
+
+**⚠ ASKED FOR TWICE, ARGUED OUT OF TWICE, BUILT ON THE THIRD.** The argument had a hole in it that two
+rounds of reasoning never found, and the person living with the screens found it immediately.
+
+### Fewer surfaces, not more
+
+**The app did not hold 66 facts.** It held far fewer, painted repeatedly, because each screen grew its own.
+
+| fact | places it was drawn | one source |
+|---|---|---|
+| this tender has no rates | **five** | `atRatesReadiness` |
+| work belongs to no tender | **three** | `isUnassigned` |
+| the agency cannot issue documents | two | `missingForEstimate` + `missingForTaxInvoice` |
+
+**Nineteen banners became ten notifications.** Every item calls the SAME predicate the screens called - never a
+copy - so a rule change reaches the bell and the screen together or neither.
+
+### Dismissal is a signature of the fact, not a hidden flag
+
+Clearing an item stores a **sorted signature** of the data behind it; the item returns the moment that differs.
+A new tender without rates, one more job belonging to no tender - and it is back. **No expiry, no per-item
+bookkeeping, nothing to go stale.** Sorted because the same facts in another order are the same fact, and an
+unsorted join would resurrect a dismissed notice whenever a query returned rows differently - which looks
+exactly like a new fact and would teach the very reflex this entry exists to remove.
+
+- **⚠ PER BROWSER, AND DELIBERATELY NOT PER ACCOUNT.** There is no per-user document in this app - no
+  `users/{uid}` match block exists, and the catch-all is `allow read, write: if false`. An account-wide store
+  needs a new collection, a validator, a rules deploy and a billed write per dismissal. **It could ride on the
+  agency document** - `isValidAgency` names fields rather than using `keys().hasOnly()`, so an unknown field
+  passes - **and that is precisely why it must not**: agencies are DELEGATED (G37), so one person's dismissal
+  would clear the notice for everyone working that agency. The owner settled it on that point: *"worse than not
+  persisting at all."*
+- **⚠ A STORAGE FAILURE SHOWS THE NOTIFICATION, NEVER HIDES IT.** Every read and write is wrapped and every
+  failure path returns "not dismissed". The cost of a private window must be a notice already seen, not one
+  never seen. Three tests hold it.
+
+### ⚠ A FAILED LOAD IS NOT A QUIET BELL (AUDIT G70)
+
+If the work lists fail to read, `agencyJobs` and `agencyOil` are **empty** - so every count drawn from them
+would read zero over data nobody could read. Those items are **not computed at all** in that state and the panel
+says the counts are unavailable. The tender-derived items still stand: they come from a different load that may
+well have succeeded. **Tested in both directions.**
+
+**No Firestore reads.** Every count comes from what `AgencyContext` already loaded - reads are billed by bytes
+here. The context states that this cached list must never gate a **write**, so the panel reports and links and
+is never a precondition.
+
+### Two predicates were lifted so they could be reached - not copied
+
+- **`lib/tenderState.ts`** - `isUnassigned`, `isIntakeOpen`, `currentTenderFor`, `otherActiveAts`.
+  `AgencyContext` imports `./firebase` at its second line and reads `localStorage` at module scope, so nothing
+  in node could touch them.
+- **`lib/ratesReadiness.ts`** - `atRatesReadiness`. `estimateMasterHealth` imports `estimateCalc`, which imports
+  **a 2,000-line report component**, which reaches `pdfjs-dist`, which calls `new DOMMatrix()` at module scope.
+
+Both re-export from their old homes, so **all 26 consumers are untouched**. A second copy is what G92 was
+committed to prevent.
+
+- **⚠ THE RE-EXPORT TRAP, CAUGHT BY tsc AND BY NOTHING ELSE.** `export ... from` forwards a name WITHOUT
+  binding it in the module's own scope - and `AgencyContext` calls two of them itself. The first extraction left
+  three call sites referring to names that no longer existed there. **No test could see it, because no test
+  imports that file - which is the very reason the predicates were moving.**
+- **⚠ A LIB FILE IMPORTING A REPORT COMPONENT FOR ONE CONSTANT IS THE ACTUAL FAULT, and it is NOT fixed
+  here** - only routed around.
+
+### What stayed, and why it is not a matter of taste
+
+- **A notice that REPLACES A CONTROL is not a banner - it is the fallback render.** New Job's closed-intake
+  panel IS the whole screen; two Save buttons are replaced by their own refusals. Moving them deletes the
+  explanation for a missing button.
+- **A notice about THE DOCUMENT BEING RENDERED cannot be computed agency-wide** - "this sheet will print short",
+  "rate not found, total withheld". **A warning that arrives after the paper does is not a warning.**
+- **A notice saying THE DATA IS MISSING stays where the wrong numbers are**, and the bell says it too.
+- **The duplicate-mark warning stays under the monogram field**, where it fires while the operator is typing the
+  colliding value. The bell can report a collision that exists; it cannot sit under an input.
+
+**Verified:** tsc (exit 0); **257 tests in 22 files**; build; hooks guard, 49 files.
+- **⚠ NOT SEEN RENDERED.** The bell, the panel, the dismissal and every banner removal are asserted at the
+  source, by type and by test, not observed in a browser.
 
 **Deploy:** hosting - a push to `main` (O71).

@@ -61,8 +61,7 @@ export default function EstimateMaster() {
     publishAtTemplate,
     adoptPublishedAt,
     globalDefaultEstimateMaster,
-    globalConfigError,
-    dismissGlobalConfigError
+    // (globalConfigError / dismissGlobalConfigError moved to the notifications bell - AUDIT G93.)
   } = useAgency();
 
   const [crgoData, setCrgoData] = useState<EstimateItem[]>([]);
@@ -2010,33 +2009,11 @@ export default function EstimateMaster() {
         </div>
       )}
 
-      {/* Global Config Failure Warning Banner */}
-      {globalConfigError && (
-        <div className="bg-amber-50 border border-amber-300 rounded-lg p-4 shadow-xs flex items-start justify-between gap-3 text-amber-900 animate-in fade-in">
-          <div className="flex items-start gap-3">
-            <div className="p-2 bg-amber-100 border border-amber-300 rounded-lg text-amber-700 shrink-0 mt-0.5">
-              <AlertTriangle className="w-5 h-5" />
-            </div>
-            <div className="space-y-1">
-              <h4 className="text-xs font-black uppercase tracking-wider text-amber-900 flex items-center gap-2">
-                <span>Global Estimate Defaults Offline</span>
-                <span className="text-[10px] bg-amber-200 text-amber-800 px-2 py-0.5 rounded font-bold">Fallback Active</span>
-              </h4>
-              <p className="text-xs text-amber-800 leading-relaxed font-medium">
-                {globalConfigError}
-              </p>
-            </div>
-          </div>
-          <button 
-            type="button"
-            onClick={dismissGlobalConfigError}
-            className="text-amber-500 hover:text-amber-800 p-1 rounded-lg hover:bg-amber-100/80 transition-colors"
-            title="Dismiss warning"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
+      {/* MOVED TO THE BELL (AUDIT G93). "Global Estimate Defaults Offline / Fallback Active"
+          is a fact about the app's configuration, not about this screen, and its Dismiss only
+          lasted until the next reload. It is a notification now, built from the same
+          `globalConfigError`, and it says there too that pricing is running on the built-in
+          fallback so figures may not match the published defaults. */}
 
       {/* ⚠ THE SCREEN AND THE APP ARE ON DIFFERENT TENDERS.
           Selecting here is display-only by design, which means the operator can end up

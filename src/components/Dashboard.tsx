@@ -96,13 +96,11 @@ export default function Dashboard() {
   const scopedAt = activeAtMaster;
 
   /**
-   * Work in NO tender. Counted from the agency-wide set already in hand - not queried for,
-   * because no Firestore equality matches an absent `atId` (AUDIT F87).
+   * ⚠ THE UNASSIGNED COUNT MOVED TO THE BELL (AUDIT G93), and with it this memo. The reasoning
+   * it carried is preserved in lib/notifications.ts: the count comes from the agency-wide set
+   * already in hand, never from a query, because no Firestore equality matches an absent
+   * `atId` (AUDIT F87).
    */
-  const unassignedCount = useMemo(
-    () => allAgencyJobs.filter(isUnassigned).length,
-    [allAgencyJobs],
-  );
 
   /**
    * THE THREE SCOPE STATES, SPELLED OUT (AUDIT F95).
@@ -476,17 +474,11 @@ export default function Dashboard() {
         <span className="text-[11px] text-slate-500">
           Change it with the Tender selector in the sidebar.
         </span>
-        {/* Unassigned work is in NO tender, so a tender-scoped Dashboard excludes it. Said
-            plainly rather than left to be discovered from a total that looks complete. */}
-        {!showingAll && unassignedCount > 0 && (
-          <Link
-            to="/mr-ledger"
-            className={`${chip('warn')} hover:bg-amber-100`}
-          >
-            <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0`} />
-            {unassignedCount} job{unassignedCount === 1 ? '' : 's'} belong to no tender &mdash; not counted here
-          </Link>
-        )}
+        {/* MOVED TO THE BELL (AUDIT G93). Unassigned work is in NO tender, so a tender-scoped
+            Dashboard excludes it - but that was ONE fact drawn in THREE places, here, on the
+            MR Register and on the Oil Ledger, each from the same `isUnassigned` predicate.
+            The notifications panel states it once, counts jobs and oil together, and links to
+            the MR Register where the per-job list that can actually be worked still lives. */}
       </div>
 
       {/* 1. COMPACT HEADER & TOP DIVISION SELECTOR BAR */}

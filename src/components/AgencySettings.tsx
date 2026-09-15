@@ -526,17 +526,11 @@ export default function AgencySettings() {
       {/* ============================ TAB: AGENCY SETUP ============================ */}
       {isMounted('agency') && (
         <div hidden={settingsTab !== 'agency'} className="space-y-5">
-          {/* THE MARKER'S DETAIL, WHERE IT IS FIXED. Same list the tab's marker was computed
-              from, so arriving here always explains the marker that sent you. */}
-          {activeAgency && agencyMissing.length > 0 && (
-            <div className="flex items-start gap-2 bg-rose-50 border border-l-2 border-l-rose-500 border-rose-300 rounded-lg px-3 py-2">
-              <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
-              <p className="text-xs text-rose-900 leading-relaxed">
-                <strong className="font-bold">Estimates or tax invoices for {activeAgency.name} are refused until these are recorded:</strong>{' '}
-                {agencyMissing.join(', ')}.
-              </p>
-            </div>
-          )}
+          {/* MOVED TO THE BELL (AUDIT G93). "Estimates or tax invoices are refused until these
+              are recorded" is a standing fact about the AGENCY, computed from the same
+              missingForEstimate + missingForTaxInvoice pair, so it is a notification now and
+              it links here. The form that fixes it is immediately below, which is what this
+              strip was pointing at. The tab marker above is unchanged. */}
 
           {/* ======================= REGION A: THIS AGENCY =======================
               Agency-level settings. NONE of this depends on an AT period - it stays available
@@ -586,17 +580,15 @@ export default function AgencySettings() {
                 </span>
               </div>
 
-              {/* THE MARKER'S DETAIL when tenders exist but none takes new work - a closed or
-                  superseded selection, or the All tenders scope. The no-tender case has its own
-                  notice below. Same gate, same reason string as New Job's refusal. */}
-              {agencyAtsForContext.length > 0 && !intakeGate.open && (
-                <div className="mb-3 flex items-start gap-2 bg-rose-50 border border-l-2 border-l-rose-500 border-rose-300 rounded-lg px-3 py-2">
-                  <AlertTriangle className="w-4 h-4 text-rose-700 shrink-0 mt-0.5" />
-                  <p className="text-xs text-rose-900 leading-relaxed">
-                    <strong className="font-bold">New Job is refusing work.</strong> {intakeGate.reason}
-                  </p>
-                </div>
-              )}
+              {/* MOVED TO THE BELL (AUDIT G93). "New Job is refusing work" is the intake gate,
+                  true of the agency's selected tender on every screen, so it is a notification
+                  now - carrying the same `isIntakeOpen` reason string.
+
+                  ⚠ WITH ONE DELIBERATE NARROWING: the panel does NOT report the All-tenders
+                  scope. That is a viewing state the operator chose, not a fault, and a
+                  notification standing permanently for a setting working as intended is how a
+                  bell earns the same reflex the banners did. The no-tender case below stays -
+                  it is a different fact, and its button does something. */}
 
               {agencyAtsForContext.length === 0 ? (
                 /* SAYS WHAT TO DO, not merely that nothing is here. A section that vanishes is

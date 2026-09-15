@@ -272,28 +272,14 @@ export function validateEstimateMaster(at: any, agency: any, coreType: string): 
 }
 
 /**
- * HAS THIS AT BEEN GIVEN RATES AT ALL?
+ * ⚠ `atRatesReadiness` NOW LIVES IN lib/ratesReadiness.ts, AND IS RE-EXPORTED HERE (AUDIT G93).
  *
- * A separate question from whether the rates are well formed, and it has to stay separate:
- * an AT with no `ratesSource` prices from the agency's sections and produces perfectly
- * valid-looking numbers, so nothing about the FIGURES can reveal that nobody has confirmed
- * them against this tender. Only the absence of the stamp can.
- *
- * Returns a reason string when the AT is not ready, null when it is.
+ * Moved, not copied, and unchanged. It left because this file's import of `./estimateCalc`
+ * reaches a React report component and through it `pdfjs-dist`, which needs a DOM at import
+ * time - so the one-field predicate that gates every estimate and every bill could not be
+ * tested. Every existing `from '../lib/estimateMasterHealth'` import still resolves.
  */
-export function atRatesReadiness(at: any): { blocked: boolean; reason: string | null } {
-  if (!at) {
-    return { blocked: true, reason: 'No AT is selected. Rates belong to a tender, so there is nothing to price against.' };
-  }
-  const src = String(at.ratesSource || '').trim();
-  if (!src) {
-    return {
-      blocked: true,
-      reason: `AT "${at.atNumber || at.name || at.id}" has no rates of its own. A new tender starts with no schedule - enter its rates, or copy them from a published AT, before issuing anything priced from it.`,
-    };
-  }
-  return { blocked: false, reason: null };
-}
+export { atRatesReadiness } from './ratesReadiness';
 
 /** Every section of an agency's master, for the health line on the master screen. */
 export function checkAllMasterSections(agency: any): MasterHealth[] {

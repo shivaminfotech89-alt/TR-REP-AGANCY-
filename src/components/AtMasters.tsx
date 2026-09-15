@@ -88,20 +88,11 @@ export default function AtMasters() {
           </div>
         )}
 
-        {activeAgency && hasAny && !activeHasRates && (
-          <div className="mt-4 bg-amber-50 border border-amber-300 rounded-lg p-3 text-xs text-amber-900 flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              <p className="font-bold">
-                The selected tender has no rates yet, so nothing can be estimated or billed against it.
-              </p>
-              <p className="mt-0.5">
-                Set its prefixes and allotment below, then enter its rates.
-              </p>
-              <Link to="/agency-settings?section=estimate-master" className="font-bold underline">Open Estimate Master</Link>
-            </div>
-          </div>
-        )}
+        {/* MOVED TO THE BELL (AUDIT G93). "This tender has no rates" was painted in FIVE
+            places - here, the Estimate Master header, the Agency Settings tab marker, the
+            "also refusing work" list and the per-AT chip - all from one predicate,
+            `atRatesReadiness`. The notifications panel names every tender that is missing
+            rates, not only the selected one, and links to the Estimate Master. */}
       </div>
 
       <AtSettings />

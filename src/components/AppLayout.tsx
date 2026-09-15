@@ -49,13 +49,14 @@ import AgencySettings from './AgencySettings';
 import AdminPanel from './AdminPanel';
 import SupportTickets from './SupportTickets';
 import AgencySwitcher from './AgencySwitcher';
+import NotificationBell from './NotificationBell';
 import { agencyGate } from '../lib/loadFailure';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
 import { useInstallPrompt } from '../lib/installPrompt';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
-          atSupersededNotice, dismissAtSupersededNotice, agenciesLoad, retryLoad } = useAgency();
+          agenciesLoad, retryLoad } = useAgency();
   const { currentTheme, themeId } = useTheme();
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -544,6 +545,18 @@ export default function AppLayout({ user }: { user: User }) {
           </div>
           
           <div className="flex items-center space-x-1.5 sm:space-x-3 shrink-0">
+            {/* ⚠ THE STANDING FACTS LIVE HERE NOW, NOT ON THE SCREENS (AUDIT G93).
+                66 persistent banners, none of which could be cleared. The reasoning for that
+                was visibility; the effect was the opposite, because a message an operator
+                cannot clear is one they learn to look past. The bell carries every fact that
+                is TRUE OF THE AGENCY rather than of the screen you happen to be on, and
+                dismissal lasts until the fact itself changes.
+
+                It sits left of the theme button because it is the only control here that
+                reports a state of the work; the rest change how the app looks or ends the
+                session. */}
+            <NotificationBell />
+
             {/* Theme Switcher Quick Button */}
             <button
               type="button"
@@ -581,33 +594,16 @@ export default function AppLayout({ user }: { user: User }) {
         </header>
 
         <div className="flex-1 overflow-y-auto overflow-x-hidden print:overflow-visible p-2.5 sm:p-4 md:p-6 print:p-0 relative custom-scrollbar">
-          {/* SAID ONCE WHEN SIGN-IN MOVED THEM (AUDIT F84). A selection changing underneath
-              is the shape this audit has spent its length removing - the job number, the
-              estimate master, the reservation - so the one place it is now allowed to
-              happen announces itself. */}
-          {atSupersededNotice && (
-            <div className="mb-3 rounded-xl border-2 border-indigo-300 bg-indigo-50 p-3 flex items-start gap-2.5">
-              <Building2 className="w-4 h-4 text-indigo-700 shrink-0 mt-0.5" />
-              <div className="min-w-0 flex-1 text-xs text-indigo-900">
-                <strong className="font-bold">
-                  AT {atSupersededNotice.movedTo} is now the current tender; you were last working
-                  in {atSupersededNotice.wasOn}.
-                </strong>
-                <p className="mt-0.5">
-                  New MRs, jobs and oil entries go to {atSupersededNotice.movedTo}. Everything under
-                  {' '}{atSupersededNotice.wasOn} is still there &mdash; switch to it in the sidebar to
-                  see it, or to finish inspections and documents on units already booked under it.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={dismissAtSupersededNotice}
-                className="shrink-0 text-[11px] font-bold text-indigo-700 hover:text-indigo-900"
-              >
-                Dismiss
-              </button>
-            </div>
-          )}
+          {/* MOVED TO THE BELL (AUDIT G93). "AT 2026-28 is now the current tender; you were
+              last working in 2024-26" is a fact about the AGENCY, true on every screen, so it
+              was drawn on every screen - above the content, pushing the work down, with a
+              Dismiss that only lasted until the next reload.
+
+              It is the same sentence in the notifications panel now, built from the same
+              `atSupersededNotice` (see lib/notifications.ts), and dismissing it there lasts
+              until a DIFFERENT tender supersedes a different one. The F84 reasoning is
+              unchanged and is recorded there: the one place a selection is allowed to change
+              underneath the operator still announces itself. */}
 
           {/* ⚠ A FAILED READ IS SAID FIRST, AND NEVER AS "NO AGENCY" (AUDIT G70, O71). On 2026-09-12 the database
               refused every read, and this screen told every customer "No Active Agency - Create one to start" over data

@@ -878,23 +878,11 @@ export function AtSettings() {
           on whichever one you happened to open - a real check made quieter as a side effect
           of a layout change. Here it does not depend on what is open, or on whether the
           section is expanded at all. */}
-      {(() => {
-        const clashing = agencyAts.filter(a => otherActiveAts(a, agencyAts).length > 0);
-        if (clashing.length === 0) return null;
-        return (
-          <div className="mt-3 p-2.5 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-[11px] leading-relaxed flex items-start gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
-            <span>
-              <strong className="font-bold">
-                {clashing.length} tenders are marked Active: {clashing.map(a => a.atNumber || a.name).join(', ')}.
-              </strong>{' '}
-              Only one should be. Nothing is broken - new work goes to whichever started
-              latest - but until one is marked Closed, which tender a job lands under is
-              decided by a date rather than by you.
-            </span>
-          </div>
-        );
-      })()}
+      {/* MOVED TO THE BELL (AUDIT G93). The reasoning above - that this must not be a per-row
+          warning, because one-at-a-time would show it only on whichever AT you opened - is
+          why it belongs in the notifications panel rather than back on the rows: the panel
+          does not depend on what is open either, and it is seen from every screen instead of
+          only this one. Same `otherActiveAts` predicate, same sentence. */}
 
       {/* THE MINIMISED SUMMARY IS GONE WITH "EXPAND & MANAGE" (AUDIT G56). It showed the active
           AT and told the operator to expand the section to do anything with it. The tender list
