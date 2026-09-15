@@ -17575,6 +17575,14 @@ There is no 228 for the division to owe: those litres were never the agency's ex
 
 **What it would have cost, measured across all 11 scrap jobs before it was abandoned:**
 
+> **⚠ THE COUNT IS WRONG - IT IS 12 JOBS, AND "today" IS 699.00 L (SEE O80).** The census behind this table
+> used `job.condition === 'Scrap'`, one of FOUR tests for scrap in this codebase, and missed `ASU-2` (ADMIN, 90.00
+> L) whose job record carries an EMPTY condition while its internal inspection says Scrap.
+>
+> **⚠ AND THE ERROR WAS INVISIBLE IN THE COLUMN BEING READ.** `available x 0.95` stays **1121.00 L** at twelve
+> jobs, because ASU-2 arrived EMPTY and retains nothing. Only the `today` figure moves. The comparison this table
+> was built to make was unaffected, which is exactly why nobody caught the count.
+
 | rule | total | vs today |
 |---|---|---|
 | today | 609.00 L | - |
@@ -17663,6 +17671,15 @@ oil it never bought.
 | AMKLL-9 | MEGHA | **10.00** | 5.50 | 15.50 |
 | six other scrap jobs | | 0.00 | 53.50 | 53.50 |
 | **11 scrap jobs** | | **550.00** | **59.00** | **609.00** |
+
+> **⚠ CORRECTED: 12 SCRAP JOBS, 699.00 L (SEE O80).** A twelfth exists - `ASU-2`, ADMIN, MR 1234, **90.00 L**,
+> arrived empty so its entire credit is phantom top-up. It is scrap by its INTERNAL INSPECTION only: the job
+> record's `condition` is empty and its `status` reads `Dispatched`. The census above used
+> `job.condition === 'Scrap'` and could not see it.
+>
+> So the split is **640.00 top-up / 59.00 filtration across 12 jobs**, and the top-up term - the part nobody had
+> looked at - is **91% of what scrap jobs contribute**, not 90%. **The direction of this entry is unchanged and
+> its argument is strengthened.**
 
 ### ⚠ THE SPLIT IS THE PART THAT REFRAMES IT: 550 TOP-UP, 59 FILTRATION
 
@@ -18211,5 +18228,155 @@ committed to prevent.
 **Verified:** tsc (exit 0); **257 tests in 22 files**; build; hooks guard, 49 files.
 - **⚠ NOT SEEN RENDERED.** The bell, the panel, the dismissal and every banner removal are asserted at the
   source, by type and by test, not observed in a browser.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O79. The retained-oil model: the receipt is right, the shortage beside it is not
+
+**Open, 2026-09-15. NOT BUILT.** The owner proposed a model that answers two of the three objections O77 raised
+against an adjustment entry, and it deserves recording precisely because it is a better idea than the one refused.
+
+### The model
+
+**When a transformer is scrapped its oil STAYS WITH THE AGENCY**, so those litres are genuinely *received* - not
+from a barrel, but received. Recorded as received they reduce what the division owes, which is right, because the
+agency now holds oil it did not buy. The receipt carries the scrap job's MR number, is dated the day scrap was
+declared, and is remarked "scrap adjustment".
+
+**⚠ THIS RETIRES TWO OF O77'S THREE REFUSALS.** O77 rejected a third `oilType` because it would print as a
+**received** row on a document going to a division office, and rejected the arithmetic because cancelling a
+shortage through `oilTransactions` means "asserting the division issued something it did not". Under this model
+the row IS received and the assertion is true. **The objection was to a mislabelled entry, not to this one.**
+
+### ⚠ THE ARITHMETIC, STATED - AND THE TWO ENTRIES DO NOT CANCEL
+
+For a scrapped unit **nothing was supplied and nothing was filtered**, so the division owes nothing for its oil,
+and the agency holds what was in the tank. **The correct net is therefore `-available`.**
+
+The model produces `shortage - available`. Since `shortage = lessOil + 0.05 x available`:
+
+```
+    model net      =  lessOil + 0.05 x available  -  available
+    correct net    =                              -  available
+    OVERSTATED BY  =  lessOil + 0.05 x available        <- exactly O77's phantom, untouched
+```
+
+**The retained entry is correct. The shortage sitting beside it is not.** They are two independent errors pointing
+opposite ways, and adding the right one does not remove the wrong one.
+
+**They do not even overlap.** Every scrap job falls in exactly one group:
+
+| | jobs | what happens |
+|---|---|---|
+| **arrived EMPTY** (`lessOil` = capacity) | 5 | retain **nothing**; their **640 L of phantom top-up is offset by zero** |
+| **arrived with oil** (`lessOil` ~ 0) | 7 | retention of 60-250 L offsets only a **3.00-15.50 L filtration** term |
+
+So the retained oil offsets the small term on the units that had oil, and does **nothing at all** for the large
+term on the units that arrived empty - **which is 91% of what O77 is about.**
+
+### The figures
+
+| | litres |
+|---|---|
+| credited today across 12 scrap jobs | **699.00** |
+| retained, raw available | **1180.00** |
+| retained, `available x 0.95` (what `Used` oil already nets to) | **1121.00** |
+| **net if retained were recorded** | **-481.00 raw / -422.00 at x0.95** - *agency owes the division* |
+
+**⚠ MEGHA'S AT 26-27 CROSSES ZERO: +757.60 -> -362.40 (raw) or -306.40 (x0.95).** The tender stops reading
+"the division owes MEGHA 757 litres" and starts reading "MEGHA owes the division about 330". That is not a
+rounding error and it is not a presentational change.
+
+### ⚠ THE DATE CANNOT BE HONEST FOR ANY EXISTING JOB
+
+The receipt is dated from the scrap declaration, and **nothing records when scrap was declared.** There is no
+`scrapDate`, `scrappedAt` or equivalent anywhere - `Dashboard.tsx:224`'s `scrapDeclared` is a counter. Condition
+is stored as CURRENT STATE: `InternalInspection.tsx:601` writes it beside `inspectionDate` (`:598`), which is the
+operator's date for the whole MR SESSION, defaulted to today (`:163`) and re-seeded from a sample job (`:184`).
+
+| candidate | verdict |
+|---|---|
+| `insp.data.inspectionDate` | a REAL date of the WRONG event, shared across the MR - and **absent on 4 of 12** |
+| `insp.createdAt` / `updatedAt` | a WRITE TIMESTAMP; AMSBT-1 and MSBT-9 were edited after creation, so it moved |
+| `job.updatedAt` | moves on a serial-number correction |
+
+**⚠ AND THE PROXY FAILS VISIBLY, NOT THEORETICALLY.** MSBT-21 and MSBT-22 were received 21 and 23 August and
+carry `internalInspectionDate 2026-09-14` - one batch session three weeks later. Dating their receipts from it
+puts three weeks of oil on the wrong side of the billing cutoff, which is the defect fixed in O78's third commit
+arriving by another road.
+
+**So: a receipt could be dated honestly for a NEW declaration, never for an existing one.** Four jobs have no
+inspection date at all; two are demonstrably wrong; six are merely plausible, and plausible is not recorded.
+
+### If it is ever built
+
+**Entered, not automatic.** MR and quantity are derivable and safe; **the date is the one field nothing records**,
+and a declaration silently writing a row into the ledger the division reconciles is the read-causing-a-write shape
+this audit has refused throughout. Offer the receipt with the quantity pre-filled, require the operator to type
+the date from the paperwork, and confirm.
+
+**A third `oilType` may be unnecessary.** `Used` already nets to `gross x 0.95`. What it cannot say is where the
+oil came from - and the printed Inward Oil Received Log has **no remark or source column**, so carrying "scrap
+adjustment" onto the sheet means a new column, a new field, a clause in `isValidOilTransaction`, and a rules
+deploy. `Barrels` would print `0`.
+
+### ⚠ THE ONE QUESTION THAT SETTLES 1,180 LITRES
+
+The owner will put it to a division office, and it covers both entries at once:
+
+> **When a transformer is scrapped, does your oil account show the top-up quantity, and does it show the oil we
+> retain?**
+
+**Not built.** 1,180 litres, crossing zero, on a premise nobody has checked - and O77's reasoning applies here
+with more force, not less, because this moves nearly twice as many litres.
+
+---
+
+## O80. Four different tests for "is this job scrap", and a census that used the wrong one
+
+**Open, 2026-09-15. NOT FIXED - it is its own defect and must not be built into the oil work.**
+
+**Any census of scrap jobs is wrong depending on which test it used, and O77's was.**
+
+| test | where | finds |
+|---|---|---|
+| `job.status === 'Scrap'` | `inspectionStage.ts:74`, `:98`, `:148`, `:155` | **5 of 12** |
+| `job.condition === 'Scrap'` | `BillingSystem.tsx:2964` | **11 of 12** - what O76/O77 used |
+| inspection `data.condition === 'Scrap'` | `inspectionStage.ts:43` | **12 of 12** |
+| `job.status === 'Scrap / Unrepairable'` | `MrLedger`'s `JOB_STATUSES` | **0** - offered by the UI, matched by nothing |
+
+### ⚠ WHY status FINDS LESS THAN HALF
+
+**`status` is a workflow STAGE and it moves on; `condition` is an ASSESSMENT and it persists.** Six of the twelve
+read `status: 'Dispatched'` because the scrapped unit was returned to the division - KLL-6, AMSBT-1, MWSBT-1,
+MSBT-9, AMKLL-9, MSBT-5. **A scrapped job that has been delivered back stops being findable by status**, which is
+exactly the population an oil census is about.
+
+### ⚠ AND ONE JOB IS SCRAP ONLY IN ITS INSPECTION
+
+`ASU-2` (ADMIN) has `status: 'Dispatched'` and an **empty** `condition`, while its internal inspection records
+`data.condition: 'Scrap'`. **The declaration never propagated to the job record.** Whether that is a missing write
+or a deliberate split is not established here - but it means the job document alone cannot answer the question.
+
+### What a single predicate would have to cover
+
+- **Both fields and the inspection**, because each finds a different set and none is a superset of the other in
+  practice - `condition` misses ASU-2, `status` misses six.
+- **Survive the workflow moving on**: `Dispatched` must not erase scrap.
+- **Decide what `'Scrap / Unrepairable'` is.** The UI offers it, nothing matches it, and a job saved with it today
+  would be invisible to every scrap test in the app.
+- **Take the inspection list as an argument**, like `isJobInternallyDone` does - the answer is not derivable from
+  the job document alone.
+- **Say which evidence answered**, so a census can report "5 by status, 11 by condition, 12 including the
+  inspection" rather than one number with no provenance.
+- **Live where both the app and `scripts/admin/` can import it** - `inspectionStage.ts` is already node-safe and
+  is where the existing tests mostly live.
+
+**⚠ NOT BUILT INTO THE OIL WORK, DELIBERATELY.** O77 records that building a scrap rule inside the oil
+question would write another copy of a predicate that needs unifying first. That reasoning holds here: this is a
+classification defect that happens to have been found through an oil census, and fixing it under an oil heading is
+how it would end up with a fifth definition.
 
 **Deploy:** hosting - a push to `main` (O71).
