@@ -19,7 +19,7 @@ import { jobNumberClashes, duplicateWithinBatch, describeHolder } from '../lib/j
 import { mrStageSummary } from '../lib/inspectionStage';
 import { CARD, LABEL, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import { inspectionsForJob } from '../lib/inspectionLink.js';
-import { collisionJobs, oilRowsForMr, describeRename } from '../lib/mrRename';
+import { collisionJobs, collisionOilRows, oilRowsForMr, describeRename } from '../lib/mrRename';
 import { 
   Loader2, 
   Search, 
@@ -80,10 +80,23 @@ interface MrGroup {
   mrNo: string;
   dateOfIssue: string;
   division: string;
+  /**
+   * ⚠ EMPTY FOR AN MR THAT HAS NO TRANSFORMERS (AUDIT O78). A repair type describes how a
+   * transformer is repaired; an MR raised for oil issue alone has none, and defaulting it to
+   * 'OGP' would state a fact about work that does not exist.
+   */
   repairType: string;
   isCancelled?: boolean;
   cancelledAt?: string | null;
   jobs: Job[];
+  /**
+   * The oil receipts carrying this MR number, in the selected tender's scope.
+   *
+   * ⚠ A GROUP MAY HAVE OIL AND NO JOBS - that is an MR raised for oil issue alone, which is
+   * normal business and was invisible in this register until O78. It may equally have jobs and
+   * no oil, which is the ordinary case.
+   */
+  oilRows: any[];
 }
 
 interface EditableJobEntry {
@@ -126,6 +139,16 @@ interface MrEditState {
   isCancelled?: boolean;
   jobs: EditableJobEntry[];
   deletedJobIds: string[];
+  /**
+   * The oil receipts this MR carries, read-only here (AUDIT O78).
+   *
+   * ⚠ IT EXISTS SO THE SAVE CAN TELL "AN MR WITH NOTHING ON IT" FROM "AN MR RAISED FOR OIL
+   * ALONE". The guard used to refuse any MR with no transformers, which is right for one that
+   * has been emptied and wrong for one the division raised for oil issue - and the second kind
+   * could not be opened at all until this pass. Nothing in the modal edits these; they are
+   * renamed by the save, in the same batch as the jobs.
+   */
+  oilRows: any[];
 }
 
 const COMMON_KVA_OPTIONS = ['10', '16', '25', '63', '100', '200', '250', '315', '500'];
@@ -183,7 +206,12 @@ function LockedMrHeaderField({ label, mix, reason }: {
 export default function MrLedger() {
   const {
     activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders,
-    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
+    // ⚠ `agencyOil` IS READ HERE SO AN MR RAISED FOR OIL ALONE CAN BE SEEN (AUDIT O78). The
+    // division raises MRs for oil issue with no transformers on them, and this register built
+    // its list from jobs alone - so those MRs appeared nowhere, could not be opened, and could
+    // not be renamed, which made G74's rename-moves-the-oil repair unreachable for exactly the
+    // MRs that consist of nothing but oil.
+    agencyJobs, agencyOil, agencyInspections, agencyDataLoad, refreshAgencyData,
   } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
@@ -273,18 +301,62 @@ export default function MrLedger() {
           repairType: job.repairType || 'OGP',
           isCancelled: false,
           jobs: [],
+          oilRows: [],
         };
       }
       groups[mrKey].jobs.push(job);
     });
 
-    // An MR is cancelled only when every job on it is.
+    /**
+     * ⚠ AN MR RAISED FOR OIL ISSUE ALONE IS STILL AN MR (AUDIT O78).
+     *
+     * The division raises an MR for oil with NO transformers on it. This register built its
+     * list from jobs only, so those MRs were invisible here - absent from the list, the counts
+     * and the division filter - and because Full Edit opens a group that never existed, they
+     * could not be opened or renamed either. That made G74's rename-moves-the-oil repair
+     * structurally unreachable for exactly the MRs made of nothing but oil.
+     *
+     * ⚠ THE OIL ROW'S OWN `atId` DECIDES SCOPE, not the jobs' - there are none to ask. Same
+     * `matchesAtScope` the jobs go through, so one rule governs both and they cannot drift
+     * (F99). An oil row belonging to no tender is unassigned work and is reported by the
+     * backlog above, not silently folded into the selected tender.
+     *
+     * ⚠ AN OIL ROW NEVER CREATES A GROUP FOR A BLANK MR NUMBER. A receipt with no number
+     * belongs to no MR by definition; it is surfaced on the Oil Account, where it can be
+     * corrected, rather than invented into a group here.
+     */
+    agencyOil
+      .filter((t: any) => matchesAtScope(t, activeAtMaster, viewingAllTenders))
+      .forEach((tx: any) => {
+        const mrKey = String(tx.mrNo ?? '').trim();
+        if (!mrKey) return;
+        if (!groups[mrKey]) {
+          groups[mrKey] = {
+            mrNo: mrKey,
+            // The receipt's own date is the only date this MR has - `getMrDateIso` falls back
+            // to exactly this when no job carries one.
+            dateOfIssue: tx.mrDate || '',
+            division: tx.division || 'Unknown',
+            // ⚠ DELIBERATELY BLANK, NOT 'OGP'. A repair type describes how a transformer is
+            // being repaired, and this MR has no transformers. Defaulting it would state a
+            // fact about work that does not exist - and it feeds the job-number counter.
+            repairType: '',
+            isCancelled: false,
+            jobs: [],
+            oilRows: [],
+          };
+        }
+        groups[mrKey].oilRows.push(tx);
+      });
+
+    // An MR is cancelled only when every job on it is. An oil-only MR has no jobs to cancel,
+    // so it is never cancelled - which is why this still guards on `length > 0`.
     Object.values(groups).forEach(g => {
       g.isCancelled = g.jobs.length > 0 && g.jobs.every(j => j.status === 'Cancelled' || j.isCancelled === true || j.mrStatus === 'Cancelled');
     });
 
     return [...Object.values(groups)].sort(byDateDesc((g: any) => g.dateOfIssue));
-  }, [agencyJobs, agencyDataLoad.status, activeAgency?.id, activeAtMaster, viewingAllTenders]);
+  }, [agencyJobs, agencyOil, agencyDataLoad.status, activeAgency?.id, activeAtMaster, viewingAllTenders]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedDivision, setSelectedDivision] = useState<string>('All');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'CANCELLED'>('ALL');
@@ -397,7 +469,13 @@ export default function MrLedger() {
       mrNo: group.mrNo,
       dateOfIssue: group.dateOfIssue,
       division: group.division,
-      repairType: group.repairType || 'OGP',
+      // ⚠ NOT `|| 'OGP'` (AUDIT O78). An MR with no transformers has no repair type, and the
+      // grouping leaves it blank on purpose; re-defaulting it here would put the invented value
+      // straight back - into the header, into what a newly added unit inherits, and into the
+      // job-number counter gate, which skips GP and would treat this as OGP work.
+      repairType: group.repairType,
+      // Carried so the save can tell an emptied MR from one raised for oil alone (AUDIT O78).
+      oilRows: group.oilRows ?? [],
       isCancelled: group.isCancelled,
       jobs: group.jobs.map(j => ({
         id: j.id,
@@ -640,8 +718,25 @@ The units already on this MR can still be edited.` };
       return;
     }
 
-    if (editingMr.jobs.length === 0) {
-      alert('MR must contain at least one transformer.');
+    /**
+     * ⚠ AN MR MUST HOLD SOMETHING - TRANSFORMERS *OR* OIL (AUDIT O78).
+     *
+     * This read "MR must contain at least one transformer", which was written to stop an
+     * operator emptying a real MR by removing its last unit - and that is still refused below.
+     * But it also refused every MR the division raised for OIL ISSUE ALONE, which carries no
+     * transformers by its nature and is normal business. Those MRs could not be saved at all,
+     * so their number could not be corrected and their oil could not be renamed with it.
+     *
+     * The test is therefore what the MR HOLDS, not what kind of thing it holds. An MR with
+     * neither jobs nor oil is not an MR; an MR with litres and no metal is.
+     */
+    const carriesOil = (editingMr.oilRows ?? []).length > 0;
+    if (editingMr.jobs.length === 0 && !carriesOil) {
+      alert('An MR must contain at least one transformer, or the oil receipt it was raised for.');
+      return;
+    }
+    if (editingMr.jobs.length === 0 && editingMr.deletedJobIds.length > 0) {
+      alert('Removing these would leave the MR with no transformers. Cancel the MR instead, which releases its job numbers and keeps the record.');
       return;
     }
 
@@ -803,6 +898,36 @@ The units already on this MR can still be edited.` };
           clash.length > 10 ? `…and ${clash.length - 10} more` : '',
           '',
           'Renaming onto it would merge two MRs into one, and nothing afterwards could say which transformers came from which. Use a number that is free, or cancel the other MR first.',
+        ].filter(Boolean).join('\n'));
+        return;
+      }
+
+      /**
+       * ⚠ AND THE SAME REFUSAL FOR OIL, WHICH THE CHECK ABOVE CANNOT SEE (AUDIT O78).
+       *
+       * `collisionJobs` asks about jobs, and that was sufficient only while an MR with no transformers could not
+       * be opened. The division raises MRs for oil issue alone; now that the register lists them and this modal
+       * can rename one, renaming onto a number another oil-only MR holds would fold two oil groups into one with
+       * nothing able to say which litres came from which - the merge G74 refuses, by a door it never met.
+       *
+       * ⚠ NO EXTRA READ: `agencyOil` was fetched above to find the rows that must MOVE. This filters the same
+       * snapshot for the rows that would be MERGED INTO.
+       */
+      const oilClash = collisionOilRows({
+        newMrNo,
+        agencyId: activeAgency.id,
+        transactions: agencyOil,
+        movingOilIds: oilRowsForMr(oldMrNo, activeAgency.id, agencyOil).map((t: any) => String(t.id ?? '')),
+      });
+      if (oilClash.length > 0) {
+        const clashLitres = oilClash.reduce((n: number, t: any) => n + (Number(t.netLiters) || 0), 0);
+        alert([
+          `MR ${newMrNo} already exists and holds ${oilClash.length} oil receipt(s) totalling ${clashLitres.toFixed(2)} litres.`,
+          '',
+          oilClash.slice(0, 10).map((t: any) => `${(Number(t.netLiters) || 0).toFixed(2)} LTR${t.division ? ` — ${t.division}` : ''}${t.mrDate ? ` — ${t.mrDate}` : ''}`).join('\n'),
+          oilClash.length > 10 ? `…and ${oilClash.length - 10} more` : '',
+          '',
+          'Renaming onto it would merge two MRs into one, and nothing afterwards could say which litres came from which. Use a number that is free.',
         ].filter(Boolean).join('\n'));
         return;
       }
@@ -1054,12 +1179,18 @@ The units already on this MR can still be edited.` };
 
       setNotification({
         type: 'success',
+        // ⚠ AN MR MAY HOLD OIL AND NO TRANSFORMERS (AUDIT O78), so neither message may assume
+        // metal. "all 0 transformer records updated" is what this said for an MR raised for
+        // oil issue alone - true, and it reads like a failure.
         message: isRename
-          ? `✓ MR ${oldMrNo} renamed to ${newMrNo}: ${editingMr.jobs.length} transformer(s)`
+          ? `✓ MR ${oldMrNo} renamed to ${newMrNo}: `
+            + (editingMr.jobs.length > 0 ? `${editingMr.jobs.length} transformer(s)` : 'no transformers')
             + (oilToRenumber.length > 0
               ? ` and ${oilToRenumber.length} oil record(s) renumbered with it.`
               : ', and no oil record carried the old number.')
-          : `✓ MR #${editingMr.mrNo} and all ${editingMr.jobs.length} transformer records updated successfully!`
+          : editingMr.jobs.length > 0
+            ? `✓ MR #${editingMr.mrNo} and all ${editingMr.jobs.length} transformer records updated successfully!`
+            : `✓ MR #${editingMr.mrNo} updated. It carries oil and no transformers.`
       });
       setTimeout(() => setNotification(null), 5000);
 
@@ -1306,13 +1437,22 @@ The units already on this MR can still be edited.` };
       {/* RESTYLED, NOT REWORDED (AUDIT G10). Every word, the count, the expander and the list
           below are unchanged; only the chrome moves to ui.ts. The dot is ADDED - the amber
           fill alone did not survive a photocopy of this register. */}
+      {/* ⚠ THE HEADLINE MOVED TO THE BELL; THE LIST STAYED, AND THAT IS THE POINT (AUDIT G93).
+          The count - "12 jobs belong to no tender" - was one fact drawn on three screens, and
+          it now sits in the notifications panel with the oil rows counted alongside it.
+
+          What could NOT move is what is below: job number, MR, division, make, serial and
+          WHICH DOCUMENTS WERE ISSUED against each. A bell can carry a count and a link; it
+          cannot carry the register that makes the backlog workable, and per the note at the
+          issued-document markers, those markers are the reason this list exists at all. So
+          the panel links HERE, and here is where the work is done.
+
+          It is now always expanded when there is anything to show: the collapsed header was
+          the part that duplicated the notification, and a Show/Hide guarding a list nothing
+          announces any more would just be a second place to look past. */}
       {!viewingAllTenders && unassignedJobs.length > 0 && (
         <div className="border-l-2 border-l-amber-500 border border-amber-300 bg-amber-50 rounded-lg overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setShowUnassigned(o => !o)}
-            className="w-full text-left p-2.5 sm:p-3 flex items-start gap-2 hover:bg-amber-100/60"
-          >
+          <div className="w-full text-left p-2.5 sm:p-3 flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-bold text-amber-900 flex items-center gap-1.5">
@@ -1320,15 +1460,11 @@ The units already on this MR can still be edited.` };
                 {unassignedJobs.length} job{unassignedJobs.length === 1 ? '' : 's'} belong to no tender
               </p>
               <p className="text-xs text-amber-800 mt-0.5">
-                They carry no AT, so they appear under no tender &mdash; including any that are
-                estimated, billed or paid. They are not lost; they are listed here until each is
-                attributed to the tender its MR belongs to.
+                Each is listed below until it is attributed to the tender its MR belongs to.
+                There is no bulk fix &mdash; every one needs its MR paperwork.
               </p>
             </div>
-            <span className="shrink-0 text-[11px] font-bold px-2.5 py-1 rounded bg-amber-600 text-white">
-              {showUnassigned ? 'Hide' : 'Show'}
-            </span>
-          </button>
+          </div>
 
           {showUnassigned && (
             <div className="border-t-2 border-amber-300 bg-white divide-y divide-slate-100 max-h-80 overflow-y-auto">
@@ -1544,7 +1680,19 @@ The units already on this MR can still be edited.` };
                   </td>
 
                   <td className={`${TD} text-right`}>
-                    <span className={`${NUM} font-bold text-slate-900`}>{group.jobs.length}</span>
+                    {/* ⚠ AN MR WITH NO TRANSFORMERS IS NOT AN MR WITH NOTHING IN IT (AUDIT O78).
+                        A bare "0" in the units column reads as an empty record; for an MR the
+                        division raised for oil issue alone, what it holds is litres. */}
+                    {group.jobs.length > 0 ? (
+                      <span className={`${NUM} font-bold text-slate-900`}>{group.jobs.length}</span>
+                    ) : (
+                      <span
+                        className="text-[10px] font-bold text-sky-800 bg-sky-50 border border-sky-200 rounded px-1.5 py-0.5"
+                        title={`Raised for oil issue: ${group.oilRows.length} receipt(s), ${group.oilRows.reduce((n: number, t: any) => n + (Number(t.netLiters) || 0), 0).toFixed(2)} litres. No transformers.`}
+                      >
+                        oil only
+                      </span>
+                    )}
                   </td>
 
                   <td className={TD}>
@@ -1745,9 +1893,21 @@ The units already on this MR can still be edited.` };
                       The repair category is locked once a unit is saved, so a subtitle offering
                       to change it contradicted the control three inches below it. */}
                   <p className="text-[11px] text-slate-300">
-                    Edit the MR number and date, and modify all {editingMr.jobs.length} transformer
-                    unit(s). Division and repair category come from the division and are shown as
-                    recorded.
+                    {/* ⚠ AN MR RAISED FOR OIL ISSUE ALONE HAS NO UNITS TO MODIFY (AUDIT O78), and
+                        "modify all 0 transformer unit(s)" reads as a broken screen rather than as
+                        the ordinary thing it is. */}
+                    {editingMr.jobs.length > 0 ? (
+                      <>
+                        Edit the MR number and date, and modify all {editingMr.jobs.length} transformer
+                        unit(s). Division and repair category come from the division and are shown as
+                        recorded.
+                      </>
+                    ) : (
+                      <>
+                        This MR was raised for oil issue and carries no transformers. Edit its number
+                        and date &mdash; the oil recorded against it follows the number.
+                      </>
+                    )}
                   </p>
                 </div>
               </div>
@@ -1886,9 +2046,13 @@ The units already on this MR can still be edited.` };
                     is the difference between "locked" and "locked and therefore irrelevant". */}
                 {headerLock.locked && !headerLock.divisionMixed && !headerLock.repairMixed && (
                   <p className="text-[10px] text-slate-500 leading-snug">
+                    {/* ⚠ `|| 'OGP'` REMOVED (AUDIT O78). This sentence says what an added unit
+                        INHERITS, so a default here is not cosmetic - it promises the operator a
+                        value the MR does not hold. An MR raised for oil issue alone has no repair
+                        type, and the first unit added to it supplies one rather than taking one. */}
                     A transformer added below is stamped{' '}
                     <strong className="text-slate-700">{editingMr.division || '(none)'}</strong> /{' '}
-                    <strong className="text-slate-700">{editingMr.repairType || 'OGP'}</strong> from
+                    <strong className="text-slate-700">{editingMr.repairType || '(not set — this unit will set it)'}</strong> from
                     these values. A unit belonging to another division, or repaired under guarantee
                     when this MR is not, belongs on that division's own MR.
                   </p>
@@ -1909,7 +2073,11 @@ The units already on this MR can still be edited.` };
                   <div className="flex items-center gap-2">
                     <Layers className="w-4 h-4 text-blue-600" />
                     <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                      Transformer Units ({editingMr.jobs.length})
+                      {/* "Transformer Units (0)" states an absence where there is none (AUDIT O78):
+                          an MR raised for oil issue alone is not an MR missing its transformers. */}
+                      {editingMr.jobs.length > 0
+                        ? `Transformer Units (${editingMr.jobs.length})`
+                        : 'Transformer Units — none; raised for oil issue'}
                     </h4>
                   </div>
                   
@@ -2164,7 +2332,8 @@ The units already on this MR can still be edited.` };
                   <button
                     type="button"
                     onClick={() => {
-                      setCancelConfirmMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any });
+                      // `oilRows` carried, not defaulted to [] - the confirmation counts what the MR holds (AUDIT O78).
+                      setCancelConfirmMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any, oilRows: editingMr.oilRows ?? [] });
                     }}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-rose-600 hover:text-rose-800 hover:bg-rose-50 px-3 py-2 rounded-xl transition-colors cursor-pointer border border-rose-200"
                   >
@@ -2175,7 +2344,7 @@ The units already on this MR can still be edited.` };
                   <button
                     type="button"
                     onClick={() => {
-                      handleReactivateMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any });
+                      handleReactivateMr({ mrNo: editingMr.originalMrNo, dateOfIssue: editingMr.dateOfIssue, division: editingMr.division, repairType: editingMr.repairType, jobs: editingMr.jobs as any, oilRows: editingMr.oilRows ?? [] });
                     }}
                     className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:bg-emerald-50 px-3 py-2 rounded-xl transition-colors cursor-pointer border border-emerald-300"
                   >

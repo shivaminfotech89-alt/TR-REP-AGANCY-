@@ -81,6 +81,33 @@ export function collisionJobs(args: {
     && !isCancelledJob(j));
 }
 
+/**
+ * OIL ROWS ALREADY CARRYING THE NEW NUMBER — the other half of a collision (AUDIT O78).
+ *
+ * ⚠ `collisionJobs` ANSWERS FOR JOBS ONLY, AND THAT WAS SUFFICIENT ONLY WHILE AN MR WITH NO TRANSFORMERS COULD
+ * NOT BE OPENED. The division raises MRs for oil issue alone; once the register lists them and Full Edit can
+ * rename one, renaming it onto a number another oil-only MR holds would fold two oil groups into one, with
+ * nothing afterwards able to say which litres came from which. That is precisely the merge G74 exists to refuse,
+ * reached through a door G74 never had to consider.
+ *
+ * ⚠ NO EXTRA READ. The rename already fetches the agency's oil to find the rows that must MOVE; this filters the
+ * same snapshot for the rows that would be MERGED INTO.
+ */
+export function collisionOilRows(args: {
+  newMrNo: string;
+  agencyId: string;
+  transactions: OilRowLike[];
+  /** Ids of the oil rows moving with this rename - they are never a collision with themselves. */
+  movingOilIds: string[];
+}): OilRowLike[] {
+  const { newMrNo, agencyId, transactions, movingOilIds } = args;
+  const moving = new Set(movingOilIds.filter(Boolean));
+  return transactions.filter(t =>
+    sameMr(t.mrNo, newMrNo)
+    && String(t.agencyId ?? '') === agencyId
+    && !moving.has(String(t.id ?? '')));
+}
+
 /** The oil rows that must move with a rename. Scoped to the agency, for the same reason. */
 export function oilRowsForMr(mrNo: string, agencyId: string, transactions: OilRowLike[]): OilRowLike[] {
   return transactions.filter(t => sameMr(t.mrNo, mrNo) && String(t.agencyId ?? '') === agencyId);

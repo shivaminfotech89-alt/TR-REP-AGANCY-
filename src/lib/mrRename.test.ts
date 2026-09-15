@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  collisionJobs, oilRowsForMr, oilRowsMissingMrNumber, litresOf, describeRename, isCancelledJob,
+  collisionJobs, collisionOilRows, oilRowsForMr, oilRowsMissingMrNumber, litresOf, describeRename, isCancelledJob,
   type RenameJobLike, type OilRowLike,
 } from './mrRename';
 
@@ -62,6 +62,34 @@ test('the oil rows for an MR are found, scoped to the agency', () => {
   const rows = oilRowsForMr('1234', A, oil);
   assert.deepEqual(rows.map(t => t.id), ['o1', 'o2'], "another agency's row with the same number does not move");
   assert.equal(litresOf(rows), 1110);
+});
+
+// ---------------------------------------------------------------- ⚠ two oil-only MRs must not merge
+
+test('⚠ RENAMING ONTO A NUMBER ANOTHER MR\'S OIL HOLDS IS A COLLISION (AUDIT O78)', () => {
+  // An oil-only MR can be renamed once the register lists it. `collisionJobs` sees no jobs on either
+  // side and would wave this through, folding two oil groups into one.
+  const hit = collisionOilRows({ newMrNo: '5585', agencyId: A, transactions: oil, movingOilIds: ['o1', 'o2'] });
+  assert.deepEqual(hit.map(t => t.id), ['o3']);
+});
+
+test('the oil moving with the rename is never a collision with itself', () => {
+  assert.deepEqual(
+    collisionOilRows({ newMrNo: '1234', agencyId: A, transactions: oil, movingOilIds: ['o1', 'o2'] }),
+    [],
+  );
+});
+
+test('a free number collides with no oil, and another agency may hold it', () => {
+  assert.deepEqual(collisionOilRows({ newMrNo: '7777', agencyId: A, transactions: oil, movingOilIds: [] }), []);
+  // o4 is agency B's row on MR 1234 - not a collision for A, and A's rows are not one for B.
+  const forB = collisionOilRows({ newMrNo: '1234', agencyId: B, transactions: oil, movingOilIds: [] });
+  assert.deepEqual(forB.map(t => t.id), ['o4']);
+});
+
+test('the new number is compared trimmed, as collisionJobs compares it', () => {
+  const hit = collisionOilRows({ newMrNo: ' 5585 ', agencyId: A, transactions: oil, movingOilIds: [] });
+  assert.deepEqual(hit.map(t => t.id), ['o3']);
 });
 
 test('an MR with no oil moves none', () => {
