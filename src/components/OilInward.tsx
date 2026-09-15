@@ -34,12 +34,30 @@ import {
   X,
   Save,
   FileText,
-  BarChart2,
-  List,
   Edit2,
   Download,
   // The stat cards' disclosure on a phone (AUDIT O82). No chevron was imported here before.
   ChevronDown,
+  /**
+   * THE TAB GLYPHS, CHOSEN FOR WHAT THEY SAY (AUDIT O83).
+   *
+   * `List` and `BarChart2` are gone: each was used by exactly one tab and nowhere else, so
+   * leaving them here would be dead imports of the kind this session has cleared three times.
+   *
+   *   Truck    oil ARRIVES, by delivery from the division. `List` said "a list", which is true
+   *            of all three tabs and therefore identifies none of them.
+   *   Scale    a RECKONING - what is owed against what was received. `BarChart2` promised a
+   *            chart this tab does not contain; it resolves to `ChartNoAxesColumn`, which is
+   *            literally a column chart sitting above a table.
+   *   Recycle  oil SALVAGED from a scrapped unit.
+   *
+   * ⚠ `Droplet` STAYS IMPORTED but leaves this strip. It is still used three times - the page
+   * heading and both oil banners - which is exactly why it could not identify the scrap tab:
+   * it is the generic oil glyph on this screen.
+   */
+  Truck,
+  Scale,
+  Recycle,
 } from "lucide-react";
 
 export interface OilTransaction {
@@ -1780,7 +1798,12 @@ ${intakeGate.reason}`);
                   : "text-slate-500 font-medium border-transparent hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
-              <List className={`w-4 h-4 shrink-0 ${viewMode === "transactions" ? "text-blue-600" : ""}`} />
+              {/* ⚠ COLOURED ON BOTH STATES (AUDIT O83). The colour IS the identifier, and an
+                  unselected tab is the one being scanned FOR - greying it removes recognition
+                  exactly where it is needed. Weight carries the emphasis instead: -400 unselected,
+                  -600 selected, so three accents plus three count pills do not read as six equally
+                  loud objects on a slate-50 strip. */}
+              <Truck className={`w-4 h-4 shrink-0 ${viewMode === "transactions" ? "text-blue-600" : "text-blue-400"}`} />
               <span>Inward</span>
               <span className="hidden sm:inline">Transactions</span>
               <span className={`${NUM} text-[10px] px-1.5 py-0.5 rounded-full ${
@@ -1805,7 +1828,7 @@ ${intakeGate.reason}`);
                   : "text-slate-500 font-medium border-transparent hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
-              <BarChart2 className={`w-4 h-4 shrink-0 ${viewMode === "summary" ? "text-emerald-600" : ""}`} />
+              <Scale className={`w-4 h-4 shrink-0 ${viewMode === "summary" ? "text-emerald-600" : "text-emerald-400"}`} />
               <span>MR Wise</span>
               <span className="hidden sm:inline">Shortage Summary</span>
               <span className={`${NUM} text-[10px] px-1.5 py-0.5 rounded-full ${
@@ -1833,7 +1856,12 @@ ${intakeGate.reason}`);
                   : "text-slate-500 font-medium border-transparent hover:text-slate-800 hover:bg-slate-100"
               }`}
             >
-              <Droplet className={`w-4 h-4 shrink-0 ${viewMode === "scrap" ? "text-sky-600" : ""}`} />
+              {/* ⚠ SHAPE CARRIES WHAT HUE CANNOT HERE. `sky-600` and `blue-600` are one step
+                  apart and near-indistinguishable at 16px - very nearly the fault the restyle
+                  fixed, where two of three labels were blue-700. The accents are kept because
+                  they match the cards below (Inward is blue, Scrap Adjustment is sky), so the
+                  distinction is carried by a recycle mark against a truck. */}
+              <Recycle className={`w-4 h-4 shrink-0 ${viewMode === "scrap" ? "text-sky-600" : "text-sky-400"}`} />
               <span>Scrap</span>
               <span className="hidden sm:inline">Adjustments</span>
               <span className={`${NUM} text-[10px] px-1.5 py-0.5 rounded-full ${

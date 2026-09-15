@@ -18692,3 +18692,66 @@ deletions, identical with and without `--ignore-cr-at-eol`.
   all.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O83. Three tab glyphs that say what the tab holds - and two checks of mine that were shaped wrongly
+
+**The icons were already there.** `List`, `BarChart2`, `Droplet` - so this was a CHANGE, not an addition, and
+the owner asked the right first question: *"report whether this is a change or an addition - I may be asking for
+something that already exists in a form I have not looked at."* It did.
+
+### What they said before, and what they say now
+
+| tab | was | now | why |
+|---|---|---|---|
+| Inward Transactions | `List` | **`Truck`** | oil ARRIVES, by delivery from the division. "A list" is true of all three tabs, so it identified none of them |
+| MR Wise Shortage Summary | `BarChart2` | **`Scale`** | a RECKONING - what is owed against what was received. `BarChart2` resolves to `ChartNoAxesColumn`: **literally a column chart, sitting above a table** |
+| Scrap Adjustments | `Droplet` | **`Recycle`** | oil SALVAGED from a scrapped unit |
+
+**⚠ `Droplet` COULD NOT IDENTIFY ANYTHING HERE.** It appears three other times on this screen - the page
+heading and both oil banners - so it is the generic oil glyph, and using it for one tab marked that tab as
+"about oil", which is the whole screen. It stays imported for those three uses.
+
+`Trash2` was considered and rejected: it reads as a DELETE ACTION, beside rows that can be written.
+
+### Colour: kept on both states, with weight carrying the emphasis
+
+The owner's instinct, and it is right - **the colour IS the identifier, and an unselected tab is the one being
+scanned FOR**, so greying it removes recognition exactly where it is needed.
+
+**The argument against is real and was not dismissed:** three saturated icons plus three count pills is six
+coloured objects on a `slate-50` strip, which is the noise complaint the notifications work began with. The
+resolution is weight rather than hue - **`-400` unselected, `-600` selected.**
+
+**⚠ AND THE ACCENT SCHEME HAS A WEAKNESS THE ICONS NOW COMPENSATE FOR.** `blue-600` (Inward) and `sky-600`
+(Scrap) are one step apart and near-indistinguishable at 16px - very nearly the fault O82 fixed, where two of
+three labels were `blue-700`. The accents were KEPT because they match the cards below (Inward is blue, Scrap
+Adjustment is sky), and desyncing tab from card costs more than the hue gains. **Shape carries what hue cannot at
+that size:** a truck against a recycle mark.
+
+### ⚠ TWO CHECKS OF MINE WERE SHAPED WRONGLY, AND ONLY ONE WAS CAUGHT BY A TOOL
+
+**1. The availability grep asked the wrong question.** It searched `declare const <Icon>:` and reported
+**`BarChart2` as not available**. It is available - `lucide-react` exports everything through one alias line, as
+`ChartNoAxesColumn as BarChart2`. **The conclusion survived** (the icon is replaced on merit, not availability)
+**but the evidence behind it was wrong, and a conclusion that survives bad evidence is not one that was earned.**
+
+**2. The import edit appended without removing, and the comment claimed otherwise.** The anchor was the tail of
+the import block, so `Truck`, `Scale` and `Recycle` were added while `List` and `BarChart2` stayed - **directly
+beneath a comment reading "`List` and `BarChart2` are gone".** False as written.
+
+**⚠ tsc CANNOT SEE THIS.** Unused imports are not errors in this project's configuration, so the typecheck
+passed, the suite passed, the build passed and the hooks guard passed **with the file containing two dead imports
+and a comment asserting their absence.** It was caught by a grep run to confirm the narrative before writing a
+commit message - which is the only reason it was caught at all, and the same shape as O82's finding: **the checks
+cannot see a surface that was missed, nor a claim that was never true.**
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 33 insertions, 5 deletions,
+identical with and without `--ignore-cr-at-eol`.
+- **⚠ THE PRINTED SHEET IS UNTOUCHED.** `BillingSystem.tsx` byte-identical - git
+  `e2bf0d93cc3922284f502ad3f849b7cf4209ce4d`, SHA-256 `81339f90...29cd387`, re-checked at the moment of commit
+  rather than carried from an earlier reading.
+- **⚠ NOT SEEN RENDERED.** Three glyphs and six colour values, none of them displayed.
+
+**Deploy:** hosting - a push to `main` (O71).
