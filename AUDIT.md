@@ -18755,3 +18755,80 @@ identical with and without `--ignore-cr-at-eol`.
 - **⚠ NOT SEEN RENDERED.** Three glyphs and six colour values, none of them displayed.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O84. A sign-in error that discarded its own cause, and an afternoon spent recovering it
+
+**A customer could not sign in on an Android tablet in Chrome.** Google sign-in appeared to complete and the app
+returned to the landing page. **The fix shipped here is one line.** What it replaced had thrown away the only
+fact that distinguishes several different faults with **opposite** remedies.
+
+### The message was the same sentence for every failure
+
+`App.tsx` caught any throw from `signInWithPopup` and said *"Login failed. Please check popup permissions and try
+again."* So a blocked popup, a closed popup, a cancelled double-tap, an unauthorized domain and a network timeout
+were **indistinguishable from outside the browser console** - which on Chrome for Android is not reachable
+without a cable and USB debugging, which this owner does not have.
+
+It now reports `err.code` first, so it survives being read aloud over a phone.
+
+### ⚠ WHY THE CODE DECIDES, AND WHY GUESSING WAS REFUSED
+
+| code | what it means | remedy |
+|---|---|---|
+| `popup-blocked`, `popup-closed-by-user` | the popup never survives | **`signInWithRedirect`** |
+| `network-request-failed` | the cross-origin `__/auth/iframe` timed out (5-15s) | **same-origin `authDomain`** - redirect would NOT help |
+| `cancelled-popup-request` | `handleLogin` fired twice | neither - guard the double-fire |
+
+**Two of the three leading candidates lead to opposite fixes**, so the owner's instruction to confirm the
+mechanism before changing auth config was right, and the refusal to pick a remedy on "the popup threw" alone was
+the only defensible position.
+
+### What was measured rather than assumed
+
+- **Authorized domains** - read from the Identity Toolkit admin API rather than taken on trust
+  (`scripts/admin/auth-domains.mjs`). All ten listed; **`transregister.com` and `www.transregister.com` both
+  PRESENT**, so `unauthorized-domain` is ruled out.
+- **`www` is canonical** - the apex 308s to it. Any same-origin fix must therefore target
+  **`www.transregister.com`**, not the apex.
+- **Firebase Hosting serves nothing** - `firebaseapp.com` and `web.app` both 404 - so there is no host running
+  the app where sign-in is already same-origin to compare against.
+- **The auth endpoints are healthy** - `/__/auth/handler` and `/__/auth/iframe` both 200 on the default
+  authDomain.
+- **`authDomain` has never changed** - one commit, 2026-08-11. **This is not a regression from recent work.**
+- **20 accounts, 18 agencies**, every agency owned by a live account, 15 of 20 signed in within 7 days
+  (`scripts/admin/signin-census.mjs`). ⚠ **Firebase Auth records no user agent**, so nothing in that data
+  identifies who is on Android - and **a user who cannot complete sign-in leaves no trace at all**, so their
+  absence is invisible by construction.
+- **The gesture is intact.** Both buttons bind `onClick={onLogin}` directly and nothing suspends before
+  `signInWithPopup`, so a lost user gesture - the one candidate that would have made this the app's own bug - is
+  excluded.
+
+### ⚠ A CONCLUSION REASONED PAST AN UNCONFIRMED FACT
+
+The investigation ran for an afternoon on the hypothesis that the popup **resolved without a session** - mobile
+Chrome's storage partitioning breaking the cross-origin handoff. That rested on "no error dialog appeared", which
+**the owner never said**. It was inferred from an absence in the report and then used as evidence to rule out
+other causes.
+
+**The alert does fire on the tablet.** The popup rejected. One question at the start would have established that,
+and the same question is the one the shipped change now answers automatically.
+
+⚠ **The hypothesis is not dead, and that matters too.** The SDK opens the cross-origin `__/auth/iframe`,
+pings it, and **rejects with `network-request-failed` on timeout** - so partitioning surfaces as a throw, not as
+silence. The owner's conclusion that the hypothesis was disproved by the alert was itself too strong. **Only the
+code separates them.**
+
+### Not built, deliberately
+
+A gated `?diag=1` panel was designed and then **abandoned before a line was written**: it existed to recover a
+code the alert already had and discarded. Fixing the message removed the need for the scaffolding, and left
+nothing to take out afterwards.
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 27 insertions, 1 deletion,
+identical with and without `--ignore-cr-at-eol`.
+- **⚠ SHIPPED TO PRODUCTION.** This is the one change this session made specifically to be seen by a
+  customer, and its correctness is judged by whether the next attempt names a code.
+
+**Deploy:** hosting - a push to `main` (O71).

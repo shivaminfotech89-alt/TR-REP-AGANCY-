@@ -74,7 +74,33 @@ export default function App() {
       await signInWithPopup(auth, provider);
     } catch (err) {
       console.error(err);
-      alert('Login failed. Please check popup permissions and try again.');
+      /**
+       * ⚠ THE CODE IS THE ONLY FACT WORTH HAVING, AND THIS THREW IT AWAY (AUDIT O84).
+       *
+       * Every sign-in failure produced the same sentence, so a blocked popup, a closed popup,
+       * a cancelled double-tap, an unauthorized domain and a network timeout were
+       * indistinguishable from outside the browser console - which is not reachable on Chrome
+       * for Android without a cable and USB debugging.
+       *
+       * That cost an afternoon on a live customer failure: the code separates remedies that are
+       * OPPOSITE. `popup-blocked` / `popup-closed-by-user` mean the popup never survives and the
+       * answer is `signInWithRedirect`; `network-request-failed` is the cross-origin
+       * `__/auth/iframe` timing out, where redirect does not help and a same-origin `authDomain`
+       * does. Picking either without the code is a guess.
+       *
+       * ⚠ NOT A DIAGNOSTIC AND NOT GATED. An error message that discards its own cause is a
+       * defect on its own terms, so this is permanent - there is nothing here to remove once
+       * this particular investigation closes.
+       *
+       * `(err as any)` because a catch binding is not typed, and the shape of a thrown value is
+       * not guaranteed to carry `code` at all.
+       */
+      const code = (err as any)?.code || 'unknown error';
+      alert(
+        `Login failed (${code}).\n\n`
+        + 'If a sign-in window opened and closed, try again without switching away from it. '
+        + 'If this repeats, send this code - it says which of several different faults this is.',
+      );
     } finally {
       setIsAuthenticating(false);
     }
