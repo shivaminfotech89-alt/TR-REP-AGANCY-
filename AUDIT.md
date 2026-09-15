@@ -17724,3 +17724,97 @@ division's sheet computes the same way, both are over-crediting and the accounts
 register is 550 litres high across MEGHA and AARATI.
 
 **Not changed. The owner will ask a division office.**
+
+---
+
+## G91. An unmatched oil row opens its own receipt - and two findings that came out of asking why
+
+**The banner told the operator to "correct the number on the receipt here" and gave them nothing to click.**
+The rows were inert `div`s, so acting on one meant closing the banner, finding the row in the register below, and
+matching it by eye on MR and litres - for a receipt the app had already identified by id.
+
+Each row is now a button calling `handleEdit`, which already fills the form, sets `editingId`, opens it, switches
+to the transactions view (the form renders in no other) and scrolls to it. **A wrapper, not new machinery.**
+
+### ⚠ SCOPED DOWN FROM WHAT WAS APPROVED, BECAUSE TWO THIRDS OF IT ALREADY EXISTED
+
+Three changes were asked for and approved. **Two were already built.** The prose already named both causes and
+both fixes; each row already distinguished `no MR number recorded` from `no transformer carries this MR number`.
+Rewriting working text to say what it already says would have inflated the diff and risked the wording for
+nothing. **The scoping error was this audit's, not the owner's** - the proposal was written before the banner's
+markup was read.
+
+### A near-match is offered, never applied
+
+Live data holds a receipt on **MR 5585** while the same agency booked **MR 5545** - one character apart. The
+operator is about to retype a number and the likely one is computable, so it is shown.
+
+**⚠ IT IS NOT ACTED ON.** The app cannot tell a typo from two genuinely different numbers, and silently
+correcting would move **2,110 litres** onto an MR on the strength of a string distance. Three constraints keep it
+a suggestion: **same agency only** (a near-match elsewhere is another agency's MR that happens to look similar,
+and offering it invites attributing one agency's oil to another's work); **same length, distance 1**; and
+**exactly one candidate** - two is not a suggestion, it is a guess. `989` is not offered for `8989`: a missing
+leading digit is a different mistake with weaker evidence.
+
+**Not built, and each refused on its own reasoning:** no dismiss, no notifications area, no "mark as external"
+flag. A banner on the oil screen is seen by whoever works with oil; **a notifications area is where things go to
+be ignored.** And recording that a receipt belongs to no MR is a data decision to be written down, not a checkbox.
+
+---
+
+### FINDING 1: every oil transaction matches no MR, and the matching rule is NOT at fault
+
+**Both transactions in the database are unmatched - 2,530 litres, 100%.** A banner that flags everything is
+indistinguishable from one that flags nothing, so the rule was checked against the data before the banner was
+believed.
+
+| receipt | agency | litres | nearest MR in ANY agency |
+|---|---|---|---|
+| MR **8989** | MEGHA | 420 | `989` (distance 1), `789` `8888` `8895` `999` `9999` (distance 2) |
+| MR **5585** | ADMIN | 2,110 | `5545` (distance 1), `2555` (distance 2) |
+
+**Neither number exists anywhere**, under any loosening tried: no exact match in its own agency, none in any
+agency, and **no loose match once case, punctuation and leading zeros are stripped**. So the rule is not too
+strict and the banner is telling the truth.
+
+**It is a data-entry pattern**: two receipts, two agencies, two different days, both against MR numbers no job was
+ever booked under. ⚠ The one actionable lead is **`5545`, in ADMIN's own agency, one character from `5585`** -
+which is why the near-match badge exists, and why it stops at showing.
+
+---
+
+### FINDING 2: THREE jobs are numbered MSBT-12, and the duplicate rule permits two of them
+
+The duplicate guard allows a job number to repeat in exactly one case: **the same physical transformer returning
+under a NEW MR as a GP repair.** It tests `serialNo`, `make` and `capacityKva` - the transformer, not the repair
+type.
+
+| id | MR | serial | make | kVA | repairType | isGp |
+|---|---|---|---|---|---|---|
+| `drIm8L5u…` | 9344 | `12` | `121` | 100 | OGP | false |
+| `ScUE3NkH…` | **1** | `12` | `121` | 100 | **GP** | **false** |
+| `BxVxraTs…` | 85558 | `312132135` | `DVDVDFV` | **25** | OGP | false |
+
+**The pair passes the rule.** Same transformer by all three tests, different MRs. Legitimate as written.
+
+**⚠ BUT LEGITIMATE FOR THE WRONG REASON, AND THAT IS THE RULE'S GAP.** The exception exists for a GP return - yet
+the GP one carries `gpSource: null`, `prevJobNo: null`, `prevDeliveryDate: null`, `gpPriorJobId: null`. **Nothing
+links it to the repair it claims against.** The rule tests the transformer and the MR; **it never tests that a GP
+job names a prior repair.** So any two jobs on one unit under different MRs pass, whether or not either is
+genuinely a guarantee return.
+
+**⚠ AND `repairType: 'GP'` WITH `isGp: false` CONTRADICT EACH OTHER** on the billed, paid job - the O72 record.
+`isGpJob` reads either, so the same document is GP to one caller and OGP to another.
+
+**⚠ THE THIRD IS A STRAIGHT VIOLATION.** `BxVxraTs…` is a **different transformer** - serial `312132135`, make
+`DVDVDFV`, 25 KVA - carrying a number already in use. It fails `isSameTransformer` outright, so the guard either
+did not run or was bypassed. That job is not explained by the GP exception at all.
+
+**Neither finding is fixed here.** Recorded because the first says the banner is honest and the second says a
+guard is weaker than its own comment claims.
+
+**Verified:** tsc (exit 0); **202 tests in 19 files**; build; hooks guard, 48 files.
+- **⚠ NOT SEEN RENDERED.** The button, the badge and the form opening behind it are asserted at the source and by
+  type, not observed.
+
+**Deploy:** hosting - a push to `main` (O71).
