@@ -1129,7 +1129,27 @@ export default function BillingSystem() {
       }
       if (uptoTimestamp > 0) {
         const itemTimestamp = parseDateToTimestamp(s.mrDate);
-        if (itemTimestamp > 0 && itemTimestamp > uptoTimestamp) {
+        /**
+         * ⚠ AN UNDATED ROW IS EXCLUDED FROM A DATE-BOUNDED STATEMENT, NOT WAVED THROUGH (AUDIT O78).
+         *
+         * This read `itemTimestamp > 0 && itemTimestamp > uptoTimestamp`, so a row whose date did
+         * not parse - `parseDateToTimestamp('-')` returns 0 - failed the first test and was KEPT,
+         * whatever the cutoff said. `getMrDateIso` returns '-' when neither a job nor an oil row
+         * carries a date, which an MR raised for oil issue alone can easily hit.
+         *
+         * The consequence had money on it: those litres were deducted on EVERY bill for the
+         * division, including bills dated BEFORE the oil was issued, through
+         * divisionCumulativeInward -> divisionNetOilOnInspectionDate -> netOilDue -> the
+         * "LESS: OIL SHORTAGE DEDUCTION" line printed on the invoice.
+         *
+         * A row that cannot be shown to fall before the cutoff has not been shown to belong in
+         * this statement. Excluding it can understate a deduction, which is visible and
+         * correctable; including it silently overstates one on a document that has left.
+         */
+        if (itemTimestamp <= 0) {
+          return false;
+        }
+        if (itemTimestamp > uptoTimestamp) {
           return false;
         }
       }

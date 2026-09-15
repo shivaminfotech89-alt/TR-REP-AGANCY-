@@ -329,10 +329,29 @@ ${intakeGate.reason}`);
         formData.oilType === "Fresh" &&
         Number(formData.grossLiters) !== defaultGrossFor(Number(formData.barrels));
 
+      /**
+       * ⚠ TRIMMED AT THE WRITE, BECAUSE NOTHING ELSE CAN TRIM IT (AUDIT O78).
+       *
+       * The form's `required` attribute refuses an EMPTY MR number and `firestore.rules` refuses
+       * one too (`data.mrNo.size() >= 1`). Neither refuses `" "`: a Firestore rule has no trim,
+       * and this handler had no check of its own, so a single space passed end-to-end.
+       *
+       * Every consumer then trims and reads it as blank - and `computeOilBalance` SKIPS a row
+       * with a blank mrNo (oilBalance.ts:191), as does the MR-wise summary. The litres drop out
+       * of the Dashboard, the statement printed for the division, the closing offer and the
+       * balance carried into the next tender, while the transactions list still shows them.
+       * One screen, two received totals, and the difference is a figure the DISCOM is settled
+       * against.
+       *
+       * Trimming here closes the only route that can still produce it. Rows written before this
+       * are found by the banner above.
+       */
+      const mrNo = formData.mrNo.trim();
+
       if (editingId) {
         const txRef = doc(db, "oilTransactions", editingId);
         await updateDoc(txRef, {
-          mrNo: formData.mrNo,
+          mrNo,
           mrDate: formData.mrDate,
           date: new Date(formData.date).getTime(),
           division: formData.division,
@@ -347,7 +366,9 @@ ${intakeGate.reason}`);
         const newTx: OilTransaction = {
           agencyId: activeAgency.id,
           ownerId: auth.currentUser.uid,
-          mrNo: formData.mrNo,
+          // Trimmed on BOTH write paths - see the note above. The create path is the one that
+          // produces new rows, so fixing only the update would have closed the rarer route.
+          mrNo,
           mrDate: formData.mrDate,
           date: new Date(formData.date).getTime(),
           division: formData.division,
