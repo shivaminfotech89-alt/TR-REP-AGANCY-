@@ -19000,3 +19000,120 @@ successful push - `index-C1_8DJUr.js` to `index-BK8uREpx.js`.
   attempt.**
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O87. The guard tested the foreground instead of waiting for it - and a persistence failure that called itself a login failure
+
+O86 shipped a retry that **never once fired.** The tablet returned `message: Database is closing/hidden` with
+`retry: not attempted`, so the diagnosis held and **the remedy was wrong.**
+
+### ⚠ THE GUARD TESTED `visibilityState` INSTEAD OF WAITING FOR IT
+
+```
+if (!isHiddenDbFailure(err) || document.visibilityState !== 'visible') throw err;
+```
+
+**The popup's result arrives before Chrome switches back**, so the error is caught while the page is **still
+hidden** - and that condition rejected **every real occurrence of the fault it was written for.** It now waits
+once for `visibilitychange` → visible with a **10s ceiling**, removing its own listener and timer on both
+paths. Still one retry, still no loop.
+
+⚠ **THE FAILING CONDITION WAS THE ONE ADDED FOR SAFETY.** It was there so the retry could not fire into a
+closed database. It was correct about the database and wrong about the timing, and it turned a fix into a no-op
+that reported success-shaped output for a week.
+
+### ⚠ THE OTHER SUSPECT WAS CLEARED BY RUNNING IT, NOT BY READING IT
+
+The regex was suspected of breaking on the slash in `closing/hidden`. It does not:
+
+```
+message           : "Database is closing/hidden"
+shipped.test(msg) : true
+match             : ["Database is closing", "closing"]
+anchored at end?  : NO - trailing text is irrelevant
+```
+
+**It is unanchored, matches `Database is closing`, and never reaches the slash.** Two plausible causes, one
+eliminated by execution in a single command. **The message match was never the bug**, and reading the regex
+carefully would have been a weaker answer than running it against the literal string the tablet sent.
+
+### Waiting for `visible` actually reopens the database - checked before agreeing to the remedy
+
+```
+8301:  this.onVisibilityChange = () => {
+8306:      else if (document.visibilityState === 'visible') {
+8307:          this.onPageShow();        // -> 8294: if (this.isHiding) { this.isHiding = false; }
+```
+
+⚠ **HAD `isHiding` BEEN CLEARED ONLY BY A REAL `pageshow`, WAITING FOR VISIBLE WOULD HAVE RETRIED INTO A
+STILL-SHUT DATABASE** - a second no-op fix on top of the first. The remedy was proposed from outside and was
+right; it was still worth the one grep that proved it, because the failure mode of being wrong was identical to
+the bug being fixed.
+
+### ⚠ SIX REASON STRINGS, BECAUSE "not attempted" MEANT THREE DIFFERENT THINGS
+
+The guard had **three** rejection conditions and **one** word for all of them, so a whole round of this
+investigation bought only "the guard was false" - not which third.
+
+```
+not attempted (message did not match)
+not attempted (no session in memory)
+not attempted (page still hidden after 10s)
+attempted immediately, failed again
+attempted after Nms wait, failed again
+attempted, succeeded
+```
+
+⚠ **THE TWO WAIT-VARIANTS ARE DELIBERATELY NOT COLLAPSED.** "Failed while already visible" points at listener
+ordering; "failed after the page came back" points at `isHiding` not clearing. **Different faults, and the
+obvious tidying would have cost another round.**
+
+### ⚠ A PERSISTENCE FAILURE IS NOT A LOGIN FAILURE
+
+Authentication **succeeds**; only the write to disk fails. `directlySetCurrentUser` (`:3135`) sets
+`this.currentUser = user` and **then** awaits the write, and `notifyAuthListeners()` sits after that await - so
+the SDK holds a valid `User` while every listener believes there is none. Showing **"Login failed"** to someone
+who is authenticated is the wrong report. They are now admitted on an **in-memory session**.
+
+⚠ **WHAT MAKES THAT SAFE IS FIRESTORE, NOT THE AUTH READING.** `firebase.ts:11-15` passes only
+`experimentalForceLongPolling` - **no `persistentLocalCache`** - so Firestore is memory-cached and never touches
+the IndexedDB that is failing. **Without that fact, admitting them would have got them past the login screen and
+broken somewhere worse**, which is a worse outcome than the bug. The cost is real and is stated to them: closing
+the tab signs them out.
+
+This **reverses a refusal recorded in O86**, where the same `auth.currentUser` reading was declined as depending
+on SDK-internal ordering that could break silently. The reversal turns on Firestore's cache, not on the
+fail-safe argument - that one only showed the downside was bounded, never that the upside worked.
+
+### ⚠ THE LISTENER ORDER IS A STATED INFERENCE, NOT A PROOF
+
+Ours must fire **after** the SDK's on the same `document`/`visibilitychange`. Registration order decides it, and
+the SDK registers at persistence init - module load, before any of this - which *should* put ours second. **That
+is an inference about when that init runs, not a proof, and it is written down as one.**
+
+**The design does not rest on it.** If the flag has not cleared, the retry throws and falls through to
+**admission** rather than to an error. Depending on something uncertain is defensible only when the uncertain
+path degrades to the good outcome rather than the bad one.
+
+### ⚠ AND ONE OF MY OWN CLAIMS IS STILL UNCONFIRMED
+
+O86 asserted `auth.currentUser` is populated at the catch. The source says so. **The field evidence does not**:
+`retry: not attempted` is equally consistent with `currentUser` having been null, because the three conditions
+reported one word between them. The instrumentation above is what will finally distinguish them - **a claim of
+mine that has been load-bearing for two entries and has never actually been observed.**
+
+### Verification, and its limits
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 146 insertions, 27 deletions.
+Six strings and the absence of the old `retried` variable confirmed **by grep, not by having written them** -
+this session has already produced a comment claiming two imports were removed while both were still present, with
+tsc, the tests, the build and the hooks guard all passing.
+
+- **One formatter builds the five lines for BOTH alerts.** A term added to one surface and not the other is a
+  defect already recorded twice in two commits, and there are now two surfaces reporting the same five fields.
+- ⚠ **NOT TESTED, AND STILL NOT TESTABLE FROM HERE.** The fault needs a real app-switch on a real device.
+- **The admission notice is noise for the operator and is kept anyway while diagnosing** - it is the only channel
+  that says whether the retry fired. It drops to a `console.warn` once the tablet confirms.
+
+**Deploy:** hosting - a push to `main` (O71).
