@@ -379,6 +379,22 @@ service cloud.firestore {
              // unknown-field rejection. An unvalidated field is still a gap - nothing bounds its
              // type or size - which is the reason to name it.
              (!('grossLitersManual' in data) || (data.grossLitersManual is bool)) &&
+             // THE JOB A SCRAP ADJUSTMENT WAS RAISED FOR (AUDIT O79). An oil row normally names
+             // an MR, not a job - but when a transformer is scrapped the oil stays with the
+             // agency, and that adjustment is raised PER TRANSFORMER. The job link is what ties
+             // the litres to the unit they came out of, and what tells the picker a job has
+             // already been adjusted.
+             //
+             // ⚠ NAMED, NOT REQUIRED. Every oil row written before this carries none, and an
+             // ordinary receipt from the division still carries none - it names an MR and
+             // nothing finer. Only an adjustment sets it.
+             //
+             // ⚠ AND THIS CLAUSE IS INERT UNTIL DEPLOYED. This validator does NOT use
+             // `keys().hasOnly(...)`, so `jobId` was already writable - unvalidated, with
+             // nothing bounding its type or size, which is the gap the comment above names.
+             // Adding it here closes that; `firebase deploy --only firestore:rules` is what
+             // makes it true.
+             (!('jobId' in data) || (data.jobId is string && data.jobId.size() >= 1 && data.jobId.size() <= 128)) &&
              (!('createdAt' in data) || isTimeValue(data.createdAt));
     }
 

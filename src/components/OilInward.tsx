@@ -21,7 +21,10 @@ import { oilRowsMissingMrNumber, litresOf } from '../lib/mrRename';
 // job scrap" existed and they disagree by more than half the population - 5, 11 and 12 of 12.
 // The predicate lives in lib/scrapState.ts rather than here on purpose: defining it inside the
 // oil feature is how it would acquire a fifth definition.
-import { isScrapJob } from '../lib/scrapState';
+import {
+  isScrapJob, isScrapAdjustment, inwardOnly, scrapAdjustmentsOnly,
+  SCRAP_OIL_TYPE, SCRAP_OIL_LABEL, scrapEvidence,
+} from '../lib/scrapState';
 import { CARD, CARD_PAD, NUM, NUM_INLINE, TONE, chip, TABLE_WRAP, TABLE, TH, TD } from '../lib/ui';
 import {
   Droplet,
@@ -185,7 +188,18 @@ export default function OilInward() {
   // The shared load's status. Nothing on this screen sets it: the save reports its own failure
   // through handleFirestoreError and leaves the list alone (AUDIT G86).
   const loading = agencyDataLoad.status === 'loading';
-  const [viewMode, setViewMode] = useState<"transactions" | "summary">(
+  /**
+   * ⚠ A THIRD VIEW, NOT A THIRD TABLE (AUDIT O79). Scrap adjustments get their own list beside
+   * the inward log rather than inside it: one arrives in barrels from the division, the other is
+   * oil the agency kept from a unit it scrapped, and mixing them would make the Inward log say a
+   * barrel arrived when none did.
+   *
+   * It is a tab because the strip already exists and both existing buttons reset the entry form
+   * on switch - so each view owns the form exactly once. A second table nested in `transactions`
+   * would leave two lists competing for one form, and would inherit that view's filters and
+   * sub-totals without meaning them.
+   */
+  const [viewMode, setViewMode] = useState<"transactions" | "summary" | "scrap">(
     "transactions",
   );
   const [filterDivision, setFilterDivision] = useState<string>("All");
@@ -491,6 +505,19 @@ ${intakeGate.reason}`);
          */
         scrapShortage: number;
         /**
+         * OIL RETAINED FROM SCRAPPED UNITS, RECORDED AS AN ADJUSTMENT (AUDIT O79).
+         *
+         * ⚠ THE THIRD DEDUCTION, NOT PART OF `totalReceived`. The account reads
+         * `opening + shortage - inward - scrap adjustment = net`. Folding it into inward would
+         * make the Inward figure assert the division issued oil it never sent.
+         *
+         * ⚠ AND IT IS THE ENTERED QUANTITY, NOT THE DERIVED ONE. `retained` below is what the
+         * scrap jobs COULD contribute; this is what an operator has actually recorded. They
+         * differ until every scrap job has an adjustment, and that difference is the point of
+         * the state column on the scrap tab.
+         */
+        scrapAdjustment: number;
+        /**
          * OIL THE AGENCY RETAINED FROM SCRAPPED UNITS - AND THIS ONE IS **NOT** IN ANY TOTAL.
          *
          * ⚠ REPORTED, NEVER APPLIED. Whether these litres belong on the account is O79's open
@@ -515,6 +542,7 @@ ${intakeGate.reason}`);
           totalShortage: 0,
           totalReceived: 0,
           scrapShortage: 0,
+          scrapAdjustment: 0,
           retained: 0,
         };
       } else if (summary[mrNo].mrDate === "-" && mrDate !== "-") {
@@ -580,12 +608,25 @@ ${intakeGate.reason}`);
           totalShortage: 0,
           totalReceived: 0,
           scrapShortage: 0,
+          scrapAdjustment: 0,
           retained: 0,
         };
       } else if (summary[mrNo].mrDate === "-" && txMrDate !== "-") {
         summary[mrNo].mrDate = txMrDate;
       }
-      summary[mrNo].totalReceived += tx.netLiters;
+      /**
+       * ⚠ AN ADJUSTMENT IS THE THIRD TERM, NOT PART OF THE SECOND (AUDIT O79).
+       *
+       * The account reads `opening + shortage - inward - scrap adjustment = net`. Adding an
+       * adjustment to `totalReceived` would fold it into INWARD, and the three deductions would
+       * collapse back into two - the net unchanged, the decomposition gone, and the Inward
+       * figure asserting the division issued oil it never sent.
+       */
+      if (isScrapAdjustment(tx)) {
+        summary[mrNo].scrapAdjustment += Number(tx.netLiters) || 0;
+      } else {
+        summary[mrNo].totalReceived += tx.netLiters;
+      }
     });
 
     return Object.values(summary).sort(
@@ -618,10 +659,17 @@ ${intakeGate.reason}`);
     });
   }, [mrSummary, filterDivision, filterDateMode, filterUptoDate, filterExactDate]);
 
-  const filteredTransactions = useMemo(() => {
+  /**
+   * THE FILTERS, APPLIED ONCE - then split by KIND (AUDIT O79).
+   *
+   * ⚠ ONE FILTER, TWO LISTS. The division and date tests are identical for both kinds, so they
+   * run once here; splitting first and filtering twice is how the two come to disagree about
+   * which period they cover.
+   */
+  const filteredAllOilRows = useMemo(() => {
     return transactions.filter((t) => {
       if (filterDivision !== "All" && t.division !== filterDivision) return false;
-      
+
       const txMrDate = t.mrDate || getMrDate(t.mrNo) || formatDateStr(t.date);
       if (filterDateMode === "upto" && filterUptoDate.trim() !== "") {
         const uptoTimestamp = parseDateToTimestamp(filterUptoDate);
@@ -635,6 +683,24 @@ ${intakeGate.reason}`);
       return true;
     });
   }, [transactions, filterDivision, filterDateMode, filterUptoDate, filterExactDate, jobs]);
+
+  /**
+   * ⚠ THE INWARD LOG IS OIL THE DIVISION ISSUED, AND NOTHING ELSE (AUDIT O79).
+   *
+   * A scrap adjustment is oil the agency KEPT from a unit it scrapped. It arrives in no barrel,
+   * and listing it here would make the Inward log - and the Excel export built from this same
+   * list - say a barrel arrived when none did. It has its own tab.
+   */
+  const filteredTransactions = useMemo(
+    () => inwardOnly(filteredAllOilRows),
+    [filteredAllOilRows],
+  );
+
+  /** The adjustments alone, same filters, for the scrap tab and its own sub-total. */
+  const filteredScrapAdjustments = useMemo(
+    () => scrapAdjustmentsOnly(filteredAllOilRows),
+    [filteredAllOilRows],
+  );
 
   // Aggregate stats for filtered criteria
   const subTotalShortage = useMemo(() => {
@@ -661,8 +727,23 @@ ${intakeGate.reason}`);
     return filteredSummary.reduce((sum, item) => sum + (item.scrapShortage || 0), 0);
   }, [filteredSummary]);
 
+  /**
+   * WHAT THE SCRAP JOBS COULD CONTRIBUTE, against what has actually been entered.
+   *
+   * ⚠ THESE ARE DIFFERENT QUANTITIES AND THE DIFFERENCE IS THE POINT. `retained` is derived
+   * from the scrap jobs themselves; `scrapAdjustment` is the sum of adjustments an operator has
+   * recorded. They agree only when every scrap job has one, and the gap between them is what
+   * the state column on the scrap tab exists to show.
+   *
+   * ⚠ ONLY `scrapAdjustment` IS IN THE BALANCE. A derived figure must never move an account -
+   * the entry is the record, and until it exists those litres are not deducted from anything.
+   */
   const subTotalRetained = useMemo(() => {
     return filteredSummary.reduce((sum, item) => sum + (item.retained || 0), 0);
+  }, [filteredSummary]);
+
+  const subTotalScrapAdjustment = useMemo(() => {
+    return filteredSummary.reduce((sum, item) => sum + (item.scrapAdjustment || 0), 0);
   }, [filteredSummary]);
 
   /**
@@ -750,8 +831,16 @@ ${intakeGate.reason}`);
 
   /** This tender's own movement, before anything carried in. */
   const tenderNetMovement = useMemo(() => {
-    return subTotalShortage - subTotalReceived;
-  }, [subTotalShortage, subTotalReceived]);
+    /**
+     * ⚠ THREE DEDUCTIONS, NOT TWO (AUDIT O79). The account reads
+     * `opening + shortage - inward - scrap adjustment = net`.
+     *
+     * The third term goes HERE and nowhere else: `subTotalNetBalance` adds the opening to this,
+     * `closingBalanceForCarry` is that figure, and the Excel total prints it - so one line
+     * carries the change into every consumer instead of three that could disagree.
+     */
+    return subTotalShortage - subTotalReceived - subTotalScrapAdjustment;
+  }, [subTotalShortage, subTotalReceived, subTotalScrapAdjustment]);
 
   /**
    * WHAT IS ACTUALLY OWED: what carried in, plus what this tender moved. A tender that
@@ -876,7 +965,12 @@ ${intakeGate.reason}`);
 
     const ws = XLSX.utils.aoa_to_sheet(wsData);
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, viewMode === "transactions" ? "Transactions" : "MR_Summary");
+    // ⚠ THREE VIEWS, SO NOT A TWO-WAY TERNARY (AUDIT O79). The scrap tab fell to "MR_Summary".
+    XLSX.utils.book_append_sheet(
+      wb,
+      ws,
+      viewMode === "transactions" ? "Transactions" : viewMode === "scrap" ? "Scrap_Adjustments" : "MR_Summary",
+    );
     const filename = `Oil_Ledger_${filterDivision}_${filterDateMode === "upto" ? `Upto_${filterUptoDate}` : "Report"}.xlsx`;
     XLSX.writeFile(wb, filename);
   };

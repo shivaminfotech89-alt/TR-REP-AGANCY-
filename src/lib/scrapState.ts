@@ -99,6 +99,55 @@ export function isScrapJob(job: any, inspections: any[] = []): boolean {
   return scrapEvidence(job, inspections).isScrap;
 }
 
+// ---------------------------------------------------------------------------
+// THE SCRAP ADJUSTMENT — an oil row that is not a receipt from the division
+// ---------------------------------------------------------------------------
+
+/**
+ * THE `oilType` THAT MARKS A SCRAP ADJUSTMENT (AUDIT O79).
+ *
+ * When a transformer is scrapped its oil STAYS WITH THE AGENCY. Those litres are recorded as a
+ * deduction against what the division owes - a THIRD term beside shortage and inward:
+ *
+ *     opening + shortage - inward - scrap adjustment = net
+ *
+ * ⚠ IT MUST BE AN EXPLICIT MARKER, NOT THE PRESENCE OF `jobId`. An implicit marker means
+ * anything that ever writes a job reference for some other reason silently becomes an
+ * adjustment. This cannot drift: a row is an adjustment because it says so.
+ *
+ * ⚠ AND IT CANNOT BE `Used`. Used oil is a legitimate INWARD type - oil the division issued -
+ * so it classifies nothing. It also forces `filtrationLossPercent: 5`, and a scrapped unit's
+ * oil is never filtered: the filtration allowance is for oil that goes back INTO a transformer,
+ * and the transformer is gone. A scrap adjustment carries the RAW quantity that was in the
+ * tank, so gross === net and the loss is 0.
+ */
+export const SCRAP_OIL_TYPE = 'Scrap';
+
+/** What the operator reads, wherever the row is labelled. */
+export const SCRAP_OIL_LABEL = 'Scrap adjustment';
+
+/**
+ * Is this oil row a scrap adjustment rather than a receipt from the division?
+ *
+ * ⚠ ONE DEFINITION, BECAUSE FIVE SURFACES ASK IT. The printed Inward Oil Received Log, the
+ * invoice's oil deduction, two Excel exports and the Oil Account's own totals each have to tell
+ * an adjustment from a receipt, and a copy in any one of them is how the statement and the
+ * screen come to disagree without either being wrong on its own terms.
+ */
+export function isScrapAdjustment(tx: any): boolean {
+  return norm(tx?.oilType) === SCRAP_OIL_TYPE;
+}
+
+/** The receipts the division actually issued - everything that is not an adjustment. */
+export function inwardOnly<T>(transactions: T[]): T[] {
+  return (transactions || []).filter(t => !isScrapAdjustment(t));
+}
+
+/** The adjustments alone. */
+export function scrapAdjustmentsOnly<T>(transactions: T[]): T[] {
+  return (transactions || []).filter(t => isScrapAdjustment(t));
+}
+
 /** How many jobs each test finds, for a report that must state its own provenance. */
 export function scrapCounts(jobs: any[], inspections: any[] = []) {
   let byStatus = 0, byCondition = 0, byInspection = 0, any = 0;

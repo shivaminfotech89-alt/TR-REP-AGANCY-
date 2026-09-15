@@ -14,6 +14,11 @@ import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { validateEstimateMaster, atRatesReadiness } from '../lib/estimateMasterHealth';
 import { estimateMasterLink } from '../lib/settingsLinks';
 import { mrStageSummary } from '../lib/inspectionStage';
+// ⚠ ONE DEFINITION OF "IS THIS AN ADJUSTMENT" (AUDIT O79). Five surfaces ask it - this printed
+// log, the invoice's oil deduction, two Excel exports and the Oil Account's totals - and a copy
+// in any one of them is how the statement and the screen come to disagree without either being
+// wrong on its own terms.
+import { isScrapAdjustment } from '../lib/scrapState';
 import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
@@ -1032,6 +1037,23 @@ export default function BillingSystem() {
 
     // Group received oil from transactions
     oilTransactions.forEach((tx) => {
+      /**
+       * ⚠ A SCRAP ADJUSTMENT IS NOT OIL THE DIVISION ISSUED, SO IT IS NOT IN THIS FIGURE
+       * (AUDIT O79).
+       *
+       * `totalReceived` here feeds `divisionCumulativeInward` -> `divisionNetOilOnInspectionDate`
+       * -> `netOilDue` -> the printed "LESS: OIL SHORTAGE DEDUCTION" line on the invoice. The
+       * division's own workbook has FOUR terms - opening, top-up, filtration loss, oil issued -
+       * and NO line for oil an agency retained from a unit it scrapped. Letting an adjustment
+       * through here would deduct it on a document reconciled against that sheet, silently.
+       *
+       * ⚠ THE SCREEN AND THIS STATEMENT THEREFORE DIFFER, DELIBERATELY. `computeOilBalance`
+       * counts adjustments, so the Oil Account's net includes them and this does not. Both say
+       * so in words - see the note under the deduction and the Oil Account's own banner. F88
+       * exists to keep the printed figure matched to the counterparty's arithmetic; this is
+       * that rule being applied, not broken.
+       */
+      if (isScrapAdjustment(tx)) return;
       const mrNo = tx.mrNo;
       if (!mrNo) return;
       const txMrDate = tx.mrDate || getMrDate(tx.mrNo);
@@ -1081,6 +1103,13 @@ export default function BillingSystem() {
     if (!selectedMrNo) return [];
     const cleanSelectedMr = selectedMrNo.trim().toLowerCase();
     return oilTransactions.filter(t => {
+      /**
+       * ⚠ EXCLUDED FROM THE PRINTED INWARD OIL RECEIVED LOG (AUDIT O79). A scrap adjustment
+       * carries the scrap job's MR number, so it matches below on `mrNo` alone and would print
+       * as a received row - asserting to a division office that oil arrived when none did. It
+       * arrives in no barrel: the agency kept it from a transformer it scrapped.
+       */
+      if (isScrapAdjustment(t)) return false;
       if (t.division && currentDivision) {
         const tDiv = t.division.trim().toUpperCase();
         const cDiv = currentDivision.trim().toUpperCase();
@@ -1112,7 +1141,9 @@ export default function BillingSystem() {
         divisionNetOilOnInspectionDate: totalNetShortage - mrInwardOilTotal,
         priorShortage: 0,
         priorInward: 0,
-        priorNetBalance: 0
+        priorNetBalance: 0,
+        // Nothing is bounded when no division is selected, so nothing is excluded to declare.
+        scrapAdjustmentExcluded: 0,
       };
     }
 
@@ -1160,6 +1191,31 @@ export default function BillingSystem() {
     const divisionCumulativeInward = divisionMrList.reduce((sum, item) => sum + item.totalReceived, 0);
     const divisionNetOilOnInspectionDate = divisionCumulativeShortage - divisionCumulativeInward;
 
+    /**
+     * WHAT THIS STATEMENT LEAVES OUT, MEASURED THE SAME WAY IT LEAVES IT OUT (AUDIT O79).
+     *
+     * ⚠ THE SAME DIVISION MATCH AND THE SAME DATE CUTOFF AS `divisionMrList` ABOVE. The note
+     * printed under Net Oil Status quotes this figure, and a quantity gathered from a wider
+     * population than the figures it qualifies would not reconcile - which is the F86 fault, on
+     * a page that goes to a division office rather than on a screen that can be corrected.
+     *
+     * An undated adjustment is excluded from the DECLARATION exactly as an undated MR is
+     * excluded from the statement (O78): a row that cannot be shown to fall before the cutoff
+     * has not been shown to belong to this period.
+     */
+    const scrapAdjustmentExcluded = oilTransactions.reduce((sum, tx) => {
+      if (!isScrapAdjustment(tx)) return sum;
+      const tDiv = (tx.division || '').trim().toUpperCase();
+      const cDiv = currentDivision.trim().toUpperCase();
+      if (tDiv && cDiv && tDiv !== cDiv && !tDiv.includes(cDiv) && !cDiv.includes(tDiv)) return sum;
+      if (uptoTimestamp > 0) {
+        const txTimestamp = parseDateToTimestamp(tx.mrDate || tx.date);
+        if (txTimestamp <= 0) return sum;
+        if (txTimestamp > uptoTimestamp) return sum;
+      }
+      return sum + (Number(tx.netLiters) || 0);
+    }, 0);
+
     const priorShortage = Math.max(0, divisionCumulativeShortage - totalNetShortage);
     const priorInward = Math.max(0, divisionCumulativeInward - mrInwardOilTotal);
     const priorNetBalance = priorShortage - priorInward;
@@ -1170,9 +1226,19 @@ export default function BillingSystem() {
       divisionNetOilOnInspectionDate,
       priorShortage,
       priorInward,
-      priorNetBalance
+      priorNetBalance,
+      /**
+       * ⚠ RETURNED FROM BOTH BRANCHES, OR THE PRINTED NOTE SILENTLY VANISHES. The no-division
+       * branch above already carries this field. Omitting it here still TYPECHECKS - the two
+       * branches union - and the note reading it would render `undefined` on every statement
+       * that HAS a division, which is every real one. A fault that passes tsc and fails on
+       * paper.
+       */
+      scrapAdjustmentExcluded,
     };
-  }, [allMrSummary, currentDivision, effectiveOilUptoDate, selectedMrNo, totalNetShortage, mrInwardOilTotal]);
+    // `oilTransactions` is read by the exclusion total above; without it here the declared
+    // figure freezes while the statement around it updates.
+  }, [allMrSummary, oilTransactions, currentDivision, effectiveOilUptoDate, selectedMrNo, totalNetShortage, mrInwardOilTotal]);
 
   const netOilDue = useMemo(() => {
     return divisionOilStatement.divisionNetOilOnInspectionDate;
@@ -3756,6 +3822,20 @@ export default function BillingSystem() {
                           {divisionOilStatement.divisionNetOilOnInspectionDate.toFixed(1)} Ltr
                         </span>
                       </div>
+                      {/* ⚠ WHAT THIS STATEMENT DOES NOT COUNT, SAID ON THE STATEMENT (AUDIT O79).
+                          Oil retained from scrapped units is excluded from both figures above, so
+                          this page stays matched to the division's four terms - opening, top-up,
+                          filtration loss, oil issued - which have no line for it. The agency's own
+                          Oil Account DOES count it, so the two differ by exactly that quantity.
+                          A screen and a statement differing with nothing explaining why is how a
+                          day gets lost; this is the explanation, on the page that omits it. */}
+                      {divisionOilStatement.scrapAdjustmentExcluded > 0 && (
+                        <p className="text-[7px] leading-tight pt-1 text-slate-700">
+                          Excludes {divisionOilStatement.scrapAdjustmentExcluded.toFixed(1)} Ltr of
+                          oil retained from scrapped units, pending confirmation of its treatment
+                          with the division.
+                        </p>
+                      )}
                     </div>
                   </div>
                 </div>

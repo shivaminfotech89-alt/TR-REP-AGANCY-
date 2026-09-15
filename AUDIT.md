@@ -18336,9 +18336,17 @@ and it is withdrawn. The write waits on ONE question, put to the owner rather th
 
 > **For a scrapped unit, does the top-up shortage REMAIN on the account, or does the retained oil REPLACE it?**
 
-The retained entry is confirmed; the shortage is not. If it remains, the two together overstate by
-`lessOil + 5% of available` - **640.00 L of phantom top-up on the five units that arrived empty**, which retain
-nothing to offset it.
+> **⚠ ANSWERED BY THE OWNER: THE SHORTAGE STAYS.** The scrap adjustment is a **THIRD TERM**, not a
+> replacement:
+>
+> ```
+>     opening + shortage - inward - scrap adjustment = net
+> ```
+>
+> So the account carries three deductions and the net is what remains. The `lessOil + 5% of available` figure
+> above is therefore **not an overstatement to be corrected** - it is the shortage term standing as measured,
+> with the retained oil deducted beside it. **What O77 leaves open is unchanged**: whether the division's own
+> sheet shows the top-up on a scrapped unit at all.
 
 **Settled for when the answer comes:** record it as an existing **`Used`** receipt with **gross = available**, so
 the app's own `filtrationLossPercent` nets it to `available x 0.95` - **no third `oilType`, no new column, no
@@ -18376,6 +18384,92 @@ scrap 506.00; retained scrap oil 1120.00, not in this balance.**
 External records. Scrap is declared on the INTERNAL inspection, so the narrow list would have found no scrap by
 inspection at all and **silently understated by ASU-2's 90 litres** - the exact miscount O80 records, very nearly
 repeated inside the code written to report it.
+
+---
+
+### THE THIRD TERM, BUILT AS FAR AS THE ARITHMETIC - AND INERT UNTIL THE UI LANDS
+
+**⚠ NOTHING ON LIVE DATA MOVES YET.** No entry path exists, so **no scrap adjustment can be created**, so
+every figure in the app today is exactly what it was. The whole change below is latent. That is deliberate: the
+printed statement changes here, and it should be inspectable before any row exists to appear on it.
+
+**RAW, NOT x0.95, AND THE OWNER'S REASONING IS THE RIGHT ONE.** The 5% is a filtration allowance for oil that
+gets filtered and **put back into a transformer**. A scrapped unit is never repaired, so its oil is never
+filtered - the agency simply holds what was in the tank. `filtrationLossPercent: 0`, gross === net.
+
+**This retires my own earlier recommendation.** I proposed the existing `Used` type with gross = available. It is
+wrong twice over: `Used` forces a 5% loss (1120.00 -> 1064.00, and the net -306.40 instead of -362.40), and used
+oil is a legitimate **inward** type, so it classifies nothing.
+
+| MEGHA AT 26-27 | litres |
+|---|---|
+| shortage | 1177.60 |
+| less inward | 420.00 |
+| less scrap adjustment | 1120.00 |
+| **net** | **-362.40 - agency owes the division** |
+
+Confirmed against `scripts/admin/scrap-oil-retained.ts`, and `describeOil` renders the direction, so the screen
+says it in words rather than leaving a minus sign to be interpreted (F88).
+
+### ⚠ THE MARKER IS EXPLICIT, BECAUSE AN IMPLICIT ONE DRIFTS
+
+`oilType: 'Scrap'` - **not the presence of `jobId`**. An implicit marker means anything that ever writes a job
+reference for another reason silently becomes a deduction against the division. A row is an adjustment because it
+says so.
+
+`lib/scrapState.ts` holds `isScrapAdjustment`, `inwardOnly` and `scrapAdjustmentsOnly` as **one definition for
+five surfaces** - the printed Inward Oil Received Log, the invoice's oil deduction, two Excel exports and the Oil
+Account's own totals. A copy in any one of them is how the statement and the screen come to disagree without
+either being wrong on its own terms.
+
+`jobId` stores the job link and doubles as the already-adjusted marker. Its rules clause is added and is
+**inert until deployed** - the validator never used `keys().hasOnly(...)`, so the field was already writable and
+unvalidated, which is the gap the file's own comment names. It rides the deploy queued for the `discom` clause.
+
+### ⚠ THE PRINTED STATEMENT CHANGES, DELIBERATELY, AND SAYS WHAT IT OMITS
+
+**The byte-identity guarantee proved in the previous commit has been deliberately ended**, with the owner's
+agreement, because protecting F88 *required* editing that file:
+
+| | git | sha-256 |
+|---|---|---|
+| before | `c9c315aa9c85f9b9be37413a1a83c6ba96a293c8` | `a20161d0...78f59fa` |
+| after | `e2bf0d93cc3922284f502ad3f849b7cf4209ce4d` | `81339f90...29cd387` |
+
+Two exclusions, because an adjustment carries the scrap job's MR number and would otherwise be swept up by a
+match on `mrNo` alone:
+
+- **`mrOilTxList`** - it would print as a **received row**, asserting to a division office that oil arrived when
+  none did. It arrives in no barrel.
+- **`allMrSummary`** - it would enter `divisionCumulativeInward` -> `netOilDue` -> the printed
+  **"LESS: OIL SHORTAGE DEDUCTION"**, deducting on a document reconciled against a sheet with no line for it.
+
+**And the page now states its own omission**, under Net Oil Status, quoting the excluded quantity measured with
+**the same division match and date cutoff** as the figures it qualifies - an unfiltered total under a bounded
+statement is the F86 fault on paper rather than on screen.
+
+- **⚠ A FAULT THAT PASSED tsc AND WOULD HAVE FAILED ON PAPER.** `scrapAdjustmentExcluded` was returned from
+  `divisionOilStatement`'s no-division branch but not its main one. The two branches union, so **TypeScript was
+  satisfied** - and the note would have rendered `undefined` and silently never appeared on any statement that
+  has a division, which is every real one.
+
+### ⚠ THE SCREEN AND THE STATEMENT NOW DIFFER ON PURPOSE
+
+`computeOilBalance` counts adjustments, so the Dashboard card, the rollover carry and the Oil Account's net all
+include them. The printed statement excludes them. **Both say so in words.** A screen and a statement differing
+by 1,120 litres with nothing explaining why is how someone loses a day.
+
+**⚠ AND MY "FOUR SURFACES" COUNT WAS WRONG.** `mrSummary`'s received line was a fifth - an adjustment added
+to `totalReceived` would have folded the third term back into inward, collapsing three deductions into two with
+the net unchanged and the decomposition gone. The summary Excel export needs no exclusion of its own: it reads
+`filteredSummary` and inherits the split.
+
+### What is NOT built
+
+The scrap tab, its per-job list with the state column, and the entry itself. Until those exist nothing can write
+an adjustment. **`retained` (what the scrap jobs could contribute) and `scrapAdjustment` (what has been recorded)
+are deliberately separate figures** - they agree only when every scrap job has an entry, and the gap between them
+is what the state column exists to show. **A derived figure must never move an account.**
 
 ---
 

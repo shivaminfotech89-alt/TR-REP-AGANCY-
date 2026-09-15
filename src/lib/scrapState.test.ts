@@ -4,7 +4,10 @@
 // moved on to 'Dispatched', and a job that is scrap ONLY in its inspection.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { scrapEvidence, isScrapJob, scrapCounts, SCRAP_STATUS_VARIANT } from './scrapState';
+import {
+  scrapEvidence, isScrapJob, scrapCounts, SCRAP_STATUS_VARIANT,
+  isScrapAdjustment, inwardOnly, scrapAdjustmentsOnly, SCRAP_OIL_TYPE,
+} from './scrapState';
 
 const insp = (jobId: string, condition = 'Scrap', type = 'Internal') =>
   ({ id: `i-${jobId}`, jobId, type, data: { condition } });
@@ -88,4 +91,46 @@ test('⚠ THE COUNTS REPRODUCE THE LIVE SPLIT: 5 by status, 11 by condition, 12 
 
 test('scrapCounts on an empty list is zeroes, not a crash', () => {
   assert.deepEqual(scrapCounts([], []), { byStatus: 0, byCondition: 0, byInspection: 0, any: 0, total: 0 });
+});
+
+// ---------------------------------------------------------------- the adjustment marker
+
+test('a scrap adjustment is marked by its oilType, and ordinary receipts are not', () => {
+  assert.equal(isScrapAdjustment({ oilType: SCRAP_OIL_TYPE }), true);
+  assert.equal(isScrapAdjustment({ oilType: 'Fresh' }), false);
+  assert.equal(isScrapAdjustment({ oilType: 'Used' }), false);
+  assert.equal(isScrapAdjustment({}), false, 'an absent oilType is a receipt, as it always was');
+});
+
+test('⚠ `Used` IS NOT AN ADJUSTMENT - it is a legitimate inward type', () => {
+  // Used oil is oil the DIVISION issued. Marking adjustments with it would classify nothing,
+  // and it forces a 5% filtration loss that a scrapped unit never incurs.
+  assert.equal(isScrapAdjustment({ oilType: 'Used', jobId: 'j1' }), false);
+});
+
+test('⚠ A jobId ALONE DOES NOT MAKE A ROW AN ADJUSTMENT', () => {
+  // The marker is explicit on purpose: an implicit one means anything that ever writes a job
+  // reference for another reason silently becomes a deduction against the division.
+  assert.equal(isScrapAdjustment({ jobId: 'j1' }), false);
+});
+
+test('the split is exhaustive - every row is inward or an adjustment, never both', () => {
+  const rows = [
+    { id: 'a', oilType: 'Fresh' },
+    { id: 'b', oilType: 'Used' },
+    { id: 'c', oilType: SCRAP_OIL_TYPE },
+    { id: 'd' },
+  ];
+  assert.deepEqual(inwardOnly(rows).map((r: any) => r.id), ['a', 'b', 'd']);
+  assert.deepEqual(scrapAdjustmentsOnly(rows).map((r: any) => r.id), ['c']);
+  assert.equal(inwardOnly(rows).length + scrapAdjustmentsOnly(rows).length, rows.length);
+});
+
+test('whitespace around the marker does not hide it', () => {
+  assert.equal(isScrapAdjustment({ oilType: '  Scrap  ' }), true);
+});
+
+test('the split handles an empty list', () => {
+  assert.deepEqual(inwardOnly([]), []);
+  assert.deepEqual(scrapAdjustmentsOnly([]), []);
 });
