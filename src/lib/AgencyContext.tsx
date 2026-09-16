@@ -254,9 +254,16 @@ export interface AllotmentRecord {
  * a console log reaches the wrong person entirely.
  */
 export interface AtSeedReport {
-  /** Counter keys and the starting number seeded for each. */
+  /**
+   * Counter keys and the seed stored for each - the LAST USED number, so the first job is
+   * `value + 1`. Empty when the tender starts every division at 1, which is now the default.
+   *
+   * ⚠ `jobsScanned` IS GONE WITH THE SCAN THAT PRODUCED IT (AUDIT O89). Nothing reads the
+   * jobs collection at tender creation any more, so the field could only ever have reported
+   * 0 - and the panel printing it would have said "Scanned 0 job(s)" under a sentence
+   * claiming the series continues. Removed rather than left at zero.
+   */
   counters: Record<string, number>;
-  jobsScanned: number;
 }
 
 export interface AtMaster {
@@ -2005,114 +2012,42 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       }
       const newRef = doc(collection(db, 'atMasters'));
 
-      // SEED THE COUNTERS FROM THE AGENCY, BUT ONLY FOR ITS FIRST AT.
-      //
-      // Before this, a new AT was written with `lastJobNumbers: {}` and job numbering
-      // silently restarted at 1. The cause is that the read and the write test different
-      // things: getNextJobNoInfo branches on `activeAtMaster && activeAtMaster.lastJobNumbers`
-      // - and `{}` is TRUTHY - so the populated `activeAgency.lastJobNumbers` in its
-      // `else if` was never reached, while the counter-writer of the day branched on
-      // `activeAtMaster` alone. An agency that had been numbering off its own counters
-      // returned to 1 the moment its first AT existed, producing duplicate job numbers
-      // immediately (AUDIT O2/C1). That sits on the path the agency form now recommends
-      // for fixing prefixes, which is how it was found.
-      //
-      // WHY SEEDING RATHER THAN TESTING THE READ FOR A NON-EMPTY OBJECT: the read alone
-      // does not fix it. Job 1 would be numbered from the agency (47), the increment
-      // would still write to the AT starting from ITS zero (1), and job 2 would be
-      // numbered from the AT (2) - the same collision, one job later and quieter. Fixing
-      // it at the read means fixing the write too, and the consistent version of that
-      // keeps writing to the agency while an AT is active, so the AT's map never becomes
-      // non-empty and the handover never happens. Seeding puts read and write on the same
-      // document from the first job.
-      //
-      // ONLY THE FIRST AT. Once an AT exists, every increment goes to it and the agency
-      // map freezes, so copying that frozen map into a second AT would start a new tender
-      // from an arbitrary old number. A new tender starts its own series - which is what
-      // per-AT counters are for. Staleness only exists from the second AT onward, and
-      // that is exactly where this does not seed.
-      // SEED THIS AT'S JOB-NUMBER COUNTERS FROM THE HIGHEST NUMBER THE AGENCY HAS
-      // ACTUALLY ISSUED - every AT, not only the first (AUDIT F42, closing O2).
-      //
-      // WHY EVERY AT. Prefixes belong to the DIVISION and the agency, not to the tender
-      // period: "21 IS" is the same before and after a rollover. So a new AT that starts
-      // its counters at zero reissues "21 IS-1" for a different physical transformer -
-      // which is exactly how C1's collisions arose. Continuation is already the behaviour
-      // at the FIRST AT boundary and was absent at every later one; that asymmetry was a
-      // bug, not a design.
-      //
-      // WHY FROM JOBS AND NOT FROM COUNTERS. `lastJobNumbers` is a CACHE of a fact that
-      // lives in the jobs collection, and it can sit low in ways the cache cannot see:
-      //   - the real allocator (NewJob's save transaction) only moves a counter UP to the
-      //     highest number in that intake - it reconciles, it does not allocate;
-      //   - it writes only when an AT or agency doc resolved, so jobs saved with no active
-      //     AT advanced nothing;
-      //   - a second counter-writer looked like the allocator and had zero call sites (A2).
-      // (Both writers are since deleted - the save path is the only one left - but the gaps
-      // this seeding covers are in the DATA those writers left behind, so it still applies.)
-      // Seeding from the cache would inherit every one of those gaps, and the failure is
-      // the precise one this exists to prevent. So: the max of BOTH - actual job numbers
-      // and every stored counter - which can never be lower than either alone.
+      /**
+       * A NEW TENDER STARTS ITS OWN SERIES (AUDIT O89).
+       *
+       * ⚠ THIS REVERSES F42's SEEDING, AND IT IS A CHANGE OF RULE - NOT A CORRECTION OF ONE.
+       * F42 seeded every new AT from the max of three sources: every sibling AT's counters,
+       * the agency document's counters, and the job numbers actually issued. Its reasoning
+       * was sound: prefixes belong to the DIVISION, not the tender period, so "21 IS" is the
+       * same string before and after a rollover, and a tender restarting at 1 reissues
+       * "21 IS-1" for a different physical transformer - which is how C1's collisions arose.
+       *
+       * WHAT CHANGED IS THE BUSINESS RULE, NOT THE CODE'S CORRECTNESS. The paperwork works
+       * per tender: a new AT begins its own numbering, from its own starting number, which
+       * is the field `startingJobNumbers` already existed to hold.
+       *
+       * ⚠ AND THE COLLISION F42 GUARDED AGAINST HAS NOT MATERIALISED. Measured across all
+       * sixteen live tenders rather than assumed: NO agency has two tenders that both booked
+       * work under one prefix, so reversing this today cannot reissue a number that is
+       * already on a challan. That window is open now and closes the moment a second tender
+       * books its first job - which is the argument for doing it today rather than later.
+       *
+       * The duplicate-number guard at intake (G92) is what catches a collision now, at the
+       * moment one would be created, rather than a seed trying to make one impossible.
+       */
       const agencyIdForSeed = String(atData.agencyId).trim();
-      const callerCounters = (atData as any).lastJobNumbers;
-      const seededCounters: Record<string, number> = { ...(callerCounters || {}) };
-      let seedJobsScanned = 0;
 
-      const bump = (key: string, value: number) => {
-        if (!key || !Number.isFinite(value) || value <= 0) return;
-        if (!seededCounters[key] || value > seededCounters[key]) seededCounters[key] = value;
-      };
+      // THE ONLY SOURCE IS WHAT THIS TENDER WAS ASKED TO START FROM. Absent means absent:
+      // `predictNextJobNo` reads a missing counter as 0 and therefore suggests 1. A starting
+      // number of 1 seeds 0, which is the same as absent - so it is not written either.
+      const seededCounters: Record<string, number> = {};
+      Object.entries((atData as any).startingJobNumbers || {}).forEach(([key, raw]) => {
+        const n = Number(raw);
+        if (!key || !Number.isFinite(n) || n <= 0) return;
+        seededCounters[key] = Math.floor(n);
+      });
 
-      try {
-        // Every stored counter for this agency - all its ATs, plus the agency record.
-        // Read from state rather than re-queried: these are already agency-scoped here.
-        atMasters
-          .filter(a => a.agencyId === agencyIdForSeed)
-          .forEach(a => Object.entries(a.lastJobNumbers || {}).forEach(([k, v]) => bump(k, Number(v))));
-        const agencyDoc = agencies.find(a => a.id === agencyIdForSeed);
-        Object.entries(agencyDoc?.lastJobNumbers || {}).forEach(([k, v]) => bump(k, Number(v)));
-
-        // The authority: the numbers actually on jobs.
-        const jobSnap = await getDocs(query(
-          collection(db, 'jobs'),
-          where('ownerId', '==', auth.currentUser.uid),
-          where('agencyId', '==', agencyIdForSeed)
-        ));
-        jobSnap.docs.forEach(d => {
-          const j: any = d.data();
-          // DO NOT consider GP jobs or Cancelled jobs for seeding last job number counters
-          if ((j.repairType || '').toUpperCase() === 'GP' || j.isGp || j.status === 'Cancelled' || j.isCancelled || j.mrStatus === 'Cancelled') {
-            return;
-          }
-          seedJobsScanned++;
-          const division = String(j.division ?? '').trim();
-          if (!division) return;
-          const key = getCounterKey(division, j.coreType || 'CRGO');
-          // ONE READING OF A JOB NUMBER, shared with every save path (AUDIT F81).
-          //
-          // This carried its own parser - a trailing digit run - and reported anything it
-          // could not read as an "unparsed" warning shown when the AT was created. Two
-          // parsers for one field, and the strict one was the one wired to a user-facing
-          // warning while the tolerant one decided real job numbers.
-          const n = jobNoSequence(j.jobNo);
-          if (n === null) return;
-          bump(key, n);
-          // CRGO is counted under EITHER `${div}_CRGO` or a bare `${div}` key, and
-          // getNextJobNoInfo reads one and falls back to the other. Seeding only one lets
-          // CRGO restart independently while every other core type continues.
-          if (key.endsWith('_CRGO')) bump(division, n);
-        });
-      } catch (seedErr) {
-        // A failed seed must not block a tender rollover. The AT is still created; the
-        // counters simply start from whatever the caller supplied, and a duplicate is
-        // refused at save rather than issued.
-        console.warn('Could not seed job-number counters from existing jobs:', seedErr);
-      }
-
-      const seedReport: AtSeedReport = {
-        counters: seededCounters,
-        jobsScanned: seedJobsScanned,
-      };
+      const seedReport: AtSeedReport = { counters: seededCounters };
 
       /**
        * THE OPENING OIL BALANCE, CARRIED AUTOMATICALLY (AUDIT F96).
@@ -2343,22 +2278,28 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
 
 
   /**
-   * ⚠ NO CALLERS. Do not wire this up to a job-number field (AUDIT F70).
+   * THE NUMBER OFFERED WHEN AN INTAKE HITS A JOB-NUMBER CLASH (AUDIT O89).
    *
-   * It predicts from `lastJobNumbers`, and a suggestion must NOT come from there any more.
-   * The counter records what has been ISSUED and only ever rises. Suggestions now continue
-   * from the highest job number actually SAVED for that prefix, which is a record of what
-   * EXISTS and can fall - so an abandoned intake offers the same number again, and a
-   * deleted or cancelled job frees its number. Reading the counter instead would quietly
-   * undo both, and would look right while doing it.
+   * ⚠ THIS BLOCK USED TO SAY "NO CALLERS. Do not wire this up to a job-number field", CALL
+   * THE FUNCTION A DELETION CANDIDATE, AND WARN THAT READING THE COUNTER "would quietly undo
+   * both, and would look right while doing it". Every part of that was false, and the last
+   * part was false about the code directly beneath it - this function reads `lastJobNumbers`
+   * and always has.
    *
-   * NewJob and MrLedger both compute their own from jobs they already hold; neither needs
-   * an extra read. What survives here is the counter LOOKUP, which nothing consults.
+   * ⚠ IT HAS EXACTLY ONE CALLER AND IT IS LOAD-BEARING: `NewJob.tsx:1447`, the clash-rename
+   * path. When an intake collides with an existing job number, this produces the replacement
+   * number the operator is OFFERED and will accept - on the same screen the duplicate guard
+   * protects. Anyone trusting the old comment would have deleted a live function that decides
+   * job numbers, and the comment invited exactly that by naming `incrementJobNoCounter` as
+   * precedent for removing it.
    *
-   * Kept rather than deleted only because removing it was out of scope for the change that
-   * orphaned it. It is a deletion candidate: the last function in this file that looked
-   * useful and had no callers was `incrementJobNoCounter`, and it sat here long enough to
-   * be documented as a hazard twice (A2) before it went.
+   * The one true thing in it is kept: NewJob and MrLedger compute their own high-water marks
+   * from jobs they already hold, so the SAVE path does not consult this. A suggestion and a
+   * reconciliation are different jobs, and only the suggestion lives here.
+   *
+   * ⚠ AND THE CALLER PASSES NO `atMasterId`, so `source` falls back to `activeAtMaster` and
+   * the offer comes from the ACTIVE TENDER'S counter. That is why this function is part of
+   * the tender-starts-its-own-series change rather than incidental to it.
    */
   const predictNextJobNo = (
     division: string,

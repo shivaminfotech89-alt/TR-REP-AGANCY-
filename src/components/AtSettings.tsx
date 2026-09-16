@@ -406,19 +406,29 @@ export function AtSettings() {
         <button type="button" onClick={() => setSeedReport(null)}
           className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 shrink-0">Dismiss</button>
       </div>
+      {/* ⚠ BOTH BRANCHES REWRITTEN WITH THE RULE CHANGE, NOT AFTER IT (AUDIT O89).
+          This said "Continues the agency's existing series - it does not restart. Scanned N
+          job(s)." Removing the seeding makes that sentence FALSE and pins `jobsScanned` at 0
+          forever - a panel stating the opposite of what the app now does, on the one screen
+          shown at the moment a tender is created. The other branch was wrong too, in a
+          quieter way: it read "No existing job numbers found", explaining a search that no
+          longer happens. Numbering starts at 1 BY RULE now, not for want of anything found. */}
       {Object.keys(seedReport.counters).length === 0 ? (
         <p className="text-[11px] text-indigo-900">
-          No existing job numbers found for this agency, so numbering starts at 1.
+          Job numbering starts at <strong>1</strong>. A new tender starts its own series - it does
+          not continue the previous one. To start somewhere else, set a starting number per
+          division below before booking the first job.
         </p>
       ) : (
         <>
           <p className="text-[11px] text-indigo-900">
-            Continues the agency's existing series - it does not restart. Scanned {seedReport.jobsScanned} job(s).
+            Job numbering starts from the starting numbers set for this tender. Every other
+            division starts at <strong>1</strong>.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {Object.entries(seedReport.counters).sort().map(([k, v]) => (
               <span key={k} className="px-2 py-0.5 rounded bg-white border border-indigo-200 text-[10px] font-mono tabular-nums text-indigo-900">
-                {k}: next is {Number(v) + 1}
+                {k}: first is {Number(v) + 1}
               </span>
             ))}
           </div>
