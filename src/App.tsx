@@ -240,19 +240,30 @@ export default function App() {
            * memory-cached and never touches the IndexedDB that is failing. Without that, admitting
            * them would get them past the login screen and break somewhere worse.
            *
-           * The cost is real and is stated to them: closing the tab signs them out.
+           * The cost is real: closing the tab signs them out.
+           *
+           * ⚠ AND IT IS NO LONGER SAID TO THEM ON SCREEN. This path showed the five-line report
+           * under "Signed in - the session could not be saved" while the fault was being
+           * diagnosed, because it was the only channel that could say whether the retry had
+           * fired. The tablet then signed in SILENTLY - the retry committed and this path never
+           * ran - so the notice was retired to the console.
+           *
+           * ⚠ WHAT THAT COSTS, STATED PLAINLY: if this path ever runs again it is now INVISIBLE
+           * from outside the browser console, which is not reachable on a tablet. A future
+           * in-memory admission will look exactly like an ordinary sign-in. That is an accepted
+           * trade, not an oversight - the failure alert below still carries all six reason
+           * strings, so a retry that fails WITHOUT a user in hand is still reported loudly.
            */
           const stillHeld = auth.currentUser;
           if (!stillHeld) throw err;
-          console.warn('SSO: retry failed; admitting on an in-memory session.', err, retryErr);
-          setUser(stillHeld);
-          alert(
-            'Signed in - the session could not be saved.\n\n'
-            + 'You are in the app and can work normally. This device could not store the session, '
-            + 'so closing the tab will sign you out and you will need to sign in again.\n\n'
-            + `${diagnosticLines(err, retry)}\n\n`
-            + 'Send these five lines exactly as they appear.',
+          console.warn(
+            'SSO: retry failed; admitted on an in-memory session. '
+            + 'Closing the tab will sign this user out.\n'
+            + diagnosticLines(err, retry),
+            err,
+            retryErr,
           );
+          setUser(stillHeld);
         }
       }
     } catch (err) {
