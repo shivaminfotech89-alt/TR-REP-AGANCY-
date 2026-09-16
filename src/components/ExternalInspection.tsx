@@ -20,6 +20,8 @@ import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
+import { InspectionLegend } from './InspectionLegend';
+import { EXTERNAL_LEGEND_COLUMNS, EXTERNAL_LEGEND_VALUES, columnTitle } from '../lib/inspectionAbbreviations';
 
 export const TRANSFORMER_CORE_TYPES = [
   'CRGO',
@@ -1336,6 +1338,8 @@ export default function ExternalInspection() {
             </div>
           </div>
 
+          {/* ⚠ SCREEN ONLY - print:hidden, and outside the printable sheet (AUDIT G98). */}
+          <InspectionLegend columns={EXTERNAL_LEGEND_COLUMNS} values={EXTERNAL_LEGEND_VALUES} />
           <div className="bg-white rounded-lg border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
             <form onSubmit={handleSubmit}>
               <div className="min-w-max">
@@ -1377,8 +1381,8 @@ export default function ExternalInspection() {
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>OIL<br/>LEV</th>
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>OUT<br/>PAINT</th>
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>NAME<br/>PLT</th>
-                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2} title="Damage Conservator (Damaged Conservator Tank)">DAM<br/>CT</th>
-                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r-2 border-blue-400 text-center" rowSpan={2} title="Damage Radiator (Damaged Radiator fins/pipes)">DAM<br/>RAD</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r border-slate-200 text-center" rowSpan={2} title={columnTitle('DAM_CT')}>DAM<br/>CT</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[50px] border-r-2 border-blue-400 text-center" rowSpan={2} title={columnTitle('DAM_RAD')}>DAM<br/>RAD</th>
                       
                       {/* HV SIDE GROUP WITH DISTINCT OUTER BORDER */}
                       <th className="p-1.5 bg-blue-100 text-[10px] font-black text-blue-950 uppercase tracking-wider text-center border-t-2 border-l-2 border-r-2 border-blue-500 shadow-xs" colSpan={3}>
@@ -1397,24 +1401,24 @@ export default function ExternalInspection() {
                     {/* Sub-Headers for HV and LV Bushing/Metal/Cap */}
                     <tr className="border-b border-slate-300 text-[9px]">
                       {/* HV Sub-columns */}
-                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-l-2 border-r border-b-2 border-blue-500 min-w-[44px]" title="HV Bushing">
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-l-2 border-r border-b-2 border-blue-500 min-w-[44px]" title={`HV side - ${columnTitle('B')}`}>
                         B (Bush)
                       </th>
-                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r border-b-2 border-blue-500 min-w-[44px]" title="HV Metal Parts">
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r border-b-2 border-blue-500 min-w-[44px]" title={`HV side - ${columnTitle('M')}`}>
                         M (Metal)
                       </th>
-                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r-2 border-b-2 border-blue-500 min-w-[44px]" title="HV Bushing Cap / Connector">
+                      <th className="p-1 bg-blue-50 text-blue-900 font-bold text-center border-r-2 border-b-2 border-blue-500 min-w-[44px]" title={`HV side - ${columnTitle('CC')}`}>
                         CC (Cap)
                       </th>
                       
                       {/* LV Sub-columns */}
-                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-l-2 border-r border-b-2 border-indigo-500 min-w-[44px]" title="LV Bushing">
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-l-2 border-r border-b-2 border-indigo-500 min-w-[44px]" title={`LV side - ${columnTitle('B')}`}>
                         B (Bush)
                       </th>
-                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[44px]" title="LV Metal Parts">
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[44px]" title={`LV side - ${columnTitle('M')}`}>
                         M (Metal)
                       </th>
-                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[44px]" title="LV Bushing Cap / Connector">
+                      <th className="p-1 bg-indigo-50 text-indigo-900 font-bold text-center border-r-2 border-b-2 border-indigo-500 min-w-[44px]" title={`LV side - ${columnTitle('CC')}`}>
                         CC (Cap)
                       </th>
                     </tr>

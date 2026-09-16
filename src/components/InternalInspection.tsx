@@ -21,6 +21,8 @@ import { estimateMasterLink } from '../lib/settingsLinks';
 import { issuedMarks } from '../lib/issuedDocuments';
 import { OtherTenderNote } from './OtherTenderNote';
 import { classifyCoreType } from './SingleJobEstimateReport';
+import { InspectionLegend } from './InspectionLegend';
+import { INTERNAL_LEGEND_COLUMNS, INTERNAL_LEGEND_VALUES, columnTitle } from '../lib/inspectionAbbreviations';
 
 /**
  * HV COILS PER LIMB, BY CONSTRUCTION.
@@ -1545,6 +1547,8 @@ export default function InternalInspection() {
             <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, HV S.E., WAS Ring, and fill damaged coil weights before submitting.</span>
           </div>
 
+          {/* ⚠ SCREEN ONLY - print:hidden, and outside the printable sheet (AUDIT G98). */}
+          <InspectionLegend columns={INTERNAL_LEGEND_COLUMNS} values={INTERNAL_LEGEND_VALUES} />
           <div className="bg-white rounded-lg border border-slate-200 overflow-x-auto print:border-none print:shadow-none print:overflow-visible">
             <form onSubmit={handleSubmit}>
               <div className="min-w-max">
@@ -1594,7 +1598,7 @@ export default function InternalInspection() {
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[48px] border-r border-slate-200 text-center" rowSpan={2}>WAS<br/>RING</th>
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>IN.<br/>PNT</th>
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>TST<br/>TRN</th>
-                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2} title="DC (Dismantling Charge / Dismantling of Transformer)">DC</th>
+                      <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2} title={columnTitle('DC')}>DC</th>
                       <th className="p-1 bg-slate-50 text-[9px] font-bold text-slate-600 uppercase tracking-wider min-w-[45px] border-r border-slate-200 text-center" rowSpan={2}>INSU<br/>LA</th>
                       <th className="p-2 bg-rose-50/80 text-[10px] font-bold text-rose-950 uppercase tracking-wider min-w-[95px] text-center" rowSpan={2}>
                         CONDITION

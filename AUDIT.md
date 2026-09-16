@@ -19636,3 +19636,107 @@ harmless", it would have left the premise standing in the code for the next read
   headless renderer in this repo.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G98. A legend for the inspection screens - every meaning confirmed by the operator, none inferred
+
+The Internal and External Inspection screens head their columns with abbreviations - Dam CT, Dry
+Act, Was Ring, DC - and gave their meanings only in five scattered `title` attributes, which do
+nothing on a phone. These screens are used on phones.
+
+### ⚠ THE MEANINGS CAME FROM THE OPERATOR, AND THE ORDER MATTERED
+
+A first pass read each column's field name, option list and code comments, and reported every
+abbreviation marked **certain** or **guessed**, for the operator to check BEFORE anything reached a
+screen - because an expansion that is plausible and wrong is worse than none: an operator treats a
+legend as authoritative. The operator answered every one. `lib/inspectionAbbreviations.ts` holds
+those answers and nothing inferred.
+
+**Where the answers corrected the first pass:**
+
+- **HV/LV Rod was NOT answered.** The first pass guessed "3 HV + 4 LV bushing rods" from a default
+  value of 7. The owner asked for it to be asked again rather than shipped as an inference. It is
+  absent from the legend.
+- **DMG, not DAM.** The LV coil header said DMG and its dropdown said DAM. The operator confirmed DMG
+  is the term and the dropdown is the inconsistency.
+- **Two flagged guesses were right.** The Dam Rad tooltip ("fins / pipes") and the CC tooltip ("Cap /
+  Connector" - both, not one or the other) had been marked uncertain. **Flagging them is what made
+  them checkable**; stated with confidence, they would have been right by luck and unverifiable.
+- **DC is Dismantling Charge.** The existing tooltip offered two meanings at once; it was a hedge,
+  now resolved.
+- **TBR is To Be Replaced**, not repaired.
+
+### ⚠ UNCONFIRMED HEADERS ARE LEFT OUT, AND A TEST HOLDS THAT LINE
+
+`HV/LV Rod`, `OIL AVL`, `NET SHRT`, `HV LIMB` and `HV S.E.` have no confirmed meaning. OIL AVL and NET
+SHRT were marked "certain" in the first pass, from the export's own wording ("OIL AVAIL LTRS"), but
+that is still a reading, and the operator did not confirm them. They are listed in
+`UNCONFIRMED_HEADERS`, and a test fails if any of them is given a meaning while still listed.
+
+### ⚠⚠ THE DROPDOWN STILL SAYS DAM - AND CHANGING IT WAS NOT SAFE HERE
+
+The operator is right that DAM is the inconsistency. But **DAM is the stored value, and it is read**:
+`SingleJobEstimateReport:1244` counts `'DAM'` coils to price LV coil replacement (Schedule-A 13A), and
+`InternalInspection` uses it for weights at `:211`, `:313` and `:1730`. Making the dropdown emit DMG
+would make every one of those comparisons miss - silently, and the estimate would lose LV coil
+replacement. `SingleJobEstimateReport:1283` records exactly that failure having happened once, when
+the stored value and the comparison disagreed.
+
+So the legend states DMG and says the dropdown displays it as DAM. **Renaming the value is its own
+change** - the stored inspections and every consumer together - not a side effect of a legend.
+
+### Placement
+
+A native `<details>` line above each screen table, collapsed by default: opens by tap and by
+keyboard, no state. Outside the table's horizontal scroll area, so it does not slide away. Each
+screen lists only its own abbreviations; cell values (DMG / RI / OK / TBR / Y / N / -) in their own
+section. The header cells could not carry it - they are ~48px around small inputs.
+
+The screen tables' header tooltips now read from the same module - Dam CT, Dam Rad, the six HV/LV
+B / M / CC cells, and DC - so a tooltip and the legend cannot disagree.
+
+### ⚠ SCREEN ONLY - PROVED BY HASH, AND WHAT THE PROOF COVERS
+
+The printed report and the screen table are **separate render paths**: the Print button copies only
+`#printable-*-inspection-sheet`, and the legend is outside it. But that is not sufficient alone -
+`triggerUniversalPrint` falls back to `window.print()` when the element is missing, and a phone's
+Share -> Print prints the page, which the screen table is styled for. So the legend's outermost
+element is also `print:hidden`.
+
+The exact source of both printed subtrees (located by matching `<div>` depth, not line numbers) and
+both XLSX export arrays was hashed before any edit and after every edit:
+
+```
+ExternalInspection  printed  11746 chars  1445e348...53440fa3e8  IDENTICAL
+ExternalInspection  export    2158 chars  0e857f47...0b94c5ab    IDENTICAL
+InternalInspection  printed  12349 chars  1e0b5567...85f45d32    IDENTICAL
+InternalInspection  export    2050 chars  f210a0ea...171eb6e6    IDENTICAL
+```
+
+To make that possible, every edit was confined to text AFTER the screen table's wrapper: several
+tooltip strings appear identically in both the printed and the screen table, and an unscoped replace
+would have edited the printed one too. ⚠ **What the hash proves:** the code that builds the printed
+report and the export is byte-identical. **It does not prove the rendered page** - no headless
+browser exists in this repo.
+
+### ⚠ Still open, and larger than this change
+
+- **The printed reports carry the same abbreviations with no legend** - that is where a UGVCL reader
+  meets them. Out of scope by the owner's instruction.
+- **The printed tables keep their old `title` text**, including DC's two-meaning hedge. Titles do not
+  print, and the printed tree was left untouched so it could be proved identical by hash.
+- **The External export uses its own abbreviations** - `H.V.L.V ROD`, `NUTE/BOLT`, `DAM. CT. TANK`,
+  `H.V.C.C` - not expanded.
+- **HV/LV Rod, OIL AVL, NET SHRT, HV LIMB, HV S.E.** await the operator.
+- **DAM -> DMG** awaits its own change.
+
+### ⚠ ONE MORE CHECK THE TEST RUNNER CANNOT SEE
+
+The new test asked `allShorts.includes('DAM')` on an array `as const` had narrowed to the defined
+short forms. The test runner does not type-check: **294 tests passed over a type error**, and only
+tsc refused it. The same gap this session has recorded before. Fixed by widening the array's type.
+
+**Verified:** tsc (exit 0); **294 tests in 26 files**; build; hooks guard, 50 files.
+
+**Deploy:** hosting - a push to `main` (O71).
