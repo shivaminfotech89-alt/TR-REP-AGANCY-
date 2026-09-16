@@ -19302,3 +19302,224 @@ query are gone, which also removes a collection read per tender creation.
 
 **Deploy:** hosting - a push to `main` (O71). The Firestore repair is already applied and is
 not part of the deploy.
+
+---
+
+## G94. A route back to the rates, a shortened AT number, and a quota only letters can raise
+
+Three AT-screen defects, and a hazard I introduced while fixing them.
+
+⚠ **APPENDED AFTER O89, NOT INSERTED AT G93.** The G-series sits ~1,800 lines above; putting
+today's live changes there would bury them above older work. O85 established that the number is
+the ordering claim - here the write order is the honest one, and this says so rather than leaving
+a reader to wonder.
+
+### The rates were never locked - there was no way back in
+
+`adoptPublishedAt` has no guard at all, and `EstimateMaster.handleAdoptTemplate` calls it on any
+selected AT at any time. What was missing was a **route**: the only pointers were the seed panel's
+"Set rates" button, which renders while `!seedAtHasRates`, and the alert shown when the copy FAILS
+at creation. **Every path vanished once the tender was configured** - which is exactly when
+someone needs it, and it read as "the rate section cannot be changed after saving".
+
+A permanent link now sits in the AT card's tab strip, naming the state rather than hiding when
+rates exist.
+
+⚠ **AND THE CONFIRM NOW NAMES THE WORK IT RE-PRICES.** It said "This REPLACES the rates
+currently on this AT" and stopped. Estimates and bills **recompute** from the tender's rates when
+printed (F72), so every job already estimated or billed reprints at a different figure. The
+percentage dialog has counted that since G87; the same fact was absent from the action with the
+wider blast radius - a percentage changes a multiplier, a template replaces every rate. Counted
+against `selectedAt`, never `globalActiveAtMaster`.
+
+### The shortener never shipped - it was never written
+
+`git log --all -S"shorten"` returned no commit. Sixteen surfaces rendered the full reference
+inline, each with its own expression. Now one helper, sixteen surfaces, measured against **all
+seventeen live `atNumber` values** - two of which are not tender references at all.
+
+### ⚠⚠ AND IT PUT A REGEX LOOKBEHIND INTO SHIPPED SOURCE
+
+A revision carried a negative lookbehind. **Lookbehind is a parse-time SyntaxError in Safari below
+16.4, and this bundle is ONE CHUNK - so one of them blanks the entire app.** That is the failure
+still unexplained on an iPhone, and the hypothesis I spent that same morning ruling out. I wrote
+it hours later.
+
+⚠ **WHAT CAUGHT IT WAS THE ALL-VALUES TEST.** Not the sweep, which came afterwards. Not review.
+The owner required assertion against all seventeen live values rather than a sample, and **a
+sample would have held the easy dozen and shipped the hazard.**
+`ALLOTMENT NO.25903,DT.10/09/26` was being mangled to `"10-09"` - a tender period invented from a
+day and a month.
+
+Both regex faults were **speculative generality**: a slash accepted as a period separator for a
+format that does not exist, and a boundary widened without checking what it excluded. Neither was
+a missed requirement.
+
+### ⚠ A NEGATIVE RESULT WORTH HAVING WRITTEN DOWN
+
+The sweep that followed found **`src/` carries no late-WebKit parse hazard**: no regex lookbehind
+(only the comment describing the removed one), no lookahead, no class static blocks - the one
+`static` hit is a CSS print variant - no `Promise.withResolvers`, `Object.groupBy`, `toSorted`,
+`.at(` or `Object.hasOwn` in source. **This does not explain the iPhone.** It narrows what the
+blank page can be, and it is recorded so the next person reaching for this hypothesis does not
+re-derive it.
+
+### The allotment quota, and a rule not applied retrospectively
+
+`AtAllotments` initialised from `at.allotments || activeAgency.allotments` and the first letter
+wrote that inherited map back onto the AT - G72's cause, still live. A new tender now starts empty
+and only letters add.
+
+⚠ **NOT APPLIED TO EXISTING TENDERS.** `NewJob:1493` is the **enforcement** path: removing the
+fallback there would BLOCK intake (A3) on three divisions with jobs booked and no letter recorded.
+**A correct rule arriving as an outage is still an outage.** So `LEGACY_QUOTA_ATS` - an enumerated
+list of the sixteen tenders existing that day, which can only **shrink**, with a test that fails
+if it grows and an amber notice telling the operator how to end it. A new AT cannot join: no flag
+to forget, no clock that keeps working. When it empties, the module and its call sites delete.
+
+Leaving it is a **work queue, not an exemption**: `allotment-vs-letters.mjs` reports "ready to
+leave" per tender - letters must cover booked work, the same floor `lib/allotments.ts` enforces
+for a single correction. **7 of 16 could leave immediately.**
+
+### Also: one tender's quota above another's job counts
+
+`AllotmentWidget` read `activeAtMaster?.allotments` while rendering usage for the AT it was
+**given**, counting jobs by `atId`. So a division with no quota on the given tender showed the
+globally selected tender's quota against this tender's counts - two tenders in one progress bar,
+labelled with the first one's number. Nothing warned, because the arithmetic stayed plausible.
+
+### ⚠ `AtAllotments:636` - THE CLOSEST CALL, DELIBERATELY SHORTENED
+
+The rule is that the shortener never reaches a printed document. All eleven printed components are
+a disjoint set from the sixteen render sites - but the allotment **confirmation modal** is the
+nearest thing to a record an operator might keep. It is a screen dialog with no print path, so it
+takes the short form; **if it ever gains one, the rule applies then.** Flagged rather than decided
+silently.
+
+### ⚠ FOUR DEFECTS OF MINE, CAUGHT BY THE CHECKS RATHER THAN BY ME
+
+An import inserted **inside** `AtDivisions`' multi-line import - **only tsc saw it**, because the
+verification grep matched an import line sitting in the wrong place just as happily; a missing
+import in `NewJob` after I dropped it from the script; a broken `console.log` in the census
+script; and the lookbehind. Four escaping failures in inline string surgery preceded them, each
+reasoned about rather than verified.
+
+**Verified:** tsc (exit 0); **288 tests in 25 files**; build; hooks guard, 49 files.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G95. The notification panel was clipped by an ancestor, not by its own width
+
+The panel rendered, sized correctly, sat at `z-40` above the header's `z-30` - and was almost
+invisible on a narrow screen.
+
+### ⚠ A `position: absolute` ELEMENT IS CLIPPED BY ANY `overflow: hidden` ANCESTOR, REGARDLESS OF z-index
+
+`AppLayout`'s `main` carried `overflow-hidden`. The header is a **child** of it, and the panel
+opens `top-full` - below the header's 56px box - so it was cut off at the header's bottom edge.
+
+`overflow-x-hidden` now. The horizontal clip is what that element was for: a wide table must not
+push the layout sideways. **The vertical clip came along with the shorthand and was never wanted.**
+Scrolling is untouched - the content region below owns it, not `main`.
+
+### ⚠ THE COMMENT WAS WORSE THAN AN ORDINARY STALE ONE - IT MISDIRECTED
+
+It said *"same `w-[min(20rem,...)]` clamp that keeps it on screen at the header's 12px mobile
+gutter"*. The code said **24rem**, and the clamp reserved 1.5rem against a gutter that is 1.5rem
+only below `sm:`. But **the inaccuracy was not the damage.** It told a confident WIDTH story about
+a panel whose real fault was VERTICAL, and it sent the investigation to the clamp arithmetic -
+which checked out, twice.
+
+**A comment that misdirects costs more than one that is merely out of date.** A stale comment is
+discarded the moment it is found wrong; this one was used as **evidence**.
+
+### ⚠ AND A CORRECTION OF MINE THAT WAS AGREED TO AND STILL WRONG
+
+I named `AppLayout:139` as the strongest candidate and the owner agreed. `:139` is the outermost
+`div` and clips nothing relevant; the clipper is `main` at `:531`. **The mechanism was right and
+the line was not** - and the agreement made a guess feel confirmed. An agreed guess is not a
+confirmed one.
+
+Both popovers now clamp to `calc(100vw-2rem)` - one number, because there is one viewport. The
+inner bounds still differ by content: 20rem for the agency list, 24rem for notification rows
+carrying a title, a detail and an action.
+
+**Verified:** tsc (exit 0); **288 tests in 25 files**; build; hooks guard, 49 files. No
+`calc(100vw-1.5rem)` survives anywhere in `src/`.
+
+- ⚠ **NOT VERIFIED ON A DEVICE.** The fault needs a narrow viewport to see.
+
+**Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G96. An inventory that produced zero edits - and the seventh check that could not see its subject
+
+A 380px / 768px responsive inventory, run before changing anything. **Six categories examined.
+Four were noise. One was a near-miss. One was tight but working. It produced no edits at all.**
+
+Recorded because the cost-against-yield is the finding, and because an inventory reported as a
+list of hits would have produced churn on screens the owner uses daily.
+
+| category | raw hits | real |
+|---|---|---|
+| wide tables with no scroll wrapper | 7 -> 2 suspects | **0** |
+| `overflow-hidden` with an absolute child | 50 -> 5 suspects | **0 new** |
+| `fixed inset-0` modals with no gutter | 41 -> 1 suspect | **0** |
+| `grid-cols-[2-9]` with no responsive variant | 93 -> 4 suspects | **0** |
+| non-wrapping flex rows | 708 | **not assessable** |
+| `whitespace-nowrap` outside tables | 25 | parked |
+
+### ⚠ THE `TABLE_WRAP` CASE - A PATTERN HUNTING A LITERAL THAT LIVES IN A CONSTANT
+
+The wide-table check looked four lines above each `min-w` for `overflow-x-auto`. It reported
+`MrLedger:1799` and `Reports:733` as unwrapped. **Both are wrapped** - `TABLE_WRAP` is
+`overflow-x-auto -mx-2.5 sm:mx-0 px-2.5 sm:px-0` in `lib/ui.ts`, and the wrapper is the constant,
+not the text. `Reports:733` even carries a G15 comment saying its `min-w` is deliberate. **Two
+false findings, avoided only by checking.**
+
+### ⚠ THE PRINT NEAR-MISS - THE MOST EXPENSIVE OF THE FAMILY
+
+`BillingSystem:3695` matched "grid-cols-4, no responsive variant". It is inside
+`PrintableA4Page documentTitle="OIL ACCOUNT SHEET"`, in black-bordered 9px print styling - **the
+printed oil account sheet UGVCL reads.** Collapsing it would have changed a document whose
+byte-identity this audit has protected twice.
+
+**Paper has no breakpoints.** The pattern matched a class name with no notion of whether the
+element ever reaches a screen. Stopped by looking at what the element WAS rather than trusting
+what its class suggested.
+
+### ⚠ THE SEVENTH INSTANCE - AND THE FIRST WHERE THE BLIND SPOT WAS MINE
+
+The first six were patterns blind to their subject: a `grep -c` counting lines not occurrences;
+`hasOwn` matching `hasOwnProperty`; a bogus top-level-await pattern; a verdict line asserting
+"there WERE pairs to compare" off one pair of single-job tenders; the `TABLE_WRAP` proximity grep;
+the print near-miss.
+
+This one was different. `grid-cols-3` flagged `Dashboard:667` and `Dashboard:1149` - **byte-
+identical declarations**. One sits in `grid-cols-2 lg:grid-cols-4` (two-up at 380px, ~46px per
+cell); the other in `grid-cols-1 md:grid-cols-2` (full width, ~106px). **The deciding fact was 500
+lines away in both cases, and nothing in the matched text distinguished them.**
+
+So I corrected for the pattern's blind spot, measured the container - and declared `:667` broken on
+cell width alone, **without checking what the cells contain.** They hold `Ext`, `Core`, `Test` at
+9px over a mono count: ~22px of label in ~38px of inner width. **It is tight and it works.**
+
+⚠ **CELL WIDTH WAS A BETTER MEASURE THAN CLASS NAME AND STILL NOT THE DECIDING FACT.** I fixed
+the pattern's blind spot and inherited a new one. The owner had already approved the edit on my
+arithmetic; withdrawing it was the correct outcome and it came from finishing a sum I had stopped
+halfway through.
+
+### What survives for a device
+
+The only 380px finding still believed: `InternalInspection` and `ExternalInspection` freeze
+`sticky left-0` plus `sticky left-8` with a 100px JOB NO column - **~132px of a 380px viewport, a
+third of the screen, before any data shows.** Whether that is unusable or merely tight is not a
+question the code answers, and no headless renderer exists in this repo (`scripts/print-check/`
+has no puppeteer, playwright, jsdom or canvas).
+
+**Nothing was built. Nothing was committed from this inventory.**
+
+**Deploy:** none - no code changed.
