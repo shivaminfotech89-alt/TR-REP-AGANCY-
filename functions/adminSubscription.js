@@ -74,6 +74,23 @@ export function makeAdminSubscriptionAction(db) {
       // waiting for the first person to compare them.
       const base = Number(prev?.expiryDate || 0) > now ? Number(prev.expiryDate) : now;
 
+      // ⚠ PER-CALL HISTORY, APPENDED BY EVERY ACTION (AUDIT G100).
+      //
+      // Every field on this document is overwritten by the next action of its kind - grantedAt by
+      // the next grant, lastPaymentDate by the next payment - so the document could say WHAT the
+      // expiry is but never HOW it got there. ZENITH TRANSFORMERS reached 10 Mar 2031 through two
+      // actions 82 seconds apart, 1095 days past its grant, and nothing recorded how those days
+      // split between them. Each entry now records the action, its inputs, and the expiry before
+      // and after, so that question is answered from the data.
+      //
+      // Appended inside the same transaction that reads `prev`, so two concurrent actions cannot
+      // each read the old array and drop the other's entry. Admin actions are a few a year per
+      // agency, so the array stays small. The PAID RENEWAL path (functions/subscription.js) does
+      // not write here - it is not an admin action - and that gap is recorded in G100.
+      const previousExpiry = Number(prev?.expiryDate || 0) || null;
+      const priorHistory = Array.isArray(prev?.history) ? prev.history : [];
+      const withEntry = (extra) => [...priorHistory, { op, by: actor, at: now, before: previousExpiry, ...extra }];
+
       const common = {
         agencyId,
         agencyName: String(agency.name || '').trim(),
@@ -109,9 +126,10 @@ export function makeAdminSubscriptionAction(db) {
           cancelledAt: now,
           cancelledBy: actor,
           cancelReason: reason,
+          history: withEntry({ after: now, reason }),
         }, { merge: true });
 
-        return { ok: true, op, agencyId, expiryDate: now };
+        return { ok: true, op, agencyId, expiryDate: now, previousExpiry };
       }
 
       if (op === 'grant_days') {
@@ -140,9 +158,10 @@ export function makeAdminSubscriptionAction(db) {
           cancelledAt: null,
           cancelledBy: null,
           cancelReason: null,
+          history: withEntry({ after: expiryDate, days: Math.round(days), reason }),
         }, { merge: true });
 
-        return { ok: true, op, agencyId, expiryDate };
+        return { ok: true, op, agencyId, expiryDate, previousExpiry };
       }
 
       // ---- mark_paid
@@ -181,9 +200,10 @@ export function makeAdminSubscriptionAction(db) {
         cancelledAt: null,
         cancelledBy: null,
         cancelReason: null,
+        history: withEntry({ after: expiryDate, days: addDays, amount, reference }),
       }, { merge: true });
 
-      return { ok: true, op, agencyId, expiryDate, amount };
+      return { ok: true, op, agencyId, expiryDate, amount, previousExpiry };
     });
   });
 }

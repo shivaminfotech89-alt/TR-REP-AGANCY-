@@ -27,6 +27,11 @@ export type AdminSubResult = {
   agencyId: string;
   expiryDate?: number;
   amount?: number;
+  /**
+   * The expiry before this action, as the SERVER read it inside its transaction (AUDIT G100).
+   * Absent from a function deployed before G100 - callers must fall back, not assume.
+   */
+  previousExpiry?: number | null;
 };
 
 /** A refusal a person can read, rather than a Firebase error code. */

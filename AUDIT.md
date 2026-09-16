@@ -19802,3 +19802,107 @@ subtrees and export arrays were re-hashed anyway and remain identical to G98's.
 **Verified:** tsc (exit 0); **295 tests in 26 files**; build; hooks guard, 50 files.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G100. Three years added to a subscription, and no screen ever showed the date
+
+The owner marked ZENITH TRANSFORMERS paid from the Admin Panel - cash, 365 days - and the panel then
+read **"1636 days left"**, which looked like 1636 days had been applied.
+
+### What the record actually held
+
+`subscriptions/cF00GwhxgSbKQjAr3iL9`, read directly: `expiryDate` **10 Mar 2031 07:22:02.854**,
+1,635.6 days from the read - the panel renders `Math.ceil` of that as 1636. So 1636 was a **span from
+today**, not days applied: the owner's reading of the display was right.
+
+The owner's reading of the arithmetic was not, and neither record-keeping nor screen could settle it:
+
+- The previous expiry was **10 Mar 2028** - exactly `startDate + 547 days`, the eighteen-month grant.
+- One paid year on top would have reached **10 Mar 2029**. The record reached **2031: 1,095 days, three
+  years, past the grant**.
+- **Two actions ran 82 seconds apart**: a `grant_days` ("Year membership", 15:41:47) and the `mark_paid`
+  (15:43:09). Both extended from the future expiry - the time of day still matches `startDate` to the
+  millisecond.
+- ⚠ **How the three years split is not recoverable.** Each action overwrites its own fields - the
+  latest grant, the latest payment - the function kept no per-call log, and the Cloud Function log
+  query returned nothing. The owner was asked how many days the grant entered and whether either
+  button was tapped twice; **both answers came back as unfilled placeholders**, so this entry does not
+  claim either.
+
+### ⚠⚠ THE FAILURE WAS INVISIBILITY, NOT THE RULE
+
+The code extends from the existing expiry while it is ahead - deliberately, for renewals, so nobody
+loses days. The owner considered whether a granted agency converting to paid should instead REPLACE
+the grant, and **kept extending**: silently removing months a customer was told were free is the harder
+mistake to explain.
+
+What failed is that **nothing ever showed a date**:
+- the mark-paid and grant forms showed only a **Days** box, prefilled with 30;
+- **there was no confirm step** - Record wrote immediately;
+- the success message said "Rs 5,900 recorded as paid (manual)" - no days, no date;
+- the only number afterwards was a days-left count, which read as days applied.
+
+Three years were added and no screen ever showed 2031.
+
+### Fix 1 - the dates, before the write
+
+Both forms now show **"Current expiry 10 Mar 2028 -> new expiry 10 Mar 2029"**, and say whether the days
+stack on the current expiry or start today. Cancel shows the date it moves from. Dates use a written
+month - `10/03/2028` and `03/10/2028` are both plausible to someone checking in a hurry.
+
+⚠ **The server is the authority; the form mirrors its rule, and says so.** The rule lives in
+`functions/adminSubscription.js`, plain JS in a separate package that cannot import the client's
+`lib/subscriptionExtension.ts`. So the form shows the client's PREVIEW before the write, and the success
+message shows the dates the SERVER returned after it (`previousExpiry` -> `expiryDate`). If the two ever
+disagree, the disagreement is on screen. A test reconstructs the ZENITH record: three 365-day extensions
+on the 10 Mar 2028 grant reach exactly 10 Mar 2031.
+
+### ⚠⚠ Fix 2 - A DOUBLE-TAP GUARD THAT COULD NOT GUARD, ON A FUNCTION THAT ADDS TIME
+
+The form guarded with `if (busy || !open) return`. **`busy` is React state, read from the render the click
+happened in** - so two taps landing before the next render BOTH saw `busy === false`, and BOTH called the
+function. On most buttons that is a duplicate. **On this one, each call adds a full period**, because the
+server extends from the expiry the previous call just wrote: two taps on Record with 365 days add two
+years, and nothing on screen says anything happened twice.
+
+Recorded as its own finding **regardless of whether it caused the ZENITH record** - it is not proven to
+have, and it could have. The guard is now a ref, set synchronously and read by the second tap
+immediately; `busy` remains for the spinner.
+
+### Fix 3 - per-call history
+
+Every action - cancel, grant, mark paid - now appends `{ op, by, at, before, after, days | amount |
+reference | reason }` to `history` on the subscription document, inside the same transaction that reads
+the previous state, so concurrent actions cannot drop each other's entry. The next "why is it 2031" is
+answered from the data.
+
+- ⚠ **NOT LIVE UNTIL THE FUNCTION IS DEPLOYED.** A push to `main` deploys hosting only; this needs
+  `firebase deploy --only functions`, which was not run. Until then the old function writes no history
+  and returns no `previousExpiry` - the client falls back to the expiry it held when the form opened.
+- ⚠ **THE PAID RENEWAL PATH DOES NOT WRITE HISTORY.** `functions/subscription.js` extends by the same
+  rule for Razorpay renewals, but it is not an admin action and was out of scope.
+
+### Correcting ZENITH - dry-run, not applied
+
+`scripts/admin/set-subscription-expiry.mjs`, dry run by default, `--apply` requiring `--reason`. It writes
+**only** `expiryDate` and one `history` entry (`correct_expiry`, before, after, reason); status, amount,
+start date and payment fields are untouched. The time of day (07:22:02.854) is kept. What the expiry also
+reaches: the write gate (still open for any future date), the admin panel's days-left figure, and the
+customer's **receipt, which prints "Runs to <expiry>" live from the record** - a reprint shows the new
+date.
+
+**The target date was an unfilled placeholder**, so nothing was applied. Dry-run for the three the
+evidence supports:
+
+| target | change | days left | meaning |
+|---|---|---|---|
+| 10 Mar 2030 | -365 days | 1271 | grant of 365 + paid 365, both stacking |
+| 10 Mar 2029 | -730 days | 906 | paid 365 on the grant; the "Year membership" grant not intended |
+| 16 Sep 2027 | -1271 days | 365 | paid year REPLACES the grant (the rule the owner declined) |
+
+**Verified:** tsc (exit 0); **302 tests in 27 files**; build; hooks guard, 50 files;
+`node --check functions/adminSubscription.js`.
+
+**Deploy:** hosting - a push to `main` (O71) for fixes 1 and 2. **Fix 3 needs `firebase deploy --only
+functions`**, not yet run.

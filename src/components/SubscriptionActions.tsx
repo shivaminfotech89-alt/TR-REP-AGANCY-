@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { formatPrice, SUBSCRIPTION_INCLUSIVE_INR } from '../lib/pricing';
+import { previewExtension, formatExpiry } from '../lib/subscriptionExtension';
+import { serverNow } from '../lib/serverClock';
 import { classifySubscription, type SubscriptionRecord } from '../lib/subscriptionStatus';
 import {
   cancelSubscription, grantDays, markPaid, AdminSubError, type AdminSubOp,
@@ -44,29 +46,63 @@ export function SubscriptionActions({ agencyId, agencyName, sub, onDone }: Props
     setAmount(String(SUBSCRIPTION_INCLUSIVE_INR)); setError(null);
   };
 
+  /**
+   * ⚠ THE DOUBLE-TAP GUARD IS A REF, NOT THE `busy` STATE (AUDIT G100).
+   *
+   * This read `if (busy || !open) return`. `busy` is React state, captured by the render the click
+   * happened in - so two taps landing before the next render BOTH see `busy === false`, and both
+   * call the function. On most buttons that is a duplicate; on THIS one each call ADDS A FULL PERIOD,
+   * because the server extends from whatever expiry the previous call just wrote. Two taps on "Record"
+   * with 365 days would add two years and show nothing wrong. A ref is set synchronously and read by
+   * the second tap immediately. `busy` stays for the spinner and the disabled state.
+   *
+   * Recorded as a finding in its own right: it is not proven to have caused the ZENITH record, but
+   * it could have, and nothing on screen would have told anyone.
+   */
+  const inFlight = useRef(false);
+
+  /** "10 Mar 2028 -> 10 Mar 2029", from the dates the SERVER returned, with the client's as fallback. */
+  const movement = (before: number | null | undefined, after: number | undefined) =>
+    after ? ` Expiry ${formatExpiry(before ?? null)} → ${formatExpiry(after)}.` : '';
+
   const run = async () => {
-    if (busy || !open) return;
+    if (inFlight.current || !open) return;
+    inFlight.current = true;
     setBusy(true); setError(null);
+    // What the record held when this form was used. The server's own `previousExpiry` wins when it
+    // is returned; a function deployed before G100 does not return it.
+    const clientBefore = sub?.expiryDate ?? null;
     try {
       if (open === 'cancel') {
-        await cancelSubscription(agencyId, reason);
-        onDone(`${agencyName}: subscription cancelled.`);
+        const r = await cancelSubscription(agencyId, reason);
+        onDone(`${agencyName}: subscription cancelled.${movement(r.previousExpiry ?? clientBefore, r.expiryDate)}`);
       } else if (open === 'grant_days') {
         const n = Number(days);
-        await grantDays(agencyId, n, reason);
-        onDone(`${agencyName}: ${n} days granted.`);
+        const r = await grantDays(agencyId, n, reason);
+        onDone(`${agencyName}: ${n} days granted.${movement(r.previousExpiry ?? clientBefore, r.expiryDate)}`);
       } else {
         const amt = Number(amount);
-        await markPaid(agencyId, reference, amt, Number(days) || 365);
-        onDone(`${agencyName}: ${formatPrice(amt)} recorded as paid (manual).`);
+        const r = await markPaid(agencyId, reference, amt, Number(days) || 365);
+        onDone(`${agencyName}: ${formatPrice(amt)} recorded as paid (manual).${movement(r.previousExpiry ?? clientBefore, r.expiryDate)}`);
       }
       close();
     } catch (e: any) {
       setError(e instanceof AdminSubError ? e.message : String(e?.message || 'Failed.'));
     } finally {
+      inFlight.current = false;
       setBusy(false);
     }
   };
+
+  /**
+   * ⚠ THE RESULTING DATE, BEFORE THE WRITE (AUDIT G100). Three years were added to ZENITH and no
+   * screen ever showed 2031. This shows the current expiry, the new one, and whether the days stack
+   * on the existing expiry or start today - using the server's rule, mirrored in
+   * lib/subscriptionExtension.ts.
+   */
+  const preview = open && open !== 'cancel'
+    ? previewExtension(sub?.expiryDate ?? null, Number(open === 'mark_paid' ? (Number(days) || 365) : days), serverNow())
+    : null;
 
   const btn = 'text-[10px] font-bold uppercase tracking-wide px-2.5 py-1.5 rounded-lg border';
 
@@ -102,8 +138,9 @@ export function SubscriptionActions({ agencyId, agencyName, sub, onDone }: Props
 
       {open === 'cancel' && (
         <p className="text-[10px] text-slate-600">
-          The expiry moves to now. The provenance is kept, so a cancelled grant still reads as a
-          grant, and the row will say CANCELLED rather than EXPIRED.
+          The expiry moves from <strong>{formatExpiry(sub?.expiryDate ?? null)}</strong> to now. The
+          provenance is kept, so a cancelled grant still reads as a grant, and the row will say
+          CANCELLED rather than EXPIRED.
         </p>
       )}
 
@@ -122,6 +159,26 @@ export function SubscriptionActions({ agencyId, agencyName, sub, onDone }: Props
             </label>
           )}
         </div>
+      )}
+
+      {open !== 'cancel' && (
+        preview ? (
+          <div className="text-[11px] bg-white border border-slate-300 rounded px-2 py-1.5 space-y-0.5">
+            <p className="text-slate-700">
+              Current expiry <strong className="font-mono tabular-nums">{formatExpiry(preview.currentExpiry)}</strong>
+              {' → '}new expiry <strong className="font-mono tabular-nums text-slate-900">{formatExpiry(preview.newExpiry)}</strong>
+            </p>
+            <p className="text-[10px] text-slate-500">
+              {preview.extendsFromExisting
+                ? 'These days are added ON TOP of the current expiry, which is still ahead.'
+                : preview.currentExpiry
+                  ? 'The current expiry has passed, so these days start from today.'
+                  : 'No current expiry, so these days start from today.'}
+            </p>
+          </div>
+        ) : (
+          <p className="text-[10px] text-slate-500">Enter a number of days to see the new expiry.</p>
+        )
       )}
 
       <label className="block">
