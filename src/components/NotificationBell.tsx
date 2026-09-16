@@ -21,8 +21,18 @@ import { isDismissed, dismiss, undismiss } from '../lib/notificationDismissal';
  * working that agency. See lib/notificationDismissal.ts.
  *
  * ⚠ THE POPOVER IS AgencySwitcher'S, ON PURPOSE. Same outside-click and Escape handling, same
- * `w-[min(20rem,...)]` clamp that keeps it on screen at the header's 12px mobile gutter, same
- * close-then-navigate. A second popover implementation is a second set of these bugs.
+ * `w-[min(...,calc(100vw-2rem))]` clamp, same close-then-navigate. A second popover
+ * implementation is a second set of these bugs. The INNER bound differs by design - 24rem here
+ * against 20rem there, because these rows carry a title, a detail line and an action.
+ *
+ * ⚠ THIS COMMENT USED TO SAY "same `w-[min(20rem,...)]` clamp that keeps it on screen at the
+ * header's 12px mobile gutter" - AND IT WAS WORSE THAN AN ORDINARY STALE COMMENT (AUDIT G95).
+ * It was wrong twice: the code said 24rem, and the clamp was reserving 1.5rem against a gutter
+ * that is 1.5rem only below `sm:`. But the damage was not the inaccuracy. It told a CONFIDENT
+ * WIDTH STORY for a panel whose real fault was VERTICAL - clipped by an `overflow-hidden`
+ * ancestor - and it sent the investigation to the clamp arithmetic, which checked out, twice.
+ * A comment that MISDIRECTS costs more than one that is merely out of date: the stale one is
+ * ignored once found wrong, while this one was used as evidence.
  *
  * ⚠ z-40, BETWEEN THE HEADER AND THE MODALS. The header is z-30 and the logout confirm is
  * z-50; a panel at z-50 would draw over a modal that is asking a question.
@@ -115,7 +125,7 @@ export default function NotificationBell() {
         <div
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-full mt-1.5 w-[min(24rem,calc(100vw-1.5rem))] bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 max-h-[70vh] overflow-y-auto"
+          className="absolute right-0 top-full mt-1.5 w-[min(24rem,calc(100vw-2rem))] bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 max-h-[70vh] overflow-y-auto"
         >
           <div className="px-3 py-1.5 flex items-center justify-between gap-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">

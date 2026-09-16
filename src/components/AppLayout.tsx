@@ -528,7 +528,21 @@ export default function AppLayout({ user }: { user: User }) {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col h-full min-w-0 print:overflow-visible overflow-hidden">
+      {/* ⚠ `overflow-x-hidden`, NOT `overflow-hidden` - AND THE DIFFERENCE IS A CLIPPED POPOVER
+          (AUDIT G95).
+
+          A `position: absolute` element is clipped by ANY ancestor with `overflow: hidden`,
+          REGARDLESS OF z-index. The header below is a child of this element, and the
+          notification panel opens `top-full` - i.e. BELOW the header's 56px box - so with
+          `overflow-hidden` here the panel was cut off at the header's bottom edge. It rendered,
+          it was correctly sized, it sat at z-40 above the header's z-30, and almost none of it
+          was visible.
+
+          The vertical clip was never wanted. This element exists to stop HORIZONTAL overflow -
+          a wide table pushing the whole layout sideways - and the vertical clip came along with
+          the shorthand. Scrolling is unaffected: the content region below (`flex-1
+          overflow-y-auto`) owns it, not this element. */}
+      <main className="flex-1 flex flex-col h-full min-w-0 print:overflow-visible overflow-x-hidden">
         {/* Header with Mobile Menu Button & Theme Selector */}
         <header className={`h-14 sm:h-16 ${currentTheme.headerBg} border-b ${currentTheme.headerBorder} flex items-center justify-between px-3 sm:px-6 shrink-0 print:hidden z-30 transition-colors duration-200`}>
           <div className="flex gap-2 sm:gap-4 items-center min-w-0">

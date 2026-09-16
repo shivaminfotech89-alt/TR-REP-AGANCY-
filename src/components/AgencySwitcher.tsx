@@ -86,7 +86,13 @@ export default function AgencySwitcher({ appLogo }: { appLogo?: string }) {
       {open && (
         <div
           role="listbox"
-          className="absolute left-0 top-full mt-1.5 w-[min(20rem,calc(100vw-1.5rem))] bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50 max-h-[70vh] overflow-y-auto"
+          /* ⚠ ONE NUMBER FOR BOTH POPOVERS (AUDIT G95). This and NotificationBell both clamp to
+             `calc(100vw-2rem)`. They were 1.5rem, which reserves 12px a side - right at the
+             header's `px-3` mobile gutter and 12px short of its `sm:px-6` one, so above `sm:`
+             a popover could sit closer to the edge than the header it hangs from. The inner
+             bound still differs by content (20rem here, 24rem there); the viewport clamp does
+             not, because there is only one viewport. */
+          className="absolute left-0 top-full mt-1.5 w-[min(20rem,calc(100vw-2rem))] bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-50 max-h-[70vh] overflow-y-auto"
         >
           <p className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-400">
             Switch agency
