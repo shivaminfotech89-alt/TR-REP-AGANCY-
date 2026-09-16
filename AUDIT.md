@@ -19117,3 +19117,52 @@ tsc, the tests, the build and the hooks guard all passing.
   that says whether the retry fired. It drops to a `console.warn` once the tablet confirms.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O88. The tablet went quiet - which fixed the fault without testing the claim underneath it
+
+**The tablet signed in with no message at all.** The retry fired, the commit succeeded, and the in-memory
+admission path never ran. O87 holds, and the customer-facing failure that opened this thread is closed.
+
+### ⚠ AND THE CLAIM IT RESTS ON IS STILL UNOBSERVED
+
+O86 asserted that `auth.currentUser` is populated at the catch, and O87 built the admission path on top of that
+assertion. **A silent success does not test it.**
+
+The successful path commits the `User` the SDK already holds; **the reading that would prove the claim lives on
+the admission path, which did not run.** So the fix works, and the fact underneath it has still never been seen -
+across three entries and two shipped changes.
+
+⚠ **RECORDED AS UNOBSERVED RATHER THAN AS CONFIRMED**, because a working fix is the most persuasive possible
+argument for a premise that was never checked, and that is exactly when the distinction stops being pedantic. The
+only evidence that would settle it is a `retry: not attempted (no session in memory)` - the string that says the
+claim is false - or an admission that actually fires.
+
+### The notice retires to the console, and what that costs
+
+The five-line report on the admission path existed because it was **the only channel that could say whether the
+retry had fired** on a device with no reachable console. The tablet has now said so, so it drops to a
+`console.warn`.
+
+⚠ **WHAT THAT COSTS, STATED RATHER THAN GLOSSED:** if that path ever runs again it is **invisible**. A future
+in-memory admission will look exactly like an ordinary sign-in, and the operator will be on a session that dies
+with the tab without being told. **Accepted, not overlooked** - the failure alert still carries all six reason
+strings, so a retry that fails *without* a user in hand is still reported loudly. The silent case is the one
+where the app works.
+
+### ⚠ THE COMMENT CHANGED WITH THE CODE, AND THAT WAS NOT AUTOMATIC
+
+The block said *"The cost is real and is stated to them: closing the tab signs them out."* **Removing the alert
+made that sentence false.** Nothing would have caught it: a comment asserting behaviour the code no longer has is
+invisible to tsc, to the tests, to the build and to the hooks guard - which is not a hypothetical. This session
+has already produced exactly that defect, a comment claiming two import removals that had not happened, with all
+four checks passing over it.
+
+**Verified by grep rather than by having written it:** exactly one `alert(` survives and it is the failure path;
+**zero** `alert(` between `stillHeld` and the outer catch, so the new comment is true of the code;
+`diagnosticLines` still reaches both surfaces - the failure alert and the admission `console.warn`.
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 20 insertions, 9 deletions.
+
+**Deploy:** hosting - a push to `main` (O71).
