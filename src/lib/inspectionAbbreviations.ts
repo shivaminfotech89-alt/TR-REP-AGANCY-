@@ -14,17 +14,20 @@
  * inference is not. An expansion that is plausible and wrong is worse than none, because an
  * operator reading a legend treats it as authoritative.
  *
- * ⚠ AND SOME HEADERS ARE DELIBERATELY ABSENT, because nobody has confirmed them:
+ * ⚠⚠ FIVE HEADERS WERE WITHHELD UNTIL ANSWERED, NOT INFERRED (AUDIT G99): HV/LV Rod, OIL AVL,
+ * NET SHRT, HV LIMB and HV S.E. They shipped with NO meaning in the first legend and were added
+ * only when the operator confirmed them - OIL AVL and NET SHRT included, even though the export's
+ * own wording suggested their meanings, because a suggestion is still a reading.
  *
- *     HV/LV Rod   the first pass guessed "3 HV + 4 LV bushing rods" from a default of 7. The owner
- *                 asked for this to be asked again rather than shipped as an inference.
- *     OIL AVL     not in the operator's answers. The export's own wording ("OIL AVAIL LTRS")
- *     NET SHRT    suggests "oil available" and "net shortage", but that is still a reading.
- *     HV LIMB     not in the answers.
- *     HV S.E.     not in the answers here (its code tooltip explains the Schedule-A pricing).
+ * ⚠ THE ONE WORTH READING IS HV/LV ROD. The first pass guessed "3 HV + 4 LV bushing rods", from a
+ * default value of 7 in the field. The operator's answer is simply the rod on each side - "HV/LV
+ * side Rod". The guess was SPECIFIC, PLAUSIBLE AND WRONG, in a way nobody reading the legend could
+ * have detected: a number that adds up reads as knowledge. Had it shipped, the legend would have
+ * taught every operator something false about a part priced per rod under Schedule-A item 1c.
  *
- * `UNCONFIRMED_HEADERS` lists them, and a test fails if any is given a meaning below without being
- * removed from that list first. Add one when the operator confirms it - never from a field name.
+ * `UNCONFIRMED_HEADERS` is empty now and kept, because the rule outlives these five: a header whose
+ * meaning is not confirmed goes there, and a test fails if it is given a meaning while still listed.
+ * Add from the operator's answer - never from a field name.
  *
  * ⚠ SCREEN ONLY. Nothing here may reach a printed inspection report: the legend is `print:hidden`
  * and sits outside the `printable-*-inspection-sheet` element the Print button copies. The printed
@@ -59,11 +62,16 @@ export const COLUMN_ABBREVIATIONS = {
   B:         { short: 'B',        meaning: 'Bushing' },
   M:         { short: 'M',        meaning: 'Metal Parts' },
   CC:        { short: 'CC',       meaning: 'Cap / Connector - the bushing cap and the connector together' },
+  HV_LV_ROD: { short: 'HV/LV Rod', meaning: 'HV/LV side Rod' },
+  OIL_AVL:   { short: 'Oil Avl',  meaning: 'Oil Available' },
+  NET_SHRT:  { short: 'Net Shrt', meaning: 'Net Shortage' },
 
   WIND:      { short: 'Wind',     meaning: 'Winding material - AL aluminium, CU copper' },
   HV_HT:     { short: 'HV / HT',  meaning: 'High Voltage / High Tension - the two are used interchangeably' },
   LV_LT:     { short: 'LV / LT',  meaning: 'Low Voltage / Low Tension - the two are used interchangeably' },
   RYB:       { short: 'R / Y / B', meaning: 'Red, Yellow, Blue - the three phases' },
+  HV_LIMB:   { short: 'HV Limb',  meaning: 'Coils per limb' },
+  HV_SE:     { short: 'HV S.E.',  meaning: 'Super Enamelled' },
   WAS_RING:  { short: 'Was Ring', meaning: 'Washers and Rings' },
   IN_PNT:    { short: 'In Pnt',   meaning: 'Inside Paint' },
   TST_TRN:   { short: 'Tst Trn',  meaning: 'Testing of Transformer' },
@@ -95,18 +103,19 @@ export const VALUE_ABBREVIATIONS = {
 export type ColumnKey = keyof typeof COLUMN_ABBREVIATIONS;
 export type ValueKey = keyof typeof VALUE_ABBREVIATIONS;
 
-/** Headers on these screens that have NO confirmed meaning yet. See the header comment. */
-export const UNCONFIRMED_HEADERS: readonly string[] = ['HV/LV Rod', 'OIL AVL', 'NET SHRT', 'HV LIMB', 'HV S.E.'];
+/** Headers on these screens that have NO confirmed meaning yet. Empty since G99. See the header comment. */
+export const UNCONFIRMED_HEADERS: readonly string[] = [];
 
 /** What each screen's legend lists - only what that screen actually shows. */
 export const EXTERNAL_LEGEND_COLUMNS: readonly ColumnKey[] = [
-  'KVA', 'KV', 'CRGO', 'OIL_CAP', 'LESS_OIL', 'SL_BL', 'DRY_ACT', 'CLN_TANK', 'OIL_LEV',
-  'OUT_PAINT', 'NAME_PLT', 'DAM_CT', 'DAM_RAD', 'HV_HT', 'LV_LT', 'B', 'M', 'CC',
+  'KVA', 'KV', 'CRGO', 'OIL_CAP', 'LESS_OIL', 'SL_BL', 'HV_LV_ROD', 'DRY_ACT', 'CLN_TANK', 'OIL_LEV',
+  'OUT_PAINT', 'NAME_PLT', 'DAM_CT', 'DAM_RAD', 'HV_HT', 'LV_LT', 'B', 'M', 'CC', 'OIL_AVL', 'NET_SHRT',
 ];
 export const EXTERNAL_LEGEND_VALUES: readonly ValueKey[] = ['Y', 'N', 'NA', 'TBR'];
 
 export const INTERNAL_LEGEND_COLUMNS: readonly ColumnKey[] = [
-  'KVA', 'CRGO', 'WIND', 'HV_HT', 'LV_LT', 'RYB', 'WAS_RING', 'IN_PNT', 'TST_TRN', 'DC', 'INSULA',
+  'KVA', 'CRGO', 'WIND', 'HV_HT', 'LV_LT', 'RYB', 'HV_LIMB', 'WAS_RING', 'IN_PNT', 'TST_TRN', 'DC',
+  'INSULA', 'HV_SE',
 ];
 export const INTERNAL_LEGEND_VALUES: readonly ValueKey[] = ['DMG', 'RI', 'OK', 'Y', 'N', 'NA'];
 

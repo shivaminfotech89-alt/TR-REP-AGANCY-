@@ -20,14 +20,28 @@ const allShorts: string[] = [
 const norm = (s: string) => s.replace(/[\s/.]/g, '').toUpperCase();
 
 test('⚠⚠ an UNCONFIRMED header is never given a meaning', () => {
-  // HV/LV Rod was guessed from a default of 7 and the owner asked for it to be asked again rather
-  // than shipped. Giving any of these a meaning requires removing it from UNCONFIRMED_HEADERS first.
+  // ⚠ EMPTY SINCE G99, SO THIS LOOP CURRENTLY ASSERTS NOTHING - it would pass whatever the module
+  // held. Kept as the guard for the next header whose meaning is unknown: list it, and giving it a
+  // meaning fails here until it is removed. The five it held are pinned by the test below instead,
+  // so emptying the list did not leave them unprotected.
   for (const h of UNCONFIRMED_HEADERS) {
     assert.ok(
       !allShorts.some(s => norm(s) === norm(h)),
       `${h} has a meaning but is still listed as unconfirmed`,
     );
   }
+});
+
+test('⚠ the five withheld until answered carry exactly the operator\'s meanings', () => {
+  // These shipped with NO meaning until confirmed (AUDIT G99). Pinned verbatim, because the reason
+  // they were withheld is that a plausible substitute is undetectable once on screen.
+  assert.equal(COLUMN_ABBREVIATIONS.HV_LV_ROD.meaning, 'HV/LV side Rod');   // NOT "3 HV + 4 LV bushing rods"
+  assert.equal(COLUMN_ABBREVIATIONS.OIL_AVL.meaning, 'Oil Available');
+  assert.equal(COLUMN_ABBREVIATIONS.NET_SHRT.meaning, 'Net Shortage');
+  assert.equal(COLUMN_ABBREVIATIONS.HV_LIMB.meaning, 'Coils per limb');
+  assert.equal(COLUMN_ABBREVIATIONS.HV_SE.meaning, 'Super Enamelled');
+  assert.ok(!/bushing|3 HV|4 LV/i.test(COLUMN_ABBREVIATIONS.HV_LV_ROD.meaning), 'the rejected inference crept back in');
+  assert.equal(UNCONFIRMED_HEADERS.length, 0);
 });
 
 test('every key a legend lists exists', () => {

@@ -19740,3 +19740,65 @@ tsc refused it. The same gap this session has recorded before. Fixed by widening
 **Verified:** tsc (exit 0); **294 tests in 26 files**; build; hooks guard, 50 files.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## G99. Five meanings withheld until answered - and the one inference that would have taught something false
+
+G98 shipped the inspection legend with five headers deliberately given **no meaning**: HV/LV Rod,
+OIL AVL, NET SHRT, HV LIMB and HV S.E. The operator has now answered all five, and they are in:
+
+| header | meaning |
+|---|---|
+| HV/LV Rod | HV/LV side Rod |
+| OIL AVL | Oil Available |
+| NET SHRT | Net Shortage |
+| HV LIMB | Coils per limb |
+| HV S.E. | Super Enamelled |
+
+### ⚠⚠ ALL FIVE WERE WITHHELD RATHER THAN INFERRED - AND ONE INFERENCE WAS WRONG
+
+OIL AVL and NET SHRT were held out even though the export's own wording ("OIL AVAIL LTRS", "NET
+SHORT LTRS") suggested exactly what the operator later confirmed. That looks over-cautious in
+hindsight. HV/LV Rod is why it was not.
+
+The first pass guessed HV/LV Rod as **"3 HV + 4 LV bushing rods"**, reasoning from a default value of
+7 in the field. The operator's answer is simply **the rod on each side**. The guess was **specific,
+plausible and wrong, in a way nobody reading the legend could have detected**: a number that adds
+up reads as knowledge, and the three-phase-plus-neutral arithmetic is exactly the kind of detail
+that makes an explanation believed. On screen, it would have taught every operator something false
+about a part priced per rod under Schedule-A item 1c.
+
+Withholding costs one round of questions. Inferring costs nothing visible - which is the problem.
+
+### ⚠ AND MY OWN CONCLUSION ON IT WAS OVERTAKEN
+
+The operator had twice answered "HV/LV Rod" - restating the header. Asked whether that meant the
+question was not landing, I checked Schedule-A itself (item 1c: "Replacement of HV/LV rod gaskets
+(flat gasket, D bush, cone bush)", unit `Rod`; the estimate master row named 'HV/LV rod') and
+concluded it was the full term needing no legend entry at all - and added a list recording that.
+The owner then confirmed a meaning, "HV/LV side Rod", and asked for the entry. The list was removed
+rather than left contradicting the entry beside it.
+
+The Schedule-A check still stands as evidence that the rod is a known part with no longer name. What
+the field's default of 7 counts remains a separate question, unanswered, and nothing on screen claims
+to answer it.
+
+### ⚠ A TEST THAT PASSES BY ASSERTING NOTHING
+
+G98's guard - an unconfirmed header may not be given a meaning - loops over `UNCONFIRMED_HEADERS`.
+With the list now empty, **it still passes, and it asserts nothing**: it would pass whatever the
+module held. The same shape this audit has recorded all day, a check that cannot see its subject.
+
+It is kept, commented as empty, because the rule outlives these five. And the five it used to protect
+are now pinned verbatim by a separate test - including an assertion that "bushing", "3 HV" and "4 LV"
+never creep back into HV/LV Rod - so emptying the list did not leave them unguarded.
+
+### Screen only, unchanged
+
+Only `lib/inspectionAbbreviations.ts` and its test changed; no component was edited. The printed
+subtrees and export arrays were re-hashed anyway and remain identical to G98's.
+
+**Verified:** tsc (exit 0); **295 tests in 26 files**; build; hooks guard, 50 files.
+
+**Deploy:** hosting - a push to `main` (O71).
