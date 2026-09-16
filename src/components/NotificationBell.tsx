@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { Bell, AlertTriangle, Info, CircleAlert, Check, X } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
@@ -20,19 +21,45 @@ import { isDismissed, dismiss, undismiss } from '../lib/notificationDismissal';
  * (G37) and a shared store would let one person's dismissal clear the notice for everyone
  * working that agency. See lib/notificationDismissal.ts.
  *
- * ⚠ THE POPOVER IS AgencySwitcher'S, ON PURPOSE. Same outside-click and Escape handling, same
- * `w-[min(...,calc(100vw-2rem))]` clamp, same close-then-navigate. A second popover
- * implementation is a second set of these bugs. The INNER bound differs by design - 24rem here
- * against 20rem there, because these rows carry a title, a detail line and an action.
+ * ⚠ THE PANEL IS PORTALED TO `document.body` AND PLACED AGAINST THE VIEWPORT (AUDIT G97).
  *
- * ⚠ THIS COMMENT USED TO SAY "same `w-[min(20rem,...)]` clamp that keeps it on screen at the
- * header's 12px mobile gutter" - AND IT WAS WORSE THAN AN ORDINARY STALE COMMENT (AUDIT G95).
- * It was wrong twice: the code said 24rem, and the clamp was reserving 1.5rem against a gutter
- * that is 1.5rem only below `sm:`. But the damage was not the inaccuracy. It told a CONFIDENT
- * WIDTH STORY for a panel whose real fault was VERTICAL - clipped by an `overflow-hidden`
- * ancestor - and it sent the investigation to the clamp arithmetic, which checked out, twice.
- * A comment that MISDIRECTS costs more than one that is merely out of date: the stale one is
- * ignored once found wrong, while this one was used as evidence.
+ * It used to be AgencySwitcher's popover copied - `absolute`, inside the bell's `relative`
+ * wrapper - with ONE change: anchored `right-0` where the switcher is `left-0`. That change was
+ * the fault. The switcher sits at the header's LEFT edge and grows rightward, so it stays on
+ * screen. The bell is NOT the header's rightmost control - the theme button and sign-out sit to
+ * its right - so a panel right-aligned to the bell and `min(24rem, 100vw-2rem)` wide started
+ * roughly 80-110px LEFT of the screen at 380px, and the layout's overflow clipping cut that off.
+ * The width clamp guaranteed the panel FIT the viewport; nothing checked where it BEGAN.
+ *
+ * ⚠⚠ AND G95 "FIXED" A DIFFERENT FAULT, IN THREE PLACES. Its commit message, the comment that
+ * stood here and its audit entry all said the panel was clipped VERTICALLY at the header's
+ * bottom edge, and changed AppLayout's `main` to `overflow-x-hidden` to free that axis. CSS
+ * contradicts the mechanism directly: when one overflow axis is not `visible`, a `visible` value
+ * on the other COMPUTES to `auto`. `main` clipped both axes before the change and after it. And
+ * `main`'s box runs the full height below the header, so a 70vh panel was never cut there.
+ * A wrong explanation written in three places is how a wrong fact becomes durable.
+ *
+ * WHY A PORTAL, AFTER TWO WRONG GUESSES AT THE CLIPPING ANCESTOR: in `body` it has no ancestor
+ * that can clip it, so the fix does not depend on being right about which one does. A
+ * `position: fixed` panel WITHOUT a portal is weaker in principle - any ancestor with
+ * `transform`, `filter` or `backdrop-filter` becomes its containing block. No header theme has
+ * one today; a future `backdrop-blur` would have broken this again, silently.
+ *
+ * What the portal COSTS, handled below and easy to get wrong:
+ *   - OUTSIDE-CLICK. A portaled panel is not a DOM child of the bell's wrapper, so
+ *     `ref.contains(target)` alone would treat EVERY click inside the panel - the dismiss X,
+ *     the links - as outside, and close it. A second ref covers the panel.
+ *   - TAB ORDER. The panel's DOM sits at the end of `body`; without moving focus into it on
+ *     open, Tab from the bell would walk the whole page before reaching it.
+ *   - ANCHORING. It no longer follows the bell automatically, so it is re-placed on resize and
+ *     orientation change. The header does not scroll, so nothing else moves it.
+ *
+ * Same Escape handling and close-then-navigate as AgencySwitcher, which is deliberately NOT
+ * portaled: left-anchored at the header's left edge, it has no negative-edge problem to solve.
+ *
+ * The earlier note here claimed "same `w-[min(20rem,...)]` clamp" (the code said 24rem) and told
+ * a confident width story that sent the investigation to clamp arithmetic - which was correct,
+ * and irrelevant.
  *
  * ⚠ z-40, BETWEEN THE HEADER AND THE MODALS. The header is z-30 and the logout confirm is
  * z-50; a panel at z-50 would draw over a modal that is asking a question.
@@ -48,12 +75,63 @@ export default function NotificationBell() {
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
+  /** The panel itself - a SECOND ref, because a portaled panel is not inside `ref`. */
+  const panelRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; width: number; maxHeight: number } | null>(null);
+
+  /**
+   * PLACE THE PANEL AGAINST THE VIEWPORT, NEVER OFF IT.
+   *
+   * Right-aligned under the bell when there is room; otherwise slid left or right until both
+   * edges are at least GUTTER from the screen's. `clientWidth`, not `innerWidth`, so a desktop
+   * scrollbar is not counted as usable space. Height is capped by the space BELOW the panel as
+   * well as by 70vh, so the bottom cannot be cut either.
+   */
+  const place = useCallback(() => {
+    const anchor = buttonRef.current;
+    if (!anchor) return;
+    const GUTTER = 16;
+    const MAX_WIDTH = 384; // 24rem
+    const r = anchor.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    const width = Math.min(MAX_WIDTH, vw - 2 * GUTTER);
+    const left = Math.min(Math.max(r.right - width, GUTTER), vw - GUTTER - width);
+    const top = r.bottom + 6;
+    const maxHeight = Math.min(vh * 0.7, vh - top - GUTTER);
+    setPos({ top, left, width, maxHeight });
+  }, []);
+
+  // Before paint, so the panel never flashes at a stale or default position.
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('orientationchange', place);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('orientationchange', place);
+    };
+  }, [open, place]);
+
+  // Focus into the panel once, when it appears - not on every re-placement, or a resize would
+  // pull focus off a button the operator had tabbed to.
+  const placed = pos !== null;
+  useEffect(() => {
+    if (open && placed) panelRef.current?.focus({ preventScroll: true });
+  }, [open, placed]);
+
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      const inBell = ref.current?.contains(t);
+      const inPanel = panelRef.current?.contains(t);
+      if (!inBell && !inPanel) setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    // Escape returns focus to the bell, since focus was moved away from it on open.
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); buttonRef.current?.focus(); } };
     document.addEventListener('mousedown', onClick);
     document.addEventListener('keydown', onKey);
     return () => {
@@ -101,6 +179,7 @@ export default function NotificationBell() {
   return (
     <div className="relative shrink-0" ref={ref}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-haspopup="dialog"
@@ -121,11 +200,14 @@ export default function NotificationBell() {
         )}
       </button>
 
-      {open && (
+      {open && pos && createPortal(
         <div
+          ref={panelRef}
           role="dialog"
           aria-label="Notifications"
-          className="absolute right-0 top-full mt-1.5 w-[min(24rem,calc(100vw-2rem))] bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 max-h-[70vh] overflow-y-auto"
+          tabIndex={-1}
+          style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width, maxHeight: pos.maxHeight }}
+          className="bg-white rounded-xl shadow-lg border border-slate-200 py-1.5 z-40 overflow-y-auto outline-none print:hidden"
         >
           <div className="px-3 py-1.5 flex items-center justify-between gap-2">
             <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
@@ -202,7 +284,8 @@ export default function NotificationBell() {
               tender without rates, one more job belonging to no tender.
             </p>
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

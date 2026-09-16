@@ -19412,6 +19412,13 @@ reasoned about rather than verified.
 
 ## G95. The notification panel was clipped by an ancestor, not by its own width
 
+> ⚠⚠ **CORRECTED BY G97 - THIS ENTRY DESCRIBES THE WRONG FAULT.** Everything below about a
+> VERTICAL clip is false. `overflow-x-hidden` still clips vertically (a `visible` axis computes
+> to `auto` when the other is not `visible`), `main` runs the full height so the panel was never
+> cut at the header, and the change fixed nothing. The real fault was horizontal: the panel was
+> right-aligned to a bell that is not the rightmost control, so it started off the left of the
+> screen. Left in place, not deleted, because how a wrong explanation spread is the finding.
+
 The panel rendered, sized correctly, sat at `z-40` above the header's `z-30` - and was almost
 invisible on a narrow screen.
 
@@ -19523,3 +19530,109 @@ has no puppeteer, playwright, jsdom or canvas).
 **Nothing was built. Nothing was committed from this inventory.**
 
 **Deploy:** none - no code changed.
+
+---
+
+## G97. One wrong explanation, written three times - and the portal that does not need to know which ancestor clips
+
+G95 did not fix the notification panel. The owner reloaded, confirmed the change was live, and the
+panel was still cut off on mobile.
+
+### The deploy was fine; the diagnosis was not
+
+Probed before anything was changed, as with the earlier sign-in work: the live JS carried `main` as
+`... overflow-x-hidden` in its only form, and the live CSS defined `.overflow-x-hidden` and
+`100vw - 2rem` with no trace of `100vw - 1.5rem`. ⚠ A first CSS probe for the clamp returned
+ZERO - a basic-regex grep in which `\(` opens a group, so the pattern could not match what it was
+looking for. It was re-run with fixed strings rather than reported as "the clamp is not deployed".
+
+### ⚠⚠ THE THREE FALSE STATEMENTS - WORTH MORE THAN THE FIX
+
+G95's **commit message**, its **code comment** on `main`, and its **audit entry** all said the
+panel was clipped VERTICALLY at the header's bottom edge, and that `overflow-x-hidden` freed that
+axis. **CSS contradicts the mechanism directly:** when one overflow axis is not `visible`, a
+`visible` value on the other COMPUTES to `auto`. `main` clipped both axes before the change and
+after it. And `main`'s box runs the full height below the header, so a 70vh panel opening just
+under it was never cut there at all.
+
+**A wrong explanation recorded in three places is how a wrong fact becomes durable.** Each copy
+lends the others authority: a reader finding the comment would check the audit, find it agrees,
+and stop. The commit message cannot be corrected - it is pushed history and stays wrong - so the
+code comment and the G95 entry now carry correction notices pointing here, and the original G95
+text is left beneath its notice rather than deleted, because how the explanation spread is the
+evidence.
+
+It was also the THIRD wrong guess at the cause: `AppLayout:139` (wrong line), then `main` at
+`:531` (right element, wrong mechanism), each agreed to before it was verified.
+
+### The chain, walked in full rather than to the next candidate
+
+| element | position | overflow |
+|---|---|---|
+| panel | `absolute right-0 top-full`, `min(24rem, 100vw-2rem)` | `overflow-y-auto` |
+| bell wrapper | **`relative`** - the containing block | visible |
+| right-hand control cluster | static | visible |
+| header | static flex item, `z-30`, 56px | visible |
+| `main` | static | clips both axes (either class) |
+| root | static, `h-screen` | `overflow-hidden` |
+
+The geometry, estimated from classes at 380px: header padding 12px, sign-out 38px, theme button
+~48px, super-admin badge ~28px when shown, with 6px gaps - so the bell's right edge sits near 270px
+(236px with the badge). A panel 348px wide right-aligned there begins at about **-78px** (-112px).
+**The panel started off the LEFT edge of the screen.** Overflow clipping cut that part away, and
+even with no clipping the page cannot scroll left to it.
+
+The width clamp guaranteed the panel FIT the viewport. Nothing checked where it BEGAN. The fault
+was the one change made when AgencySwitcher's popover was copied: `left-0` became `right-0`.
+AgencySwitcher grows rightward from the header's left edge and is fine.
+
+⚠ **WHICH SIDE WAS CUT IS NOT CONFIRMED.** The owner was asked whether the cut was on the left,
+bottom or right; the reply's placeholder was not filled in. The geometry predicts the left. The
+portal was chosen because it corrects all three - it clamps both horizontal edges and caps height
+to the space below - so the build did not depend on the answer. This entry does not claim an
+observation that was not made.
+
+### The portal - chosen because it cannot be wrong about the ancestor
+
+The panel renders into `document.body` with `position: fixed`, placed from the bell's
+`getBoundingClientRect()`: right-aligned under the bell where there is room, slid until both edges
+are at least 16px from the screen's, and height capped at the lesser of 70vh and the space below.
+`clientWidth`, not `innerWidth`, so a scrollbar is not counted as room.
+
+**In `body` it has no ancestor that can clip it** - so after two wrong guesses at WHICH ancestor was
+responsible, the fix no longer depends on knowing. `position: fixed` WITHOUT a portal would be
+weaker in principle: any ancestor with `transform`, `filter` or `backdrop-filter` becomes its
+containing block. None of the fourteen header themes has one today; a future `backdrop-blur` would
+have broken it again with nothing to say so.
+
+What the portal costs, all handled:
+
+- ⚠ **Outside-click.** A portaled panel is not a DOM child of the bell's wrapper, so the old
+  `ref.contains(target)` test alone would have treated every click INSIDE the panel - the dismiss X,
+  the links - as outside, and closed it. A second ref covers the panel. This is the defect a portal
+  most easily ships with, and it would have looked like a brand-new bug.
+- **Tab order.** The panel's DOM is at the end of `body`, so focus moves into it when it appears -
+  once, not on every re-placement, or a resize would pull focus off a control the operator had
+  tabbed to. Escape returns focus to the bell.
+- **Anchoring.** It no longer follows the bell automatically, so it is re-placed on resize and
+  orientation change. The header does not scroll.
+- **Print.** `print:hidden` moves onto the portaled panel itself.
+
+AgencySwitcher is deliberately NOT portaled; its note says why, and says it needs the same treatment
+if it is ever anchored anywhere but the header's left edge. ⚠ That note previously read "This and
+NotificationBell both clamp to `calc(100vw-2rem)`" - which the portal would have made the FOURTH
+false statement in this chain, so it changed in the same commit.
+
+### `main` reverted
+
+`overflow-x-hidden` went back to `overflow-hidden`. The two compute identically here, so this is not
+a behaviour change - it is removing a change whose only justification was false. Kept "because it is
+harmless", it would have left the premise standing in the code for the next reader.
+
+**Verified:** tsc (exit 0); **288 tests in 25 files**; build; hooks guard, 49 files.
+
+- ⚠ **NOT VERIFIED ON A DEVICE, AGAIN.** G95 passed every check and did not fix anything. The same
+  checks passing here are necessary and prove nothing about the panel on a phone. There is no
+  headless renderer in this repo.
+
+**Deploy:** hosting - a push to `main` (O71).
