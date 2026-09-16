@@ -3,6 +3,7 @@ import { useAgency, AtMaster } from '../lib/AgencyContext';
 import { Plus, Trash2, Save, Loader2, Check, AlertTriangle, Layers } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
 import { getCounterKey } from '../lib/AgencyContext';
+import { shortAtNumber } from '../lib/utils';
 import {
   seedFromStartingNumber, startingNumberFromSeed,
   ALL_CORE_TYPES, GUARANTEE_DEFAULTS, hasNoGuarantee,
@@ -186,7 +187,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
       if (activeAgency) {
         await updateAgency(activeAgency.id, { prefixes });
       }
-      setSaveSuccessMsg(`Divisions & prefixes successfully saved for AT: ${at.atNumber}!`);
+      setSaveSuccessMsg(`Divisions & prefixes successfully saved for AT: ${shortAtNumber(at.atNumber)}!`);
       setTimeout(() => setSaveSuccessMsg(null), 5000);
     } catch (e) {
       alert("Failed to save divisions.");
@@ -201,7 +202,7 @@ export function AtDivisions({ at }: { at: AtMaster }) {
         <div>
           <h4 className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
             <Layers className="w-4 h-4 text-indigo-600" />
-            Divisions & Core Prefixes for AT: {at.atNumber}
+            Divisions & Core Prefixes for AT: {shortAtNumber(at.atNumber)}
           </h4>
           <p className="text-[11px] text-slate-500">
             Define division names and unique prefixes for CRGO, Amorphous, Wound Core, LSTC & O/H jobs

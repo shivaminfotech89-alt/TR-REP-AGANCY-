@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAgency } from '../lib/AgencyContext';
 import { AgencyMarkTile } from './AgencyMarkTile';
 import { Building2, Check, ChevronsUpDown, Settings2, Plus } from 'lucide-react';
+import { shortAtNumber } from '../lib/utils';
 
 /**
  * Header agency switcher.
@@ -77,7 +78,7 @@ export default function AgencySwitcher({ appLogo }: { appLogo?: string }) {
             )}
           </span>
           <span className="block text-[10px] sm:text-xs text-slate-500 truncate">
-            {activeAtMaster ? `AT ${activeAtMaster.atNumber}` : 'No AT selected'}
+            {activeAtMaster ? `AT ${shortAtNumber(activeAtMaster.atNumber)}` : 'No AT selected'}
           </span>
         </span>
       </button>

@@ -6,7 +6,7 @@ import { CARD, CARD_PAD, LABEL } from '../lib/ui';
 import { Plus, Check, Loader2, Calendar, ChevronDown, ChevronUp, Edit2, Save, X, Briefcase, FileText, Layers, Building, Trash2, AlertTriangle } from 'lucide-react';
 import { AtAllotments } from './AtAllotments';
 import { AtDivisions } from './AtDivisions';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, shortAtNumber } from '../lib/utils';
 import { deleteIfEmpty, GuardedDeleteError } from '../lib/guardedDelete';
 import { computeOilBalance, openingMapFrom, describeOil } from '../lib/oilBalance';
 import { otherActiveAts, isUnassigned } from '../lib/AgencyContext';
@@ -401,7 +401,7 @@ export function AtSettings() {
     <div className="p-2.5 sm:p-3 rounded-lg border border-l-2 border-l-indigo-500 border-indigo-200 bg-indigo-50/60 space-y-2">
       <div className="flex items-start justify-between gap-3">
         <h4 className="text-xs font-bold uppercase tracking-widest text-indigo-900">
-          AT {seedReportAtNo} is ready &mdash; two things to know
+          AT {shortAtNumber(seedReportAtNo)} is ready &mdash; two things to know
         </h4>
         <button type="button" onClick={() => setSeedReport(null)}
           className="text-[11px] font-bold text-indigo-700 hover:text-indigo-900 shrink-0">Dismiss</button>
@@ -451,7 +451,7 @@ export function AtSettings() {
         <strong className="font-bold block uppercase tracking-wide">This AT has no rates yet.</strong>
         <p className="mt-1">
           A new tender starts with no rate schedule of its own, so <strong>estimates and bills
-          against AT {seedReportAtNo} are blocked</strong> until it has one. Enter its rates, or copy
+          against AT {shortAtNumber(seedReportAtNo)} are blocked</strong> until it has one. Enter its rates, or copy
           them from a published AT.
         </p>
         {/* ?at=<id> SELECTS THE TENDER THAT WAS JUST CREATED.
@@ -463,7 +463,7 @@ export function AtSettings() {
           to={`/agency-settings?section=estimate-master&at=${encodeURIComponent(seedReportAtId)}`}
           className="mt-2 inline-flex items-center px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold"
         >
-          Set rates for AT {seedReportAtNo}
+          Set rates for AT {shortAtNumber(seedReportAtNo)}
         </Link>
       </div>
       )}
@@ -910,7 +910,7 @@ export function AtSettings() {
         const typed = isEdit ? String(pctConfirm.to) : newAt.atPercentage;
         const n = Number(typed);
         const atLabel = isEdit
-          ? (pctConfirm.at.atNumber || pctConfirm.at.name || pctConfirm.at.id)
+          ? shortAtNumber(pctConfirm.at.atNumber || pctConfirm.at.name) || pctConfirm.at.id
           : (newAt.atNumber || '(no number)');
         const billed = Math.round(10000 * (1 + n / 100));
         // Free: the shared load already holds this agency's jobs (AUDIT G86). Before that it
@@ -1147,7 +1147,7 @@ export function AtSettings() {
                           <div className="space-y-1">
                             <div className="flex items-center flex-wrap gap-2">
                               {isOpen ? <ChevronUp className="w-4 h-4 text-indigo-500 shrink-0" /> : <ChevronDown className="w-4 h-4 text-slate-400 shrink-0" />}
-                              <h3 className="font-bold text-slate-900">{at.atNumber}</h3>
+                              <h3 className="font-bold text-slate-900">{shortAtNumber(at.atNumber)}</h3>
                               {at.name && <span className="text-slate-500 font-normal">- {at.name}</span>}
                               {isActiveAt && (
                                 <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-100 px-2 py-0.5 rounded-full flex items-center">
@@ -1195,7 +1195,7 @@ export function AtSettings() {
                           isActiveAt ? 'bg-indigo-50/60 border-indigo-200' : 'bg-amber-50 border-amber-300'
                         }`}>
                           <span className={LABEL}>Editing</span>
-                          <span className="text-xs font-bold text-slate-900">AT {at.atNumber}</span>
+                          <span className="text-xs font-bold text-slate-900">AT {shortAtNumber(at.atNumber)}</span>
                           {at.name && <span className="text-[11px] text-slate-500">- {at.name}</span>}
                           {/* THE DIVERGENCE, STATED. Same rule as the Estimate Master
                               selector: this screen shows what you opened, the app books
@@ -1406,6 +1406,36 @@ export function AtSettings() {
                             <FileText className="w-3.5 h-3.5" />
                             <span>Allotment Quotas & Letters</span>
                           </button>
+
+                          {/* ⚠ THE ROUTE TO THE RATES, AND IT IS PERMANENT (AUDIT G94).
+                              Rates could always be changed - `adoptPublishedAt` has no guard and
+                              `EstimateMaster.handleAdoptTemplate` calls it on any selected AT at
+                              any time. What was missing was a WAY IN from here. The only two
+                              pointers to that screen were the seed panel's "Set rates" button,
+                              which renders only while `!seedAtHasRates`, and the alert shown when
+                              the copy FAILS at creation. So every route to changing a tender's
+                              rates disappeared the moment the tender was configured - which is
+                              exactly when someone needs it, and it read as "the rate section
+                              cannot be changed after saving".
+
+                              NOT gated on `hasRates`. A link that appears only when something is
+                              missing is the same defect one step along: it teaches the operator
+                              the screen exists and then removes it. It names the state instead. */}
+                          <Link
+                            to={`/agency-settings?section=estimate-master&at=${encodeURIComponent(at.id)}`}
+                            onClick={e => e.stopPropagation()}
+                            title={hasRates
+                              ? 'Open this tender in Estimate Master - edit its rates, or copy a published template onto it'
+                              : 'This tender has no rates, so estimates and bills against it are refused. Set them in Estimate Master.'}
+                            className={`ml-auto flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold border-b-2 border-transparent transition-all ${
+                              hasRates
+                                ? 'text-slate-500 hover:text-indigo-700 hover:bg-slate-50'
+                                : 'text-rose-700 hover:text-rose-800 hover:bg-rose-50'
+                            }`}
+                          >
+                            <Briefcase className="w-3.5 h-3.5" />
+                            <span>{hasRates ? 'Rates' : 'Rates - none set'}</span>
+                          </Link>
                         </div>
 
                         {/* Active Tab Content */}

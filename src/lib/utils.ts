@@ -248,3 +248,95 @@ Please get in touch - we would like to know about this case, and it may change w
 export function getAgencyStateCode(agency: any): string {
   return stateCodeFromGstin(agency?.gstin) || String(agency?.agencyStateCode ?? '').trim();
 }
+
+/**
+ * A TENDER REFERENCE, SHORTENED FOR THE SCREEN (AUDIT G94).
+ *
+ * `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819` is what the tender letter says and what the
+ * operator types. It is also what sixteen surfaces rendered in full, including the tender
+ * selector in the sidebar, where it wrapped to three lines and pushed everything else down.
+ *
+ * ⚠ THE STORED VALUES DO NOT FORM ONE FAMILY. Measured across all seventeen live ATs rather
+ * than assumed from the two that prompted this:
+ *
+ *     UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819      full reference - what this is for
+ *     UGVCL/2026-28/01/AT/1819                       shorter reference, same shape
+ *     UGVCL/EE-T-1/TRANS-REP/2020-21/1087            serial with no /AT/ before it
+ *     2026-28/AT/1819, 2020-21/01/1049               partial - no discom prefix
+ *     2026-27, 26-27, 24-25, 2026-28, 2020-2021      already short
+ *     AT-2026-28, AT2026-27, AT 26-27, 2026_27       already short, various spellings
+ *     ALLOTMENT NO.25903,DT.10/09/26                 ⚠ NOT A TENDER REFERENCE AT ALL
+ *     ...2026-28/01/AT/1808 ,07/09/2026              ⚠ a date appended after the serial
+ *
+ * ⚠ SO AN UNRECOGNISED VALUE IS RETURNED UNCHANGED, and that rule is the important half.
+ * Two of seventeen are not tender references. `ALLOTMENT NO.25903,DT.10/09/26` reduced to
+ * something that LOOKS like a tender number would be worse than leaving it long: a wrong
+ * short form reads as deliberate, while a long one only reads as untidy.
+ *
+ * THE RULE: find a tender PERIOD, and optionally a SERIAL that follows it. No period, no
+ * change. The period is the part an operator recognises - "26-28" is the tender - and the
+ * serial is what distinguishes two ATs of the same period, which several agencies have.
+ *
+ * ⚠ NEVER USE THIS ON A PRINTED DOCUMENT. The estimate, the bill and the challan carry the
+ * reference UGVCL reads back against its own file, and a shortened one is a different
+ * string from the one on the paper. This is for screens only.
+ */
+export function shortAtNumber(atNumber?: string | null): string {
+  const raw = String(atNumber ?? '').trim();
+  if (!raw) return '';
+
+  /**
+   * A period: 2026-28, 2026-2028, 26-28, or the underscore spelling some ATs use.
+   *
+   * ⚠ `/` IS NOT A PERIOD SEPARATOR, AND ALLOWING IT MANGLED THE ONE VALUE THIS FUNCTION
+   * EXISTS TO LEAVE ALONE. An earlier revision accepted `[-_/]`, so
+   * `ALLOTMENT NO.25903,DT.10/09/26` matched `10/09` inside its DATE and shortened to
+   * "10-09" - a plausible-looking tender period invented out of a day and a month. No live
+   * value uses `/` between the halves of a period; it was widened for a format that does not
+   * exist, and it swallowed one that does.
+   *
+   * ⚠⚠ NO LOOKBEHIND. NOT FOR STYLE - REGEX LOOKBEHIND IS A PARSE-TIME SyntaxError IN
+   * SAFARI BELOW 16.4, AND THIS BUNDLE IS A SINGLE CHUNK, SO ONE OF THEM BLANKS THE WHOLE
+   * APP. A revision of this function carried `(?<![\d-])` for two minutes; it was removed
+   * because the app is at this moment failing to load at all on an iPhone, cause unknown,
+   * and lookbehind is one of the few constructs that produces exactly that symptom.
+   *
+   * So the character before the period is CAPTURED (`(^|[^\d])`) rather than asserted about.
+   * That accepts a letter or a dash - `AT2026-27` and `AT-2026-28` are both real stored
+   * values, and `\b` matched neither - while still refusing a digit, so a long run like
+   * `NO.25903` cannot yield a period out of its own tail. The captured delimiter's length is
+   * added back when locating the serial.
+   *
+   * Every failure here was caught by the test against all seventeen live values before this
+   * reached a single screen. None was a missed requirement; all were speculative generality.
+   */
+  const period = raw.match(/(^|[^\d])((?:19|20)\d{2}|\d{2})([-_])((?:19|20)\d{2}|\d{2})([^\d-]|$)/);
+  if (!period) return raw;
+
+  const from = period[2];
+  const sep = period[3];
+  const to = period[4];
+  // Both halves shortened to two digits, so 2026-2028 and 2026-28 render identically.
+  const shortPeriod = `${from.slice(-2)}-${to.slice(-2)}`;
+
+  // The serial, when one follows the period. `/AT/1819` first, because that is the labelled
+  // form; otherwise the last all-digit segment AFTER the period, so a discom prefix's own
+  // numbers cannot be mistaken for it.
+  //
+  // The trailing group is part of the match, so the search for a serial starts one character
+  // early and includes it - which is correct: `/AT/1819` needs that leading `/`.
+  const after = raw.slice(period.index! + period[1].length + from.length + sep.length + to.length);
+  const labelled = after.match(/\/\s*AT\s*\/\s*(\d+)/i);
+  let serial = labelled ? labelled[1] : '';
+  if (!serial) {
+    const digitSegments = after.match(/\/\s*(\d+)(?=\s*(?:[,\s]|$|\/))/g);
+    if (digitSegments && digitSegments.length > 0) {
+      const last = digitSegments[digitSegments.length - 1].match(/(\d+)/);
+      // A bare "01" is a sequence number within the tender, not the AT serial - too short to
+      // identify anything on its own, and every agency has one.
+      if (last && last[1].length >= 3) serial = last[1];
+    }
+  }
+
+  return serial ? `${shortPeriod}/${serial}` : shortPeriod;
+}

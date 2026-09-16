@@ -40,6 +40,7 @@ import { formatDDMMYYYY } from '../lib/utils';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { APP_MARK } from '../lib/ui';
+import { inheritsAgencyQuota } from '../lib/allotmentInheritance';
 
 interface TransformerEntry {
   jobNo: string;
@@ -1492,8 +1493,28 @@ ${intakeGate.reason}`);
         for (const [cType, countToAdd] of Object.entries(countsToAdd)) {
           let allowed = Number(activeAtMaster.allotments?.[commonData.division]?.[cType]);
           
+          /**
+           * ⚠ THE AGENCY FALLBACK IS THE ENFORCEMENT PATH, NOT A DISPLAY DETAIL (AUDIT G94).
+           *
+           * This is the line that decides whether an intake is PERMITTED. Fixing the panel and
+           * the widget while leaving this unconditional would have left the screen reading 0
+           * while intake still allowed 35 - the display and the guard disagreeing, which is
+           * worse than either being wrong alone.
+           *
+           * ⚠ AND IT IS GATED, NOT DELETED. Removing it outright would be a customer-facing
+           * intake stop, mid-tender: `allowed === 0` BLOCKS below (A3 - "not a quota of zero
+           * and not a quota of infinity, it is missing data"), and three divisions have jobs
+           * already booked against a quota no letter in the app justifies. A correct rule
+           * arriving as an outage is still an outage.
+           *
+           * So only a tender on `LEGACY_QUOTA_ATS` still inherits. That list can only shrink -
+           * a test fails if it grows - and a tender leaves it once its letters cover its booked
+           * work. See lib/allotmentInheritance.ts.
+           */
           if (!allowed || allowed === 0) {
-             allowed = Number(activeAgency.allotments?.[commonData.division]?.[cType]) || 0;
+             allowed = inheritsAgencyQuota(activeAtMaster.id)
+               ? Number(activeAgency.allotments?.[commonData.division]?.[cType]) || 0
+               : 0;
           }
           
           allowed = allowed || 0;

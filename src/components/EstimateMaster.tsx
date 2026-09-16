@@ -25,6 +25,12 @@ import { SCRAP_ITEM_CODE_BY_CORE_CLASS } from '../lib/estimateCalc';
 import { sameContent } from '../lib/compareSections';
 import { rateHolderFor, seedSection, planReseed, sectionIsEdited, cloneRows } from '../lib/estimateMasterSeed';
 import { inheritedForCell, INHERITS_NOTHING } from '../lib/gridInheritance';
+// ⚠ THE SAME PREDICATE THE PERCENTAGE DIALOG USES (AUDIT G94). Copying a template REPLACES
+// every rate on the tender, and the printed estimate RECOMPUTES rather than reading stored
+// figures (F72) - so a job already estimated or billed reprints at a different number. The
+// confirm below counts them. `hasPricedDocument` is narrower than `hasIssuedDocument` on
+// purpose: a challan carries no price, so it cannot reprint differently.
+import { hasPricedDocument } from '../lib/issuedDocuments.js';
 
 const kvaColumns = ['5', '10', '16', '25', '50', '63', '100', '200', '315', '500'] as const;
 type KvaType = typeof kvaColumns[number];
@@ -61,6 +67,10 @@ export default function EstimateMaster() {
     publishAtTemplate,
     adoptPublishedAt,
     globalDefaultEstimateMaster,
+    // Free - the shared agency load already holds these (AUDIT G86). Used ONLY to count the
+    // jobs a template copy would re-price, and counted against `selectedAt` rather than the
+    // globally active tender, for the reason stated above selectedAt.
+    agencyJobs,
     // (globalConfigError / dismissGlobalConfigError moved to the notifications bell - AUDIT G93.)
   } = useAgency();
 
@@ -1212,10 +1222,35 @@ export default function EstimateMaster() {
     if (!selectedAt) { alert('No AT is selected, so there is nowhere to copy these rates to.'); return; }
     const tpl = publishedAts.find(t => t.id === templateId);
     if (!tpl) return;
+    /**
+     * ⚠ NAME THE WORK THIS RE-PRICES, NOT JUST THE RATES IT REPLACES (AUDIT G94).
+     *
+     * This said "This REPLACES the rates currently on this AT" and stopped there. The
+     * consequence it left out is the F72 shape: the printed estimate and bill RECOMPUTE from
+     * the tender's rates rather than reading stored figures, so every job already estimated
+     * or billed under this tender REPRINTS AT A DIFFERENT NUMBER - and the paper already in
+     * the file stops matching the screen.
+     *
+     * The percentage dialog one screen over has named that count since G87
+     * (`AtSettings.tsx:919`). The same fact was missing here, on an action with a wider blast
+     * radius: a percentage changes a multiplier, a template replaces every rate.
+     *
+     * Counted against `selectedAt`, never `globalActiveAtMaster` - this screen can be showing
+     * a different tender from the one the app is working in, and counting the wrong one would
+     * understate or overstate the damage while looking authoritative.
+     */
+    const pricedCount = (agencyJobs || []).filter(
+      (j: any) => String(j.atId ?? '') === selectedAt.id && hasPricedDocument(j),
+    ).length;
     const ok = window.confirm(
       `Copy "${tpl.name}" v${tpl.version} onto AT ${selectedAt.atNumber || selectedAt.name}?\n\n`
       + `This REPLACES the rates currently on this AT. It is a copy, so later revisions of the template will not change your rates - `
-      + `you will simply be told the template has moved on.`
+      + `you will simply be told the template has moved on.\n\n`
+      + (pricedCount > 0
+        ? `⚠ ${pricedCount} job${pricedCount === 1 ? '' : 's'} on this tender ${pricedCount === 1 ? 'has' : 'have'} an estimate or a bill already issued. `
+          + `Estimates and bills RECOMPUTE from the tender's rates when printed, so ${pricedCount === 1 ? 'that document' : 'those documents'} `
+          + `will reprint at different figures and will no longer match the paper in the file.`
+        : `No job on this tender has an estimate or a bill issued yet, so nothing already printed changes.`)
     );
     if (!ok) return;
     setIsSaving(true);

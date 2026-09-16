@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { useAgency, isIntakeOpen, type PublishedAt } from '../lib/AgencyContext';
 import { CARD, CARD_PAD } from '../lib/ui';
-import { gstinScopeError } from '../lib/utils';
+import { gstinScopeError, shortAtNumber } from '../lib/utils';
 import EditAgencyForm from "./EditAgencyForm";
 import { Loader2, Plus, Building, Trash2, FileUp, CheckCircle2, AlertTriangle, ArrowRight, Layers, FileText } from 'lucide-react';
 import { validateDivisionPrefixes } from '../lib/prefixValidation';
@@ -328,8 +328,8 @@ export default function AgencySettings() {
         faultySections.length > 0 ? `Wrong schedule: ${faultySections.join(', ')}` : '',
       ].filter(Boolean).join(' · '),
       title: [
-        ...atsWithoutRates.map(at => `AT ${at.atNumber || at.name}${isClosedAt(at) ? ' (closed)' : ''}: no rates - estimates and bills are refused.`),
-        ...misfiledSections.map(({ at, health }) => `AT ${at.atNumber || at.name}${isClosedAt(at) ? ' (closed)' : ''}: the ${health.label} section holds the wrong schedule.`),
+        ...atsWithoutRates.map(at => `AT ${shortAtNumber(at.atNumber || at.name)}${isClosedAt(at) ? ' (closed)' : ''}: no rates - estimates and bills are refused.`),
+        ...misfiledSections.map(({ at, health }) => `AT ${shortAtNumber(at.atNumber || at.name)}${isClosedAt(at) ? ' (closed)' : ''}: the ${health.label} section holds the wrong schedule.`),
       ].join('\n'),
     };
   }
@@ -492,7 +492,7 @@ export default function AgencySettings() {
                 {!activeAtMaster && <option value="">None selected</option>}
                 {agencyAtsForContext.map(at => (
                   <option key={at.id} value={at.id}>
-                    {at.atNumber || '(no number)'}{at.name ? ` - ${at.name}` : ''}{at.status === 'Closed' ? '  (closed)' : ''}
+                    {shortAtNumber(at.atNumber) || '(no number)'}{at.name ? ` - ${at.name}` : ''}{at.status === 'Closed' ? '  (closed)' : ''}
                   </option>
                 ))}
               </select>
@@ -659,7 +659,7 @@ export default function AgencySettings() {
                         "which tender" and "what state" are the two things this header answers. */}
                     {activeAtMaster ? (
                       <span className="px-2.5 py-0.5 text-xs font-black bg-indigo-50 text-indigo-800 border border-indigo-300 rounded-full">
-                        AT {activeAtMaster.atNumber || activeAtMaster.name}
+                        AT {shortAtNumber(activeAtMaster.atNumber || activeAtMaster.name)}
                         {String(activeAtMaster.status || '').toLowerCase() === 'closed' && ' · CLOSED'}
                       </span>
                     ) : (
@@ -711,7 +711,7 @@ export default function AgencySettings() {
                     <ul className="mt-2 space-y-1">
                       {others.map(o => (
                         <li key={o.key} className="text-xs text-rose-950">
-                          <strong className="font-bold">AT {o.at.atNumber || o.at.name}</strong> {o.text}{' '}
+                          <strong className="font-bold">AT {shortAtNumber(o.at.atNumber || o.at.name)}</strong> {o.text}{' '}
                           {/* A CLOSED TENDER IS READ-ONLY IN ESTIMATE MASTER, so "Open it" alone would
                               land on rates nobody can change. Say what the fix actually is. */}
                           {isClosedAt(o.at) && (

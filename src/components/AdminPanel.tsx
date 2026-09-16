@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, shortAtNumber } from '../lib/utils';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { collection, query, getDocs, doc, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import { useAgency, Agency } from '../lib/AgencyContext';
@@ -997,7 +997,7 @@ export default function AdminPanel() {
                       <tr key={t.id} className="border-b border-slate-100 align-top">
                         <td className="py-2 pr-3">
                           <div className="font-bold text-slate-800">{t.name}</div>
-                          {t.atNumber && <div className="text-slate-500">AT {t.atNumber}</div>}
+                          {t.atNumber && <div className="text-slate-500">AT {shortAtNumber(t.atNumber)}</div>}
                           {t.notes && <div className="text-slate-500 mt-0.5 max-w-md">{t.notes}</div>}
                         </td>
                         {/* ⚠ "not set" IS SAID OUT LOUD. A template with no board is invisible to

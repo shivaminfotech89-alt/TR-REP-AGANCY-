@@ -53,6 +53,7 @@ import NotificationBell from './NotificationBell';
 import { agencyGate } from '../lib/loadFailure';
 import { APP_MARK, APP_SUBTITLE } from '../lib/ui';
 import { useInstallPrompt } from '../lib/installPrompt';
+import { shortAtNumber } from '../lib/utils';
 
 export default function AppLayout({ user }: { user: User }) {
   const { activeAgency, activeAtMaster, atMasters, setActiveAtMasterId, viewingAllTenders,
@@ -316,7 +317,7 @@ export default function AppLayout({ user }: { user: User }) {
                       .sort((x, y) => (y.startDate || 0) - (x.startDate || 0))
                       .map(t => (
                         <option key={t.id} value={t.id} className="text-slate-900">
-                          AT {t.atNumber || t.name}
+                          AT {shortAtNumber(t.atNumber || t.name)}
                           {String(t.status || '').toLowerCase() === 'closed' ? ' — closed' : ''}
                         </option>
                       ))}

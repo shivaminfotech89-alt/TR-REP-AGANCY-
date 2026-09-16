@@ -5,6 +5,8 @@ import { db } from '../lib/firebase';
 import { auth } from '../lib/firebase';
 import { collection as fsCollection, query as fsQuery, where as fsWhere, getDocs as fsGetDocs } from 'firebase/firestore';
 import { drawsOnAllotment } from '../lib/allotments';
+import { shortAtNumber } from '../lib/utils';
+import { inheritsAgencyQuota } from '../lib/allotmentInheritance';
 
 export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
   const { activeAgency, activeAtMaster } = useAgency();
@@ -54,10 +56,34 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
 
   return (
     <div className="mt-8 pt-6 border-t border-slate-200">
-      <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider">Job Allotment Usage ({atMaster.atNumber})</h3>
+      <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider">Job Allotment Usage ({shortAtNumber(atMaster.atNumber)})</h3>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {divisions.map(div => {
-          const allot = atMaster?.allotments?.[div] || activeAtMaster?.allotments?.[div] || activeAgency.allotments?.[div] || {};
+          /**
+           * ⚠ THE MIDDLE TERM USED TO BE `activeAtMaster?.allotments?.[div]`, AND IT WAS WRONG
+           * ON ITS OWN TERMS (AUDIT G72 amendment).
+           *
+           * This widget renders usage for the AT it is GIVEN - `atMaster` - and counts jobs with
+           * `where('atId','==', atMaster.id)`. Falling through to `activeAtMaster` meant that when
+           * the given tender had no quota for a division, the bar showed the GLOBALLY SELECTED
+           * tender's quota against THIS tender's job counts. Two different tenders in one
+           * progress bar, labelled with the first one's number.
+           *
+           * Nothing warned, and the arithmetic stayed plausible - which is why it survived: a
+           * quota from one tender and a usage count from another still divide.
+           *
+           * ⚠ AND THE AGENCY FALLBACK IS NOW GATED, NOT UNCONDITIONAL (AUDIT G94). Only a
+           * tender on `LEGACY_QUOTA_ATS` still inherits the agency's map; every tender created
+           * after the rule changed starts at `{}` and gains quota only from its own allotment
+           * letters. The list can only shrink - a test fails if it grows - so this fallback is
+           * on its way out rather than settled.
+           *
+           * (An earlier revision of this comment said the fallback was "deliberately left for
+           * now". That stopped being true the moment the line below was gated, and a comment
+           * describing the opposite of its own code is the defect this audit keeps finding -
+           * invisible to tsc, the tests, the build and the hooks guard alike.)
+           */
+          const allot = atMaster?.allotments?.[div] || (inheritsAgencyQuota(atMaster?.id) ? activeAgency.allotments?.[div] : undefined) || {};
           const cTypes = ['CRGO', 'Amorphous', 'Wound Core'];
           const hasAny = cTypes.some(c => allot[c] > 0);
           

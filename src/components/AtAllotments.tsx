@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { formatDDMMYYYY } from '../lib/utils';
+import { formatDDMMYYYY, shortAtNumber } from '../lib/utils';
 import { useAgency, AtMaster, AllotmentRecord } from '../lib/AgencyContext';
 import { TABLE, TH } from '../lib/ui';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, getDocs } from 'firebase/firestore';
 import { editLetter, deleteLetter, bookedFor, type AllotmentLetter, type Correction } from '../lib/allotments';
 import { Plus, Check, Loader2, FileText, History, Lock, ShieldCheck, CheckCircle2, ArrowRight, X, Pencil, Trash2, AlertTriangle } from 'lucide-react';
+import { inheritsAgencyQuota } from '../lib/allotmentInheritance';
 
 export interface AllotmentConfirmationData {
   letterNo: string;
@@ -24,9 +25,23 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   const { activeAgency, updateAtMaster, updateAgency } = useAgency();
   const [isSaving, setIsSaving] = useState(false);
   
-  // State for net allotments (sync from AT or fallback to Agency)
+  /**
+   * THE TENDER'S OWN QUOTA (AUDIT G94).
+   *
+   * ⚠ THIS ONCE READ "sync from AT or fallback to Agency", UNCONDITIONALLY, AND THAT IS HOW
+   * THE QUOTAS GOT INFLATED. The state initialised from the AGENCY's map, and the first
+   * "Add letter" save wrote that inherited map back onto the AT along with its increment - so
+   * a figure nobody issued a letter for became the tender's own stored number. ADMIN's AT map
+   * is its agency map exactly (35/30/10) against letters totalling 15/15/0. See the header of
+   * lib/allotments.ts, which records the live figures and why they must not be recomputed.
+   *
+   * A new tender now starts at `{}` and gains quota ONLY from its own letters. The fallback
+   * survives for the tenders that already existed - `LEGACY_QUOTA_ATS`, a list that can only
+   * shrink - because removing it outright would block intake on divisions with booked work
+   * and no letter recorded.
+   */
   const [allotments, setAllotments] = useState<Record<string, Record<string, number>>>(
-      at.allotments || activeAgency?.allotments || {}
+      at.allotments || (inheritsAgencyQuota(at.id) ? activeAgency?.allotments : undefined) || {}
   );
   
   // State for adding a new allotment letter
@@ -164,7 +179,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
   }, [divisions, letterDivision]);
 
   React.useEffect(() => {
-    setAllotments(at.allotments || activeAgency?.allotments || {});
+    setAllotments(at.allotments || (inheritsAgencyQuota(at.id) ? activeAgency?.allotments : undefined) || {});
   }, [at.allotments, activeAgency?.allotments]);
 
   if (!activeAgency) return null;
@@ -229,7 +244,7 @@ export function AtAllotments({ at }: { at: AtMaster }) {
           quantityAdded: qty,
           previousTotal: previousNet,
           newTotal: newNet,
-          atNumber: at.atNumber || at.name || 'Active AT',
+          atNumber: shortAtNumber(at.atNumber || at.name) || 'Active AT',
           timestamp: new Date().toLocaleString()
         });
 
@@ -492,6 +507,23 @@ export function AtAllotments({ at }: { at: AtMaster }) {
             <p className="text-xs text-slate-500 mt-0.5">
               Cumulative division quotas calculated automatically from received allotment letters. Manual editing is restricted.
             </p>
+
+            {/* ⚠ SAY IT ON THE SCREEN, NOT ONLY IN THE CODE (AUDIT G94).
+                A gated fallback that exists only in a module nobody opens is a second code path
+                that quietly stays forever. This tells the person who can actually end it what to
+                do, and it disappears by itself the moment the tender leaves LEGACY_QUOTA_ATS. */}
+            {inheritsAgencyQuota(at.id) && (
+              <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-900">
+                <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600" />
+                <span>
+                  <strong className="font-bold">Some of this quota predates the letters below.</strong>{' '}
+                  This tender still falls back to the agency-wide allotment map, so a figure here may
+                  not have a letter behind it. Enter this tender&rsquo;s real allotment letters above and
+                  the fallback is removed &mdash; after that, the quota is exactly what the letters say.
+                  New tenders already start at zero.
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="text-right">
