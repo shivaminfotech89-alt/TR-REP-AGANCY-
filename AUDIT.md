@@ -19166,3 +19166,139 @@ four checks passing over it.
 **Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files. 20 insertions, 9 deletions.
 
 **Deploy:** hosting - a push to `main` (O71).
+
+---
+
+## O89. A tender starts its own series - a change of rule, not a correction of F42
+
+Job numbering on a new AT continued the previous tender's series. It now starts from that
+tender's own starting number, defaulting to **1**.
+
+### ⚠ F42 WAS RIGHT WHEN IT WAS WRITTEN, AND THIS IS NOT A BUG FIX
+
+`addAtMaster` seeded every new AT from the **max of three sources** - every sibling AT's
+counters, the agency document's counters, and the job numbers actually issued. Its reasoning
+holds: **prefixes belong to the DIVISION, not the tender period**, so `21 IS` is the same
+string before and after a rollover, and a tender restarting at 1 reissues `21 IS-1` for a
+different physical transformer. That is how C1's collisions arose.
+
+**What changed is the business rule, not the code's correctness.** The paperwork works per
+tender: a new AT begins its own numbering, from its own starting number - which is precisely
+what `startingJobNumbers` already existed to hold. Recording it as a reversal rather than a
+repair matters, because the next person to read F42 will find sound reasoning and needs to
+know it was overtaken rather than mistaken.
+
+⚠ **AND THE WINDOW WAS OPEN NOW AND CLOSING.** Measured across all sixteen live tenders
+rather than assumed: **no agency has two tenders that both booked work under one prefix**, so
+reversing this today cannot reissue a number already on a challan. ADMIN's Active AT sat at
+`DEESA_CRGO: 29` with **zero jobs** - the moment it booked one, F42 hands it **30**. The
+behaviour being stopped had not yet fired, and once it fires the reversal stops being free.
+
+The duplicate-number guard at intake (G92) is what catches a collision now - at the moment one
+would be created, rather than a seed trying to make one impossible.
+
+### ⚠ THE PANEL WORDING WAS CAUGHT BEFORE SHIPPING, NOT AFTER
+
+`AtSettings`' seed panel - **the one thing shown at the moment a tender is created** - said:
+
+> *"Continues the agency's existing series - it does not restart. Scanned N job(s)."*
+
+Removing the seeding makes that sentence **false** and pins `jobsScanned` at **0** forever.
+The other branch was wrong more quietly: *"No existing job numbers found"* explains a search
+that no longer happens - numbering now starts at 1 **by rule**, not for want of anything found.
+
+Both branches rewritten with the change, and **`jobsScanned` removed from `AtSeedReport`
+rather than left reporting zero.** This is the fourth surface of one change (the write, the
+type, the panel, the starting-number field), and "a term reached three surfaces out of four"
+is already recorded twice in this audit. It was found by asking which surfaces the change
+touched **before** editing, not by a check afterwards - **no check can see the surface you
+missed.**
+
+### ⚠ `predictNextJobNo`'s DOC BLOCK WAS FALSE IN EVERY PART
+
+It said **"NO CALLERS. Do not wire this up to a job-number field"**, called the function a
+**deletion candidate** citing `incrementJobNoCounter` as precedent for removing it, and warned
+that reading the counter *"would quietly undo both, and would look right while doing it"* -
+**directly above code that reads `lastJobNumbers` and always has.**
+
+It has **one caller**: `NewJob.tsx:1447`, the clash-rename path, which produces the replacement
+number an operator is **offered and will accept**, on the same screen the duplicate guard
+protects. **Anyone trusting that comment would have deleted a live function that decides job
+numbers** - and the comment named a precedent for doing it.
+
+Same shape as the import-block comment found earlier the same day, on a function that decides
+job numbers rather than one that imports an icon. **Nothing detects this**: not tsc, not the
+tests, not the build, not the hooks guard.
+
+### ⚠ AND THE STARTING-NUMBER FIELD HAS NEVER BEEN USABLE ON A FRESH TENDER
+
+`AtDivisions` disables the starting-number input when `counterMoved(key)` - `lastJobNumbers[key] > 0`.
+**F42 handed every new AT inflated counters at creation**, so the field was disabled **before a
+single job existed**. The control that exists to say where numbering starts could not be used
+on the one tender where it matters, and its tooltip explained the refusal in terms of numbering
+that had "already started" when none had.
+
+**Nobody reported it.** Either nobody tried, or someone tried and assumed it was meant to be
+read-only - which is the worse of the two, because a disabled control reads as deliberate.
+Removing the seeding fixes it as a side effect: a new AT's counters are now absent, so the
+field is live.
+
+### The repair: counters brought back to what their own jobs justify
+
+Changing the rule does nothing to stored counters - a tender whose counter already reads 24
+still offers 25. `scripts/admin/repair-at-counters.mjs`, **dry-run by default, `--apply` the
+only way to write**:
+
+| | |
+|---|---|
+| ATs repaired | **8 of 16** |
+| keys cleared (no jobs under that tender) | **56** |
+| keys reset to real high-water | **9** |
+| keys already correct | **9** |
+
+Two cases, deliberately not the same: an AT with **no jobs** has its counters **cleared** -
+nobody earned those numbers; an AT **with jobs** has each key **set to its own high-water**,
+never cleared, because a counter below its own issued numbers would offer them again. MEGHA's
+`SABARMATI_CRGO` reads **23**, not empty.
+
+**Convergence verified:** a second dry run reports **0 of 16** and 18 keys already right.
+
+### ⚠ THE REPAIR INVENTED KEYS, AND WAS CORRECTED BEFORE IT WROTE
+
+A first revision bumped the bare `<div>` key alongside `<div>_CRGO`. **The dual-key rule is
+real** - the save paths advance both together (`MrLedger:1167`) and `predictNextJobNo:2387`
+reads `Math.max(counters[counterKey], counters[division])` - so the intent was that a
+prediction could not sit below a real number.
+
+But it wrote `SABARMATI`, `GNR`, `BAVLA` and `DAEESA` onto tenders that **never stored them**,
+and **a repair that writes keys nobody earned has stopped being a repair and become a change.**
+
+**Nothing is lost by omitting them**, and this is the part worth stating once rather than
+rediscovering: because the read takes the **max** of the two, `<div>_CRGO` alone yields the
+same answer. The bare key can only equal or undercut it once `_CRGO` holds the true
+high-water - which is exactly what the repair writes.
+
+⚠ **TWO TENDERS THEN DROPPED OUT OF THE REPAIR ENTIRELY** - AARATI `11101` and ZENITH -
+**because their only proposed change was the invented key.** Two documents were going to be
+written for no reason at all. That is what "strictly corrective" looks like when it is
+actually true, and it is the clearest evidence the first version was doing something nobody
+asked for.
+
+### ⚠ THE DRY RUN SAID WHAT IT EXPECTED BEFORE IT RAN
+
+The rows predicted to disappear (`SABARMATI: - -> 47`, `GNR: - -> 2`, `BAVLA: - -> 15`,
+`DAEESA: - -> 4`) and the predicted direction of every total were **stated first, then
+matched**. Same for the convergence check: `0 of 16` was named before the command ran.
+
+**A verification that could only have confirmed is worth less than one that could have
+contradicted.** Five checks earlier in this same session were shaped wrongly - `grep -c`
+counting lines, `hasOwn` catching `hasOwnProperty`, a bogus top-level-await pattern, a
+`node -e` killed by shell escaping, and a verdict line that asserted a false conclusion - and
+every one of them would have been caught by naming the expected answer first.
+
+**Verified:** tsc (exit 0); **274 tests in 23 files**; build; hooks guard, 49 files.
+64 insertions, 123 deletions in `AgencyContext.tsx` - the seeding block and its full `jobs`
+query are gone, which also removes a collection read per tender creation.
+
+**Deploy:** hosting - a push to `main` (O71). The Firestore repair is already applied and is
+not part of the deploy.
