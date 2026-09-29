@@ -7989,8 +7989,11 @@ Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
 > signature block to 3 sheets losing nothing. The range it measures is the argument against a bigger constant: a lone
 > sheet holds **10** rows on MEGHA's letterhead and **21** with none.
 >
-> **Still cut at a constant, and still able to lose a sign-off: external inspection (9), the testing report (8) and
-> the forwarding letter (14/22).** Same shape, same fix, not done. Neither of the first two is covered by print-check.
+> **The EXTERNAL inspection sheet is done too: G102** (2026-09-29) - and it turned out to HAVE the defect, not merely
+> to be at risk of it: at HEAD its stress case lost 8mm of signature block. "Not measured" was not "fine".
+>
+> **Still cut at a constant, and still able to lose a sign-off: the testing report (8) and the forwarding letter
+> (14/22).** Same shape, same fix, not done. Neither is covered by print-check.
 >
 > Step 3 - the multi-job sheet - is untouched. It still loses 4mm of its sign-off on MEGHA's letterhead, measured
 > again on 2026-09-29, and it has no row count to derive: every sheet prints every row.
@@ -8028,7 +8031,7 @@ The body is `overflow-hidden`.
 | Single-job estimate, itemised | `layoutEstimatePages`: an mm budget against `contentMm`, **measured** from the page at runtime | **Yes** - the only document that does |
 | Single-job estimate, fixed-rate | The same budget, with about 85mm of clause and notes not charged to it (G22), but a **measured** overflow warning (G23) | Partly |
 | Internal inspection sheet | **Packed by measured row height against the measured body, the last sheet's sign-off reserved first (G101)** | **Yes** |
-| External inspection sheet | `CHUNK_SIZE = 9` | No - not measured. **Same shape as O58, same fix, not done** |
+| External inspection sheet | **Packed by measured row height against the measured body, the last sheet's sign-off reserved first (G102)** | **Yes** |
 | Testing report | `CHUNK_SIZE = 8` | No - not measured. **Same shape as O58, same fix, not done** |
 | Estimate forwarding letter | `paginateRows`: 14 rows on the first sheet, 22 after | No - not measured |
 | Multi-job estimate sheet | 5 columns a sheet; every row on every sheet | No (O63) |
