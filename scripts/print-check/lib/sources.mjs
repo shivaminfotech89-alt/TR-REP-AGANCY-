@@ -47,10 +47,23 @@ export function letterheadRegion(root) {
 }
 
 /** Every static class name in className="..." and in the static parts of className={`...`}. */
+/**
+ * ⚠ THIS SCANS THE SOURCE TEXT, WHICH INCLUDES ITS COMMENTS - so a comment that ILLUSTRATES markup contributes class
+ * names (found 2026-09-29, G103). TestingReport's own note reads:
+ *
+ *     `<tr className="... h-6.5">` resolves to 26px ONLY because this project is on Tailwind v4
+ *
+ * and that produced the token `...`, which no stylesheet defines, which refused the whole comparison. The refusal was
+ * right to fire on an undefined class and wrong about what it had found.
+ *
+ * A token with NO letter or digit in it cannot be a class name, so prose placeholders are dropped. That is narrower
+ * than parsing the comments out: a comment quoting a REAL class still contributes it, which is the safer direction -
+ * it can cost a false refusal, never a false pass.
+ */
 export function classTokens(text) {
   const tokens = new Set();
   for (const m of text.matchAll(/className=(?:"([^"]*)"|\{`([^`]*)`\})/g)) {
-    (m[1] ?? m[2].replace(/\$\{[^}]*\}/g, ' ')).split(/\s+/).filter(Boolean).forEach(t => tokens.add(t));
+    (m[1] ?? m[2].replace(/\$\{[^}]*\}/g, ' ')).split(/\s+/).filter(t => /[A-Za-z0-9]/.test(t)).forEach(t => tokens.add(t));
   }
   return tokens;
 }

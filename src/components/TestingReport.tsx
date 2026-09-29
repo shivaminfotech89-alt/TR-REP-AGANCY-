@@ -14,6 +14,8 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { triggerUniversalPrint } from '../lib/printUtils';
+import { SHEET_MARK } from '../lib/printOverflow';
+import { useMeasuredRowChunks } from '../lib/useMeasuredRowChunks';
 import { PrintableA4Page } from './LetterheadHeader';
 import { isMrReadyForTesting, isJobExternallyDone, isJobInternallyDone } from '../lib/inspectionStage';
 
@@ -136,6 +138,50 @@ export default function TestingReport() {
   const [isPrintOpen, setIsPrintOpen] = useState(false);
   
   const [testingDate, setTestingDate] = useState(new Date().toISOString().split('T')[0]);
+
+  /**
+   * The jobs this report prints, lifted out of the print branch unchanged - the pagination hook below needs them, and
+   * it has to run before this screen's `if (loading && jobs.length === 0)` early return (React #310 otherwise).
+   */
+  const selectedJobs = useMemo(
+    () => Array.from<string>(selectedJobIds).map(id => jobs.find(j => j.id === id)!).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true })),
+    [selectedJobIds, jobs],
+  );
+
+  /**
+   * HOW MANY ROWS A SHEET HOLDS - DERIVED FROM THE MEASURED BODY, NOT A CONSTANT (AUDIT O64 step 2, G103).
+   *
+   * This was `CHUNK_SIZE = 8`. A constant is wrong in both directions and no single value serves two agencies, because
+   * the body a sheet has to spend is the page less that agency's letterhead reservations. The internal sheet lost its
+   * whole signature block to wrapped rows (O58) and the external sheet lost 8mm of one (G102); this sheet is the same
+   * shape and was the last of the three.
+   *
+   * ⚠⚠ THE ROW IS 55.3px, NOT 26px - MEASURED, AND NOT RECONCILED WITH THE FIGURE G21 ASSUMED.
+   * G21's note says `h-6.5` resolves to 26px, and it does - on screen, at a 16px root. Printed, the root is 10pt, so
+   * the class asks for 21.7px. print-check measures the row at **55.3px**: two and a half times it. The class is a
+   * MINIMUM on a table row and on this sheet it never binds - five cells stack two lines each (job number over serial,
+   * MR number over date) and those decide the height. G21 estimated the stacking at "~1px each ... about 2mm down the
+   * page"; it is the dominant term, not a rounding.
+   *
+   * That is why 8 was not merely optimistic but impossible: 8 x 55.3 = 442px against a 325.9px budget on MEGHA's
+   * letterhead. Every full sheet printed short - 31mm off sheet 1 and 36mm off sheet 2 on live data, whole ROWS gone,
+   * not just the sign-off (G103).
+   *
+   * The Tailwind-version warning in G21's note still stands and still matters: under v3, or a pinned scale, `h-6.5`
+   * emits nothing at all. It happens not to be the binding constraint today, so it would change nothing today - but a
+   * measured count absorbs it either way, and a constant chosen for a nominal row height would not.
+   *
+   * ⚠ THE BINDING CONSTRAINT IS STILL WIDTH (G21) - 21 column slots across a landscape 297mm. What is derived here is
+   * the vertical count only.
+   *
+   * ⚠ THE SERIAL NUMBER COMES FROM `offsets`, NEVER `pageIdx * CHUNK_SIZE` (O64).
+   */
+  const { chunks: jobChunks, offsets: chunkOffsets } = useMeasuredRowChunks(
+    selectedJobs,
+    job => job.id,
+    'printable-testing-sheet',
+    { seed: 8, enabled: isPrintOpen },
+  );
   const [formsData, setFormsData] = useState<Record<string, TestingData>>({});
 
   const divisions = useMemo(() => {
@@ -446,40 +492,9 @@ export default function TestingReport() {
   }
 
   if (isPrintOpen) {
-    const selectedJobs = Array.from<string>(selectedJobIds).map(id => jobs.find(j => j.id === id)!).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
     const printDate = formatDDMMYYYY(selectedJobs[0]?.testingDate || new Date());
 
-    /**
-     * EIGHT ROWS A PAGE - AND, LIKE THE INSPECTION REPORTS, IT IS NOT A VERTICAL LIMIT
-     * (AUDIT G21).
-     *
-     * ⚠ THE PREVIOUS JUSTIFICATION WAS "Chunk jobs for clean landscape A4 pagination (8 jobs
-     * per page)". That restates the value and asserts a result; it is not a model. The two
-     * inspection reports had no comment at all. This is the model all three lacked.
-     *
-     * LANDSCAPE A4, 21 column slots across 297mm. The content area is ~176mm, and eight rows
-     * plus the title, header and signature block use about 88mm after G21's enlargement -
-     * roughly 88mm SPARE, about half the page. So the binding constraint here is WIDTH, which
-     * is the opposite of what a row count implies.
-     *
-     * ⚠ THE ROW HEIGHT IS WHAT MADE THE ENLARGEMENT NEARLY FREE, AND IT IS TAILWIND-VERSION-
-     * DEPENDENT. `<tr className="... h-6.5">` resolves to 26px ONLY because this project is on
-     * Tailwind v4, which generates spacing dynamically. 6.5 is not in v3's fixed scale: under
-     * v3, or under a config that pins the scale, the class emits NOTHING and the rows fall
-     * back to sizing from their content. That would change how this document paginates without
-     * anyone touching this file. On a table row the height is a MINIMUM anyway, so the five
-     * cells that stack two lines grow it by ~1px each at 9.5px - about 2mm down the page,
-     * which is why the enlargement was nearly free rather than free.
-     *
-     * ⚠ IF THE TEXT EVER OVERFLOWS 297mm, the honest fixes are FEWER COLUMNS PER PAGE or a
-     * SMALLER CHUNK_SIZE. Not smaller type - unreadable print is the fault G21 fixed.
-     */
-    const CHUNK_SIZE = 8;
-    const jobChunks: typeof selectedJobs[] = [];
-    for (let i = 0; i < selectedJobs.length; i += CHUNK_SIZE) {
-      jobChunks.push(selectedJobs.slice(i, i + CHUNK_SIZE));
-    }
-    if (jobChunks.length === 0) jobChunks.push([]);
+    // The sheets are cut by measured height above - useMeasuredRowChunks, and the note that goes with it.
 
     return (
       <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
@@ -522,13 +537,13 @@ export default function TestingReport() {
               >
                 <div className="flex flex-col justify-between h-full">
                   <div>
-                    <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
+                    <div {...{ [SHEET_MARK.chrome]: '' }} className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
                       <span>REPAIRER: <strong className="font-serif uppercase">{activeAgency?.name || 'IDEAL ENGINEERING CO.'}</strong></span>
                       <span>TESTING DATE: <strong className="font-mono">{printDate}</strong></span>
                       <span>TOTAL TRANSFORMERS: <strong>{selectedJobs.length}</strong></span>
                     </div>
 
-                    <table className="w-full border-collapse border border-black text-[9.5px] text-center">
+                    <table {...{ [SHEET_MARK.table]: '' }} className="w-full border-collapse border border-black text-[9.5px] text-center">
                       <thead>
                         <tr className="bg-slate-100 print:bg-transparent">
                           <th rowSpan={2} className="border border-black p-0.5 w-5">Sr.</th>
@@ -560,13 +575,14 @@ export default function TestingReport() {
                       </thead>
                       <tbody>
                         {chunk.map((job, cIdx) => {
-                          const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
+                          // ⚠ THE RUNNING OFFSET, NOT pageIdx * CHUNK_SIZE (AUDIT O64).
+                          const globalIdx = chunkOffsets[pageIdx] + cIdx;
                           const data = job.testingDetails || defaultTestingData;
                           const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
                           const extDateStr = job.externalInspectionDate ? formatDDMMYYYY(job.externalInspectionDate) : '-';
                           const intDateStr = job.internalInspectionDate ? formatDDMMYYYY(job.internalInspectionDate) : '-';
                           return (
-                            <tr key={job.id} className="border border-black h-6.5">
+                            <tr key={job.id} {...{ [SHEET_MARK.row]: job.id }} className="border border-black h-6.5">
                               <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
                               <td className="border border-black p-0.5 font-bold uppercase break-words max-w-[60px]" title={job.division || '-'}>{job.division || '-'}</td>
                               <td className="border border-black p-0.5 font-bold uppercase text-left pl-1">
@@ -618,8 +634,10 @@ export default function TestingReport() {
                     </table>
                   </div>
 
+                  {/* ⚠ LAST SHEET ONLY - the block O58 and G102 lost on the two inspection sheets. Marked, so packRows
+                      reserves its measured height on the final sheet rather than filling that sheet to the body's edge. */}
                   {isLastPage && (
-                    <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
+                    <div {...{ [SHEET_MARK.last]: '' }} className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
                       <div className="text-center">
                         <div className="h-8"></div>
                         <div className="border-t border-dotted border-black pt-0.5">TESTING SUPERVISED / WITNESSED</div>

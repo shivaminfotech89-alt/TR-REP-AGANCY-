@@ -5,9 +5,9 @@
 // both are CUT from the source between markers (lib/sources.cut) until they are extracted.
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { slash } from './env.mjs';
+import { Refusal, slash } from './env.mjs';
 import { cut, letterheadRegion, readSource } from './sources.mjs';
-import { pickEstimate, pickExternalInspection, pickExternalInspectionStress, pickInspection, pickInspectionNoLetterhead, pickInspectionStress, pickMultiJob } from './data.mjs';
+import { pickEstimate, pickExternalInspection, pickExternalInspectionStress, pickInspection, pickInspectionNoLetterhead, pickInspectionStress, pickMultiJob, pickTestingReport, pickTestingReportNoLetterhead, pickTestingReportStress } from './data.mjs';
 
 const EG = 'src/components/EstimateGenerate.tsx';
 
@@ -294,6 +294,63 @@ ${block}
   },
 });
 
+/**
+ * The testing report (AUDIT G103). Its own row reader - `kind: 'testing'` - because its header is "Job No & S.No".
+ *
+ * ⚠ MORE STAND-INS THAN THE INSPECTION SHEETS NEED. `auth.currentUser?.displayName` prints inside the sign-off, and
+ * rows fall back to the module-level `defaultTestingData`. Both are reconstructed here; `defaultTestingData` is cut
+ * from the source rather than retyped, so a field added to it reaches this harness without anyone remembering to.
+ */
+const testingReport = (id, title, select) => ({
+  id, title, kind: 'testing', container: 'printable-testing-sheet', orientation: 'landscape',
+  select,
+  generate(root) {
+    const r = slash(root);
+    const file = 'src/components/TestingReport.tsx';
+    const block = cut(root, file, 'the testing report',
+      '  if (isPrintOpen) {', '\n  return (\n    <div className="max-w-7xl mx-auto">',
+      ['<PrintableA4Page', '</PrintableA4Page>']);
+    const src = readSource(root, file);
+    const defaults = (src.match(/const defaultTestingData: TestingData = \{[\s\S]*?\n\};\n/) || [])[0];
+    if (!defaults) {
+      throw new Refusal(`${file} no longer declares "const defaultTestingData: TestingData = {...};" - the testing report's rows fall back to it, so a harness without it would print blanks where the app prints values.`);
+    }
+    const measuredRows = paginatesByHeight(root);
+    const entry = head(root, id) + `
+import { formatDDMMYYYY } from '${r}/src/lib/utils';
+import { PrintableA4Page } from '${r}/src/components/LetterheadHeader';
+${measuredRows ? `import { useMeasuredRowChunks } from '${r}/src/lib/useMeasuredRowChunks';
+import { SHEET_MARK } from '${r}/src/lib/printOverflow';` : ''}
+import { Printer } from 'lucide-react';
+type TestingData = any;
+${defaults}
+// The sign-off prints the signed-in user's display name; there is no sign-in here.
+const auth: any = { currentUser: { displayName: 'print-check' } };
+function Doc(): any {
+  const isPrintOpen = true;
+  const activeAgency: any = D.agency;
+  const testingDate: string = D.testingDate;
+  // ⚠ jobs AND selectedJobIds ARE SUPPLIED FOR BOTH SHAPES OF THE BRANCH. Before G103 the branch derived
+  // selectedJobs itself from these two; from G103 the screen lifts that memo above its early return, so the
+  // declaration moves HERE - and declaring it on a commit that still derives it inside would be a duplicate.
+  const jobs: any[] = D.selectedJobs;
+  const selectedJobIds = new Set<string>(D.selectedJobIds);
+  const setIsPrintOpen = (_: boolean) => {};
+  const handleExportExcel = () => {};
+  const closePrint = () => {};
+${measuredRows ? `  // As the screen's lifted memo orders them: by job number, numerically.
+  const selectedJobs: any[] = [...D.selectedJobs].sort((a: any, b: any) => String(a.jobNo).localeCompare(String(b.jobNo), undefined, { numeric: true }));
+  const { chunks: jobChunks, offsets: chunkOffsets } = useMeasuredRowChunks(
+    selectedJobs, (job: any) => job.id, 'printable-testing-sheet', { seed: 8, enabled: true });` : ''}
+  EXPECTED = { rows: D.selectedJobs.length };
+${block}
+  return null;
+}
+` + mount + runtime('printable-testing-sheet', 'landscape', root);
+    return { entry, coverageText: block + letterheadRegion(root) };
+  },
+});
+
 export const DOCUMENTS = [
   estimate('estimate-itemised', 'ITEMISED', 'Single-job estimate, itemised layout'),
   estimate('estimate-fixed-rate', 'FIXED_RATE', 'Single-job estimate, fixed-rate layout'),
@@ -304,6 +361,9 @@ export const DOCUMENTS = [
   externalInspection('external-inspection', 'External inspection sheet', live => pickExternalInspection(live)),
   externalInspection('external-inspection-stress', 'External inspection sheet, longest real values in every row', live => pickExternalInspectionStress(live)),
   externalInspection('external-inspection-no-letterhead', 'External inspection sheet on an agency that has NO letterhead - a real agency, not a synthetic one', live => pickExternalInspection(live, { letterhead: false })),
+  testingReport('testing', 'Testing report', live => pickTestingReport(live)),
+  testingReport('testing-stress', 'Testing report, longest real values in every row', live => pickTestingReportStress(live)),
+  testingReport('testing-no-letterhead', 'Testing report with the letterhead removed - the other end of the row-count range', live => pickTestingReportNoLetterhead(live)),
 ];
 
 /** What the command line may name. */
@@ -311,5 +371,6 @@ export const ALIASES = {
   all: DOCUMENTS.map(d => d.id),
   estimate: ['estimate-itemised', 'estimate-fixed-rate'],
   'external': ['external-inspection', 'external-inspection-stress', 'external-inspection-no-letterhead'],
+  'testing-report': ['testing', 'testing-stress', 'testing-no-letterhead'],
   ...Object.fromEntries(DOCUMENTS.map(d => [d.id, [d.id]])),
 };

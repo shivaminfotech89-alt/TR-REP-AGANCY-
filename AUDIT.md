@@ -7992,8 +7992,12 @@ Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
 > **The EXTERNAL inspection sheet is done too: G102** (2026-09-29) - and it turned out to HAVE the defect, not merely
 > to be at risk of it: at HEAD its stress case lost 8mm of signature block. "Not measured" was not "fine".
 >
-> **Still cut at a constant, and still able to lose a sign-off: the testing report (8) and the forwarding letter
-> (14/22).** Same shape, same fix, not done. Neither is covered by print-check.
+> **The TESTING REPORT is done too: G103** (2026-09-29) - and it was the worst of the three: at HEAD it lost **31mm
+> off sheet 1 and 36mm off sheet 2 on LIVE data**, whole rows and not merely a sign-off, because its row measures
+> 55.3px against the 26px G21 assumed and eight of them never fitted a letterheaded body.
+>
+> **Step 2 is therefore done for the three sheets named here. STILL OPEN: the forwarding letter** - `paginateRows`,
+> 14 rows then 22, a constant, and no print-check case.
 >
 > Step 3 - the multi-job sheet - is untouched. It still loses 4mm of its sign-off on MEGHA's letterhead, measured
 > again on 2026-09-29, and it has no row count to derive: every sheet prints every row.
@@ -8032,8 +8036,8 @@ The body is `overflow-hidden`.
 | Single-job estimate, fixed-rate | The same budget, with about 85mm of clause and notes not charged to it (G22), but a **measured** overflow warning (G23) | Partly |
 | Internal inspection sheet | **Packed by measured row height against the measured body, the last sheet's sign-off reserved first (G101)** | **Yes** |
 | External inspection sheet | **Packed by measured row height against the measured body, the last sheet's sign-off reserved first (G102)** | **Yes** |
-| Testing report | `CHUNK_SIZE = 8` | No - not measured. **Same shape as O58, same fix, not done** |
-| Estimate forwarding letter | `paginateRows`: 14 rows on the first sheet, 22 after | No - not measured |
+| Testing report | **Packed by measured row height against the measured body, the last sheet's sign-off reserved first (G103)** | **Yes** |
+| Estimate forwarding letter | `paginateRows`: 14 rows on the first sheet, 22 after | No - not measured. **The last constant-cut sheet, and the only part of step 2 still open** |
 | Multi-job estimate sheet | 5 columns a sheet; every row on every sheet | No (O63) |
 | Bill: forwarding letter, certificate, tax invoice, oil account | One sheet each, content-sized, never paginated | No - not measured. The certificate's own comment records its signature once escaping the border. |
 | Delivery challan | One sheet, never paginated | No - not measured |
@@ -20155,3 +20159,115 @@ takes a `letterhead` flag and refuses rather than falling back if no agency at t
 - **A clarity fix to print-check's own output**, worth recording because it was misleading: the derived line said
   "N on a continuation sheet", and where the deck fits one sheet that N is the DECK, not a capacity - ZENITH read
   "15 on a continuation sheet, 22 on a lone sheet". It now says "sheet 1 holds N".
+
+---
+
+## G103. The testing report was losing whole rows off live paper, and the row was 55.3px against an assumed 26px
+
+**Why.** O64 step 2, the last of the three fixed-count sheets. `CHUNK_SIZE = 8`.
+
+### ⚠⚠ THE WORST OF THE THREE, AND THE ONLY ONE THAT FAILED ON REAL DATA
+
+print-check, **at HEAD**, on the live case - not the stress case:
+
+| sheet | elements cut off | lost |
+|---|---|---|
+| 1 of 2 | 83 | **31 mm** |
+| 2 of 2 | 64 | **36 mm** |
+
+**Whole rows of a signed test report were missing from the paper**, not just a sign-off. O58 and G102 each lost a
+signature block; this lost rows as well. Every MR of more than about five jobs on MEGHA's letterhead printed short.
+
+G66's warning *was* firing - the run records "(warned)" - so operators were being told a number before the dialog.
+The sheet still printed short, because warning was all G66 did.
+
+Now: **4 sheets, nothing cut.**
+
+### ⚠⚠ THE ROW IS 55.3px. G21 ASSUMED 26px. NOT RECONCILED
+
+G21's note says `h-6.5` resolves to 26px, and it does - **on screen, at a 16px root**. Printed, the root is 10pt, so
+the class asks for **21.7px**. print-check measures the row at **55.3px**.
+
+- `h-6.5` is a **minimum** on a table row, and on this sheet **it never binds**. Five cells stack two lines each - job
+  number over serial, MR number over date - and those decide the height.
+- G21 estimated that stacking at "~1px each at 9.5px - about 2mm down the page". It is **the dominant term**, about
+  33px of a 55.3px row.
+
+**So 8 was not optimistic, it was impossible:** 8 x 55.3 = 442px against a 325.9px budget. Eight rows never fitted on
+that letterhead, and the constant had no way to know.
+
+**The Tailwind-version warning in G21's note is untouched and still stands** - under v3, or a config that pins the
+scale, `h-6.5` emits nothing. It happens not to be the binding constraint, so it would change nothing today; a
+measured count absorbs it either way.
+
+### WHAT CHANGED
+
+The hook, the marks and the running offset, as G101 and G102. No new decision code.
+
+**One structural change this sheet needed and the others did not:** `selectedJobs` was derived *inside* the print
+branch from `selectedJobIds` and `jobs`. The hook must run before the screen's `if (loading && jobs.length === 0)`
+early return, so that derivation is lifted to a `useMemo` above it - unchanged, including its `!` on
+`jobs.find(...)`, which is pre-existing and deliberately not "fixed" here.
+
+### THE HARNESS: THREE REFUSALS AND A DEFECT OF ITS OWN
+
+Every one of these fired before anything printed, which is the tool working.
+
+1. **`closePrint is not defined`** - the cut block calls a handler declared outside it. Stubbed in the entry.
+2. **`jobs is not defined`, on the BEFORE tree only.** Before this change the branch derives `selectedJobs` itself, so
+   the entry must supply `jobs` and `selectedJobIds`; after it, the entry must supply `selectedJobs` and must *not*
+   declare it on a commit that still derives it inside, or it is a duplicate declaration. Both shapes are now handled.
+3. **⚠ A DEFECT IN print-check ITSELF: the class-coverage check read a class name out of a COMMENT.**
+   `classTokens` scans the source text for `className="..."`, comments included. TestingReport's own note reads
+   `` `<tr className="... h-6.5">` resolves to 26px `` - so the token `...` was extracted, no stylesheet defines it,
+   and **the whole comparison was refused**. The refusal was right to fire on an undefined class and wrong about what
+   it had found. A token with no letter or digit in it cannot be a class name and is now dropped.
+   - Narrower than parsing comments out, deliberately: a comment quoting a real class still contributes it, which
+     **costs a false refusal at worst, never a false pass**.
+   - It only surfaced because this change DELETED the comment that contained it, so before and after disagreed.
+
+### VERIFIED
+
+- **print-check, `--compare HEAD`, live data:**
+
+  | Case | HEAD | now |
+  |---|---|---|
+  | testing (MEGHA, 15 jobs) | 2 sheets, **31 mm and 36 mm cut, 147 elements** | **4 sheets, 0 cut**, deck 5 + 5 + 4 + 1 |
+  | testing-stress | identical to the above | identical to the above |
+  | testing-no-letterhead | 2 sheets, 0 cut | 2 sheets, 0 cut, deck 9 + 6 |
+
+- **⚠ THE STRESS CASE DOES NOT STRESS, AND IT IS RECORDED RATHER THAN DRESSED UP.** Its output is byte-for-byte the
+  live case's: 4 sheets, the same 5 + 5 + 4 + 1, the same 55.3px row. Live testing values are all short - **the longest
+  `remarks` in the whole database is 3 characters** - so substituting the longest real value of all 14 fields changes
+  nothing measurable. The run prints that length on its selection line so the weakness is visible. It will start
+  earning its keep the first time an operator writes a sentence in `remarks`.
+- **⚠ NO IMPROVEMENT WITH NO LETTERHEAD.** 2 sheets before and after, nothing cut either way: with a 618.3px body,
+  8 x 55.3 = 442px fitted, so the constant was already adequate there. **The whole defect was letterhead-specific**,
+  which is exactly the case a constant cannot serve.
+- **Range:** a lone sheet fits **4** rows on MEGHA's letterhead and **8** with none.
+- **Sheets went UP, 2 to 4, and that is the fix.** The two sheets were never holding 15 rows; they were holding about
+  11 and dropping the rest off the bottom.
+- **Gates:** tsc (exit 0); 324 tests in 28 files; build; hooks guard, 50 files.
+- **`print-subtree-hashes --compare HEAD`: 12 byte-identical, 1 changed** - `TestingReport.tsx#0`.
+- **All 12 print-check cases, one run, 82 seconds.** The only finding left across every covered document is the
+  multi-job sheet's 4 mm - O63, step 3, untouched.
+
+### O64 STEP 2 IS NOW DONE FOR THE THREE FIXED-COUNT SHEETS IT NAMED
+
+Internal inspection (G101), external inspection (G102), testing report (G103). **The forwarding letter is not done** -
+`paginateRows`, 14 rows then 22, still a constant, no print-check case, and O64 named it in the same breath as these
+three. Step 3, the multi-job sheet, is untouched and still loses 4 mm.
+
+### WHAT THE THREE COST, AND WHAT THEY FOUND
+
+The argument for building a case per document rather than trusting the shared component:
+
+| | live case at HEAD | found by |
+|---|---|---|
+| Internal inspection | printed whole | the stress case only - 12 mm |
+| External inspection | printed whole | the stress case only - 8 mm |
+| Testing report | **31 mm + 36 mm, whole rows** | **the live case** |
+
+Two of the three were only reachable through a stress case built from the longest real values. The third was failing
+on the data an operator prints today and had been doing so unmeasured. **"Not measured" was not "fine" in any of the
+three.**

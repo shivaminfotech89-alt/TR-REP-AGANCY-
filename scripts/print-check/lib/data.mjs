@@ -217,6 +217,90 @@ export function pickInspectionNoLetterhead(live) {
   };
 }
 
+/**
+ * THE TESTING REPORT (AUDIT G103) - the last of the three fixed-count sheets, `CHUNK_SIZE = 8`.
+ *
+ * ⚠ ITS SELECTION IS NOT AN MR. The screen prints whatever job ids the operator has ticked, so there is no
+ * `selectedMrNo` to key on. This picks the MR whose jobs carry the most `testingDetails` - which is what an operator
+ * ticking a whole MR would produce - and hands the print branch that set.
+ *
+ * ⚠ ITS DATA IS ON THE JOB, NOT IN `inspections`. Testing values live on the job document as `testingDetails`, so a
+ * job with none prints a row of defaults; those are excluded, or the sheet would measure empty rows.
+ *
+ * `letterhead: false` asks for the other end of the range. Live data may not have a usable deck there - the only
+ * no-letterhead agency with testing data has ONE job - so it refuses rather than printing a one-row sheet and
+ * calling that a measurement of pagination.
+ */
+export function pickTestingReport(live, { letterhead = true, minJobs = 2 } = {}) {
+  const groups = new Map();
+  for (const j of live.jobs) {
+    if (!j.mrNo || !j.testingDetails) continue;
+    if (!Object.values(j.testingDetails).some(v => v !== '' && v != null)) continue;
+    const key = `${j.agencyId}|${j.mrNo}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(j);
+  }
+  const wanted = [...groups].filter(([, js]) => {
+    const a = live.agencies.find(x => x.id === js[0].agencyId);
+    return hasLetterhead(a) === letterhead && js.length >= minJobs;
+  });
+  const [, selected] = wanted.sort((a, b) => (b[1].length - a[1].length) || byKey(a[0], b[0]))[0] || [];
+  if (!selected) {
+    throw new Refusal(`no MR with at least ${minJobs} jobs carrying filled testingDetails belongs to an agency ${letterhead ? 'with' : 'without'} a full-A4 letterhead. A one-row sheet would not measure pagination, so this is a refusal rather than a thin case.`);
+  }
+  const agency = live.agencies.find(a => a.id === selected[0].agencyId);
+  const dates = selected.map(j => j.testingDate).filter(Boolean).sort();
+  return {
+    label: `MR ${selected[0].mrNo} - ${agency?.name}, ${selected.length} jobs, ${hasLetterhead(agency) ? 'full-A4 letterhead' : 'no letterhead'}`,
+    data: { agency, selectedJobs: selected, selectedJobIds: selected.map(j => j.id), testingDate: dates[dates.length - 1] || '' },
+  };
+}
+
+/**
+ * THE TESTING REPORT WITH ITS LETTERHEAD REMOVED - the other end of the range, synthetically.
+ *
+ * ⚠ SYNTHETIC, and only because live data leaves no choice: the one no-letterhead agency carrying testing data has a
+ * single job. Nothing is asserted about this agency beyond the fit of what it prints.
+ */
+export function pickTestingReportNoLetterhead(live) {
+  const base = pickTestingReport(live);
+  const agency = { ...base.data.agency };
+  delete agency.letterheadUrl;
+  delete agency.letterheadMode;
+  return {
+    label: `MR ${base.data.selectedJobs[0].mrNo} - ${base.data.agency?.name} WITH ITS LETTERHEAD REMOVED (synthetic), ${base.data.selectedJobs.length} jobs`,
+    data: { ...base.data, agency },
+  };
+}
+
+/**
+ * THE TESTING REPORT'S STRESS CASE - every row carrying the longest real value of every field IT prints.
+ *
+ * The field list is read off the sheet's own `data.<field>` reads, after G102's list of twenty-two guessed names
+ * matched none of the real ones and would have produced a stress case that stressed nothing.
+ */
+export function pickTestingReportStress(live) {
+  const base = pickTestingReport(live);
+  const longest = vals => vals.map(v => (v == null ? '' : String(v))).reduce((a, b) => (b.length > a.length ? b : a), '');
+  const details = live.jobs.map(j => j.testingDetails).filter(Boolean);
+  const job = {
+    jobNo: longest(live.jobs.map(j => j.jobNo)), serialNo: longest(live.jobs.map(j => j.serialNo)),
+    division: longest(live.jobs.map(j => j.division)), mrNo: longest(live.jobs.map(j => j.mrNo)),
+    capacityKva: longest(live.jobs.map(j => j.capacityKva)), coreType: longest(live.jobs.map(j => j.coreType)),
+  };
+  const FIELDS = ['noLoadVoltage', 'excitationCurrent', 'noLoadLoss', 'fullLoadCurrent', 'impedanceVoltage', 'loadLoss',
+    'neutralCurrent', 'percentageImpedance', 'dvdfTest', 'highVoltageTest', 'insulationResistance', 'oilBdv',
+    'ratioTest', 'remarks'];
+  const fields = Object.fromEntries(FIELDS.map(f => [f, longest(details.map(d => d[f]))]).filter(([, v]) => v !== ''));
+  return {
+    label: `${base.label}, every row stressed with the longest real values (remarks ${String(fields.remarks || '').length} characters; ${Object.keys(fields).length} of ${FIELDS.length} fields present in live data)`,
+    data: {
+      ...base.data,
+      selectedJobs: base.data.selectedJobs.map(j => ({ ...j, ...job, testingDetails: { ...j.testingDetails, ...fields } })),
+    },
+  };
+}
+
 /** The MR with the most estimable jobs that all price cleanly, itemised, under one AT. */
 export function pickMultiJob(live) {
   const groups = new Map();

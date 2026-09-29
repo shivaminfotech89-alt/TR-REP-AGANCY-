@@ -19,6 +19,16 @@ const ROWS = {
     const rows = t ? [...t.querySelectorAll('tbody tr')] : [];
     return { rows: rows.map(r => ({ cells: [...r.children].map(c => c.textContent.trim()), h: Math.round(r.getBoundingClientRect().height * 10) / 10 })), cols: null };
   }`,
+  /**
+   * ⚠ THE TESTING REPORT NEEDS ITS OWN READER: its header is "Job No & S.No", so the `inspection` reader above - which
+   * tests equality with "Job No" - finds no table and reports NO ROWS. That is caught (somethingPrinted checks the row
+   * count against the document's own builder) rather than passing as a clean sheet, but it is not the same reader.
+   */
+  testing: `page => {
+    const t = [...page.querySelectorAll('table')].find(t => [...t.querySelectorAll('th')].some(th => th.textContent.trim() === 'Job No & S.No'));
+    const rows = t ? [...t.querySelectorAll('tbody tr')] : [];
+    return { rows: rows.map(r => ({ cells: [...r.children].map(c => c.textContent.trim()), h: Math.round(r.getBoundingClientRect().height * 10) / 10 })), cols: null };
+  }`,
 };
 
 /**
