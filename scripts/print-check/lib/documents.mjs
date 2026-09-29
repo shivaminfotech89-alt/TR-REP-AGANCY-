@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { slash } from './env.mjs';
 import { cut, letterheadRegion, readSource } from './sources.mjs';
-import { pickEstimate, pickInspection, pickInspectionNoLetterhead, pickInspectionStress, pickMultiJob } from './data.mjs';
+import { pickEstimate, pickExternalInspection, pickExternalInspectionStress, pickInspection, pickInspectionNoLetterhead, pickInspectionStress, pickMultiJob } from './data.mjs';
 
 const EG = 'src/components/EstimateGenerate.tsx';
 
@@ -251,6 +251,49 @@ ${block}
   },
 });
 
+/**
+ * The external inspection sheet (AUDIT G102) - written inline inside its screen, like the internal one, and cut from
+ * the source between markers. Its rows are read by the same `inspection` reader: its table carries a `Job No` header.
+ */
+const externalInspection = (id, title, select) => ({
+  id, title, kind: 'inspection', container: 'printable-external-inspection-sheet', orientation: 'landscape',
+  select,
+  generate(root) {
+    const r = slash(root);
+    const file = 'src/components/ExternalInspection.tsx';
+    // The whole print branch, from `if (isPrintOpen && selectedMrNo)` to the end of it. There is no scrap note here,
+    // so the branch itself is the start - unlike the internal sheet.
+    const block = cut(root, file, 'the external inspection sheet',
+      '  if (isPrintOpen && selectedMrNo) {', '\n  return (\n    <div className="space-y-6 print:space-y-0">',
+      ['<PrintableA4Page', '</PrintableA4Page>']);
+    const measuredRows = paginatesByHeight(root);
+    const entry = head(root, id) + `
+import { formatDDMMYYYY } from '${r}/src/lib/utils';
+import { PrintableA4Page } from '${r}/src/components/LetterheadHeader';
+${measuredRows ? `import { useMeasuredRowChunks } from '${r}/src/lib/useMeasuredRowChunks';
+import { SHEET_MARK } from '${r}/src/lib/printOverflow';` : ''}
+import { Printer, Download } from 'lucide-react';
+function Doc(): any {
+  const isPrintOpen = true;
+  const activeAgency: any = D.agency;
+  const selectedMrNo: string = D.selectedMrNo;
+  // As the screen's mrJobs memo orders them: by job number, numerically.
+  const mrJobs: any[] = [...D.mrJobs].sort((a: any, b: any) => String(a.jobNo).localeCompare(String(b.jobNo), undefined, { numeric: true }));
+  const formsData: Record<string, any> = D.formsData;
+  const handleExportExcel = () => {};
+  const setIsPrintOpen = (_: boolean) => {};
+${measuredRows ? `  // The deck cut by measured height, as the component calls it - see paginatesByHeight above for why it is here.
+  const { chunks: jobChunks, offsets: chunkOffsets } = useMeasuredRowChunks(
+    mrJobs, (job: any) => job.id, 'printable-external-inspection-sheet', { enabled: true });` : ''}
+  EXPECTED = { rows: mrJobs.length };
+${block}
+  return null;
+}
+` + mount + runtime('printable-external-inspection-sheet', 'landscape', root);
+    return { entry, coverageText: block + letterheadRegion(root) };
+  },
+});
+
 export const DOCUMENTS = [
   estimate('estimate-itemised', 'ITEMISED', 'Single-job estimate, itemised layout'),
   estimate('estimate-fixed-rate', 'FIXED_RATE', 'Single-job estimate, fixed-rate layout'),
@@ -258,11 +301,15 @@ export const DOCUMENTS = [
   inspection('inspection', 'Internal inspection sheet', live => pickInspection(live)),
   inspection('inspection-stress', 'Internal inspection sheet, longest real values in every row (the O58 case)', live => pickInspectionStress(live)),
   inspection('inspection-no-letterhead', 'Internal inspection sheet with the letterhead removed - the other end of the row-count range', live => pickInspectionNoLetterhead(live)),
+  externalInspection('external-inspection', 'External inspection sheet', live => pickExternalInspection(live)),
+  externalInspection('external-inspection-stress', 'External inspection sheet, longest real values in every row', live => pickExternalInspectionStress(live)),
+  externalInspection('external-inspection-no-letterhead', 'External inspection sheet on an agency that has NO letterhead - a real agency, not a synthetic one', live => pickExternalInspection(live, { letterhead: false })),
 ];
 
 /** What the command line may name. */
 export const ALIASES = {
   all: DOCUMENTS.map(d => d.id),
   estimate: ['estimate-itemised', 'estimate-fixed-rate'],
+  'external': ['external-inspection', 'external-inspection-stress', 'external-inspection-no-letterhead'],
   ...Object.fromEntries(DOCUMENTS.map(d => [d.id, [d.id]])),
 };

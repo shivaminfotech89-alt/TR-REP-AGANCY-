@@ -20069,3 +20069,86 @@ exactly what O58's "27.6px spare under the table" says on the same line. With th
   still width (G20, G61), and height pagination does nothing for that.
 
 **Deploy:** hosting - a push to `main` (O71). No functions, no rules.
+
+---
+
+## G102. The external inspection sheet had O58's defect too, and nobody had measured it
+
+**Why.** O64 step 2, second of the three fixed-count sheets. G101 fixed the internal sheet; this one was the same
+shape - `CHUNK_SIZE = 9`, a sign-off on the last sheet only - and O64 recorded it as "not measured", which is not the
+same as fine.
+
+### ⚠⚠ IT WAS NOT FINE. THE DEFECT WAS REAL AND INVISIBLE
+
+print-check, on the new stress case, **at HEAD**: sheet 2 of 2 loses **8 mm - `INSPECTED BY`, `Junior Engineer`,
+`EXECUTIVE ENGINEER`**. The same failure as O58, on a different document, found the day a case existed to find it.
+
+**That is the whole argument for building the case rather than trusting the shape.** The packing logic was already
+tested and shared; what was unknown was this sheet's own measurements, and they said it was broken.
+
+### WHAT CHANGED
+
+The hook, the marks and the running offset, exactly as G101 - `useMeasuredRowChunks`, `SHEET_MARK`, `rowOffsets`. No
+new decision code: `packRows` and `measureRowLayout` are unchanged, which is the point of having put them in a module.
+
+**The measurements are this sheet's own, and they are not the internal sheet's:**
+
+| | internal (G101) | external |
+|---|---|---|
+| chrome above the rows | 92 px | **77.7 px** |
+| sign-off | 71.4 px (103.6 with a scrap note) | **71.4 px**, no scrap note on this sheet |
+| body, MEGHA letterhead | 414.9 px | 414.9 px |
+| body, no letterhead | 618.3 px | **601.8 px** |
+| columns | 26 | **29** |
+
+Two of the five differ. A fix that assumed the internal sheet's figures would have been wrong about the budget by
+14 px of chrome and 16.5 px of body.
+
+### ⚠ THE STRESS FIELD LIST WAS GUESSED FIRST, AND EVERY NAME WAS WRONG
+
+The first `FIELDS` list for `pickExternalInspectionStress` was twenty-two plausible names - `oilCapacity`, `nutBolt`,
+`damRad`. The sheet reads `oilCapLtrs`, `nuteBolt`, `damRadNo`. **Not one of the twenty-two matched.**
+
+A stress case built on it would have stressed nothing: every field would have fallen back to its short live value,
+the sheet would have printed clean, and the 8 mm cut above would never have been found. Read off the sheet's own
+`data.<field>` reads instead: **23 of 23 present in live data**, and the run says so on its selection line, so a
+future list that stops matching is visible rather than silent.
+
+That is the same shape as the census that reported 1,572 cells clean and could not see the four defects - a check
+that structurally cannot fail.
+
+### ⚠ NO SYNTHETIC CASE NEEDED HERE - both ends of the range are real agencies
+
+G101 had to strip MEGHA's letterhead to measure the other end. External inspection does not: **MEGHA carries a
+letterhead and ZENITH TRANSFORMERS does not**, and both have real multi-row decks (18 and 15 jobs). `pickExternalInspection`
+takes a `letterhead` flag and refuses rather than falling back if no agency at that end has an external inspection.
+
+### VERIFIED
+
+- **print-check, `--compare HEAD`, live data:**
+
+  | Case | HEAD | now |
+  |---|---|---|
+  | external-inspection (MEGHA, 18 jobs) | 2 sheets, 0 cut | 2 sheets, 0 cut, deck **16 + 2** |
+  | external-inspection-stress | 2 sheets, **10 elements cut, 8 mm**, warning held the dialog | **2 sheets, 0 cut, no warning**, deck 10 + 8 |
+  | external-inspection-no-letterhead (ZENITH, 15 jobs) | 2 sheets | **1 sheet** |
+
+  - The run exits FINDINGS because **HEAD** loses the signature block. Nothing is cut in the working tree.
+- **⚠ NO SAVING ON THE LIVE MR, AND IT WAS EXPECTED.** MR 85558 has 18 jobs and printed on two sheets before and
+  after - 18 rows never fitted one sheet and still do not. Its second sheet now carries 2 rows instead of 9. **The
+  win here is the stress case's 8 mm and ZENITH's sheet, not this one.** Stated because a reader seeing "nothing"
+  against the case an operator actually prints would otherwise read it as the fix not working.
+- **The stress case saved no sheet either** - 2 sheets before and after. It stopped losing the sign-off, which is the
+  defect; the sheet count was already right.
+- **Range:** a lone sheet fits **8** of its tallest rows on MEGHA's letterhead and **22** on ZENITH's none.
+- **Gates:** tsc (exit 0); 324 tests in 28 files (no new - the decision module was already covered, and this change
+  adds no decision code); build; hooks guard, 50 files.
+- **`print-subtree-hashes --compare HEAD`: 12 byte-identical, 1 changed** - `ExternalInspection.tsx#0`.
+
+### NOT EXERCISED
+
+- **The testing report** - still `CHUNK_SIZE = 8`, still able to lose its sign-off, no case. Next.
+- **The forwarding letter** - 14 rows then 22, still a constant, no case.
+- **A clarity fix to print-check's own output**, worth recording because it was misleading: the derived line said
+  "N on a continuation sheet", and where the deck fits one sheet that N is the DECK, not a capacity - ZENITH read
+  "15 on a continuation sheet, 22 on a lone sheet". It now says "sheet 1 holds N".

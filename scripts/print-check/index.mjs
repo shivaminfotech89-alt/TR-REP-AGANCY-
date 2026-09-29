@@ -282,7 +282,9 @@ async function main() {
       // count from a constant that happens to divide the deck.
       if (r.budget) {
         const b = r.budget;
-        console.log(`${' '.repeat(32)}rows by measured height: ${b.rowsPerSheet} on a continuation sheet, ${b.rowsOnALoneSheet} on a lone sheet; deck cut ${b.sheetSizes.join(' + ')}`);
+        // "sheet 1 holds" rather than "a continuation sheet holds": where the whole deck fits one sheet, sheet 1 IS the
+        // last sheet and the figure is the deck, not a capacity. Reading it as a capacity understates the sheet.
+        console.log(`${' '.repeat(32)}rows by measured height: sheet 1 holds ${b.rowsPerSheet}, a lone sheet fits ${b.rowsOnALoneSheet} of its tallest row; deck cut ${b.sheetSizes.join(' + ')}`);
         console.log(`${' '.repeat(32)}body ${b.bodyHeightPx}px less chrome ${b.chromeHeightPx}px = ${b.rowBudgetPx}px for rows; last sheet ${b.finalRowBudgetPx}px (sign-off ${b.lastExtraPx}px); a row ${b.rowMinPx}-${b.rowMaxPx}px`);
       }
     }

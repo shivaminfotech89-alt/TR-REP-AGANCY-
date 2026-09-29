@@ -18,6 +18,8 @@ import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { LetterheadHeader, PrintableA4Page } from './LetterheadHeader';
 import { triggerUniversalPrint } from '../lib/printUtils';
+import { SHEET_MARK } from '../lib/printOverflow';
+import { useMeasuredRowChunks } from '../lib/useMeasuredRowChunks';
 import { RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 import { InspectionLegend } from './InspectionLegend';
@@ -348,6 +350,28 @@ export default function ExternalInspection() {
     if (!selectedMrNo) return [];
     return scopedJobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
   }, [scopedJobs, selectedMrNo]);
+
+  /**
+   * HOW MANY ROWS A SHEET HOLDS - DERIVED FROM THE MEASURED BODY, NOT A CONSTANT (AUDIT O64 step 2, G102).
+   *
+   * This was `CHUNK_SIZE = 9`. A constant is wrong in both directions, and no single value can serve two agencies:
+   * the body a sheet has to spend is the page less that agency's letterhead reservations, and a row's height depends
+   * on whether its make or serial wraps. The internal sheet lost its whole signature block to nine wrapped rows
+   * (O58); this sheet is the same shape and had the same exposure, never measured.
+   *
+   * ⚠ THE BINDING CONSTRAINT ON THIS SHEET IS STILL WIDTH, AND HEIGHT PAGINATION DOES NOTHING FOR IT (G20).
+   * 29 columns across a landscape 297mm - three more than the internal sheet. If the text ever overflows 297mm the
+   * honest fixes are FEWER COLUMNS PER SHEET, not smaller type. What is derived here is the vertical count only.
+   *
+   * ⚠ THE SERIAL NUMBER COMES FROM `offsets`, NEVER `pageIdx * CHUNK_SIZE` - with measured chunks that expression
+   * mis-numbers every row after the first sheet on a signed document, and reads as innocent arithmetic (O64).
+   */
+  const { chunks: jobChunks, offsets: chunkOffsets } = useMeasuredRowChunks(
+    mrJobs,
+    job => job.id,
+    'printable-external-inspection-sheet',
+    { enabled: isPrintOpen && !!selectedMrNo },
+  );
 
   const handleExportExcel = () => {
     if (!selectedMrNo) return;
@@ -756,32 +780,7 @@ export default function ExternalInspection() {
   if (isPrintOpen && selectedMrNo) {
     const sampleJob = mrJobs[0];
     const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
-    /**
-     * NINE ROWS A PAGE - AND IT IS NOT A VERTICAL LIMIT (AUDIT G20).
-     *
-     * ⚠ THE BINDING CONSTRAINT IS WIDTH, WHICH IS THE OPPOSITE OF WHAT A ROW COUNT IMPLIES.
-     * This sheet is LANDSCAPE A4 and the table has 29 columns across 297mm. Vertically it is
-     * nowhere near full: content area ~176mm, and nine rows plus the header, title and
-     * signature block use about 68mm - roughly 115mm SPARE. The page is two-thirds empty.
-     *
-     * So a reader wondering whether 9 can go up should be asking about column width, not
-     * height. And a reader making the text bigger - as G20 did, 7.5px to 9.5px - is spending
-     * from a very large vertical surplus and a very small horizontal one.
-     *
-     * ⚠ IF THE TEXT EVER OVERFLOWS 297mm, the honest fixes are FEWER COLUMNS PER PAGE or a
-     * SMALLER CHUNK_SIZE. Not smaller type: unreadable print is the fault this number's
-     * neighbours were just changed to fix, and compensating horizontally by shrinking would
-     * undo that silently.
-     *
-     * There is no mm budget behind this the way layoutEstimatePages has one - 9 is a measured
-     * number with no model, and this comment is the model it never had.
-     */
-    const CHUNK_SIZE = 9;
-    const jobChunks: typeof mrJobs[] = [];
-    for (let i = 0; i < mrJobs.length; i += CHUNK_SIZE) {
-      jobChunks.push(mrJobs.slice(i, i + CHUNK_SIZE));
-    }
-    if (jobChunks.length === 0) jobChunks.push([]);
+    // The sheets are cut by measured height above - useMeasuredRowChunks, and the note that goes with it.
 
     return (
       <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
@@ -830,14 +829,14 @@ export default function ExternalInspection() {
               >
                 <div className="flex flex-col justify-between h-full">
                   <div>
-                    <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
+                    <div {...{ [SHEET_MARK.chrome]: '' }} className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5">
                       <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
                       <span>MR DATE: <strong className="font-mono">({mrDateStr})</strong></span>
                       <span>DIVISION: <strong className="uppercase">{sampleJob?.division || '-'}</strong></span>
                       <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
                     </div>
 
-                    <table className="w-full border-collapse border border-black text-[9.5px] text-center">
+                    <table {...{ [SHEET_MARK.table]: '' }} className="w-full border-collapse border border-black text-[9.5px] text-center">
                       <thead>
                         {/* Grouped High-Level Header */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
@@ -883,13 +882,16 @@ export default function ExternalInspection() {
                       </thead>
                       <tbody>
                         {chunk.map((job, cIdx) => {
-                          const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
+                          // ⚠ THE RUNNING OFFSET, NOT pageIdx * CHUNK_SIZE (AUDIT O64). Sheets no longer hold a
+                          // constant number of rows, and the old expression would mis-number every row after the
+                          // first sheet on a signed document while reading as innocent arithmetic.
+                          const globalIdx = chunkOffsets[pageIdx] + cIdx;
                           const data = formsData[job.id] || {} as any;
                           const rating = data.starRating || job.starRating || '3 Star & other';
                           const transCore = data.transType || job.coreType || 'CRGO';
 
                           return (
-                            <tr key={job.id} className="border border-black h-6">
+                            <tr key={job.id} {...{ [SHEET_MARK.row]: job.id }} className="border border-black h-6">
                               <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
                               <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
                                 {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
@@ -934,8 +936,10 @@ export default function ExternalInspection() {
                     </table>
                   </div>
 
+                  {/* ⚠ THE BLOCK O58 LOST ON THE INTERNAL SHEET. Marked last-sheet-only, so packRows reserves its
+                      measured height on the final sheet instead of filling that sheet to the body's edge and cutting it. */}
                   {isLastPage && (
-                    <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
+                    <div {...{ [SHEET_MARK.last]: '' }} className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
                       <div className="text-center">
                         <div className="h-8"></div>
                         <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY</div>

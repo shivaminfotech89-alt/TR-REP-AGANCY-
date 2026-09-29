@@ -132,6 +132,70 @@ export function pickInspectionStress(live) {
 }
 
 /**
+ * THE EXTERNAL INSPECTION SHEET (AUDIT G102) - the same shape as the internal one, 29 columns instead of 26, and it
+ * had O58's exposure without ever being measured.
+ *
+ * `letterhead` picks the largest MR on a full-A4 letterhead; without it, the largest on an agency that has none.
+ * **Both ends of the range are real agencies here** - MEGHA carries a letterhead and ZENITH does not - so unlike the
+ * internal sheet this needs no synthetic case to measure the other end.
+ */
+export function pickExternalInspection(live, { letterhead = true } = {}) {
+  const groups = new Map();
+  for (const j of live.jobs) {
+    if (!j.mrNo || !live.ext[j.id]) continue;
+    const key = `${j.agencyId}|${j.mrNo}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(j);
+  }
+  const wanted = [...groups].filter(([, js]) => {
+    const a = live.agencies.find(x => x.id === js[0].agencyId);
+    return hasLetterhead(a) === letterhead;
+  });
+  const [, mrJobs] = wanted.sort((a, b) => (b[1].length - a[1].length) || byKey(a[0], b[0]))[0] || [];
+  if (!mrJobs) {
+    throw new Refusal(`no MR with an external inspection belongs to an agency ${letterhead ? 'with' : 'without'} a full-A4 letterhead, so there is nothing real to print for that end of the range.`);
+  }
+  const agency = live.agencies.find(a => a.id === mrJobs[0].agencyId);
+  const dates = mrJobs.map(j => j.externalInspectionDate).filter(Boolean).sort();
+  return {
+    label: `MR ${mrJobs[0].mrNo} - ${agency?.name}, ${mrJobs.length} jobs, ${hasLetterhead(agency) ? 'full-A4 letterhead' : 'no letterhead'}`,
+    data: { agency, mrJobs, formsData: pick(live.ext, mrJobs.map(j => j.id)), selectedMrNo: mrJobs[0].mrNo, externalInspectionDate: dates[dates.length - 1] || '' },
+  };
+}
+
+/**
+ * THE EXTERNAL SHEET'S STRESS CASE - every row carrying the longest real value of every field IT prints.
+ *
+ * ⚠ THE FIELD LIST IS THIS SHEET'S, NOT THE INTERNAL ONE'S. Reusing pickInspectionStress's list would stress fields
+ * this sheet does not print and leave its own at their short live values - a stress case that stresses nothing, which
+ * is the shape of check this project keeps recording (G33, G59).
+ */
+export function pickExternalInspectionStress(live) {
+  const base = pickExternalInspection(live);
+  const longest = vals => vals.map(v => (v == null ? '' : String(v))).reduce((a, b) => (b.length > a.length ? b : a), '');
+  const externals = Object.values(live.ext);
+  const job = {
+    jobNo: longest(live.jobs.map(j => j.jobNo)), repairType: 'GP', serialNo: longest(live.jobs.map(j => j.serialNo)),
+    make: longest(live.jobs.map(j => j.make)), coreType: longest(live.jobs.map(j => j.coreType)), capacityKva: longest(live.jobs.map(j => j.capacityKva)),
+    starRating: longest(live.jobs.map(j => j.starRating)), ratingLevel: longest(live.jobs.map(j => j.ratingLevel)),
+  };
+  // Read off the sheet's own `data.<field>` reads, not guessed: a first pass here invented twenty-two plausible
+  // names and every one of them was wrong, which would have produced exactly the stress case that stresses nothing.
+  const FIELDS = ['breather', 'clnDrtyTank', 'damCtTank', 'damRadNo', 'dryActPart', 'gasket', 'hvLvRod', 'hvSideHvCc',
+    'hvSideHvb', 'hvSideHvm', 'kv', 'lessOilLtrs', 'lvSideLvCc', 'lvSideLvb', 'lvSideLvm', 'namePlate', 'nuteBolt',
+    'oilCapLtrs', 'oilLevGls', 'outsidePaint', 'sealType', 'starRating', 'transType'];
+  const fields = Object.fromEntries(FIELDS.map(f => [f, longest(externals.map(d => d[f]))]).filter(([, v]) => v !== ''));
+  return {
+    label: `${base.label}, every row stressed with the longest real values (serial ${job.serialNo.length}, make ${job.make.length} characters; ${Object.keys(fields).length} of ${FIELDS.length} fields present in live data)`,
+    data: {
+      ...base.data,
+      mrJobs: base.data.mrJobs.map(j => ({ ...j, ...job })),
+      formsData: Object.fromEntries(Object.entries(base.data.formsData).map(([id, d]) => [id, { ...d, ...fields }])),
+    },
+  };
+}
+
+/**
  * THE SAME MR WITH NO LETTERHEAD - the other end of the range a derived row count has to work across (AUDIT O64).
  *
  * The body a sheet has to spend is the page less the letterhead's header and footer reservations, so the row count
