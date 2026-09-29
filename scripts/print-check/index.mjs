@@ -4,8 +4,10 @@
 //
 //   npm run print-check -- [documents...] [--compare <ref>] [--out <dir>]
 //
-//   documents   all (default) | estimate | estimate-itemised | estimate-fixed-rate | multi-job | inspection
-//               | inspection-stress | inspection-no-letterhead
+//   documents   all (default) | estimate | estimate-itemised | estimate-fixed-rate | multi-job
+//               | inspection | inspection-stress | inspection-no-letterhead
+//               | external  (external-inspection, -stress, -no-letterhead)
+//               | testing-report  (testing, testing-stress, testing-no-letterhead)
 //               inspection-stress is the largest inspection MR with the longest real value of every printed field in
 //               every row - the case that produced O58. The pagination fix was tested against it and passed (G101).
 //               inspection-no-letterhead is the same MR with the letterhead removed - SYNTHETIC. A row count derived
@@ -59,9 +61,11 @@
 //   - One browser engine. Firefox and Safari lay out print differently, and an operator may print from either.
 //   - The print dialog as an operator leaves it: scale, margins, headers and footers, background graphics.
 //   - This machine's fonts. A machine without them substitutes, and every text width changes.
-//   - Four documents (six cases). The other printed documents - bills, the challan, the forwarding letter, the external
-//     inspection and testing reports - are not covered. Two of the four are rendered from cut source, not a component.
-//     The warning is checked only on these; that it measures the others is by construction, not by measurement.
+//   - Six documents (twelve cases), about 82 seconds for all of them. The other printed documents - the bills, the
+//     challan and the ESTIMATE FORWARDING LETTER - are not covered. Four of the six are rendered from cut source,
+//     not a component. The warning is checked only on these; that it measures the others is by construction, not by
+//     measurement - and on three sheets running that check for the first time found a real cut (O58, G102, G103),
+//     the testing report's on LIVE data. "Not measured" has not once meant "fine".
 //   - Only the records it picks: the most complete live example of each document. A defect that needs long values, many
 //     rows or a particular letterhead may not be present in them.
 //   - Whether the figures are right. It reads what printed; pricing is the builder's tests' and regressions' job.
