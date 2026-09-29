@@ -7983,7 +7983,17 @@ Open, 2026-09-11. Consolidates O58's signature-block finding and O63. Not fixed.
 >   real rows print whole;
 > - both estimate layouts print whole.
 >
-> Steps 2 and 3 wait for evidence of what overflows in use.
+> **Step 2 is built for the INTERNAL INSPECTION SHEET ONLY: G101** (2026-09-29). Its row count is derived from the
+> measured body, the last sheet's sign-off is reserved before rows are packed onto it, and the serial number comes
+> from a running offset. **O58 is fixed on paper** - print-check's stress case went from 2 sheets losing 12mm of
+> signature block to 3 sheets losing nothing. The range it measures is the argument against a bigger constant: a lone
+> sheet holds **10** rows on MEGHA's letterhead and **21** with none.
+>
+> **Still cut at a constant, and still able to lose a sign-off: external inspection (9), the testing report (8) and
+> the forwarding letter (14/22).** Same shape, same fix, not done. Neither of the first two is covered by print-check.
+>
+> Step 3 - the multi-job sheet - is untouched. It still loses 4mm of its sign-off on MEGHA's letterhead, measured
+> again on 2026-09-29, and it has no row count to derive: every sheet prints every row.
 >
 > **Decided: no production write to learn which documents overflow.** The warning tells the operator, and
 > operators telling the owner is the channel for a product with twelve customers. The cheapest record, should
@@ -8001,13 +8011,15 @@ The body is `overflow-hidden`.
 
 | | Document | What decides a sheet's contents | What is lost |
 |---|---|---|---|
-| O58 | Internal inspection sheet | `CHUNK_SIZE = 9` rows a sheet | The whole signature block on the last sheet, 43.8px deep - when the nine rows wrap to two lines. Nine one-line rows fit with about 34mm to spare, and MR 85558 prints whole today. |
+| O58 | Internal inspection sheet | ~~`CHUNK_SIZE = 9` rows a sheet~~ **derived from the measured body since G101** | The whole signature block on the last sheet - **43.8px of it PAST the body, the block itself 71.4px** (corrected 2026-09-29; "43.8px deep" here was the overflow, not the block, and G101's first estimate took it for the block and overcounted a sheet by five rows) - when the nine rows wrap to two lines. Nine one-line rows fit with about 34mm to spare, and MR 85558 prints whole today. **Fixed: G101.** |
 | O63 | Multi-job estimate sheet | `PER_PAGE = 5` transformer COLUMNS a sheet. **Every sheet prints every applicable item row**; there is no vertical pagination at all. | "Thanking you" and "Auth Sign." on the last sheet, with 21 item rows (MR 2555). |
 
 **One cause, two mechanisms - recorded as one, so a fix is not applied to half of it.**
-- The inspection sheet has a row count that could be derived from the body's height.
-- The multi-job sheet has no row count to derive: its rows never move to another sheet.
-- Deriving a rows-per-page constant fixes the first and leaves the second exactly as it is.
+- The inspection sheet has a row count that could be derived from the body's height. **Done: G101.**
+- The multi-job sheet has no row count to derive: its rows never move to another sheet. **Still open.**
+- Deriving a rows-per-page constant fixes the first and leaves the second exactly as it is. **That is what happened -
+  the half that was fixable this way is fixed, and the multi-job sheet still loses 4mm** (measured again 2026-09-29).
+  Recording them as one cause is what kept the second visible after the first was done.
 
 **The whole family - every document printed on `PrintableA4Page`:**
 
@@ -8015,9 +8027,9 @@ The body is `overflow-hidden`.
 |---|---|---|
 | Single-job estimate, itemised | `layoutEstimatePages`: an mm budget against `contentMm`, **measured** from the page at runtime | **Yes** - the only document that does |
 | Single-job estimate, fixed-rate | The same budget, with about 85mm of clause and notes not charged to it (G22), but a **measured** overflow warning (G23) | Partly |
-| Internal inspection sheet | `CHUNK_SIZE = 9` | No (O58) |
-| External inspection sheet | `CHUNK_SIZE = 9` | No - not measured |
-| Testing report | `CHUNK_SIZE = 8` | No - not measured |
+| Internal inspection sheet | **Packed by measured row height against the measured body, the last sheet's sign-off reserved first (G101)** | **Yes** |
+| External inspection sheet | `CHUNK_SIZE = 9` | No - not measured. **Same shape as O58, same fix, not done** |
+| Testing report | `CHUNK_SIZE = 8` | No - not measured. **Same shape as O58, same fix, not done** |
 | Estimate forwarding letter | `paginateRows`: 14 rows on the first sheet, 22 after | No - not measured |
 | Multi-job estimate sheet | 5 columns a sheet; every row on every sheet | No (O63) |
 | Bill: forwarding letter, certificate, tax invoice, oil account | One sheet each, content-sized, never paginated | No - not measured. The certificate's own comment records its signature once escaping the border. |
@@ -8046,9 +8058,12 @@ Only print-check's four documents have been measured. "Not measured" does not me
 4. **The single-sheet documents** - the four bill documents and the challan - cannot move content to a
    second sheet without a redesign. For them, detection is the fix until one is shown to overflow.
 
-**Verification:** print-check measures cut-off on four documents, and checks the warning against paper
-(G66). The longest-real-values stress case that produced O58 is now one of its cases (`inspection-stress`),
-so the pagination fix is tested against the case that failed.
+**Verification:** print-check measures cut-off on four documents (**six cases since G101**), and checks the warning
+against paper (G66). The longest-real-values stress case that produced O58 is one of its cases (`inspection-stress`),
+so the pagination fix **was** tested against the case that failed - and it passed it (G101). `inspection-no-letterhead`
+prints the same MR with the letterhead removed, because a derived row count has to be right at both ends of the range
+and the two differ by more than twice. Since G101 a run also reports **the row count the sheet derived** - without
+that, a sheet count cannot tell a measured count from a constant that happens to divide the deck.
 
 ### IF A RECORD OF WARNINGS IS EVER WANTED - the cheapest shape, not built
 
@@ -8355,10 +8370,20 @@ confirmed and when. That records a person's answer; it does not check the paper 
 
 ### O58. A signed inspection sheet can lose its signature block, and nothing says so
 
-> **The signature-block finding is consolidated into O64** (2026-09-11): one cause with O63's multi-job
-> sheet - content past a letterhead-shortened page body, cut off silently. Fix it there. The letterhead-image
-> note at the end of this entry - the image's own signature text printing through the rows - is a
-> different defect and stays here.
+> **FIXED on the internal inspection sheet: G101** (2026-09-29). The sheet's row count is derived from the measured
+> body, and the last sheet's signature block is reserved before rows are packed onto it. print-check's
+> `inspection-stress` - the case that produced this entry - went from 2 sheets losing 12mm of signature block to 3
+> sheets losing nothing.
+>
+> **⚠ ONE FIGURE IN THIS ENTRY WAS READ WRONGLY LATER, AND THE ENTRY IS RIGHT.** The block was measured at 71.4px
+> in G101, not the 43.8px below. Both are correct and they are different things: 43.8px is what hung PAST the body,
+> and the 27.6px of spare this entry records on the same line is the rest of the block, inside it. A reader taking
+> 43.8px as the block's height - as G101's first estimate did - gets a lone-sheet row count five rows too high.
+>
+> **The signature-block finding was consolidated into O64** (2026-09-11): one cause with O63's multi-job
+> sheet - content past a letterhead-shortened page body, cut off silently. **The external inspection sheet and the
+> testing report still have it.** The letterhead-image note at the end of this entry - the image's own signature text
+> printing through the rows - is a different defect and stays here.
 
 Open, found 2026-09-11 while printing G61's column. Not started.
 
@@ -19906,3 +19931,141 @@ evidence supports:
 
 **Deploy:** hosting - a push to `main` (O71) for fixes 1 and 2. **Fix 3 needs `firebase deploy --only
 functions`**, not yet run.
+
+---
+
+## G101. The inspection sheet's row count is measured, not a constant - and the range across two letterheads is twice over
+
+**Why.** O64 step 2, for the internal inspection sheet only. `CHUNK_SIZE = 9` was wrong in both directions and one
+number could not do both jobs, because a row's height depends on whether its make or serial wraps.
+- **It spilled when it need not.** On MEGHA's letterhead nine one-line rows left about 34mm spare, so an MR of ten
+  ordinary jobs printed a second landscape sheet holding one row and the sign-off.
+- **It held when it must not.** Nine rows that wrap took the whole signature block off the paper (O58).
+
+External inspection (`CHUNK_SIZE = 9`) and the testing report (8) are **not** changed. They are the same shape and
+the same fix; they wait until this one has been printed in use.
+
+### WHAT IT DOES
+
+`src/lib/sheetPagination.ts` decides, `measureRowLayout` in `printUtils` measures, and
+`useMeasuredRowChunks` runs the two passes O64 step 2 asks for: render at the seed count, measure every row **as
+printed**, pack by height, re-render. It settles after one re-render - a row's height does not depend on which sheet
+it lands on, because every sheet's body is the same width.
+
+### ⚠⚠ THE LAST SHEET'S FIT IS CIRCULAR, AND THAT IS THE PART THAT REPRODUCES O58
+
+The signature block and the scrap note render **only on the last sheet**. So "does this row fit?" has no answer
+until it is known whether this sheet is the last - and packing that row on is what MAKES it the last, which adds the
+sign-off, which is what overflows. **A paginator that fills each sheet to the body's edge and then discovers it was
+the final one prints O58's defect again, out of principled-looking code.**
+
+`packRows` asks the questions in the only order that terminates:
+1. **First**, whether every remaining row fits **beside the sign-off**. If so, that is the last sheet, and it is whole.
+2. If not, this sheet is not the last: it is filled against the budget **without** the sign-off, and **it must leave
+   at least one row behind** - otherwise it consumes the deck, becomes the last sheet after all, and loses the block.
+
+A test holds the trap window directly: a deck that fits `rowBudget` but not `finalRowBudget` must never be emitted as
+one sheet.
+
+### ⚠ MEASURED AS PRINTED, THROUGH THE FRAME G66 ALREADY PAID FOR
+
+The row heights go through `inPrintFrame` - the same hidden frame, at the paper's width, with every media condition
+rewritten to its printed form. Printed, the root font is 10pt instead of 16px, so a screen-measured row is about a
+sixth too tall; a paginator measuring the screen **packs too few rows while looking principled**, which is the
+premature spill again in a new form. G66's first build measured the screen and said 22mm where paper lost 4mm.
+
+`measureAsPrinted` was refactored onto `inPrintFrame` rather than duplicated. print-check confirms the other three
+documents are byte-for-byte unchanged on paper.
+
+### ⚠ HEIGHTS COME FROM THE ELEMENTS' OWN BOXES, NEVER FROM THE GAPS BETWEEN THEM
+
+`PrintableA4Page`'s body and the sheet's own column are both `justify-between`. On a sheet with room to spare the
+free space is dealt out **between the table and the sign-off**. Measuring the block as "the distance from the last
+row to the bottom" would read that free space as part of it - on O58's sheet, about 34mm - and reserve a third of
+the sheet for a 71px block. Each marked element's own height plus its margins is free of that.
+
+**What is marked** (`SHEET_MARK`, `printOverflow.ts`): per-sheet chrome, the table, each row by its stable key, and
+**last-sheet-only content**. A sheet that adds last-sheet content without marking it will be paginated as though
+that content were free, and will lose it exactly as O58 did.
+
+### ⚠ THE SERIAL NUMBER - `pageIdx * CHUNK_SIZE` CANNOT SURVIVE VARIABLE CHUNKS
+
+With a constant chunk the expression is right. With measured chunks **every row after the first sheet is mis-numbered
+on a signed document**, and it passes review because it reads as innocent arithmetic. Replaced by a running offset
+(`rowOffsets`). A test pins the difference: for the stress deck cut 9 + 8 + 1, sheet 2's first row is Sr 8, where the
+old expression printed Sr 10.
+
+### ⚠ THE HOOK CANNOT LIVE WHERE THE CHUNKING LIVED, AND A GUARD CAUGHT IT
+
+First written where `CHUNK_SIZE` was - below the screen's `if (!activeAgency) return`. `scripts/admin/hooks-after-return.js`
+failed it immediately: **one component, React #310 on that branch.** Moved up beside the other hooks.
+
+That has a consequence for print-check. The harness cuts the print branch out of the source between markers, and the
+cut starts **below** that early return, so the hook is outside it and is reconstructed in the generated entry
+(`paginatesByHeight`). On a commit that still cuts at a constant, the chunking is inside the cut block and nothing is
+added - so `--compare` across the change works.
+
+**The harness refused twice before it printed, both times correctly:** `SHEET_MARK is not defined`, because the cut
+block used an import the generated entry did not have. That is the marker discipline (G65) doing its job.
+
+### ⚠ THE RANGE - WHY A CONSTANT RAISED TO 14 WOULD BE WRONG TOO
+
+print-check, live data, headless Chrome, print media at 1123px. MR 85558, 18 jobs. A row measured **20px unwrapped,
+32.8px wrapped**.
+
+| | body | for rows | last sheet | rows, unwrapped | rows, all wrapped |
+|---|---|---|---|---|---|
+| MEGHA letterhead (64mm / 25mm) | 414.9px | 322.9px | 219.4px | **10** on a lone sheet, 16 on a continuation | 6 / 9 |
+| No letterhead (6mm each way) | 618.3px | 526.3px | 422.8px | **21** on a lone sheet, 26 on a continuation | 12 / 16 |
+
+**Twice over, between two agencies, on one document.** No single constant is right for both, which is the answer to
+"why not just raise 9 to 14": 14 would cut MEGHA's sheet and still waste a third of a sheet with no letterhead.
+
+**⚠ THE GAIN ON MEGHA'S LETTERHEAD IS ONE ROW, NOT FIVE.** An earlier estimate in this session said 14-15 rows would
+fit a lone sheet. It was wrong, and the way it was wrong is worth keeping: it read O58's **43.8px cut** as the
+block's height. The block is **71.4px** - 27.6px of it sat inside the body and only 43.8px hung past, which is
+exactly what O58's "27.6px spare under the table" says on the same line. With the scrap note the last sheet gives up
+103.6px. So the lone-sheet count goes 9 to 10, and a continuation sheet 9 to 16.
+
+### VERIFIED
+
+- **print-check, `--compare HEAD`, live data:**
+
+  | Document | HEAD | now |
+  |---|---|---|
+  | Inspection, real rows | 2 sheets, 0 cut | 2 sheets, 0 cut, deck cut **15 + 3** |
+  | Inspection, stress (the O58 case) | 2 sheets, **13 elements cut, 12 mm**, warning held the dialog | **3 sheets, 0 cut, no warning**, deck cut 9 + 8 + 1 |
+  | Inspection, no letterhead | 2 sheets, 0 cut | **1 sheet**, 0 cut, deck cut 18 |
+  | Estimate itemised / fixed-rate / multi-job | - | **nothing changed on paper** |
+
+  - The run exits FINDINGS **because HEAD's stress sheet loses its signature block** - `INSPECTED BY`,
+    `Junior Engineer`, `EXECUTIVE ENG`. There is no finding in the working tree.
+  - **O58 is fixed on paper, against the case that produced it.**
+- **⚠ NO IMPROVEMENT ON THE LIVE MR, and it is the case an operator sees.** MR 85558 has 18 jobs and printed on two
+  sheets before and after. 18 rows never fitted one sheet and still do not; what changed is that the second sheet now
+  carries 3 rows instead of 9. The saving is for MRs of **ten to sixteen** jobs, which this MR is not.
+- **print-check now reports the derived count** - rows a sheet, the deck's cut, the body, and what a row costs.
+  Without it a run cannot tell a measured count from a constant that happens to divide the deck: 18 rows is "2 sheets"
+  either way.
+- **A new case, `inspection-no-letterhead`** - the live agency with its letterhead removed. **Synthetic**, and
+  nothing is asserted about it beyond the fit of what it prints.
+- **Gates:** tsc (exit 0); **324 tests in 28 files**, 22 of them new; build; hooks guard, 50 files, none.
+- **`print-subtree-hashes --compare HEAD`: 12 byte-identical, 1 changed** - `InternalInspection.tsx#0`. One document
+  moved, which is the intended footprint.
+- **One of the new tests failed first, and it was the test that was wrong**, not the packing: it asserted ten rows
+  spill, which is the behaviour this change removes.
+
+### NOT EXERCISED
+
+- **External inspection and the testing report** - unchanged, still cut at a constant, still able to lose their
+  sign-off. print-check does not cover either.
+- **The fallback.** No frame, no marks, a measurement that throws - the sheet keeps the seed count. Read, not run.
+- **A deck large enough to make the measurement slow.** 87-124 ms on 18 rows over several runs; forty jobs untimed.
+- **Firefox and Safari**, as G66.
+- **Balanced sheets are deliberately not attempted.** Greedy-maximal minimises the sheet count and leaves the fewest
+  rows for the final sheet, which is the best case for the sign-off fitting. `9 + 8 + 1` is tidier as `6 + 6 + 6` and
+  would cost nothing here - but any balancing has to keep the last sheet's reserve, and that is a separate change.
+- **The right-hand cut.** `measureRowLayout` reports it; nothing packs for it. The binding constraint on this sheet is
+  still width (G20, G61), and height pagination does nothing for that.
+
+**Deploy:** hosting - a push to `main` (O71). No functions, no rules.

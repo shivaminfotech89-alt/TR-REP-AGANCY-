@@ -60,6 +60,28 @@ export interface NamedCutoff extends Cutoff { name?: string | null }
 export const SHEET_NAME_ATTR = 'data-sheet-name';
 
 /**
+ * WHAT A HEIGHT-PAGINATED SHEET MARKS FOR THE MEASUREMENT TO FIND (AUDIT O64 step 2, lib/sheetPagination).
+ *
+ * The marks say which part of a sheet is which, so a row count can be derived from the measured body instead of
+ * being a constant. They carry no styling and change no layout - they are read by `measureRowLayout`.
+ *
+ * ⚠ `LAST` IS THE ONE THAT MATTERS. Content that prints only on the final sheet - the signature block, the scrap
+ * note - is what O58 lost, and the packing can only reserve room for it if it knows its measured height. A sheet
+ * that adds last-sheet content without marking it here will be paginated as though that content were free, and
+ * will lose it exactly as O58 did.
+ */
+export const SHEET_MARK = {
+  /** Per-sheet content ABOVE the rows: an MR header line and the like. Its margins count. */
+  chrome: 'data-sheet-chrome',
+  /** The table whose body rows are paginated. Its height less its rows is the header and borders. */
+  table: 'data-sheet-table',
+  /** One paginated row. The value is the row's stable key, so heights survive a re-chunk. */
+  row: 'data-sheet-row',
+  /** Content on the LAST sheet only - the sign-off, the scrap note. Its margins count. */
+  last: 'data-sheet-last',
+} as const;
+
+/**
  * ONE LINE PER SHEET THAT LOSES ANYTHING, NAMED AS THE OPERATOR KNOWS IT (AUDIT G67).
  *   "Tax invoice: 12 mm at the bottom will be cut off when printed"
  *   "Internal inspection report, sheet 2 of 2: 5 mm at the bottom ..." - counted among sheets of that name

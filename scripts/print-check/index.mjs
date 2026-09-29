@@ -4,9 +4,13 @@
 //
 //   npm run print-check -- [documents...] [--compare <ref>] [--out <dir>]
 //
-//   documents   all (default) | estimate | estimate-itemised | estimate-fixed-rate | multi-job | inspection | inspection-stress
+//   documents   all (default) | estimate | estimate-itemised | estimate-fixed-rate | multi-job | inspection
+//               | inspection-stress | inspection-no-letterhead
 //               inspection-stress is the largest inspection MR with the longest real value of every printed field in
-//               every row - the case that produced O58. A pagination fix is tested against the case that failed.
+//               every row - the case that produced O58. The pagination fix was tested against it and passed (G101).
+//               inspection-no-letterhead is the same MR with the letterhead removed - SYNTHETIC. A row count derived
+//               from the measured body has to be right at both ends of the range, and the two bodies differ by more
+//               than twice: a lone sheet holds 10 rows on that letterhead and 21 with none.
 //   --compare   also print each document from <ref>, in a temporary git worktree, and report what changed on paper
 //   --out       where PDFs, sheet pictures and results.json go. Default: a new directory under the OS temp directory.
 //               Refused inside the repository.
@@ -33,6 +37,9 @@
 //   - TAILWIND IS TOLD WHERE THE SOURCE IS (@source), so a build does not depend on what its folder happens to contain.
 //     G63's correct print once rested on G62's broken output lying in the same folder.
 //   - CUT-OFF IS MEASURED AGAINST THE CLIPPING CONTAINER, not the page edge - PrintableA4Page's body hides overflow.
+//   - THE DERIVED ROW COUNT IS REPORTED, not just the sheet count (G101). Where a sheet packs rows by measured height,
+//     a run prints the body it measured, what a row cost and how the deck was cut. A sheet count alone cannot tell a
+//     measured count from a constant that happens to divide the deck: 18 rows is "2 sheets" either way.
 //   - THE APP'S CUT-OFF WARNING IS CHECKED AGAINST THE PRINT (G66), on commits that have it. The app measures a copy in
 //     a hidden frame with its styles rewritten to their printed form; this measures the print window itself, untouched,
 //     in print media at the sheet's width. The warning must appear exactly when paper is cut, say each sheet's
@@ -52,7 +59,7 @@
 //   - One browser engine. Firefox and Safari lay out print differently, and an operator may print from either.
 //   - The print dialog as an operator leaves it: scale, margins, headers and footers, background graphics.
 //   - This machine's fonts. A machine without them substitutes, and every text width changes.
-//   - Four documents (five cases). The other printed documents - bills, the challan, the forwarding letter, the external
+//   - Four documents (six cases). The other printed documents - bills, the challan, the forwarding letter, the external
 //     inspection and testing reports - are not covered. Two of the four are rendered from cut source, not a component.
 //     The warning is checked only on these; that it measures the others is by construction, not by measurement.
 //   - Only the records it picks: the most complete live example of each document. A defect that needs long values, many
@@ -271,6 +278,13 @@ async function main() {
       const mm = Math.max(0, ...r.pages.map(p => p.cutMm));
       const warning = r.h.flow !== 'measured' ? 'dialog on load' : (r.h.warningLines.length ? `WARNING SHOWN, dialog held: ${r.h.warningLines.join(' / ')}` : 'no warning, dialog opened') + ` (measured in ${r.h.printMs} ms; bars on screen: ${r.files.filter(f => f.includes('-screen-bar')).length})`;
       console.log(`  ${label.padEnd(8)} ${id.padEnd(20)} ${r.pages.length} sheet(s) = ${r.pdfPages} PDF page(s), ${rows} rows, style ${r.style.checked} checked / ${r.style.failureCount} wrong, ${cut} cut off (${mm} mm), letterhead ${r.h.letterhead}\n${' '.repeat(32)}${warning}`);
+      // The derived row count, where the sheet derives one (O64 step 2). A sheet count alone cannot tell a measured
+      // count from a constant that happens to divide the deck.
+      if (r.budget) {
+        const b = r.budget;
+        console.log(`${' '.repeat(32)}rows by measured height: ${b.rowsPerSheet} on a continuation sheet, ${b.rowsOnALoneSheet} on a lone sheet; deck cut ${b.sheetSizes.join(' + ')}`);
+        console.log(`${' '.repeat(32)}body ${b.bodyHeightPx}px less chrome ${b.chromeHeightPx}px = ${b.rowBudgetPx}px for rows; last sheet ${b.finalRowBudgetPx}px (sign-off ${b.lastExtraPx}px); a row ${b.rowMinPx}-${b.rowMaxPx}px`);
+      }
     }
   }
   if (compare) {

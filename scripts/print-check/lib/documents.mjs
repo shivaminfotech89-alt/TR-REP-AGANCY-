@@ -7,7 +7,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { slash } from './env.mjs';
 import { cut, letterheadRegion, readSource } from './sources.mjs';
-import { pickEstimate, pickInspection, pickInspectionStress, pickMultiJob } from './data.mjs';
+import { pickEstimate, pickInspection, pickInspectionNoLetterhead, pickInspectionStress, pickMultiJob } from './data.mjs';
 
 const EG = 'src/components/EstimateGenerate.tsx';
 
@@ -40,6 +40,16 @@ const measuresBeforePrinting = root => readSource(root, 'src/lib/printUtils.ts')
  */
 /** Whether this tree's sheets carry the name the warning uses (G67). Before it, the warning numbers sheets. */
 const namesSheets = root => readSource(root, 'src/components/LetterheadHeader.tsx').includes('data-sheet-name');
+
+/**
+ * Whether this tree cuts the inspection deck by MEASURED HEIGHT (O64 step 2) or at a constant.
+ *
+ * ⚠ THE HOOK IS NOT IN THE CUT BLOCK, AND IT CANNOT BE. It has to run before the screen's `if (!activeAgency)`
+ * early return or React throws #310 on that branch (scripts/admin/hooks-after-return.js), and the cut starts below
+ * that return. So it is reconstructed here, exactly as the component calls it. On a commit that still cuts at a
+ * constant, the chunking is inside the cut block and nothing is added.
+ */
+const paginatesByHeight = root => existsSync(join(root, 'src/lib/useMeasuredRowChunks.ts'));
 
 const runtime = (container, orientation, root) => { const measured = measuresBeforePrinting(root); return `
 const w: any = window;
@@ -209,10 +219,13 @@ const inspection = (id, title, select) => ({
       '  const scrapJobs = mrJobs.filter(', '\n  return (\n    <div className="space-y-6 print:space-y-0">',
       ['if (isPrintOpen && selectedMrNo) {', '<PrintableA4Page', '</PrintableA4Page>']);
     const hv = (readSource(root, file).match(/const hvCoilsPerLimb = [\s\S]*?;\n/) || [])[0];
+    const measuredRows = paginatesByHeight(root);
     const entry = head(root, id) + `
 import * as SJER from '${r}/src/components/SingleJobEstimateReport';
 import { formatDDMMYYYY } from '${r}/src/lib/utils';
 import { PrintableA4Page } from '${r}/src/components/LetterheadHeader';
+${measuredRows ? `import { useMeasuredRowChunks } from '${r}/src/lib/useMeasuredRowChunks';
+import { SHEET_MARK } from '${r}/src/lib/printOverflow';` : ''}
 import { Printer, Download } from 'lucide-react';
 const { classifyCoreType } = SJER as any;
 ${hv || "const hvCoilsPerLimb = (coreType?: string): string => '4';   // absent at this commit"}
@@ -226,6 +239,9 @@ function Doc(): any {
   const formsData: Record<string, any> = D.formsData;
   const handleExportExcel = () => {};
   const setIsPrintOpen = (_: boolean) => {};
+${measuredRows ? `  // The deck cut by measured height, as the component calls it - see paginatesByHeight above for why it is here.
+  const { chunks: jobChunks, offsets: chunkOffsets } = useMeasuredRowChunks(
+    mrJobs, (job: any) => job.id, 'printable-internal-inspection-sheet', { enabled: true });` : ''}
   EXPECTED = { rows: mrJobs.length };
 ${block}
   return null;
@@ -241,6 +257,7 @@ export const DOCUMENTS = [
   multiJob,
   inspection('inspection', 'Internal inspection sheet', live => pickInspection(live)),
   inspection('inspection-stress', 'Internal inspection sheet, longest real values in every row (the O58 case)', live => pickInspectionStress(live)),
+  inspection('inspection-no-letterhead', 'Internal inspection sheet with the letterhead removed - the other end of the row-count range', live => pickInspectionNoLetterhead(live)),
 ];
 
 /** What the command line may name. */

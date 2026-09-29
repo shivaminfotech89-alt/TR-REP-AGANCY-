@@ -1,4 +1,5 @@
-import { cutoffOf, printMediumMatches, summariseSheets, SCREEN_ONLY_ATTR, SHEET_NAME_ATTR, type Box, type Cutoff, type NamedCutoff } from './printOverflow';
+import { cutoffOf, printMediumMatches, summariseSheets, SCREEN_ONLY_ATTR, SHEET_MARK, SHEET_NAME_ATTR, type Box, type Cutoff, type NamedCutoff } from './printOverflow';
+import type { RowLayout } from './sheetPagination';
 
 /** Marks PrintableA4Page's clipping body, so a measurement finds it without knowing the component's classes. */
 export const PRINT_BODY_ATTR = 'data-print-body';
@@ -27,6 +28,11 @@ export function measureSheets(root: Document | Element): NamedCutoff[] {
 
 const stylesOf = (doc: Document) => Array.from(doc.querySelectorAll('link[rel="stylesheet"], style')).map(el => el.outerHTML).join('\n');
 const isLandscapeRoot = (root: Element) => root.matches('.a4-print-page.landscape') || !!root.querySelector('.a4-print-page.landscape');
+
+/** The page's own stylesheets around some sheets' markup - what the direct print paths and the on-screen bar measure. */
+const documentAround = (doc: Document, markup: string) =>
+  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">${stylesOf(doc)}</head><body>${markup}</body></html>`;
+
 
 /** Until a window's document, its images and its stylesheets are in - or 5 seconds, whichever comes first. */
 async function whenLoaded(win: Window): Promise<void> {
@@ -79,6 +85,17 @@ function applyPrintMedia(doc: Document, paper: Window): void {
  * the print window is restyled.
  */
 export async function measureAsPrinted(html: string, landscape: boolean, host: Document = document): Promise<NamedCutoff[]> {
+  return (await inPrintFrame(html, landscape, host, doc => measureSheets(doc))) ?? [];
+}
+
+/**
+ * `html` laid out in a hidden frame as wide as the paper, its media rewritten to its printed form, and `read` run
+ * there. The frame is removed afterwards. Returns null when the frame gave no window.
+ *
+ * Every measurement that has to agree with paper goes through here - the cut-off warning (G66) and the row heights
+ * pagination is derived from (O64 step 2). Measuring the app's own screen instead is the mistake G66 paid for.
+ */
+async function inPrintFrame<T>(html: string, landscape: boolean, host: Document, read: (doc: Document) => T): Promise<T | null> {
   const frame = host.createElement('iframe');
   frame.setAttribute('aria-hidden', 'true');
   frame.tabIndex = -1;
@@ -86,21 +103,86 @@ export async function measureAsPrinted(html: string, landscape: boolean, host: D
   host.body.appendChild(frame);
   try {
     const win = frame.contentWindow;
-    if (!win) return [];
+    if (!win) return null;
     win.document.open();
     win.document.write(html);
     win.document.close();
     await whenLoaded(win);
     applyPrintMedia(win.document, win);
-    return measureSheets(win.document);
+    return read(win.document);
   } finally {
     frame.remove();
   }
 }
 
-/** The page's own stylesheets around some sheets' markup - what the direct print paths and the on-screen bar measure. */
-const documentAround = (doc: Document, markup: string) =>
-  `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">${stylesOf(doc)}</head><body>${markup}</body></html>`;
+/** An element's height including the margins that push it away from its neighbours. */
+const outerHeight = (el: Element): number => {
+  const style = el.ownerDocument.defaultView?.getComputedStyle(el);
+  const margins = style ? (parseFloat(style.marginTop) || 0) + (parseFloat(style.marginBottom) || 0) : 0;
+  return (el as HTMLElement).getBoundingClientRect().height + margins;
+};
+
+/**
+ * THE HEIGHTS PAGINATION IS DERIVED FROM, MEASURED AS PRINTED (AUDIT O64 step 2).
+ *
+ * `container` holds the sheets as they currently stand - cut at any count, right or wrong. Every paginated row
+ * appears once across them, so one layout gives every row's printed height whatever the current cut is. Returns
+ * null when the marks are not there to read, and the caller keeps the count it had.
+ *
+ * ⚠ HEIGHTS ARE READ FROM THE ELEMENTS' OWN BOXES, NEVER FROM THE GAPS BETWEEN THEM. PrintableA4Page's body and the
+ * sheet's own column are both `justify-between`, so on a sheet with room to spare the free space is dealt out
+ * BETWEEN the table and the sign-off. Measuring the sign-off as "the distance from the last row to the bottom"
+ * would read that free space as part of the block - on O58's sheet, 34mm of it - and reserve a third of the sheet
+ * for a 44px block. Each marked element's own height plus its margins is free of that.
+ */
+export async function measureRowLayout(
+  container: Element,
+): Promise<{ layout: RowLayout; heightByKey: Record<string, number> } | null> {
+  const host = container.ownerDocument;
+  const pages = Array.from(container.querySelectorAll('.a4-print-page'));
+  if (!pages.length) return null;
+  const sheetsHtml = documentAround(host, pages.map(p => p.outerHTML).join('\n'));
+  return inPrintFrame(sheetsHtml, isLandscapeRoot(pages[0]), host, doc => {
+    const sheets = Array.from(doc.querySelectorAll('.a4-print-page'));
+    const first = sheets[0];
+    const last = sheets[sheets.length - 1];
+    if (!first || !last) return null;
+
+    const body = first.querySelector(`[${PRINT_BODY_ATTR}]`);
+    const table = first.querySelector(`[${SHEET_MARK.table}]`);
+    if (!body || !table) return null;
+
+    // Every row, from every sheet, keyed - so a re-chunk reuses the heights rather than re-measuring.
+    const heightByKey: Record<string, number> = {};
+    const order: string[] = [];
+    for (const row of Array.from(doc.querySelectorAll(`[${SHEET_MARK.row}]`))) {
+      const key = row.getAttribute(SHEET_MARK.row);
+      if (!key || key in heightByKey) continue;
+      heightByKey[key] = (row as HTMLElement).getBoundingClientRect().height;
+      order.push(key);
+    }
+    if (!order.length) return null;
+
+    // The table's own header and borders: what the table costs beyond the rows it happens to hold on this sheet.
+    const rowsHere = Array.from(table.querySelectorAll(`[${SHEET_MARK.row}]`))
+      .reduce((sum, r) => sum + (r as HTMLElement).getBoundingClientRect().height, 0);
+    const tableOverhead = outerHeight(table) - rowsHere;
+
+    const chromeHeight = Array.from(first.querySelectorAll(`[${SHEET_MARK.chrome}]`))
+      .reduce((sum, el) => sum + outerHeight(el), 0) + tableOverhead;
+
+    const lastSheetExtraHeight = Array.from(last.querySelectorAll(`[${SHEET_MARK.last}]`))
+      .reduce((sum, el) => sum + outerHeight(el), 0);
+
+    const layout: RowLayout = {
+      rowHeights: order.map(k => heightByKey[k]),
+      bodyHeight: (body as HTMLElement).getBoundingClientRect().height,
+      chromeHeight,
+      lastSheetExtraHeight,
+    };
+    return { layout, heightByKey };
+  });
+}
 
 type CutoffListener = (cutoff: Cutoff) => void;
 const watchedSheets = new Map<Element, CutoffListener>();

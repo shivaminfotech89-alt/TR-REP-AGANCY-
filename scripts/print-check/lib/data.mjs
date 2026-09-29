@@ -131,6 +131,28 @@ export function pickInspectionStress(live) {
   };
 }
 
+/**
+ * THE SAME MR WITH NO LETTERHEAD - the other end of the range a derived row count has to work across (AUDIT O64).
+ *
+ * The body a sheet has to spend is the page less the letterhead's header and footer reservations, so the row count
+ * is an agency-by-agency figure, not a constant: on MEGHA's 64mm/25mm letterhead a sheet holds far fewer rows than
+ * on none, where PrintableA4Page reserves 6mm each way and prints its own header block instead. A count derived from
+ * the measured body is the reason both are right; a constant raised to suit one of them is wrong for the other.
+ *
+ * ⚠ THIS AGENCY IS SYNTHETIC - the live agency with its letterhead removed, not a real record. It exists to measure
+ * the range, and nothing is asserted about it beyond the fit of what it prints.
+ */
+export function pickInspectionNoLetterhead(live) {
+  const base = pickInspection(live);
+  const agency = { ...base.data.agency };
+  delete agency.letterheadUrl;
+  delete agency.letterheadMode;
+  return {
+    label: `MR ${base.data.selectedMrNo} - ${base.data.agency?.name} WITH ITS LETTERHEAD REMOVED (synthetic), ${base.data.mrJobs.length} jobs`,
+    data: { ...base.data, agency },
+  };
+}
+
 /** The MR with the most estimable jobs that all price cleanly, itemised, under one AT. */
 export function pickMultiJob(live) {
   const groups = new Map();

@@ -119,6 +119,7 @@ export async function printDocument(chrome, url, kind, outPrefix, orientation) {
   await sleep(300);
   const pages = await evaluate(measureScript(kind));
   const style = await evaluate(STYLE_PROBE);
+  const budget = await evaluate(BUDGET_PROBE);
   const rects = await evaluate(`[...document.querySelectorAll('.a4-print-page')].map(p => { const r = p.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; })`);
   for (const [i, c] of rects.entries()) {
     const shot = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: true, clip: { x: c.x, y: c.y, width: c.w, height: c.h, scale: 1.5 } });
@@ -131,8 +132,34 @@ export async function printDocument(chrome, url, kind, outPrefix, orientation) {
   writeFileSync(`${outPrefix}.pdf`, bytes);
   files.push(`${outPrefix}.pdf`);
   const pdfPages = (bytes.toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g) || []).length;
-  return { h, pages, style, pdfPages, files, console: [...events] };
+  return { h, pages, style, budget, pdfPages, files, console: [...events] };
 }
+
+/**
+ * THE ROW COUNT THE SHEET DERIVED, AND WHAT IT DERIVED IT FROM (AUDIT O64 step 2) - null on a sheet cut at a constant.
+ *
+ * A sheet count alone cannot show whether pagination is right: two sheets is the correct answer for eighteen rows
+ * both when the count is measured and when it is a constant that happens to divide them. This reads the figures the
+ * sheet published - the body it measured, what a row costs, and how many it decided a sheet holds - so a run says
+ * which it was, and so the budget for an agency with a tall letterhead can be compared with one that has none.
+ */
+const BUDGET_PROBE = `(() => {
+  const el = document.querySelector('[data-rows-per-sheet]');
+  if (!el) return null;
+  const n = a => { const v = el.getAttribute(a); return v === null ? null : Number(v); };
+  return {
+    bodyHeightPx: n('data-body-height-px'),
+    chromeHeightPx: n('data-chrome-height-px'),
+    lastExtraPx: n('data-last-extra-px'),
+    rowBudgetPx: n('data-row-budget-px'),
+    finalRowBudgetPx: n('data-final-row-budget-px'),
+    rowsPerSheet: n('data-rows-per-sheet'),
+    rowMinPx: n('data-row-min-px'),
+    rowMaxPx: n('data-row-max-px'),
+    rowsOnALoneSheet: n('data-rows-on-a-lone-sheet'),
+    sheetSizes: (el.getAttribute('data-sheet-sizes') || '').split(',').filter(Boolean).map(Number),
+  };
+})()`;
 
 /** THE STYLE CHECK MUST BE ABLE TO FAIL: strip the stylesheets from the page just printed, and probe again. */
 export async function styleControl(chrome) {

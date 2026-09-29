@@ -14,6 +14,8 @@ import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } f
 import { PrintableA4Page } from './LetterheadHeader';
 import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { triggerUniversalPrint } from '../lib/printUtils';
+import { SHEET_MARK } from '../lib/printOverflow';
+import { useMeasuredRowChunks } from '../lib/useMeasuredRowChunks';
 import { isJobInternallyDone, isMrInternalComplete, isJobExternallyDone, isMrExternalComplete, latestJobDate } from '../lib/inspectionStage';
 import { getJobFullEstimate, checkJobCircleLimit, coreTypeHasCircleLimit } from '../lib/estimateCalc';
 import { atForJob, matchesAtScope } from '../lib/AgencyContext';
@@ -327,6 +329,35 @@ export default function InternalInspection() {
     if (!selectedMrNo) return [];
     return scopedJobs.filter(j => j.mrNo === selectedMrNo).sort((a, b) => a.jobNo.localeCompare(b.jobNo, undefined, { numeric: true }));
   }, [scopedJobs, selectedMrNo]);
+
+  /**
+   * HOW MANY ROWS A SHEET HOLDS - DERIVED FROM THE MEASURED BODY, NOT A CONSTANT (AUDIT O64 step 2).
+   *
+   * This was `CHUNK_SIZE = 9`, and a constant is wrong in both directions. On MEGHA's letterhead nine ONE-LINE rows
+   * left about 34mm spare, so an MR of ten ordinary jobs printed a second sheet holding one row and the sign-off;
+   * nine rows that WRAP to two lines overflowed by about 12mm and took the whole signature block with them (O58).
+   * One number cannot do both jobs, because a row's height depends on whether its make or serial wraps.
+   *
+   * ⚠ AND NO CONSTANT COULD BE RIGHT FOR TWO AGENCIES. Measured by print-check on 2026-09-29, a row costing 20px
+   * unwrapped and 32.8px wrapped: on MEGHA's 64mm/25mm letterhead a LONE sheet holds 10 rows and a continuation
+   * sheet 16; with no letterhead, 21 and 26. Raising 9 to 14 would cut MEGHA's sheet and still waste a third of a
+   * sheet for the agency with none. The count has to come from the body each agency leaves.
+   *
+   * ⚠ THE BINDING CONSTRAINT ON THIS SHEET IS STILL WIDTH, AND HEIGHT PAGINATION DOES NOTHING FOR IT (G20, G61).
+   * The table is 26 columns across a landscape 297mm. If the text ever overflows 297mm the honest fixes are FEWER
+   * COLUMNS PER SHEET, not smaller type - unreadable print is the fault G20's neighbours were changed to fix. What
+   * is derived here is the vertical count only; `measureRowLayout` reports a right-hand cut but does not pack for it.
+   *
+   * ⚠ THE SERIAL NUMBER COMES FROM `offsets`, NEVER `pageIdx * CHUNK_SIZE`. With measured chunks that expression
+   * mis-numbers every row after the first sheet, silently, on a signed document - and it reads as innocent
+   * arithmetic (O64).
+   */
+  const { chunks: jobChunks, offsets: chunkOffsets } = useMeasuredRowChunks(
+    mrJobs,
+    job => job.id,
+    'printable-internal-inspection-sheet',
+    { enabled: isPrintOpen && !!selectedMrNo },
+  );
 
   // Agency's configured "Circle Authority Estimate Approval Limit" master, for the
   // live Clause 4.0 indicator below - resolved once per agency, not per job.
@@ -985,45 +1016,14 @@ export default function InternalInspection() {
   }
 
   const scrapJobs = mrJobs.filter(job => formsData[job.id]?.condition === 'Scrap').map(j => j.jobNo);
-  const scrapNote = scrapJobs.length > 0 
+  const scrapNote = scrapJobs.length > 0
     ? `NOTE : JOB NO ${scrapJobs.join(' & ')} FOUND HEAVILY DAMAGED WITH CORE & LT, HENCE PROPOSED FOR SCRAP ONLY`
     : null;
 
   if (isPrintOpen && selectedMrNo) {
     const sampleJob = mrJobs[0];
     const mrDateStr = formatDDMMYYYY(sampleJob?.dateOfIssue || sampleJob?.mrDate || sampleJob?.createdAt);
-    /**
-     * NINE ROWS A PAGE - AND IT IS NOT A VERTICAL LIMIT (AUDIT G20).
-     *
-     * ⚠ THE BINDING CONSTRAINT IS WIDTH, WHICH IS THE OPPOSITE OF WHAT A ROW COUNT IMPLIES.
-     * This sheet is LANDSCAPE A4 and the table has 26 columns across 297mm (25 before G61's HV S.E.;
-     * this comment said 27, and a printed measurement counted 25). Vertically it is
-     * nowhere near full: content area ~176mm, and nine rows plus the header, title and
-     * signature block use about 68mm - roughly 115mm SPARE. The page is two-thirds empty.
-     *
-     * ⚠ NOT ON A FULL-A4 LETTERHEAD. Printed 2026-09-11 on one with a 64mm header and a 25mm
-     * footer: ~34mm spare under nine one-line rows, ~7mm under nine two-line rows - and the last
-     * sheet's signature block is then CUT OFF by PrintableA4Page's overflow-hidden body, on the
-     * preview and on paper alike, with nothing pointing at it (AUDIT O58).
-     *
-     * So a reader wondering whether 9 can go up should be asking about column width, not
-     * height. And a reader making the text bigger - as G20 did, 7.5px to 9.5px - is spending
-     * from a very large vertical surplus and a very small horizontal one.
-     *
-     * ⚠ IF THE TEXT EVER OVERFLOWS 297mm, the honest fixes are FEWER COLUMNS PER PAGE or a
-     * SMALLER CHUNK_SIZE. Not smaller type: unreadable print is the fault this number's
-     * neighbours were just changed to fix, and compensating horizontally by shrinking would
-     * undo that silently.
-     *
-     * There is no mm budget behind this the way layoutEstimatePages has one - 9 is a measured
-     * number with no model, and this comment is the model it never had.
-     */
-    const CHUNK_SIZE = 9;
-    const jobChunks: typeof mrJobs[] = [];
-    for (let i = 0; i < mrJobs.length; i += CHUNK_SIZE) {
-      jobChunks.push(mrJobs.slice(i, i + CHUNK_SIZE));
-    }
-    if (jobChunks.length === 0) jobChunks.push([]);
+    // The sheets are cut by measured height above - useMeasuredRowChunks, and the note that goes with it.
 
     return (
       <div className="bg-slate-100 min-h-screen text-black p-4 print:p-0 print:bg-white">
@@ -1072,7 +1072,7 @@ export default function InternalInspection() {
               >
                 <div className="flex flex-col justify-between h-full">
                   <div>
-                    <div className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5 flex-wrap gap-y-1">
+                    <div {...{ [SHEET_MARK.chrome]: '' }} className="flex justify-between items-center text-[10px] font-bold border-b border-black pb-1 mb-1.5 flex-wrap gap-y-1">
                       <span>MR NO: <strong className="font-mono">{selectedMrNo}</strong></span>
                       <span>MR DATE: <strong className="font-mono">({mrDateStr})</strong></span>
                       <span>DIVISION: <strong className="uppercase">{sampleJob?.division || '-'}</strong></span>
@@ -1081,7 +1081,7 @@ export default function InternalInspection() {
                       <span>TOTAL TRANSFORMERS: <strong>{mrJobs.length}</strong></span>
                     </div>
 
-                    <table className="w-full border-collapse border border-black text-[9.5px] text-center">
+                    <table {...{ [SHEET_MARK.table]: '' }} className="w-full border-collapse border border-black text-[9.5px] text-center">
                       <thead>
                         {/* Grouped High-Level Header */}
                         <tr className="bg-slate-100 print:bg-transparent font-bold">
@@ -1133,12 +1133,15 @@ export default function InternalInspection() {
                       </thead>
                       <tbody>
                         {chunk.map((job, cIdx) => {
-                          const globalIdx = pageIdx * CHUNK_SIZE + cIdx;
+                          // ⚠ THE RUNNING OFFSET, NOT pageIdx * CHUNK_SIZE (AUDIT O64). Sheets no longer hold a
+                          // constant number of rows, and the old expression would mis-number every row after the
+                          // first sheet on a signed document while reading as innocent arithmetic.
+                          const globalIdx = chunkOffsets[pageIdx] + cIdx;
                           const data = formsData[job.id] || {} as any;
                           const transCore = job.coreType || 'CRGO';
 
                           return (
-                            <tr key={job.id} className="border border-black h-6">
+                            <tr key={job.id} {...{ [SHEET_MARK.row]: job.id }} className="border border-black h-6">
                               <td className="border border-black p-0.5 font-bold">{globalIdx + 1}</td>
                               <td className="border border-black p-0.5 font-bold font-mono uppercase text-left pl-1">
                                 {job.jobNo} {job.repairType === 'GP' ? '(GP)' : ''}
@@ -1187,15 +1190,18 @@ export default function InternalInspection() {
                       </tbody>
                     </table>
 
+                    {/* LAST SHEET ONLY, so its measured height is reserved on the last sheet (AUDIT O64). */}
                     {scrapNote && isLastPage && (
-                      <div className="mt-2 p-1.5 bg-amber-50 print:bg-transparent border border-amber-300 print:border-black text-[9px] font-bold text-amber-900 print:text-black uppercase">
+                      <div {...{ [SHEET_MARK.last]: '' }} className="mt-2 p-1.5 bg-amber-50 print:bg-transparent border border-amber-300 print:border-black text-[9px] font-bold text-amber-900 print:text-black uppercase">
                         {scrapNote}
                       </div>
                     )}
                   </div>
 
+                  {/* ⚠ THE BLOCK O58 LOST. Marked last-sheet-only, so packRows reserves its measured height on the
+                      final sheet instead of filling that sheet to the body's edge and cutting it. */}
                   {isLastPage && (
-                    <div className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
+                    <div {...{ [SHEET_MARK.last]: '' }} className="mt-2 pt-2 border-t border-black flex justify-between items-end px-6 text-[9.5px] font-bold uppercase">
                       <div className="text-center">
                         <div className="h-8"></div>
                         <div className="border-t border-dotted border-black pt-0.5">INSPECTED BY</div>
