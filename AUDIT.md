@@ -20574,7 +20574,91 @@ The field was added in G61 and the export was not extended with it. So **an oper
 see the answer that moves the most expensive line on the estimate by Rs 50/kg** - and cannot see, now, whether a row
 is S.E., DPC or not applicable.
 
-**This is not caused by G105 and is not fixed by it.** It is recorded here because the DPC rename is exactly the
+**FIXED: G106** (2026-10-01) - the column is there, and it calls the printed sheet's own expression rather than a second copy of it. The external export was audited at the same time and has no equivalent gap. **This was not caused by G105 and was not fixed by it.** It is recorded here because the DPC rename is exactly the
 moment someone would check the export and find the gap. Fixing it is one column plus the `-`/blank/S.E./DPC rendering
 the printed sheet now does, and it should reuse that same expression rather than re-deriving it - the shape
 `formula-term-every-surface` warns about. Not done, and not scoped here.
+
+---
+
+## G106. The Excel export never carried the field that swings the HV coil rate - and the sheet's expression now serves both
+
+**Why.** G105 recorded this as its own item: the internal inspection's Excel export had no HV S.E. column. The field
+was added in G61 and the export was never extended, so **an operator exporting an MR could not see the answer that
+moves the most expensive line by Rs 50/kg** - and after G105 could not see whether a row was S.E., DPC or not
+applicable either.
+
+### ONE EXPRESSION, FOUR OUTCOMES - SHARED, NOT COPIED
+
+`hvSeCell(material, stored)` in `lib/hvSeConductor`, called by the printed sheet **and** the export:
+
+| | |
+|---|---|
+| `-` | the question does not arise - a copper winding |
+| `S.E.` | Super Enamelled |
+| `DPC` | Double Paper Cover |
+| `''` | an aluminium row nobody has answered yet |
+
+**⚠ BLANK AND `-` ARE NOT INTERCHANGEABLE, AND THAT IS WHY THIS IS ONE FUNCTION RATHER THAN TWO.** Blank means "not
+recorded"; the dash means "not applicable". **Two implementations of a three-state rule agree on the two easy states
+and differ on the third** - and the third is the one that says whether an outstanding question is outstanding. Since
+G105 this field has three states where it had two, so the window for that divergence had just widened.
+
+The printed cell was rewritten to call it as well, so the sheet and the export cannot drift: before this, the sheet
+held the only copy of the rule and the export held none.
+
+### ⚠ A TEST CORRECTLY WENT STALE, AND THE STALE EXPECTATION WAS THE WORSE DESIGN
+
+G105 left a test requiring **three** direct `hvSeApplies(` calls in the screen - the control, the validation and the
+printed cell. After this change there are two: the printed cell and the export now ask `hvSeCell`, which asks
+`hvSeApplies` for them. The test failed, and **requiring three would have pushed the rule back out into the call
+sites, which is the defect it was written to prevent.** It now asserts two direct calls plus two through `hvSeCell`.
+
+### THE EXTERNAL EXPORT, AUDITED - NO GAP
+
+The question was whether the same thing had happened on the external sheet for anything added since its export was
+written. **It has not.** Checked field by field rather than assumed:
+
+| | printed sheet | Excel export | printed but not exported |
+|---|---|---|---|
+| Internal, `data.*` fields | 20 | 20 | **none** (was 1 - this entry) |
+| External, `data.*` fields | 23 | 23 | **none** |
+| External, `job.*` fields | 8 | 8 | **none** |
+
+**And both are aligned** - header cells against pushed row cells, which a field added to one and not the other would
+break by offsetting every column after it:
+
+- internal **31 / 31** (30 / 30 before this change);
+- external **34 / 34**.
+
+The external sheet's `starRating`, `sealType`, `kv` and `transType` - the fields G61-era work touched - are all in
+its export. Nothing is owed there.
+
+### VERIFIED
+
+- **print-check, `inspection inspection-stress --compare HEAD`: `inspection: nothing`, `inspection-stress: nothing`,
+  CLEAN.** That is the **correct** result and the point of running it: the printed sheet's output must be unchanged
+  while its source moved to the shared expression.
+  - ⚠ **This "nothing" is not G104's "nothing".** There, the tool was structurally unable to see the change. Here it
+    can see the sheet - it reported `Not S.E.` → `DPC` across 18 rows one commit ago - and reports no difference
+    because there is none. A tool's clean run means something only when you can say which of those two it is.
+- **357 tests in 30 files**, 6 new: all four outcomes of the cell, a stored answer on copper being ignored rather
+  than shown, an unrecognised value staying blank rather than guessed, and two source assertions - that the printed
+  cell and the export call the same expression, and that the export has both a header and a value feeding it.
+- **Header/row alignment counted** for both sheets, above. A column added to the header alone would silently offset
+  every column after it in the spreadsheet, and no test or harness would have seen it.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files; `print-subtree-hashes` 12 byte-identical, 1 changed.
+- **The harness refused once** - `hvSeCell is not defined`, the cut block using a new import. Added beside the others
+  on the same tree gate.
+
+### NOT EXERCISED
+
+- **⚠ NO HARNESS EXPORTS A SPREADSHEET.** print-check drives printing only. The export is verified by the source
+  assertions above, by the alignment count, and by reading - not by opening a produced file. **That is the weakest
+  link in this entry**: a change that broke the export at runtime rather than structurally would pass everything
+  here. What would close it is a check that calls `handleExportExcel`'s row builder on live data and asserts the
+  header and row lengths agree - which needs the builder lifted out of the component first.
+- **The copper `-` in the export** is unexercised for the same reason the printed one is (G105): print-check's MR has
+  no copper row, and no harness touches the export at all.
+- **The other exports were not audited** - the testing report, billing, the challan, Reports, the MR register and oil.
+  Only the two inspection sheets were in scope, and only those two are claimed.

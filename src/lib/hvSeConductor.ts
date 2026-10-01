@@ -35,6 +35,32 @@ export const HV_SE_OPTIONS: readonly { value: string; label: string }[] = [
 export const HV_SE_NOT_APPLICABLE = '-';
 
 /**
+ * WHAT THIS FIELD READS ON A FINISHED DOCUMENT - ONE EXPRESSION, THREE STATES (AUDIT G106).
+ *
+ * The printed inspection sheet and the Excel export must say the same thing about the same row, and since G105 there
+ * are THREE things to say, not two:
+ *
+ *   `-`      the question does not arise - a copper winding
+ *   `S.E.`   Super Enamelled
+ *   `DPC`    Double Paper Cover
+ *   `''`     an aluminium row nobody has answered yet
+ *
+ * ⚠ BLANK AND `-` ARE NOT INTERCHANGEABLE, AND THAT IS THE WHOLE REASON THIS IS ONE FUNCTION. Blank means "not
+ * recorded"; the dash means "not applicable". Two implementations of a three-state rule will agree on the two easy
+ * states and differ on the third - and the third is the one that says whether an outstanding question is outstanding.
+ *
+ * `material` is the already-classified winding material, so this module stays free of the classifier and of any
+ * import cycle with the estimate that uses it.
+ */
+export function hvSeCell(material: 'Copper' | 'Aluminium' | null, stored: unknown): string {
+  if (!hvSeApplies(material)) return HV_SE_NOT_APPLICABLE;
+  const v = String(stored ?? '').trim();
+  if (v === HV_SE_WITH) return 'S.E.';
+  if (v === HV_SE_WITHOUT) return 'DPC';
+  return '';
+}
+
+/**
  * Whether the S.E./DPC question arises for this winding material (AUDIT G105).
  *
  * ⚠ SUPPRESSED ONLY WHERE THE MATERIAL IS POSITIVELY KNOWN TO BE COPPER. An unclassified winding type - blank, or a

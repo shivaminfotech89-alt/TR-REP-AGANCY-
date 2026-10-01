@@ -23,7 +23,7 @@ import { estimateMasterLink } from '../lib/settingsLinks';
 import { issuedMarks } from '../lib/issuedDocuments';
 import { OtherTenderNote } from './OtherTenderNote';
 import { classifyCoreType, classifyWindingMaterial } from './SingleJobEstimateReport';
-import { HV_SE_OPTIONS, HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies } from '../lib/hvSeConductor';
+import { HV_SE_OPTIONS, HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies, hvSeCell } from '../lib/hvSeConductor';
 import { InspectionLegend } from './InspectionLegend';
 import { INTERNAL_LEGEND_COLUMNS, INTERNAL_LEGEND_VALUES, columnTitle } from '../lib/inspectionAbbreviations';
 
@@ -404,7 +404,11 @@ export default function InternalInspection() {
         'TST TRN',
         'DC',
         'INSULA',
-        'CONDITION'
+        'CONDITION',
+        // ⚠ ADDED G106, AND IT WAS MISSING SINCE G61. This column swings the HV coil rate by Rs 50/kg and the export
+        // did not carry it, so an operator exporting an MR could not see the answer that priced it. Last, matching
+        // the printed sheet's own column order.
+        'HV S.E.'
       ]
     ];
     
@@ -440,7 +444,10 @@ export default function InternalInspection() {
         data.tstTrn || 'Y',
         data.dc || 'Y',
         data.insula || 'Y',
-        data.condition || 'Repairable'
+        data.condition || 'Repairable',
+        // The printed sheet's own expression, not a second copy of it - three states, and the one that differs
+        // between two implementations is the one that matters (lib/hvSeConductor).
+        hvSeCell(classifyWindingMaterial(data.windingType), data.hvSeConductor)
       ]);
     });
 
@@ -1208,9 +1215,7 @@ export default function InternalInspection() {
                                   only for an aluminium row nobody has answered yet. Printing "-" for unanswered too
                                   would make the sheet say "not applicable" about a question that is outstanding. */}
                               <td className="border border-black p-0.5 font-bold whitespace-nowrap">
-                                {!hvSeApplies(classifyWindingMaterial(data.windingType)) ? HV_SE_NOT_APPLICABLE
-                                  : data.hvSeConductor === HV_SE_WITH ? 'S.E.'
-                                  : data.hvSeConductor === HV_SE_WITHOUT ? 'DPC' : ''}
+                                {hvSeCell(classifyWindingMaterial(data.windingType), data.hvSeConductor)}
                               </td>
                             </tr>
                           );

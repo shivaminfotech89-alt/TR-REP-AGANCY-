@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   COPPER_HV_SCHEDULE_ROW, HV_SE_NOT_APPLICABLE, HV_SE_OPTIONS, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies,
+  hvSeCell,
 } from './hvSeConductor';
 
 // ── The question arises for aluminium only ───────────────────────────────────────────────────────────────────
@@ -83,13 +84,60 @@ test('the not-applicable mark is the dash the legend already defines, not blank'
   assert.notEqual(HV_SE_NOT_APPLICABLE, '');
 });
 
+// ── The cell, one expression, four outcomes (AUDIT G106) ─────────────────────────────────────────────────────
+
+test('the cell reads S.E., DPC, a dash or blank - and blank is not the dash', () => {
+  assert.equal(hvSeCell('Aluminium', HV_SE_WITH), 'S.E.');
+  assert.equal(hvSeCell('Aluminium', HV_SE_WITHOUT), 'DPC');
+  assert.equal(hvSeCell('Copper', HV_SE_WITHOUT), HV_SE_NOT_APPLICABLE);
+  assert.equal(hvSeCell('Aluminium', ''), '', 'an unanswered aluminium row is blank, never the dash');
+});
+
+test('⚠ a stored answer on copper is ignored, not shown', () => {
+  // One live inspection carries WITHOUT_SE on copper, answered when the question was still asked. The cell must say
+  // the question does not arise, not report an answer nobody should have been asked for.
+  for (const stored of [HV_SE_WITH, HV_SE_WITHOUT, '', 'ANYTHING']) {
+    assert.equal(hvSeCell('Copper', stored), HV_SE_NOT_APPLICABLE, `copper with ${stored || 'blank'} stored`);
+  }
+});
+
+test('an unrecognised stored value on aluminium is blank, not guessed', () => {
+  assert.equal(hvSeCell('Aluminium', 'SUPER_ENAMELLED'), '');
+  assert.equal(hvSeCell('Aluminium', null), '');
+  assert.equal(hvSeCell('Aluminium', undefined), '');
+});
+
+test('an unclassified winding is still asked, so its cell behaves as aluminium', () => {
+  assert.equal(hvSeCell(null, HV_SE_WITH), 'S.E.');
+  assert.equal(hvSeCell(null, ''), '');
+});
+
+test('⚠ the printed sheet and the Excel export call the SAME expression, not two copies', () => {
+  const screen = readFileSync(new URL('../components/InternalInspection.tsx', import.meta.url), 'utf8');
+  const calls = screen.split('hvSeCell(').length - 1;
+  assert.ok(calls >= 2, `the printed cell and the export must both use hvSeCell - found ${calls} call(s)`);
+  // And neither may re-derive the three states inline.
+  assert.ok(!/hvSeConductor === HV_SE_WITH \? 'S\.E\.'/.test(screen), 'the three-state rule has been re-derived');
+});
+
+test('the Excel export carries the column at all - the gap G106 closed', () => {
+  const screen = readFileSync(new URL('../components/InternalInspection.tsx', import.meta.url), 'utf8');
+  const exportBlock = screen.slice(screen.indexOf('const handleExportExcel'), screen.indexOf('book_append_sheet'));
+  assert.ok(exportBlock.includes("'HV S.E.'"), 'the export has no HV S.E. header');
+  assert.ok(exportBlock.includes('hvSeCell('), 'the export header exists but no row value feeds it');
+});
+
 // ── The screen and the pricing must not drift apart ──────────────────────────────────────────────────────────
 
 test('the inspection screen gates the field, its validation and its printed cell on the same rule', () => {
   const screen = readFileSync(new URL('../components/InternalInspection.tsx', import.meta.url), 'utf8');
   assert.ok(screen.includes("from '../lib/hvSeConductor'"), 'the screen uses the shared rule');
-  // Three places: the control, the required-field check, and the printed cell.
-  assert.ok(screen.split('hvSeApplies(').length - 1 >= 3,
-    'the control, the validation and the printed cell must all gate on hvSeApplies');
+  // ⚠ TWO DIRECT CALLS, NOT THREE, SINCE G106 - and that is the improvement, not a regression. The control and the
+  // required-field check ask `hvSeApplies` themselves; the printed cell and the Excel export ask `hvSeCell`, which
+  // asks it for them. Requiring three direct calls would push the rule back out into the call sites.
+  assert.ok(screen.split('hvSeApplies(').length - 1 >= 2,
+    'the control and the required-field check must gate on hvSeApplies');
+  assert.ok(screen.split('hvSeCell(').length - 1 >= 2,
+    'the printed cell and the export must gate through hvSeCell');
   assert.ok(!screen.includes("'Not S.E.'"), 'the old label is still rendered somewhere');
 });

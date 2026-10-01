@@ -252,7 +252,7 @@ import { formatDDMMYYYY } from '${r}/src/lib/utils';
 import { PrintableA4Page } from '${r}/src/components/LetterheadHeader';
 ${measuredRows ? `import { useMeasuredRowChunks } from '${r}/src/lib/useMeasuredRowChunks';
 import { SHEET_MARK } from '${r}/src/lib/printOverflow';` : ''}
-${hvSeAlOnly ? `import { HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies } from '${r}/src/lib/hvSeConductor';` : ''}
+${hvSeAlOnly ? `import { HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies, hvSeCell } from '${r}/src/lib/hvSeConductor';` : ''}
 import { Printer, Download } from 'lucide-react';
 const { classifyCoreType, classifyWindingMaterial } = SJER as any;
 ${hv || "const hvCoilsPerLimb = (coreType?: string): string => '4';   // absent at this commit"}
