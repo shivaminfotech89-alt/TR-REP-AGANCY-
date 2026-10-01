@@ -5001,6 +5001,18 @@ in the only place that calls it.
 
 ### O21. The "originals missing" coil rates are unreachable — no code path resolves 12B or 13B
 
+> **⚠ A SECOND MEMBER OF THIS CLASS SINCE G105** (2026-10-01): **`12A-a1` - copper HV coil WITH S.E. - is now
+> unreachable too, and for a different reason.** 12B/13B are unreachable because nothing RECORDS the fact that
+> selects them. `12A-a1` is unreachable because the combination does not occur: copper windings in this work are
+> not Super Enamelled, so the question is no longer asked. The tender prices it; the workshop never sees it.
+>
+> **The two need opposite responses, which is why they are recorded together.** 12B/13B are a GAP - a field and a
+> domain answer would make them reachable and are worth having. `12A-a1` is a DECISION - making it reachable would
+> re-introduce a question with no real answer. A future sweep for "priced rows the app cannot reach" will find
+> both; only one of them is a defect. `12B-a1` is unreachable for both reasons at once.
+>
+> The decision, its Rs 50/kg figure and its reason are in `src/lib/hvSeConductor.ts`.
+
 Schedule-A prices coil replacement twice over, on whether the transformer arrived with its
 original windings:
 
@@ -20427,3 +20439,142 @@ claimed insertion order was preserved, and the test written to confirm it failed
 - **Why the jobs query has no `orderBy` is not revisited here.** Adding one would make the order explicit at the
   source rather than at each grouping, but it needs a Firestore index and O71 records what a missing index cost this
   project. Sorting in the app costs nothing at 168 jobs.
+
+---
+
+## G105. "Not S.E." named an absence; it is DPC - and the question does not arise for copper at all
+
+Two corrections from the operator, 2026-10-01.
+
+### 1. DPC IS A MATERIAL, NOT A MISSING ONE
+
+The HV coil conductor is insulated one of two ways: **S.E.** (Super Enamelled, an enamel coating) or **DPC**
+(Double Paper Cover, paper insulation **instead of** Super Enamelled). The dropdown read "Not S.E.", which asks
+whether something is missing rather than which of two materials is on the coil.
+
+Now **"DPC (not S.E.)"** on screen and **DPC** on paper.
+
+**⚠ THE STORED VALUE IS STILL `WITHOUT_SE`, DELIBERATELY.** The estimate reads it to select Schedule-A 12A;
+renaming it to `DPC` would make every consumer's comparison miss, silently. That is the trap already recorded
+against DAM/DMG, where the dropdown still emits the stored term on purpose. **This is the safe version of that same
+shape: only the label moved.**
+
+### 2. THE QUESTION ARISES FOR ALUMINIUM ONLY
+
+A copper HV winding has no S.E./DPC selection. The field is now absent for CU and shows **`-`**.
+
+**Hidden, not disabled.** A disabled control still costs the same 90px on a sheet whose binding constraint is width
+(G20, G61), and "disabled" implies "answer it later" where the truth is that the question does not arise.
+
+**⚠ `-` FOR COPPER, BLANK FOR UNANSWERED - THREE STATES, AND BLANK KEEPS MEANING ONE THING.** Blank already means
+"not recorded" on that sheet. Printing `-` for both would make the sheet say "not applicable" about a question that
+is outstanding. The dash matches the legend's existing `NA` entry.
+
+### ⚠⚠ A PRICING DECISION: 12A-a1 IS NOW UNREACHABLE
+
+Schedule-A prices copper on the S.E. axis in both tenders:
+
+| row | meaning | UGVCL-2020 | UGVCL-2026 |
+|---|---|---|---|
+| `12A-a` | copper, without S.E. | Rs 357/kg | Rs 360/kg |
+| `12A-a1` | copper, **with** S.E. | Rs 407/kg | Rs 411/kg |
+
+**A copper HV coil now prices at `12A-a` permanently**, foreclosing **Rs 50/kg** (Rs 51 on UGVCL-2026). Accepted on
+the owner's decision, for this reason: **copper windings in this work are not Super Enamelled, so `12A-a1` describes
+a combination that does not occur. The tender prices it; the workshop never sees it.**
+
+**⚠ RECORDED AS AN UNREACHABLE PRICED ROW - THE SAME CLASS AS THE ORIGINALS-MISSING ROWS (O21) - SO NOBODY LATER
+"COMPLETES THE SET".** A future reader finding `12A-a1` transcribed and unused should read `lib/hvSeConductor` before
+wiring it up: it is unused because the work does not exist, not because the app is incomplete. `12B-a1` is
+unreachable for both reasons at once.
+
+**The copper arm of the with-S.E. lookup was DELETED, not left unreachable.** `resolveRate(isCopper ? ['12A(a1)'] :
+['12A(b1)'])` became `resolveRate(['12A(b1)'])`. Dead code naming a row reads as a reachable path, and leaving it
+would have made the test below unwritable.
+
+**It cost nothing when taken.** Of 123 live internal inspections only **two** are copper - one `WITHOUT_SE`, one
+blank, **none `WITH_SE`** - and both carry a zero HV coil weight (`hvCoilApplies` is `weight > 0`), one of them
+Scrap. **No job on the database prices a copper HV coil at all**, so the change is Rs 0 today and entirely
+prospective.
+
+### WHAT ELSE HAD TO MOVE, OR THE FIX WOULD HAVE BEEN HALF-DONE
+
+Hiding a field is not contained in the screen that shows it:
+
+- **The save would have become impossible for copper.** The required-field check demanded an answer; it is now
+  aluminium-only. Without that, no copper job could be submitted - the field is not on screen to answer.
+- **The estimate would have printed a false explanation on every copper job.** With no answer stored, `seAnswer`
+  returns `unrecorded` and the estimate says *"this internal inspection was saved before S.E. was recorded"*. For a
+  copper job saved tomorrow that is untrue: the field is not absent from the record, it is absent from the question.
+  That notice, and the `unrecognised` block beside it, are now aluminium-only.
+- **The coil description would have read "Copper SE".** `coilLabel` now returns `Copper` for copper whatever is
+  stored, so no answer - stored or absent - can put SE in a copper line's description.
+- **A stored answer on a copper job is ignored, not trusted.** One live inspection carries `WITHOUT_SE` on copper,
+  answered when the question was still asked. It prices identically either way, but reading it would make the rule
+  depend on what happens to be on disk.
+
+**One definition, in `lib/hvSeConductor`**, shared by the screen that stopped asking and the pricing that stopped
+offering - a field hidden on one side and an axis still live on the other would price from an answer nobody could
+give.
+
+### THE LEGEND
+
+- `HV_SE` corrected: "Super Enamelled" alone did not say what it is the insulation **on**. Now *"Super Enamelled -
+  the insulation on the HV coil conductor"*, with the aluminium-only limit in its detail.
+- **`S.E.` and `DPC` added as VALUE abbreviations**, beside DMG/RI/OK, because both appear in a dropdown. DPC's
+  wording is the operator's: *"Double Paper Cover - paper insulation on the HV coil conductor instead of Super
+  Enamelled"*.
+
+**⚠ G99'S PIN FAILED FIRST, AND CORRECTLY.** A test asserts the five withheld meanings verbatim, because a plausible
+substitute is undetectable once on screen. Extending `HV_SE` broke it. The pin was not loosened: it now requires the
+meaning to *start* with "Super Enamelled" **and** match the new wording exactly, so the term itself still cannot be
+quietly substituted. A second test forbids either entry describing DPC as an absence, and requires all three to state
+the aluminium-only limit.
+
+### VERIFIED
+
+- **print-check, `inspection inspection-stress --compare HEAD`, live data:**
+
+  | Case | changed on paper |
+  |---|---|
+  | inspection-stress | **`Not S.E.` to `DPC` on all 18 rows**, and nothing else - sheets, rows, heights, cut-off and the warning all identical |
+  | inspection | **nothing** |
+
+  - `inspection: nothing` is correct, not a miss: **MR 85558 is 18 aluminium rows with every S.E. answer blank**, so
+    there was no "Not S.E." on it to rename. The stress case shows the rename because `pickInspectionStress`
+    substitutes the longest real value of every field, and `WITHOUT_SE` is longer than `WITH_SE`.
+- **351 tests in 30 files**, 11 new: the aluminium-only rule, the stored values unchanged, the label naming a
+  material rather than an absence, the dash not being blank, and **the one asked for - no code line in the estimate
+  selects `12A-a1`**, with a companion test that the aluminium rows and the copper without-S.E. row are still
+  selected, so that check cannot pass by the block having been deleted.
+- **`print-subtree-hashes --compare HEAD`: 12 byte-identical, 1 changed** - `InternalInspection.tsx#0`. Here the hash
+  *does* see the change, because the printed cell is inside the PrintableA4Page region - unlike G104.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files.
+- **The harness refused once before it printed** - `hvSeApplies is not defined`, the cut block using an import the
+  generated entry lacked. Gated on the tree, as with `SHEET_MARK`, so `--compare` still builds earlier commits.
+
+### NOT EXERCISED
+
+- **⚠ THE COPPER DASH IS NOT EXERCISED BY ANY RENDER.** print-check's inspection MR is 85558, which is **18 aluminium
+  rows and no copper**, and the two live copper jobs are on other MRs. The `-` is verified by unit test and by
+  reading only. A synthetic copper case would need the stress generator to override `windingType` to `CU`, which it
+  currently sets to the longest real value and so always picks `AL`.
+- **The screen's dash** - the same gap on screen; no harness drives that screen.
+- **No live copper job has a non-zero HV coil weight**, so the pricing path for copper HV coil is itself unexercised
+  by any real record. The decision's figure comes from the schedule, not from a priced job.
+
+### ⚠ A SEPARATE ITEM, PREDATING THIS CHANGE: THE EXCEL EXPORT HAS NEVER CARRIED THIS FIELD
+
+The internal inspection's Excel export runs `JOB NO, TRANS. SR. NO, MAKE, DIVISION, MR NO, MR DATE, KVA, TYPE / CORE,
+EXT. INSP DATE, INT. INSP DATE, WIND, HV LIMB, DAMAGED HV COIL R/Y/B, TOT COIL (HT), WT/COIL (KG) HT, TOT WT (HT),
+LV COIL R/Y/B, WT/COIL (KG) LT, TOT WT (LT), WAS RING, IN PNT, TST TRN, DC, INSULA, CONDITION` - and **no HV S.E.
+column**.
+
+The field was added in G61 and the export was not extended with it. So **an operator exporting an MR to Excel cannot
+see the answer that moves the most expensive line on the estimate by Rs 50/kg** - and cannot see, now, whether a row
+is S.E., DPC or not applicable.
+
+**This is not caused by G105 and is not fixed by it.** It is recorded here because the DPC rename is exactly the
+moment someone would check the export and find the gap. Fixing it is one column plus the `-`/blank/S.E./DPC rendering
+the printed sheet now does, and it should reuse that same expression rather than re-deriving it - the shape
+`formula-term-every-surface` warns about. Not done, and not scoped here.

@@ -61,6 +61,14 @@ const paginatesByHeight = root => existsSync(join(root, 'src/lib/useMeasuredRowC
  */
 const sharesMrGrouping = root => existsSync(join(root, 'src/lib/mrGrouping.ts'));
 
+/**
+ * Whether this tree asks the HV S.E./DPC question for aluminium only (AUDIT G105). Before it, the inspection sheet
+ * asked it of every winding and printed "Not S.E."; after it the field is aluminium-only, the label reads
+ * "DPC (not S.E.)" and a copper row prints "-". The cut block needs the shared rule, so the import is added only
+ * where the module exists and `--compare` still builds the commits before it.
+ */
+const asksHvSeForAluminiumOnly = root => existsSync(join(root, 'src/lib/hvSeConductor.ts'));
+
 const runtime = (container, orientation, root) => { const measured = measuresBeforePrinting(root); return `
 const w: any = window;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -231,6 +239,7 @@ const inspection = (id, title, select) => ({
   generate(root) {
     const r = slash(root);
     const file = 'src/components/InternalInspection.tsx';
+    const hvSeAlOnly = asksHvSeForAluminiumOnly(root);
     // The whole print branch, from the scrap note it prints to the end of `if (isPrintOpen && selectedMrNo)`.
     const block = cut(root, file, 'the internal inspection sheet',
       '  const scrapJobs = mrJobs.filter(', '\n  return (\n    <div className="space-y-6 print:space-y-0">',
@@ -243,8 +252,9 @@ import { formatDDMMYYYY } from '${r}/src/lib/utils';
 import { PrintableA4Page } from '${r}/src/components/LetterheadHeader';
 ${measuredRows ? `import { useMeasuredRowChunks } from '${r}/src/lib/useMeasuredRowChunks';
 import { SHEET_MARK } from '${r}/src/lib/printOverflow';` : ''}
+${hvSeAlOnly ? `import { HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies } from '${r}/src/lib/hvSeConductor';` : ''}
 import { Printer, Download } from 'lucide-react';
-const { classifyCoreType } = SJER as any;
+const { classifyCoreType, classifyWindingMaterial } = SJER as any;
 ${hv || "const hvCoilsPerLimb = (coreType?: string): string => '4';   // absent at this commit"}
 function Doc(): any {
   const isPrintOpen = true;

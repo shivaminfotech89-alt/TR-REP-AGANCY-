@@ -71,7 +71,8 @@ export const COLUMN_ABBREVIATIONS = {
   LV_LT:     { short: 'LV / LT',  meaning: 'Low Voltage / Low Tension - the two are used interchangeably' },
   RYB:       { short: 'R / Y / B', meaning: 'Red, Yellow, Blue - the three phases' },
   HV_LIMB:   { short: 'HV Limb',  meaning: 'Coils per limb' },
-  HV_SE:     { short: 'HV S.E.',  meaning: 'Super Enamelled' },
+  HV_SE:     { short: 'HV S.E.',  meaning: 'Super Enamelled - the insulation on the HV coil conductor',
+               detail: 'Aluminium only. A copper HV winding has no S.E./DPC selection and prints "-". The alternative is DPC.' },
   WAS_RING:  { short: 'Was Ring', meaning: 'Washers and Rings' },
   IN_PNT:    { short: 'In Pnt',   meaning: 'Inside Paint' },
   TST_TRN:   { short: 'Tst Trn',  meaning: 'Testing of Transformer' },
@@ -95,6 +96,16 @@ export const VALUE_ABBREVIATIONS = {
   RI:  { short: 'RI',  meaning: 'Re-Insulation - conductor intact, paper insulation burned, needs re-wrapping' },
   OK:  { short: 'OK',  meaning: 'Sound - no repairs needed' },
   TBR: { short: 'TBR', meaning: 'To Be Replaced - not repaired' },
+  /**
+   * ⚠ "NOT S.E." WAS WRONG, AND THE STORED VALUE STILL SAYS IT (AUDIT G105). DPC is a different insulation,
+   * not the absence of S.E. - so the dropdown now reads "DPC (not S.E.)". `WITHOUT_SE` remains what is written
+   * to disk, because the estimate reads it to select Schedule-A 12A; renaming it would make every consumer's
+   * comparison miss, the same trap recorded on DMG above.
+   */
+  SE:  { short: 'S.E.', meaning: 'Super Enamelled - enamel insulation on the HV coil conductor',
+         detail: 'Aluminium windings only. Schedule-A prices the HV coil with and without S.E. separately (12A).' },
+  DPC: { short: 'DPC', meaning: 'Double Paper Cover - paper insulation on the HV coil conductor instead of Super Enamelled',
+         detail: 'Aluminium windings only. Shown as "DPC (not S.E.)" in the dropdown; stored as WITHOUT_SE.' },
   Y:   { short: 'Y',   meaning: 'Yes' },
   N:   { short: 'N',   meaning: 'No' },
   NA:  { short: '-',   meaning: 'Not applicable' },
@@ -117,7 +128,7 @@ export const INTERNAL_LEGEND_COLUMNS: readonly ColumnKey[] = [
   'KVA', 'CRGO', 'WIND', 'HV_HT', 'LV_LT', 'RYB', 'HV_LIMB', 'WAS_RING', 'IN_PNT', 'TST_TRN', 'DC',
   'INSULA', 'HV_SE',
 ];
-export const INTERNAL_LEGEND_VALUES: readonly ValueKey[] = ['DMG', 'RI', 'OK', 'Y', 'N', 'NA'];
+export const INTERNAL_LEGEND_VALUES: readonly ValueKey[] = ['DMG', 'RI', 'OK', 'SE', 'DPC', 'Y', 'N', 'NA'];
 
 /** The meaning of a column, for a `title` attribute. One sentence, no detail. */
 export function columnTitle(key: ColumnKey): string {

@@ -22,7 +22,8 @@ import { atForJob, matchesAtScope } from '../lib/AgencyContext';
 import { estimateMasterLink } from '../lib/settingsLinks';
 import { issuedMarks } from '../lib/issuedDocuments';
 import { OtherTenderNote } from './OtherTenderNote';
-import { classifyCoreType } from './SingleJobEstimateReport';
+import { classifyCoreType, classifyWindingMaterial } from './SingleJobEstimateReport';
+import { HV_SE_OPTIONS, HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies } from '../lib/hvSeConductor';
 import { InspectionLegend } from './InspectionLegend';
 import { INTERNAL_LEGEND_COLUMNS, INTERNAL_LEGEND_VALUES, columnTitle } from '../lib/inspectionAbbreviations';
 
@@ -552,7 +553,12 @@ export default function InternalInspection() {
       if (!jobData.windingType || jobData.windingType.trim() === '') missing.push('Winding Type');
       // THE SAVE BOUNDARY (AUDIT G61). Every inspection saved from here on carries the answer; one
       // saved before this field existed keeps pricing without S.E. until someone re-saves it.
-      if (jobData.hvSeConductor !== 'WITH_SE' && jobData.hvSeConductor !== 'WITHOUT_SE') missing.push('HV S.E. (S.E. / Not S.E.)');
+      // ⚠ REQUIRED FOR ALUMINIUM ONLY (AUDIT G105). Copper has no S.E./DPC selection, so requiring an answer would
+      // make a copper job unsaveable - the field is not on screen to answer.
+      if (hvSeApplies(classifyWindingMaterial(jobData.windingType))
+        && jobData.hvSeConductor !== HV_SE_WITH && jobData.hvSeConductor !== HV_SE_WITHOUT) {
+        missing.push('HV S.E. (S.E. / DPC)');
+      }
       if (!jobData.condition || jobData.condition.trim() === '') missing.push('Condition (Repairable / Scrap)');
       if (!jobData.wasring || jobData.wasring.trim() === '') missing.push('WAS Ring');
       if (!jobData.inPnt || jobData.inPnt.trim() === '') missing.push('Inside Paint');
@@ -833,12 +839,30 @@ export default function InternalInspection() {
    * A controlled select whose value matches no option DISPLAYS the first option while holding
    * '' - so through renderSelectField an unanswered field would look answered. Blank is a real,
    * selectable option here, and the control stays marked until the question is answered (G61).
+   *
+   * ⚠ ALUMINIUM ONLY, AND A DASH WHERE IT DOES NOT APPLY (AUDIT G105). A copper HV winding has no
+   * S.E./DPC selection - copper windings in this work are not Super Enamelled, so the question does
+   * not arise. It prints and shows "-", the legend's "not applicable", NEVER blank: blank already
+   * means "not recorded" on this sheet and must not come to mean two things.
+   *
+   * ⚠ "DPC (not S.E.)", NOT "Not S.E." DPC is a different insulation, not the absence of one - see
+   * lib/hvSeConductor. The STORED value is still WITHOUT_SE; only the label changed.
    */
-  const renderHvSeSelect = (jobId: string) => {
+  const renderHvSeSelect = (jobId: string, windingType: string) => {
+    if (!hvSeApplies(classifyWindingMaterial(windingType))) {
+      return (
+        <span
+          className="text-[10px] font-bold text-slate-400"
+          title="A copper HV winding has no S.E./DPC selection - copper windings in this work are not Super Enamelled, so the question does not arise. The HV coil prices at Schedule-A 12A-a."
+        >
+          {HV_SE_NOT_APPLICABLE}
+        </span>
+      );
+    }
     const value = formsData[jobId]?.hvSeConductor || '';
     return (
       <select
-        title="HV winding: super-enamelled (S.E.) conductor? Schedule-A prices the HV coil with and without S.E. separately (12A)."
+        title="HV winding conductor insulation: Super Enamelled (S.E.) or Double Paper Cover (DPC)? Schedule-A prices the HV coil separately for each (12A). Aluminium only."
         value={value}
         onChange={(e) => handleChange(jobId, 'hvSeConductor', e.target.value)}
         className={`px-1 py-1 text-[10px] font-bold border rounded focus:ring-1 focus:ring-blue-500 text-center shadow-2xs cursor-pointer w-20 ${
@@ -846,8 +870,7 @@ export default function InternalInspection() {
         }`}
       >
         <option value=""></option>
-        <option value="WITH_SE">S.E.</option>
-        <option value="WITHOUT_SE">Not S.E.</option>
+        {HV_SE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     );
   };
@@ -1180,9 +1203,14 @@ export default function InternalInspection() {
                               <td className={`border border-black p-0.5 font-bold ${data.condition === 'Scrap' ? 'text-red-600' : 'text-slate-800'}`}>
                                 {data.condition || 'Repairable'}
                               </td>
-                              {/* Blank prints blank: an unanswered inspection is not "Not S.E." on paper either. */}
+                              {/* ⚠ THREE STATES, AND BLANK KEEPS MEANING ONE THING (AUDIT G105). "-" where the
+                                  question does not arise (copper), "S.E." or "DPC" where it was answered, and BLANK
+                                  only for an aluminium row nobody has answered yet. Printing "-" for unanswered too
+                                  would make the sheet say "not applicable" about a question that is outstanding. */}
                               <td className="border border-black p-0.5 font-bold whitespace-nowrap">
-                                {data.hvSeConductor === 'WITH_SE' ? 'S.E.' : data.hvSeConductor === 'WITHOUT_SE' ? 'Not S.E.' : ''}
+                                {!hvSeApplies(classifyWindingMaterial(data.windingType)) ? HV_SE_NOT_APPLICABLE
+                                  : data.hvSeConductor === HV_SE_WITH ? 'S.E.'
+                                  : data.hvSeConductor === HV_SE_WITHOUT ? 'DPC' : ''}
                               </td>
                             </tr>
                           );
@@ -1550,7 +1578,7 @@ export default function InternalInspection() {
 
           <div className="bg-amber-50 border-l-4 border-amber-500 p-3 rounded text-amber-900 text-xs flex items-center gap-2 shadow-sm print:hidden">
             <span className="font-bold text-sm">⚠️ Mandatory Rule:</span>
-            <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, HV S.E., WAS Ring, and fill damaged coil weights before submitting.</span>
+            <span>Blank internal inspection reports are <strong>NOT acceptable</strong>. You must select Winding Type, Condition, HV S.E. (aluminium only), WAS Ring, and fill damaged coil weights before submitting.</span>
           </div>
 
           {/* ⚠ SCREEN ONLY - print:hidden, and outside the printable sheet (AUDIT G98). */}
@@ -1787,7 +1815,7 @@ export default function InternalInspection() {
                           </select>
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center bg-amber-50/30">
-                          {renderHvSeSelect(job.id)}
+                          {renderHvSeSelect(job.id, formsData[job.id]?.windingType || 'AL')}
                         </td>
                         <td className="p-1.5 text-center align-top">
                           {renderCircleLimitIndicator(job)}

@@ -39,9 +39,28 @@ test('⚠ the five withheld until answered carry exactly the operator\'s meaning
   assert.equal(COLUMN_ABBREVIATIONS.OIL_AVL.meaning, 'Oil Available');
   assert.equal(COLUMN_ABBREVIATIONS.NET_SHRT.meaning, 'Net Shortage');
   assert.equal(COLUMN_ABBREVIATIONS.HV_LIMB.meaning, 'Coils per limb');
-  assert.equal(COLUMN_ABBREVIATIONS.HV_SE.meaning, 'Super Enamelled');
+  // ⚠ HV_SE WAS EXTENDED ON A SECOND OPERATOR CONFIRMATION (AUDIT G105), not loosened: 'Super Enamelled' is still
+  // the whole of what the abbreviation stands for, and the clause after the dash says what it is the insulation
+  // ON. The pin is kept tight on the term itself so a future reader cannot quietly substitute a different one.
+  assert.ok(COLUMN_ABBREVIATIONS.HV_SE.meaning.startsWith('Super Enamelled'), 'the term itself must lead');
+  assert.equal(COLUMN_ABBREVIATIONS.HV_SE.meaning, 'Super Enamelled - the insulation on the HV coil conductor');
   assert.ok(!/bushing|3 HV|4 LV/i.test(COLUMN_ABBREVIATIONS.HV_LV_ROD.meaning), 'the rejected inference crept back in');
   assert.equal(UNCONFIRMED_HEADERS.length, 0);
+});
+
+test('⚠ DPC is a material, never "the absence of S.E." (AUDIT G105)', () => {
+  // The correction this entry exists for: "Not S.E." read as something missing. The wording is the operator's.
+  assert.equal(VALUE_ABBREVIATIONS.DPC.meaning,
+    'Double Paper Cover - paper insulation on the HV coil conductor instead of Super Enamelled');
+  assert.ok(VALUE_ABBREVIATIONS.SE.meaning.startsWith('Super Enamelled'), 'the term itself must lead');
+  // Neither may describe DPC as an absence, which is the mistake being corrected.
+  for (const a of [VALUE_ABBREVIATIONS.DPC, VALUE_ABBREVIATIONS.SE]) {
+    assert.ok(!/(absence|missing|not done|no S\.E\.)/i.test(a.meaning), `"${a.meaning}" describes DPC as an absence`);
+  }
+  // Both say the choice is aluminium only - the fact that stops an operator hunting for the field on copper.
+  for (const a of [VALUE_ABBREVIATIONS.DPC, VALUE_ABBREVIATIONS.SE, COLUMN_ABBREVIATIONS.HV_SE]) {
+    assert.match(`${a.meaning} ${(a as any).detail ?? ''}`, /[Aa]luminium/, 'the aluminium-only limit is not stated');
+  }
 });
 
 test('every key a legend lists exists', () => {

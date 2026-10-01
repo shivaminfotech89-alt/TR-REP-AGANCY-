@@ -24,6 +24,7 @@ import { scheduleSrForMasterCode, isClause4Excluded } from '../lib/scheduleItemM
 import { overhaulingRowKind } from '../lib/overhaulingRows';
 import { resolveScrapCharge } from '../lib/estimateCalc';
 import type { OrderReference } from '../lib/orderReference';
+import { COPPER_HV_SCHEDULE_ROW, HV_SE_WITH, hvSeApplies } from '../lib/hvSeConductor';
 
 type EstimateSection = 'physical' | 'internal' | 'labour';
 const SECTION_LABELS: Record<EstimateSection, string> = {
@@ -386,6 +387,13 @@ export function buildSingleJobEstimateData(
   const isCopper = windingMaterial === 'Copper';
   const windingSuffix = isCopper ? 'Copper' : 'Aluminium SE';
 
+  /**
+   * Whether the S.E./DPC axis applies at all - aluminium only (AUDIT G105). One definition, shared with the
+   * inspection screen that stopped asking the question, so the field and the pricing cannot drift apart. The full
+   * reasoning, and the Rs 50/kg this forecloses on copper, is at the HV coil row below and in lib/hvSeConductor.
+   */
+  const seAxisApplies = hvSeApplies(windingMaterial);
+
   // S.E. CONDUCTOR ON THE HV WINDING - recorded on the internal inspection, never defaulted (G61).
   //
   //   'WITH_SE' / 'WITHOUT_SE'  select that row of Schedule-A 12A (a or b, with or without the -1)
@@ -409,9 +417,12 @@ export function buildSingleJobEstimateData(
    * estimate reprints unchanged; an answered one names what was priced.
    */
   const coilLabel = (se: ReturnType<typeof seAnswer>, legacy: string) =>
-    se === 'with' ? `${isCopper ? 'Copper' : 'Aluminium'} SE`
-      : se === 'without' ? (isCopper ? 'Copper' : 'Aluminium')
-        : legacy;
+    // ⚠ COPPER READS "Copper", NEVER "Copper SE" (AUDIT G105) - the S.E. axis does not apply to it, so no answer,
+    // stored or absent, may put SE in the description of a copper line.
+    isCopper ? 'Copper'
+      : se === 'with' ? 'Aluminium SE'
+        : se === 'without' ? 'Aluminium'
+          : legacy;
 
   const rateErrors: EstimateRateError[] = [];
   if (atPercentageRaw === null) {
@@ -1185,25 +1196,45 @@ export function buildSingleJobEstimateData(
   // accepted document says the customer did not object, not that it was right. It
   // overcharged HV coil work by Rs 50/kg.
   //
-  // COPPER PRICES TOO - '12A-a' without S.E., '12A-a1' with. Copper used to block here on the
-  // grounds that '12A-a' (Rs 357) against '12A-a1' (Rs 407) could not be resolved; one answer
-  // now resolves the S.E. axis for BOTH materials, so blocking one and pricing the other would
-  // treat the same evidence two different ways.
+  // COPPER ONCE PRICED BOTH WAYS, AND NO LONGER DOES - SUPERSEDED BY G105. This said "one answer now resolves the
+  // S.E. axis for BOTH materials". The operator has since corrected the premise: copper windings in this work are
+  // not Super Enamelled, so the axis has no copper side to resolve. Copper prices at '12A-a' permanently and
+  // '12A-a1' is unreachable - a decision, with its figure, recorded in lib/hvSeConductor.
   //
   // The block also carried an unstated second job - stopping copper rewinds that ought to
   // be scrapped. That is the circle-limit indicator's work, and it does it properly: it
   // compares the actual cost against the actual limit instead of inferring the answer from
   // the material. A copper rewind will breach the limit and be flagged; a minor copper
   // repair will not, and now prices instead of refusing.
-  if (hvCoilApplies && hvSe === 'unrecognised') {
+  if (hvCoilApplies && seAxisApplies && hvSe === 'unrecognised') {
     rateErrors.push({ kind: 'missing-input', message: `${jobLabel}: HV S.E. reads "${String(internalData?.hvSeConductor)}" on the internal inspection, so the HV coil rate cannot be selected - Schedule-A prices it with and without S.E. separately. Answer HV S.E. on the internal inspection.` });
   }
-  if (hvCoilApplies && hvSe === 'unrecorded') {
+  // ⚠ AND THE NOTICE IS ALUMINIUM ONLY, OR IT WOULD LIE. Without this, a copper job saved tomorrow would carry
+  // "this internal inspection was saved before S.E. was recorded" - an explanation that is simply untrue, because
+  // the field is not absent from the record, it is absent from the question.
+  if (hvCoilApplies && seAxisApplies && hvSe === 'unrecorded') {
     notices.push(`HV coil priced WITHOUT S.E.: this internal inspection was saved before S.E. was recorded.${isCopper ? '' : ' The line reads "Aluminium SE", the wording this estimate has always printed for aluminium - it does not mean the S.E. rate was used.'} Answer HV S.E. on the internal inspection to price it either way.`);
   }
-  const hvWithSe = hvSe === 'with';
+  /**
+   * ⚠⚠ THE S.E. AXIS IS ALUMINIUM ONLY, SO COPPER CAN NEVER REACH 12A-a1 (AUDIT G105).
+   *
+   * A copper HV winding has no S.E./DPC selection - the inspection does not ask, because copper windings in this
+   * work are not Super Enamelled. `hvSeApplies` is the one definition of that rule, shared with the screen that
+   * stopped asking, so the two cannot drift: a field hidden on one side and an axis still live on the other would
+   * price from an answer nobody could give.
+   *
+   * ⚠ IT IS A PRICING DECISION AND IT FORECLOSES Rs 50/kg. 12A-a is Rs 357/kg against 12A-a1's Rs 407 (Rs 360 / Rs
+   * 411 on UGVCL-2026). Accepted on the owner's decision of 2026-10-01: the tender prices the combination, the
+   * workshop never sees it. 12A-a1 joins the originals-missing rows as a priced row this app cannot reach - see
+   * lib/hvSeConductor, which records it so nobody later "completes the set".
+   *
+   * ⚠ A STORED ANSWER ON A COPPER JOB IS IGNORED, NOT TRUSTED. One live inspection carries WITHOUT_SE on copper,
+   * answered when the question was still asked; it would price identically either way, but reading it would make the
+   * rule depend on what happens to be on disk.
+   */
+  const hvWithSe = seAxisApplies && hvSe === 'with';
   // The row is named once and used twice: to price the line, and to print on it (AUDIT G62).
-  const hvCoilSr = isCopper ? (hvWithSe ? '12A-a1' : '12A-a') : (hvWithSe ? '12A-b1' : '12A-b');
+  const hvCoilSr = isCopper ? COPPER_HV_SCHEDULE_ROW : (hvWithSe ? '12A-b1' : '12A-b');
   const hvCoilScheduleValue = scheduleRate(hvCoilSr);
   // WITH S.E. READS ITS OWN MASTER ROW - 12A(a1) / 12A(b1) - AND SCHEDULE-A WHERE THAT ROW HAS NO CELL (AUDIT G64).
   //
@@ -1217,7 +1248,9 @@ export function buildSingleJobEstimateData(
   // 215. These rows exist so agencies can override the S.E. rate, and the override that equals the old tender's
   // figure is the one this test cannot see. Not fixed here; see resolveRate.
   const hvCoilRate = hvWithSe
-    ? resolveRate(isCopper ? ['12A(a1)'] : ['12A(b1)'], hvCoilScheduleValue)
+    // ⚠ NO COPPER ARM HERE, AND THAT IS DELIBERATE (AUDIT G105). `hvWithSe` implies aluminium, so `12A(a1)` was
+    // dead the moment the S.E. axis became aluminium-only - and dead code naming a row reads as a reachable path.
+    ? resolveRate(['12A(b1)'], hvCoilScheduleValue)
     : resolveRate(isCopper ? ['12A(a)', '12A'] : ['12A(b)', '12A'], hvCoilScheduleValue);
   recordErrorIfApplies(hvCoilApplies, hvCoilRate, 'HV Coil');
   const hvCoilAmt = hvCoilApplies ? hvCoilWeight * (hvCoilRate ?? 0) : 0;
