@@ -51,6 +51,7 @@ import {
 import { Link } from 'react-router-dom';
 import * as XLSX from 'xlsx';
 import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
+import { byJobNo } from '../lib/mrGrouping';
 
 interface Job {
   id: string;
@@ -306,6 +307,17 @@ export default function MrLedger() {
       }
       groups[mrKey].jobs.push(job);
     });
+
+    /**
+     * THE REGISTER'S JOBS IN JOB-NUMBER ORDER (AUDIT G104) - pushed in whatever order the read returned, until now.
+     *
+     * ⚠ THIS IS THE SURFACE AN OPERATOR RECONCILES AGAINST, and it prints a sequence number beside each job
+     * (`idx + 1`), which made an arbitrary order look authoritative. The register's Excel export walks the same
+     * array, so it was wrong in the same way.
+     *
+     * One comparator, shared - lib/mrGrouping, which also records why not `jobNoSequence`.
+     */
+    Object.values(groups).forEach((g: any) => g.jobs.sort(byJobNo));
 
     /**
      * ⚠ AN MR RAISED FOR OIL ISSUE ALONE IS STILL AN MR (AUDIT O78).

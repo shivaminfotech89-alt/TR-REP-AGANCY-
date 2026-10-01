@@ -51,6 +51,16 @@ const namesSheets = root => readSource(root, 'src/components/LetterheadHeader.ts
  */
 const paginatesByHeight = root => existsSync(join(root, 'src/lib/useMeasuredRowChunks.ts'));
 
+/**
+ * Whether this tree has the shared MR grouping (AUDIT G104), which is what orders the multi-job sheet's columns.
+ *
+ * ⚠ ON A TREE WITHOUT IT THE OLD SUBSTITUTION IS USED, AND THAT IS THE POINT. Before G104 the grouping was an inline
+ * loop inside EstimateGenerate that did not sort, so `{ [mrNo]: jobs }` over the list in the order the read
+ * returned it reproduces exactly what that commit printed. After it, the real function is imported. That is what lets `--compare` show the
+ * columns reordering instead of reporting "nothing changed on paper".
+ */
+const sharesMrGrouping = root => existsSync(join(root, 'src/lib/mrGrouping.ts'));
+
 const runtime = (container, orientation, root) => { const measured = measuresBeforePrinting(root); return `
 const w: any = window;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
@@ -163,6 +173,7 @@ const multiJob = {
   select: live => pickMultiJob(live),
   generate(root) {
     const r = slash(root);
+    const grouped = sharesMrGrouping(root);
     // THE SHEET'S FIGURES COME FROM EstimateGenerate'S OWN FUNCTIONS, CUT FROM ITS SOURCE. Re-implementing them here
     // would be a second pricing path - the defect G8 removed from this very sheet.
     const wrapper = cut(root, EG, "the multi-job sheet's pricing wrapper (getJobFullEstimate)",
@@ -177,6 +188,7 @@ import * as SJER from '${r}/src/components/SingleJobEstimateReport';
 import * as AC from '${r}/src/lib/AgencyContext';
 import * as estimateCalc from '${r}/src/lib/estimateCalc';
 import * as scheduleItemMap from '${r}/src/lib/scheduleItemMap';
+${grouped ? `import { groupJobsByMr } from '${r}/src/lib/mrGrouping';` : ''}
 const { classifyWindingMaterial } = SJER as any;
 const { getEstimateMasterForCore, atForJob } = AC as any;
 const { getJobFullEstimate: getJobFullEstimatePure, isGpJob } = estimateCalc as any;
@@ -185,7 +197,12 @@ const { lineForMasterRow, builderCodeForMasterRow } = scheduleItemMap as any;
 function multiJobData(): any {
   const activeAgency = D.agency, atMasters = D.ats, activeAtMaster = D.at;
   const externalInspMap = D.ext, internalInspMap = D.int;
-  const mrGroups: Record<string, any[]> = { [D.mrNo]: D.jobs };
+  // ⚠ THE APP'S OWN GROUPING, IMPORTED - NOT A SUBSTITUTE (AUDIT G104). Substituting it reproduced the column order
+  // faithfully AND was blind to any fix of it: this comparison reported "nothing changed on paper" for a change that
+  // reorders every column, because the substitute replaced the very expression that carried the defect. A check that
+  // cannot see its subject is this project's opening pattern; that was its first appearance inside the print harness.
+  // D.jobs arrives in the order the read returned it, as the app receives it, so what prints is what the app computes.
+  const mrGroups: Record<string, any[]> = ${grouped ? 'groupJobsByMr(D.jobs)' : '{ [D.mrNo]: D.jobs }'};
   const estimableJobs = (mr: string) => (mrGroups[mr] || []).filter((j: any) => !isGpJob(j));
   const refNoText = D.refNo, currentSelectedDivision = D.division, signedByText = D.signedBy;
 ${wrapper}

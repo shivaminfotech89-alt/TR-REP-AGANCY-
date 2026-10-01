@@ -32,6 +32,7 @@ import { lineForMasterRow } from '../lib/scheduleItemMap';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { triggerUniversalPrint } from '../lib/printUtils';
 import { paginateRows } from '../lib/pagination';
+import { groupJobsByMr } from '../lib/mrGrouping';
 import { formatDDMMYYYY, byDateDesc, byNumericDesc } from '../lib/utils';
 
 // The second estimate engine that used to live here - `calculateJobItemDetails`, ~366
@@ -233,15 +234,16 @@ export default function EstimateGenerate() {
     return map;
   }, [inspections]);
 
-  const mrGroups = useMemo(() => {
-    const groups: Record<string, any[]> = {};
-    jobs.forEach(j => {
-      if (!j.mrNo) return;
-      if (!groups[j.mrNo]) groups[j.mrNo] = [];
-      groups[j.mrNo].push(j);
-    });
-    return groups;
-  }, [jobs]);
+  /**
+   * EVERY MR'S JOBS, IN JOB-NUMBER ORDER (AUDIT G104) - see lib/mrGrouping for what went wrong without it, and why
+   * the obvious parser, `jobNoSequence`, is the wrong one here.
+   *
+   * ⚠ THIS DECIDES THE MULTI-JOB SHEET'S COLUMN ORDER, and it used to decide nothing: jobs were pushed in the order
+   * the Firestore read handed them back, which with no `orderBy` is unspecified - measured, not document-id order
+   * either, and not job-number order in 18 of 20 live MRs. print-check imports the same function rather than
+   * substituting its own grouping, so a comparison can see this order change.
+   */
+  const mrGroups = useMemo(() => groupJobsByMr(jobs), [jobs]);
 
   const divisions = useMemo(() => {
     const set = new Set<string>();

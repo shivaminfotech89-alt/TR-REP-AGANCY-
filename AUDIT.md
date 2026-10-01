@@ -40,6 +40,52 @@ a clean bill closes it.
 
 ---
 
+## Pattern: the check that cannot see its subject, now inside the print harness itself
+
+**The opening pattern of this file is a check that structurally cannot fail. On 2026-10-01 it appeared twice in one
+change, in the two tools this project trusts most about paper** (G104). Both would have reported clean, and the
+clean report would have meant nothing.
+
+The change reordered the multi-job estimate sheet's columns - a visible, money-bearing change to a signed document.
+
+**1. `print-subtree-hashes` cannot see it, by construction.** It finds every `<PrintableA4Page>…</PrintableA4Page>`
+region in `src/` and hashes **its source text**. It renders nothing. The ordering defect lived in a `useMemo` in
+EstimateGenerate, outside every such region, so:
+
+> **13 byte-identical, 0 changed** - while every column on the sheet moved.
+
+That is the tool's correct answer to the question it asks. The error would have been to read it as "nothing reached
+paper", which is exactly how it has been cited before.
+
+**2. print-check's multi-job case could not see it either, and that was worse.** The harness builds the sheet from
+EstimateGenerate's own cut functions, but it **substituted the one expression that carried the defect**:
+
+```js
+const mrGroups: Record<string, any[]> = { [D.mrNo]: D.jobs };
+```
+
+The substitute reproduced the broken order faithfully - so the harness had been printing the scrambled sheet all
+along - and was blind to any correction of it. Its first run on the fix reported:
+
+> `multi-job: nothing`
+
+**A substitution faithful to the defect is indistinguishable from a correct harness until the defect is fixed.** The
+cut-from-source discipline (G65) exists so the harness cannot drift from the app; this was a hole in it that the
+markers could not catch, because nothing had moved - the substitute was always there.
+
+**How to apply:**
+- **Before trusting a clean run, state which question the tool asks and whether the change is inside it.** A
+  source-text hash answers "did the printed markup change", never "did the paper change".
+- **A harness that substitutes app logic must import it instead, or the substitution must be shown to fail when the
+  app is wrong.** `{ [mrNo]: jobs }` could not fail. It now imports `groupJobsByMr`, gated on the tree having it so
+  `--compare` still builds older commits.
+- **When a change is invisible to a tool, say so in the entry and name what saw it instead.** Here: print-check's
+  row-cell comparison, which showed five rows of amounts moving between columns, plus unit tests on the ordering.
+- A tool reporting "nothing changed" on a change you believe is real is **evidence about the tool**, not reassurance
+  about the change. Chase it before writing the entry.
+
+---
+
 ## Pattern: a fabricated fact arrived through a trusted channel, and specificity was taken for evidence
 
 **On 2026-09-11 this file recorded that the owner's accountant is Kaushal Shah, and named him as the person
@@ -20271,3 +20317,113 @@ The argument for building a case per document rather than trusting the shared co
 Two of the three were only reachable through a stress case built from the longest real values. The third was failing
 on the data an operator prints today and had been doing so unmeasured. **"Not measured" was not "fine" in any of the
 three.**
+
+---
+
+## G104. The multi-job sheet's columns were in no order at all, and disagreed with the letter that covers them
+
+**Reported:** an MR's columns do not read in job-number sequence.
+
+### WHAT ORDER THEY WERE IN: NONE
+
+`buildMultiJobData` took `estimableJobs(mr)` → `(mrGroups[mr] || []).filter(…)`, and `mrGroups` pushed jobs in the
+order the job list arrived. That list comes from a Firestore query with **no `orderBy`**, so the order is
+**unspecified** - whatever the read hands back.
+
+**⚠ AND IT IS NOT DOCUMENT-ID ORDER, THOUGH A FIRST PASS HERE SAID IT WAS.** That claim came from simulating
+Firestore's ordering with a JavaScript string sort, which is case-insensitive where Firestore's is not. Read back
+from the live database on 2026-10-01, MR 2555 comes out **MSBT-1, MSBT-3, MSBT-4, MSBT-2** - doc ids `IP4acepD`,
+`hivHkvhF`, `SRQfQP3e`, `Uwz2VbZA`, which is neither ascending document id nor job number. The whole read is not in
+document-id order either. The honest statement is the weaker one: **nothing in the app chooses this order and nothing
+an operator can predict produces it.**
+
+It differed from job-number order in **18 of the 20 live MRs with more than one job** - a figure that survived the
+correction, having been recomputed against the real read order.
+
+### ⚠⚠ IT DISAGREED WITH THE FORWARDING LETTER IT IS PRINTED WITH
+
+Not with the billing screen, which sorts. The dangerous pair was inside one print action:
+
+| Surface | Order |
+|---|---|
+| Estimate screen's job list, forwarding letter, estimate Excel export | `selectedJobsData` - **sorted numerically, always was** |
+| **Multi-job sheet's columns** | **unsorted** |
+
+The letter and the sheet go to the division in one envelope. **Row 3 of the covering letter and column 3 of the sheet
+it covers were different transformers.**
+
+### A SECOND SURFACE, NOT REPORTED AND ALSO WRONG
+
+**The MR register** (`MrLedger`) built its groups with the same inline push and never sorted - and renders a sequence
+number beside each job (`idx + 1`), which made an arbitrary order look authoritative. Its **Excel export** walks the
+same array. That is the surface an operator reconciles against, so it was wrong in the place it would be trusted.
+
+Nine other surfaces were already right: both inspection sheets, the testing report, billing, the delivery challan and
+Reports all use the same numeric comparator.
+
+### ⚠ NOT `jobNoSequence` - THE PARSER THAT LOOKS RIGHT AND IS NOT
+
+It parses the integer after the last dash, and **all 160 distinct live job numbers parse**: 0 nulls, including 11 with
+digits in the prefix (`21GETS-44`), 5 with more than one dash (`21PS-AP-1`, correctly taking after the last) and one
+with whitespace (`OH21 IS-1`). No dash-free or bare numbers exist today.
+
+**It is disqualified because it discards the prefix.** `AMSBT-1` and `MWSBT-1` both parse to 1 - two jobs of one MR
+with the same sort key. **Three of the 42 live MRs collide:**
+
+| MR | collisions |
+|---|---|
+| 85558 | `AMSBT-1`/`MWSBT-1`, `AMSBT-2`/`MWSBT-2` |
+| 1234 | `ASU-3`/`SU-3`, `OH21 IS-1`/`WSU-1` |
+| 3929 | `ZKAP-1`/`ZK-1`, `ZKAP-2`/`ZK-2` |
+
+Sorting by it would have left those columns arbitrary - **the same defect in better clothes**. `jobNoSequence` is
+right where it is used, for a per-division, per-core high-water mark, where dropping the prefix is the point. It is
+untouched.
+
+`localeCompare(…, { numeric: true })` is used instead, and it agrees with an explicit (prefix, number) ordering on
+**all 42** live MRs.
+
+### ONE DEFINITION, BECAUSE THE HARNESS HAD TO SHARE IT
+
+`src/lib/mrGrouping.ts` - `byJobNo`, `sortJobsByNo`, `groupJobsByMr`. EstimateGenerate, MrLedger **and print-check**
+all use it. The extraction was not tidiness: print-check substituted its own grouping and could not otherwise see the
+fix. See the pattern note, *the check that cannot see its subject*.
+
+**⚠ GROUP ORDER IS NUMERIC, NOT INSERTION ORDER - AND MY NOTE SAID OTHERWISE UNTIL A TEST DISPROVED IT.** An MR number
+is a numeric string and a JavaScript object orders integer-like keys numerically ascending whatever the insertion
+order, so MR 12 precedes MR 77 however they arrived. The inline loops keyed a plain object the same way, so **group
+order is unchanged** by the extraction; only order *within* a group is fixed. The first draft of the module comment
+claimed insertion order was preserved, and the test written to confirm it failed instead.
+
+### VERIFIED
+
+- **print-check, `multi-job --compare HEAD`, live data - five rows of amounts moved between columns:**
+
+  ```
+  row 15: 15 | HV Wdg. (Not Miss) -AL | QTY | 1,467.00 | 1,304.00 |   815.00 | 4,075.00
+        -> 15 | HV Wdg. (Not Miss) -AL | QTY | 1,467.00 | 4,075.00 | 1,304.00 |   815.00
+  ```
+
+  Rows 16-19 likewise. Sheets, row count, cut-off and the warning are unchanged - only which column holds which
+  figure. That reconciles exactly with the live read order: before `MSBT-1, MSBT-3, MSBT-4, MSBT-2`, after
+  `MSBT-1, MSBT-2, MSBT-3, MSBT-4`.
+- **⚠ ITS FIRST RUN REPORTED `multi-job: nothing`,** before the harness was made to import the real grouping. That
+  run is the finding in the pattern note, not a passing check.
+- **`print-subtree-hashes --compare HEAD`: 13 byte-identical, 0 changed** - as predicted before the change was made,
+  and recorded in the pattern note. **A clean run here is not evidence about this change.**
+- **339 tests in 29 files**, 17 of them new - the reported SU-6…SU-10 case, MR 2555, 1051 and 85558 in the order the
+  live read returns them, all six `jobNoSequence` collisions, every live job-number shape, and the group-order rule
+  the first comment got wrong.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files.
+
+### NOT EXERCISED
+
+- **The MR register's own ordering is not covered by any harness** - print-check prints documents, and the register is
+  a screen with an Excel export. The change there is verified by the shared function's unit tests and by reading, not
+  by a render.
+- **No MR with SU-6…SU-10 exists in the live database**, so the reported sequence could not be reproduced from real
+  data. The nearest real case is MR 1234 (`SU-3`, `SU-4`, `WSU-1`, `ASU-3`, `ASU-2`, `OH21 IS-1`). The sequence is a
+  unit test instead.
+- **Why the jobs query has no `orderBy` is not revisited here.** Adding one would make the order explicit at the
+  source rather than at each grouping, but it needs a Firestore index and O71 records what a missing index cost this
+  project. Sorting in the app costs nothing at 168 jobs.
