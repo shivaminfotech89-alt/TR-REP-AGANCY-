@@ -41,6 +41,7 @@ import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { APP_MARK } from '../lib/ui';
 import { inheritsAgencyQuota } from '../lib/allotmentInheritance';
+import { jobNumberTail, nextJobNoFor, takenJobNumbers } from '../lib/jobNumbering';
 
 interface TransformerEntry {
   jobNo: string;
@@ -355,6 +356,20 @@ export default function NewJob() {
   }, [availableDivisions, activeAgency, activeAtMaster]);
 
   // Helper to compute predicted job number in memory from active saved MR jobs
+  /**
+   * THE NUMBER THE FIELD IS PREFILLED WITH - FROM THIS TENDER'S COUNTER, SKIPPING WHAT IS TAKEN (AUDIT G107).
+   *
+   * ⚠ IT USED TO IGNORE THE TENDER. This took the highest number already carrying the prefix anywhere in the
+   * agency, so a new AT continued the previous tender's series - the behaviour O89 reversed at the seed and that
+   * this path never honoured, because it never read the seed. The counter now decides where the series starts and
+   * `nextFreeJobNumber` steps past anything in use, so the suggestion can never be a number the duplicate guard
+   * at save would refuse.
+   *
+   * ⚠ WHERE A NEW TENDER REUSES THE DIVISION'S PREFIX THIS LANDS BACK AT THE AGENCY MAXIMUM, and that is not a
+   * defect of this function. MEGHA's MSBT-1 is on two challans; O89's "start at 1" and the agency-wide duplicate
+   * guard cannot both hold under a reused prefix. Requiring a new AT to define its own prefix is what closes it -
+   * see lib/jobNumbering.
+   */
   const getAutoJobNo = (
     rowIndex: number,
     currentCoreType: string,
@@ -363,39 +378,23 @@ export default function NewJob() {
     allRows: TransformerEntry[]
   ): string => {
     if (currentRepairType === 'GP' || !activeAgency || !currentDivision || !currentCoreType) return '';
-    const { prefix, counterKey } = getJobNoPrefix(currentDivision, currentCoreType);
+
+    // ONE COUNTER READER. `predictNextJobNo` resolves the prefix and reads this tender's `lastJobNumbers`,
+    // including the bare/_CRGO fallback pair; re-deriving either here is what let the two paths disagree.
+    const { prefix, nextNum, counterKey } = predictNextJobNo(currentDivision, currentCoreType, currentRepairType);
     if (!prefix) return '';
 
-    // Find the highest job number among ACTIVE (non-cancelled) OGP saved jobs in this agency
-    // GP jobs are excluded because they reuse original job numbers from prior repairs and arrive randomly.
-    const head = `${prefix.toUpperCase()}-`;
-    const tailOf = (v: unknown): number => {
-      const raw = String(v ?? '').trim().toUpperCase();
-      if (!raw.startsWith(head)) return 0;
-      const n = parseInt(raw.slice(head.length), 10);
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    };
+    const taken = takenJobNumbers(pastJobs, prefix);
 
-    const activeOgpJobs = pastJobs.filter(j => 
-      j.status !== 'Cancelled' && 
-      !j.isCancelled && 
-      j.mrStatus !== 'Cancelled' &&
-      (j.repairType || '').toUpperCase() !== 'GP' &&
-      !j.isGp
-    );
-    const activeSavedMax = activeOgpJobs.reduce((m, j) => Math.max(m, tailOf(j.jobNo)), 0);
-
+    // How many earlier rows of this intake draw from the same counter - each takes the next free number in turn.
     let countBefore = 0;
     for (let i = 0; i < rowIndex; i++) {
       const row = allRows[i];
       if (!row || !row.coreType) continue;
-      const rKey = getJobNoPrefix(currentDivision, row.coreType).counterKey;
-      if (rKey === counterKey) {
-        countBefore++;
-      }
+      if (getJobNoPrefix(currentDivision, row.coreType).counterKey === counterKey) countBefore++;
     }
 
-    return `${prefix}-${activeSavedMax + 1 + countBefore}`;
+    return nextJobNoFor(prefix, nextNum - 1, taken, countBefore);
   };
 
   // Sync and populate exact job numbers once agency, division & pastJobs cache are ready in OGP mode.
@@ -1443,15 +1442,25 @@ ${intakeGate.reason}`);
         const offers: { index: number; from: string; fromLabel: string; to: string }[] = [];
         const usedCandidates = new Set<string>();
 
+        /**
+         * ⚠ THE OFFER MUST NOT BE A NUMBER ALREADY IN USE (AUDIT G107). This advanced only past the OTHER offers in
+         * this batch, never past the jobs on record - so on a tender whose counter sits below the numbers already
+         * issued under its prefix it offered one of them. ADMIN's new AT would have offered SU-1 with SU-1...SU-24
+         * on record. The save's duplicate guard caught it, which made it a refusal loop rather than a wrong save:
+         * the operator accepts the offer, saves, and is refused again with the same number.
+         *
+         * Now the same function the prefill uses, with the numbers already offered in this batch folded into the
+         * taken set - one definition of "the next free number", which is what let the two disagree.
+         */
         clashRows.forEach(c => {
           const coreType = transformers[c.index].coreType || 'CRGO';
           const info = predictNextJobNo(commonData.division, coreType, commonData.repairType);
-          let candidateNum = info.nextNum;
-          let candidate = `${info.prefix}-${candidateNum}`;
-          while (usedCandidates.has(candidate)) {
-            candidateNum++;
-            candidate = `${info.prefix}-${candidateNum}`;
+          const taken = takenJobNumbers(pastJobs, info.prefix || '');
+          for (const already of usedCandidates) {
+            const n = jobNumberTail(already, info.prefix || '');
+            if (n > 0) taken.add(n);
           }
+          const candidate = nextJobNoFor(info.prefix, info.nextNum - 1, taken);
           usedCandidates.add(candidate);
           offers.push({
             index: c.index,

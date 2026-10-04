@@ -19261,6 +19261,20 @@ four checks passing over it.
 
 ## O89. A tender starts its own series - a change of rule, not a correction of F42
 
+> **⚠ THIS ENTRY CONTAINS A TENSION IT DID NOT NOTICE, FOUND 2026-10-04 (G107).** It names the duplicate guard at
+> intake as what catches a collision now - and **the collision this rule produces is the one that guard forbids.**
+> The guard is agency-wide (`agencyId` only, no `atId`), so where a new tender reuses the division's prefix,
+> starting at 1 offers a number already taken: MEGHA's `MSBT-1` exists twice and both copies carry a challan.
+>
+> **The window being open is what hid it.** The measurement below - no agency has two tenders that both booked
+> work under one prefix - is still true, and it is exactly why the contradiction had never fired. The first job
+> booked under a new AT sharing a prefix would have made both visible at once.
+>
+> **And the prefill never read this rule at all** until G107: it took the agency-wide maximum for the prefix and
+> ignored the seed this entry changed. G107 makes the counter decide where the series starts and skips numbers
+> already in use, so the rule holds wherever the prefix leaves room - and records that making the prefix
+> per-tender is the remaining half, including that it contradicts F42's reasoning, which this entry left standing.
+
 Job numbering on a new AT continued the previous tender's series. It now starts from that
 tender's own starting number, defaulting to **1**.
 
@@ -20662,3 +20676,166 @@ its export. Nothing is owed there.
   no copper row, and no harness touches the export at all.
 - **The other exports were not audited** - the testing report, billing, the challan, Reports, the MR register and oil.
   Only the two inspection sheets were in scope, and only those two are claimed.
+
+---
+
+## G107. The add-unit gate asked the session about the wrong tender, and the prefill ignored the rule O89 set
+
+Two reports, one commit, because both turn on the same thing: which tender is the subject.
+
+### 1. THE GATE WAS ASKED OF THE SESSION'S TENDER, AND WAS UNREACHABLE EITHER WAY
+
+**Reported:** a transformer cannot be added when editing an MR.
+
+The Add Unit control was rendered only when `isIntakeOpen(activeAtMaster, …)` - **the tender the session has
+selected** - while the function immediately beside it resolved the MR's own AT from its jobs, carrying the comment
+*"never from the session (F66)"*. The gate was the inconsistency.
+
+**⚠⚠ AND IT WAS UNREACHABLE, NOT MERELY WRONG.** The register lists an MR only when its `atId` equals the selected
+AT, or the scope is All tenders. So for an MR on any tender but the current one, **both routes to reach it closed the
+gate**:
+
+| route | what the gate said |
+|---|---|
+| select the MR's own tender | "AT *X* has been superseded by AT *Y*. New work belongs to the current tender." |
+| choose All tenders | "The scope is All tenders … pick the tender this MR belongs to." |
+
+**The second message's advice leads to the first refusal.** And MEGHA has **twelve MRs, none of them on its current
+AT** - ten on the Active-but-superseded AT 26-27 and two carrying no AT - so the control could not be made to appear
+on a single one of them.
+
+**It is also why the reported case was not the AT precondition.** When the button WAS visible, intake was open, which
+required the selected AT to be the current one; the register then listed only MRs whose `atId` equalled it; so every
+MR reachable with the button showing had exactly one AT and no blanks, and `atForEditingMr` always succeeded. **All
+three of its messages were unreachable through the UI.**
+
+**Now:** `existingMrIntake` (lib/tenderState) answers one question - is the MR's own tender Closed - and
+`mrAddGate` in MrLedger resolves the MR's tender and handles the rest. **Superseded is allowed: a superseded tender
+is still Active, the division is still reading its paperwork, and a transformer that arrived under it belongs to it.
+Closed still refuses**, which is F83's rule, and the refusal now names the MR's tender rather than the session's.
+
+Measured over all 42 live MRs:
+
+| | |
+|---|---|
+| 24 MRs on **Active** ATs - including MEGHA's ten | **the control now appears** |
+| 15 MRs on **Closed** ATs | still refused, naming their own tender |
+| 2 MRs with no AT (MEGHA MR 1, MR 9344) | **message 1, now reachable** |
+| 1 MR with an unusable atId (AARATI MR 12) | **a message that did not exist** |
+
+### ⚠ THE THREE MESSAGES, NOW THAT THEY CAN BE SEEN
+
+- **Message 1 - "does not record which AT" - is right, and its case is real** (2 MRs). Its wording said a new unit
+  *"would have to take its job number and AT percentage from whichever AT is selected today"*, which described the
+  mechanism this change removes; the refusal stands but the explanation was rewritten to say there is no MR tender to
+  draw from.
+- **Messages 2 and 3 - partly unstamped, and jobs under different ATs - were written for cases that have never
+  arrived.** Zero MRs today, and still zero after this change. They are not wrong, they are **unexercised**, and both
+  remain reachable future states: a job moved between MRs produces either. Kept, and recorded as untested.
+- **⚠ A FIFTH CASE HAD NO MESSAGE.** `atForEditingMr` succeeds whenever the jobs agree on ONE atId - it never asked
+  whether that id names a tender this agency has. **AARATI's MR 12 carries job `MSBT-5` - a MEGHA prefix - stamped
+  with MEGHA's AT 26-27.** It passed the precondition and would then have reached a gate with no status to read.
+
+  Refused, with its own message, on the owner's decision. The wording states the fault **without implying the
+  operator caused it** - "a fault in the record rather than anything done on this screen" - says what is still
+  possible, and points at what actually fixes it: **no screen can re-stamp a job's AT**, so it names
+  `scripts/find-misattached-at-console.js`, the read-only diagnostic F22 left for exactly this, which reports whether
+  the tender or the transformer is the one in the wrong place.
+
+### ⚠ ONE GATE, NOT TWO - G3'S FAULT IN A NEW FORM
+
+The handler used to check the session gate and then, separately, the AT precondition; the control checked only the
+session gate. **The refusal an operator SAW and the refusal that HAPPENED were computed from different things** -
+which is what G3 removed from this same handler once already. `mrAddGate` is one answer, used by both.
+
+### 2. THE PREFILL IGNORED O89, AND THE CLASH OFFER CONTRADICTED IT
+
+**Confirmed first, as asked: a new MR under an existing AT does continue - but not from the counter.** The field was
+filled by `getAutoJobNo`, which took the highest number carrying that prefix **anywhere in the agency**
+(`pastJobs` is `agencyJobs`, not AT-scoped) and never read `lastJobNumbers` at all. The counter was read by a
+different function, `predictNextJobNo`, used only to offer a replacement on a clash. **Two answers to one question,
+agreeing on an established tender and disagreeing at the boundary.**
+
+So **O89's rule was never honoured by the prefill.** O89 changed the AT-creation seed so a new tender starts from its
+own starting number; the prefill did not consult the seed, so whether a new tender restarted depended entirely on
+whether it happened to use a different prefix:
+
+| agency / division | new AT prefix | prefill before | after |
+|---|---|---|---|
+| MEGHA / KALOL | `ASD` (new) | ASD-1 | ASD-1 - unchanged |
+| MEGHA / SABARMATI | `MSBT` (same) | MSBT-24 | **MSBT-24** - see below |
+| ADMIN / DEESA | `SU` (same) | SU-25 | **SU-25** |
+| UPENDRA / DEESA | `PLN1` (same, ×3) | PLN1-1 | PLN1-1 - no job carries the prefix |
+
+### ⚠⚠ O89'S OWN TENSION, RECORDED AS FOUND
+
+**O89 names the duplicate guard as what catches a collision now - and the collision its rule produces is the one that
+guard forbids.**
+
+- O89: a new tender starts its own series, defaulting to **1**.
+- The duplicate guard at intake is **agency-wide** - `where('agencyId', …)`, no `atId` - so a job number must be
+  unique across every tender.
+- Where a new tender reuses the division's prefix, **1 is already taken**. MEGHA's `MSBT-1` exists twice, both active,
+  and **both copies carry a challan number and date**.
+
+A prefill that offered `MSBT-1` would offer a number that cannot be saved, and the clash offer - counter-based - would
+offer it again: **a refusal loop at the tender boundary**.
+
+**This stayed invisible for the same reason O89 was safe to ship.** O89 measured that no agency has two tenders which
+both booked work under one prefix, and that is still true - the only multi-valued prefix is MEGHA's `MSBT`, and its
+second group is unstamped jobs, not a tender. The window being open is what made the reversal free; it is also what
+hid the contradiction. **Once a new AT books its first job under a reused prefix, both become visible at once.**
+
+**What was built (option (a), on the owner's decision):** the counter decides where the series **starts**, and
+`nextFreeJobNumber` steps past anything already in use. The tender's own series is honoured wherever the prefix
+leaves room; a number on an issued challan is never offered. **Where the prefix is shared the result lands back at the
+agency maximum - so O89's rule is honoured only because the prefix differs, and nothing yet requires that it does.**
+That is stated in `lib/jobNumbering` rather than left as a surprise.
+
+**The clash offer now uses the same function**, with the numbers already offered in this batch folded into the taken
+set. Before, it advanced only past the other offers in the batch and never past the jobs on record.
+
+### ⚠ THE REMAINING HALF - OPTION (c), AND WHAT IT COSTS
+
+Requiring a new AT to define its own prefix per division puts the tender boundary where an operator can see it, at
+creation, instead of in a counter the prefill silently disagrees with. **Not built. Its cost, measured:**
+
+- **Three agencies share a prefix across tenders today** - MEGHA/SABARMATI (`MSBT`, 2 ATs), ADMIN/DEESA (`SU`, 2),
+  UPENDRA/DEESA (`PLN1`, 3). A validation at creation is **forward-only**: it prevents new sharing and corrects none
+  of these. For MEGHA/SABARMATI to actually restart, someone must change that AT's SABARMATI prefix in AT Divisions -
+  an operator action, affecting future numbering only, since existing jobs keep their numbers.
+- **⚠ IT CONTRADICTS F42'S REASONING, WHICH O89 LEFT STANDING.** F42 held that *"prefixes belong to the DIVISION, not
+  the tender period"* - `21 IS` is the same string before and after a rollover because that is what the division
+  calls it. Requiring a per-tender prefix asks the agency to invent a name the division does not use. That is a
+  business question, not a validation detail, and it should be put to the owner before it is built.
+- A cheaper variant worth weighing first: **warn at AT creation** when a prefix is already in use by a sibling AT,
+  and say what it means for numbering - leaving the choice with the operator rather than refusing.
+
+### VERIFIED
+
+- **383 tests in 32 files**, 26 new - two new suites.
+  - `jobNumbering`: the boundary both ways (a fresh prefix offers 1; a reused one skips to the first free number),
+    cancelled numbers freed, GP numbers not reserved, gaps filled before the end, batch allocation, and that it
+    always answers rather than hanging the intake form.
+  - `existingMrIntake`: superseded allowed, Closed refused by its own name, and **a test that the two rules genuinely
+    differ** on the case that caused this - `isIntakeOpen` refuses a superseded tender for new work while
+    `existingMrIntake` admits a unit to an MR already on it.
+  - Source assertions that the control and the handler call the same gate, that `isIntakeOpen` is gone from the
+    add-unit path, that both numbering call sites go through one function, and that the old agency-maximum
+    derivation was **removed rather than bypassed**.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files.
+- **`print-subtree-hashes --compare HEAD`: 13 byte-identical, 0 changed** - correct, and the right check here:
+  neither change touches a printed document.
+
+### NOT EXERCISED
+
+- **⚠ print-check cannot see either change.** It drives printed documents; the MR register and the intake form are
+  screens. Both rest on unit tests, source assertions and reading. **No harness opens the MR edit dialog or the
+  intake form at all** - which is the standing gap behind G106's weakest link as well.
+- **The boundary itself has never fired.** No agency has yet booked a job under a new AT sharing a prefix, so the
+  skip-past-taken path is proved by tests against live figures, not by a real intake.
+- **Messages 2 and 3 remain untested against data**, as above - zero MRs are partly unstamped or span two ATs.
+- **The fifth case's message is shown for one MR** (AARATI MR 12) and was not exercised on screen.
+- **Whether the gate should also consider a tender's end DATE** is untouched. `isIntakeOpen` keys on status and
+  supersession, never on the period having lapsed - ROLLOVER.md records that nothing in the app calculates from
+  those dates, and that is unchanged here.

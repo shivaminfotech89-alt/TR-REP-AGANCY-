@@ -12,7 +12,8 @@ import {
   runTransaction
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned, isIntakeOpen } from '../lib/AgencyContext';
+import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned } from '../lib/AgencyContext';
+import { existingMrIntake } from '../lib/tenderState';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
 import { jobNumberClashes, duplicateWithinBatch, describeHolder } from '../lib/jobNumberGuard';
@@ -242,15 +243,6 @@ export default function MrLedger() {
    * job names a tender, so there is nothing to infer from - scripts/admin/assign-at.js
    * refuses all twelve for exactly that reason. Each needs a human with the MR paperwork.
    */
-  /**
-   * ADDING A UNIT CREATES NEW WORK, so it obeys the same gate as New Job (AUDIT F83).
-   * Editing the units already on an MR does not, and is untouched: a transformer received
-   * under a tender is finished under it.
-   */
-  const intakeGate = useMemo(
-    () => isIntakeOpen(activeAtMaster, atMasters.filter(t => t.agencyId === activeAgency?.id), viewingAllTenders),
-    [activeAtMaster, atMasters, activeAgency?.id],
-  );
 
   /**
    * ⚠ DERIVED FROM THE SHARED LOAD, AND STILL NOT A QUERY (AUDIT F87, G86).
@@ -550,6 +542,52 @@ An MR belongs to one tender, so there is no single sequence to draw a job number
 The units already on this MR can still be edited.` };
   };
 
+  /**
+   * MAY A UNIT BE ADDED TO THE MR THAT IS OPEN? - ASKED OF THE MR'S OWN TENDER (AUDIT G107).
+   *
+   * This replaced a gate computed from `activeAtMaster`, the session's selection. See `existingMrIntake` for why
+   * that was both the wrong tender and unreachable; in short, the register only lists an MR when its own AT is
+   * selected or the scope is All tenders, and the old gate refused in both of those states.
+   *
+   * ⚠ ONE ANSWER, USED BY THE CONTROL AND THE HANDLER. The previous arrangement checked the session gate in two
+   * places and the AT precondition in a third, so the refusal an operator SAW and the refusal that HAPPENED were
+   * computed from different things (G3's fault, in a new form). The handler now asks this and nothing else.
+   */
+  const mrAddGate = (): { open: boolean; reason: string } => {
+    const at = atForEditingMr();
+    if ('error' in at) return { open: false, reason: at.error };
+
+    const master = atMasters.find((a: any) => a.id === at.atId);
+
+    /**
+     * ⚠ THE FIFTH CASE, AND IT HAD NO MESSAGE UNTIL NOW (AUDIT G107). `atForEditingMr` succeeds whenever the jobs
+     * agree on ONE atId - it does not ask whether that id names a tender this agency has. One live MR is in exactly
+     * that state: AARATI's MR 12 carries job MSBT-5 - a MEGHA prefix - stamped with MEGHA's AT.
+     *
+     * Refused, because nothing here can be answered honestly: there is no series to draw a number from and no
+     * percentage to price at, and the app cannot tell whether the job is in the wrong agency or the tender is
+     * (F22's shape). The wording states the fault without blaming the operator and points at the diagnostic,
+     * because no screen can re-stamp a job's AT - `scripts/find-misattached-at-console.js` reports which way round
+     * it is and an administrator corrects the record.
+     */
+    if (!master || String(master.agencyId ?? '') !== String(activeAgency?.id ?? '')) {
+      return {
+        open: false,
+        reason: `A transformer cannot be added to MR ${editingMr?.mrNo}: it is stamped with a tender that does not belong to ${activeAgency?.name || 'this agency'}.
+
+This is a fault in the record rather than anything done on this screen - the transformer and the tender it names sit under different agencies, so there is no series to take a job number from and no accepted percentage to price a new unit at.
+
+The units already on this MR can still be edited, inspected, tested and dispatched. Correcting the stamp is an administrator's job: scripts/find-misattached-at-console.js reports whether the tender or the transformer is the one in the wrong place.`,
+      };
+    }
+
+    const gate = existingMrIntake(master);
+    if (gate.open) return { open: true, reason: '' };
+    return { open: false, reason: `A transformer cannot be added to MR ${editingMr?.mrNo}: ${gate.reason}
+
+The units already on this MR can still be edited, inspected, tested and dispatched.` };
+  };
+
   // Add new transformer row to editing MR
   const handleAddTransformerToMr = () => {
     // ⚠ REFUSED BEFORE ANY WORK IS DONE, not at the write. A trial that ends while a form
@@ -561,23 +599,16 @@ The units already on this MR can still be edited.` };
     if (!editingMr) return;
 
     /**
-     * ⚠ THE GATE IS IN THE HANDLER, NOT ONLY ON THE BUTTON (AUDIT G3).
+     * ⚠ THE GATE IS IN THE HANDLER, NOT ONLY ON THE BUTTON (AUDIT G3) - AND IT IS NOW THE SAME GATE (G107).
      *
-     * The control at the bottom of this modal is already hidden when the tender is closed to
-     * new work - but hiding a control is what the operator SEES, and this is what HAPPENS.
-     * The handler checked `atForEditingMr()`, which answers a different question: whether the
-     * MR's jobs agree on a tender, not whether that tender still accepts new work.
-     *
-     * So the F83 rule was enforced by a `{intakeGate.open ? …}` in the JSX and by nothing
-     * else - the exact arrangement OilInward rejects three files away, with a comment saying
-     * so. Adding a unit to an old MR while its tender is closed is intake, and intake is what
-     * that rule refuses.
+     * The control is hidden when a unit cannot be added, but hiding a control is what the operator SEES and this is
+     * what HAPPENS. Previously the two were computed from different things: the button consulted the session's
+     * tender while the handler consulted that AND, separately, whether the MR's jobs agreed on one. `mrAddGate` is
+     * one answer, asked of the MR's own tender, used in both places.
      */
-    if (!intakeGate.open) {
-      setNotification({
-        type: 'error',
-        message: `No new units can be added: ${intakeGate.reason} The units already on this MR can still be edited.`,
-      });
+    const gate = mrAddGate();
+    if (!gate.open) {
+      setNotification({ type: 'error', message: gate.reason });
       return;
     }
 
@@ -589,11 +620,10 @@ The units already on this MR can still be edited.` };
     // Cancelled jobs are excluded so their numbers are reused.
     let nextJobNo = '';
     if (activeAgency && editingMr.repairType !== 'GP') {
+      // The gate above already refused every case in which this cannot resolve, so this reads the id rather than
+      // re-asking the question - two answers to one question is what G107 removed from this handler.
       const at = atForEditingMr();
-      if ('error' in at) {
-        setNotification({ type: 'error', message: at.error });
-        return;
-      }
+      if ('error' in at) return;
       const { prefix } = getJobNoPrefix(editingMr.division, coreType, at.atId);
       if (prefix) {
         const head = `${prefix.toUpperCase()}-`;
@@ -2122,7 +2152,7 @@ The units already on this MR can still be edited.` };
                       says "this is a thing you might do to this MR", and under a closed
                       tender it is not (AUDIT F83). Editing the units already here is
                       unaffected - only adding a NEW one is refused. */}
-                  {intakeGate.open ? (
+                  {mrAddGate().open ? (
                     <button
                       type="button"
                       onClick={handleAddTransformerToMr}
@@ -2136,8 +2166,7 @@ The units already on this MR can still be edited.` };
                       {/* Dot added; text untouched (AUDIT G10). */}
                       <span className={`w-1.5 h-1.5 rounded-full ${TONE.warn.dot} shrink-0 mt-1`} />
                       <span>
-                        No new units: {intakeGate.reason} The units already on this MR can still be
-                        edited, inspected, tested and dispatched.
+                        {mrAddGate().reason}
                       </span>
                     </span>
                   )}

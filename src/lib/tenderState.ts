@@ -76,6 +76,42 @@ export function currentTenderFor(agencyAts: AtMaster[]): AtMaster | null {
   return active[0] || null;
 }
 
+/**
+ * ADDING A UNIT TO AN MR THAT ALREADY EXISTS - A DIFFERENT QUESTION FROM `isIntakeOpen` (AUDIT G107).
+ *
+ * `isIntakeOpen` answers "may NEW work be booked", and it is asked of the tender the SESSION has selected. That is
+ * right for a fresh intake. It was also what guarded adding a unit to an existing MR, and there it was the wrong
+ * question asked of the wrong tender:
+ *
+ *   - **The wrong tender.** The gate read the session's AT while the function beside it resolved the MR's own AT
+ *     from its jobs, carrying the comment "never from the session (F66)". An operator with tender Y selected,
+ *     editing an MR that belongs to tender X, was answered about Y.
+ *   - **Unreachable rather than merely wrong.** The register lists an MR only when its `atId` equals the selected
+ *     AT, or the scope is All tenders. So for an MR on any tender but the current one BOTH routes closed the gate -
+ *     select its tender and it reads "superseded", choose All tenders and it reads "no single tender". The control
+ *     could not be made to appear at all. MEGHA had twelve MRs and not one could take a unit.
+ *
+ * ⚠ SUPERSEDED IS ALLOWED HERE; CLOSED IS NOT. A superseded tender is still Active - the division is still reading
+ * its paperwork, and a transformer that arrived under it belongs to it. Only a tender marked Closed refuses, which
+ * is the rule F83 was written for. The MR's own tender is named in the refusal, because the session's is not the
+ * subject.
+ *
+ * The caller resolves the MR's tender and handles an MR that has none, or more than one, or one that cannot be
+ * found; this answers only the status question, so it can be tested without a screen.
+ */
+export function existingMrIntake(at: AtMaster | null | undefined): IntakeGate {
+  if (!at) return { open: false, reason: 'The tender this MR belongs to could not be read.', currentAt: null };
+  const label = at.atNumber || at.name || at.id;
+  if (String(at.status || '').toLowerCase() === 'closed') {
+    return {
+      open: false,
+      reason: `this MR belongs to AT ${label}, which is marked Closed, so no new units can be booked against it.`,
+      currentAt: at,
+    };
+  }
+  return { open: true, reason: '', currentAt: at };
+}
+
 export function isIntakeOpen(
   at: AtMaster | null | undefined,
   agencyAts: AtMaster[],
