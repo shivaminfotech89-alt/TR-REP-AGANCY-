@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAgency, AtMaster } from '../lib/AgencyContext';
 import { Plus, Trash2, Save, Loader2, Check, AlertTriangle, Layers } from 'lucide-react';
-import { validateDivisionPrefixes } from '../lib/prefixValidation';
+import { validateDivisionPrefixes, validatePrefixesAcrossAgency, configuredPrefixes, prefixHasBookedWork } from '../lib/prefixValidation';
 import { getCounterKey } from '../lib/AgencyContext';
 import { shortAtNumber } from '../lib/utils';
 import {
@@ -11,7 +11,7 @@ import {
 } from '../lib/guaranteePeriod';
 
 export function AtDivisions({ at }: { at: AtMaster }) {
-  const { updateAtMaster, activeAgency, updateAgency } = useAgency();
+  const { updateAtMaster, activeAgency, updateAgency, atMasters, agencyJobs } = useAgency();
   const [isSaving, setIsSaving] = useState(false);
   const [divisions, setDivisions] = useState<any[]>([]);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
@@ -117,11 +117,53 @@ export function AtDivisions({ at }: { at: AtMaster }) {
   /** True once a real job number has advanced this counter - the seed is then inert. */
   const counterMoved = (key: string) => Number(at.lastJobNumbers?.[key] || 0) > 0;
 
+  /**
+   * ⚠ NOT `counterMoved`, FOR DECIDING WHETHER A PREFIX MAY CHANGE (AUDIT G108).
+   *
+   * `counterMoved` is a few lines above and looks like the right test. It is not, and live data proves it: SAMOR's
+   * DAEESA-1 holds FOUR booked jobs under `STD` against a counter of ZERO, so `counterMoved` would wave the change
+   * straight through. The counter is a cache that can sit below reality - F42's own observation, which still
+   * stands - and the jobs are the fact. See `prefixHasBookedWork`.
+   */
+  const siblingAts = atMasters.filter((a: any) => a.agencyId === activeAgency?.id);
+  const ownPrefixes = configuredPrefixes(at);
+
+  /** A prefix this AT has already issued numbers under cannot be renamed - it would split one tender's series. */
+  const bookedPrefixChanges = (): string[] => {
+    const nowConfigured = new Set(
+      divisions.flatMap((d: any) => [d.prefixCRGO, d.prefixAmorphous, d.prefixWoundCore, d.prefixLSTC, d.prefixOH])
+        .map((v: any) => String(v ?? '').trim().toUpperCase()).filter(Boolean),
+    );
+    return ownPrefixes.filter(p => !nowConfigured.has(p) && prefixHasBookedWork(at.id, p, agencyJobs));
+  };
+
   const validation = validateDivisionPrefixes(divisions);
+  const agencyValidation = validatePrefixesAcrossAgency(divisions, {
+    atId: at.id, siblingAts, jobs: agencyJobs, ownPrefixes, agency: activeAgency,
+  });
 
   const handleSave = async () => {
     if (!validation.isValid) {
       alert(`Validation Error:\n\n${validation.errors.join('\n')}`);
+      return;
+    }
+
+    if (!agencyValidation.isValid) {
+      alert(['Validation Error:', '', ...agencyValidation.errors].join('\n'));
+      return;
+    }
+    const booked = bookedPrefixChanges();
+    if (booked.length > 0) {
+      alert([
+        `This tender has already issued job numbers under ${booked.length > 1 ? 'these prefixes' : 'the prefix'} `
+          + `${booked.map(p => `"${p}"`).join(', ')}, so ${booked.length > 1 ? 'they' : 'it'} cannot be changed.`,
+        '',
+        'Renaming a prefix does not renumber the jobs already issued under it - they keep their numbers. The tender'
+          + ' would then carry two prefixes and one running sequence, which is what one-prefix-per-tender exists to'
+          + ' prevent.',
+        '',
+        'A prefix can still be changed on a tender that has booked nothing under it.',
+      ].join('\n'));
       return;
     }
 

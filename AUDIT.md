@@ -11194,6 +11194,29 @@ field-name sweep returns these, and on `approvalDate` holding a non-date.
 
 ### F42. New ATs continue the agency's job-number series instead of restarting it
 
+> **⚠⚠ THE PREMISE BELOW IS WRONG. NOT OVERTAKEN - WRONG WHEN IT WAS WRITTEN.** Corrected by the operator,
+> **2026-10-04**: **every tender has a new prefix.** That is the practice and always was.
+>
+> So *"prefixes belong to the division and the agency, not to the tender period"* - the sentence this entry turns
+> on - is false. `21 IS` is **not** the same string before and after a rollover, and a new tender restarting at 1
+> therefore reissues nothing: its numbers sit under a name no job has carried.
+>
+> **This is deliberately NOT O20's correction.** O20 records an answer that was right when given and later
+> changed. This one was mistaken from the start, and the difference matters to anyone reading it: there is no
+> date before which the reasoning below held.
+>
+> **⚠ IT IS LOAD-BEARING, WHICH IS WHY THE CORRECTION IS HERE AND NOT ONLY IN THE NEW ENTRY.** O89 cited this
+> premise to explain why restarting at 1 reissues a number; G107 cited it as a reason for caution; and the case
+> for not enforcing one-prefix-per-tender rested on it entirely. All three are corrected where they stand.
+>
+> **What below still stands, and is worth keeping:** that `lastJobNumbers` is a CACHE of a fact living in the
+> jobs collection, and can sit below reality in ways the cache cannot see. That observation is independent of
+> the prefix question, it was right, and G108 leans on it - `counterMoved` reads the cache and would wave
+> through a prefix change on a tender with four booked jobs and a counter of zero.
+>
+> **Enforced since G108**: a new AT's prefix must be one no sibling tender configures or resolves to, and one no
+> job number already carries. The reused prefixes in live data are an entry fault, not the rule.
+
 Closes **O2**'s open question, and the answer came from the domain rather than from
 preference: **prefixes belong to the division and the agency, not to the tender period.**
 "21 IS" is the same before and after a rollover, so the number after it must continue — a
@@ -19278,7 +19301,20 @@ four checks passing over it.
 Job numbering on a new AT continued the previous tender's series. It now starts from that
 tender's own starting number, defaulting to **1**.
 
-### ⚠ F42 WAS RIGHT WHEN IT WAS WRITTEN, AND THIS IS NOT A BUG FIX
+### ⚠ ~~F42 WAS RIGHT WHEN IT WAS WRITTEN, AND THIS IS NOT A BUG FIX~~ - BOTH HALVES ARE FALSE (corrected 2026-10-04)
+
+> **This heading and the paragraph under it were wrong, and in both directions (AUDIT G108).** The operator
+> confirmed on 2026-10-04 that **every tender has a new prefix**, so F42's premise - prefixes belonging to the
+> division rather than the tender period - was **false when F42 was written**, not merely overtaken by a change
+> of rule.
+>
+> That makes **this entry a correction after all**, not "a change of rule, not a correction". The rule recorded
+> here was right; what was wrong was the reasoning it was being contrasted with. The sentence below about
+> reissuing `21 IS-1` describes a collision that cannot arise once each tender has its own prefix - which is
+> what C1's collisions actually came from: prefixes being reused, an entry fault.
+>
+> Kept as written, struck rather than deleted, because the next reader of F42 needs to find this disagreement
+> rather than a tidy entry.
 
 `addAtMaster` seeded every new AT from the **max of three sources** - every sibling AT's
 counters, the agency document's counters, and the job numbers actually issued. Its reasoning
@@ -20804,10 +20840,11 @@ creation, instead of in a counter the prefill silently disagrees with. **Not bui
   UPENDRA/DEESA (`PLN1`, 3). A validation at creation is **forward-only**: it prevents new sharing and corrects none
   of these. For MEGHA/SABARMATI to actually restart, someone must change that AT's SABARMATI prefix in AT Divisions -
   an operator action, affecting future numbering only, since existing jobs keep their numbers.
-- **⚠ IT CONTRADICTS F42'S REASONING, WHICH O89 LEFT STANDING.** F42 held that *"prefixes belong to the DIVISION, not
-  the tender period"* - `21 IS` is the same string before and after a rollover because that is what the division
-  calls it. Requiring a per-tender prefix asks the agency to invent a name the division does not use. That is a
-  business question, not a validation detail, and it should be put to the owner before it is built.
+- **⚠ ~~IT CONTRADICTS F42'S REASONING~~ - WITHDRAWN 2026-10-04, AND F42 WAS THE THING THAT WAS WRONG (G108).**
+  This listed F42's *"prefixes belong to the DIVISION, not the tender period"* as a reason for caution, and asked
+  for the business question to be put to the owner before building. It was put, and the answer is that **every
+  tender has a new prefix** - F42's premise was false when written. The caution was misplaced: there was no
+  tension to weigh, only an entry to correct. Built in G108.
 - A cheaper variant worth weighing first: **warn at AT creation** when a prefix is already in use by a sibling AT,
   and say what it means for numbering - leaving the choice with the operator rather than refusing.
 
@@ -20839,3 +20876,119 @@ creation, instead of in a counter the prefill silently disagrees with. **Not bui
 - **Whether the gate should also consider a tender's end DATE** is untouched. `isIntakeOpen` keys on status and
   supersession, never on the period having lapsed - ROLLOVER.md records that nothing in the app calculates from
   those dates, and that is unchanged here.
+
+---
+
+## G108. Every tender has its own prefix - the rule, enforced, and F42 corrected as wrong rather than outdated
+
+**The business rule, from the operator, 2026-10-04: every tender has a new prefix.**
+
+That settles a question three entries had been circling. **F42's premise - *"prefixes belong to the division and the
+agency, not to the tender period"* - is false, and was false when it was written.** The reused prefixes in live data
+are an entry fault, not the practice they were read as. O89's restart-at-1 rule was correct and always was; it only
+looked inapplicable because the data showed prefixes being shared.
+
+### WHAT WAS BUILT
+
+`validatePrefixesAcrossAgency` (lib/prefixValidation), wired into the division editor: a prefix is refused when a
+sibling tender configures it, when a sibling **resolves** to it, or when a job number already carries it.
+
+**⚠ CHECKED AGAINST JOB NUMBERS, BECAUSE AN AT CAN BE DELETED AND ITS JOBS CANNOT (F78 - "an AT has been deleted,
+forget it everywhere").** Validating against siblings alone leaves a deleted tender's prefix free to reuse with
+nothing to warn, while the numbers it issued sit in the jobs collection waiting to collide. One extra pass over jobs
+already in memory closes it.
+
+**⚠⚠ AND AGAINST THE AGENCY'S FALLBACK MAP, WHICH IS WHERE MOST OF THE SHARING ACTUALLY COMES FROM.**
+`adoptPublishedAt` copies rates and nothing else, so **a new AT is born with no `prefixes` at all** and
+`getJobNoPrefix` resolves it from `activeAgency.prefixes`. A first pass here checked only what a sibling
+*configures* - which would have passed a prefix that two tenders nonetheless resolve to. **Three of the five live
+sharing groups are exactly that**: SAMOR's AT-2026-28 and UPENDRA's 1819 configure nothing and still land on the
+shared prefix. The effective set is what matters, not the stored one.
+
+### ⚠ THE OBVIOUS GUARD FOR A PREFIX CHANGE IS THE WRONG ONE, AND LIVE DATA PROVES IT
+
+A prefix a tender has already issued numbers under cannot be renamed: the counter is keyed on
+`division_coreType`, never on the prefix, so renaming `MSBT` to `MSB2` on a tender holding `MSBT-1`…`MSBT-23` leaves
+the counter at 23 with nothing taken under `MSB2` - and the next number offered is `MSB2-24`. **One tender, two
+prefixes, one running sequence** - the very thing this rule exists to prevent.
+
+**`counterMoved` sits four lines above in the same file and looks applicable. It is wrong.**
+
+> **SAMOR's DAEESA-1 holds FOUR booked jobs under `STD` against a counter of ZERO.**
+
+`counterMoved` reads `lastJobNumbers`, and F42's own surviving observation is that it is a *cache* which can sit
+below reality. The jobs are the fact. `prefixHasBookedWork` asks the right question - does any live job of THIS
+tender carry this prefix - and the comment says why `counterMoved` is not it, because the next reader will find it
+sitting there looking right.
+
+### ⚠ (a) AND (c) TOGETHER DELIVER O89, AND THE SKIP BECOMES DEAD CODE AT A BOUNDARY
+
+Confirmed, and tested both ways:
+
+- a new tender with its own prefix → nothing is taken under it → `nextFreeJobNumber(0, ∅)` = **1**. O89's rule,
+  delivered by the prefill at last.
+- a tender seeded to start at 47 → **47**, so `startingJobNumbers` still means what O89 made it mean.
+- the same job history under a **reused** prefix → 23 numbers taken → the skip runs all the way to **24**. That is
+  the case (c) removes, and the test keeps both halves side by side so the contrast cannot be lost.
+
+So G107's `nextFreeJobNumber` skip never fires at a tender boundary once this rule holds. It remains correct and
+remains necessary - for cancelled-number gaps within a tender, and for the legacy data below.
+
+### THE FIVE LIVE GROUPS - A LIST TO WORK THROUGH
+
+**Validation is forward-only: it refuses new sharing and corrects none of these.** Every one is a **settings edit,
+not a migration** - in all five, the AT that needs changing has booked nothing under the shared prefix.
+
+**Also a correction to my own earlier count: four agencies, not three.** SAMOR was missed because the first sweep
+looked only at divisions that appear in job data, and SAMOR's shared prefixes sit in divisions with little or no
+booked work.
+
+| # | Agency | Division | Prefix | Change this AT | Why | Cost |
+|---|---|---|---|---|---|---|
+| 1 | MEGHA | SABARMATI | `MSBT` | `…2026-28/01/AT/1819` | configures `MSBT` itself; AT 26-27 holds all 23 jobs | **free** - no SABARMATI work on it |
+| 2 | ADMIN | DEESA | `SU` | `2026-28/AT/1819` | configures `SU` itself; 2026_27 (Closed) holds 14 jobs | **free** |
+| 3 | UPENDRA | DEESA | `PLN1` | `UGVCL/2026-28/01/AT/1819` **and** one of `AT2026-27` / `24-25` | the 1819 AT configures nothing and falls back; the other two each configure `PLN1` | **free** - no job carries `PLN1` at all |
+| 4 | SAMOR | DAEESA-1 | `STD` | `AT-2026-28` **and** `…/AT/1808` | `AT-2026-28` falls back; `1808` configures `STD`; the Closed ALLOTMENT AT holds 4 jobs | **free** on both |
+| 5 | SAMOR | DEESA-2 | `ST` | `AT-2026-28` **and** `…/AT/1808` | same two; nothing has booked under `ST` | **free** |
+
+Working notes:
+
+- **An AT showing "falls back to the agency map" needs its own prefixes set**, not a value changed - open its
+  Divisions panel and enter them. Until it does, it shares whatever the agency map holds.
+- **The Closed ATs are not the ones to touch** in groups 1, 2 and 4 - they hold the booked work, and renaming their
+  prefix is now refused for that reason.
+- MEGHA's `MSBT` series has an outlier worth knowing about: **`MSBT-112` exists** along`MSBT-1`…`MSBT-23`, while the
+  counter reads 23. Not addressed here.
+
+### VERIFIED
+
+- **400 tests in 33 files**, 17 new: a sibling's configured prefix refused and named; a prefix carried only by job
+  numbers refused (the F78 hole); cancelled jobs not reserving one; this AT's own saved prefix never refused against
+  itself; **the fallback case**, with a bare sibling claiming the agency map and a configured one not also claiming
+  it; **SAMOR's counter-of-zero against four booked jobs**, asserting `counterMoved` is false where
+  `prefixHasBookedWork` is true; and the boundary both ways, unique prefix against reused.
+- **Gates:** tsc (exit 0); 400 tests; build; hooks guard, 50 files; `print-subtree-hashes` 13 byte-identical, 0
+  changed - correct, no printed document is touched.
+
+### THE THREE CORRECTIONS, AT THEIR ENTRIES
+
+- **F42** - the premise marked false, **wrong when written rather than overtaken**, with the operator and the date
+  named. Deliberately NOT given O20's sentence: there is no date before which F42's reasoning held. What survives is
+  named too - its observation that `lastJobNumbers` is a cache that can sit below reality, which G108 leans on.
+- **O89** - its heading *"F42 WAS RIGHT WHEN IT WAS WRITTEN, AND THIS IS NOT A BUG FIX"* struck, both halves being
+  false. **O89 was a correction after all.** Struck rather than deleted, so a reader arriving from F42 finds the
+  disagreement.
+- **G107** - its (c) cost item *"it contradicts F42's reasoning"* withdrawn. The business question it asked to have
+  put to the owner was put; there was no tension to weigh, only an entry to correct.
+
+### NOT EXERCISED
+
+- **No harness opens the Divisions panel**, so the refusals are proved by unit tests against live figures and by
+  reading, not by a render. Same standing gap as G106 and G107.
+- **AT creation is not gated, and deliberately so for now.** A new AT is born with no prefixes, so there is nothing
+  to validate at that moment; the check fires when prefixes are first saved, which is the first time a value exists.
+  **The consequence is that an AT can sit sharing the agency's fallback prefix until someone opens its panel** -
+  which is the state three of the five groups are in. Making creation itself demand prefixes would be a bigger change
+  to that screen and is not done here.
+- **None of the five groups is corrected by this change**, by design. The list above is the work.
+- **The validation has never refused anything in production** - it is new, and no AT has been edited since.
