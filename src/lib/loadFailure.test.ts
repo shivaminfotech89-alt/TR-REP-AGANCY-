@@ -1,23 +1,28 @@
 // Tests for lib/loadFailure.ts (AUDIT G70). Run with `npm test`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { agencyGate, describeLoadFailure } from './loadFailure';
+import { agencyGate, describeLoadFailure, type AgenciesLoad } from './loadFailure';
+
+/** ⚠ `loadedAt` IS NOT PART OF THE GATE (AUDIT G110). It records when a read last succeeded, for the staleness
+ *  line; `agencyGate` has never consulted it and must not start. This helper keeps these cases about the gate. */
+const load = (status: AgenciesLoad['status'], error: string | null = null): AgenciesLoad =>
+  ({ status, error, loadedAt: null });
 
 test('a failed load is never "no agency"', () => {
-  assert.equal(agencyGate({ status: 'failed', error: 'x' }, false), 'failed');
+  assert.equal(agencyGate(load('failed', 'x'), false), 'failed');
 });
 
 test('a load still running says nothing about emptiness', () => {
-  assert.equal(agencyGate({ status: 'loading', error: null }, false), 'loading');
+  assert.equal(agencyGate(load('loading'), false), 'loading');
 });
 
 test('only a load that succeeded and found nothing is "no agency"', () => {
-  assert.equal(agencyGate({ status: 'loaded', error: null }, false), 'no-agency');
+  assert.equal(agencyGate(load('loaded'), false), 'no-agency');
 });
 
 test('an agency in hand is ready, whatever the load says', () => {
   for (const status of ['loading', 'loaded', 'failed'] as const) {
-    assert.equal(agencyGate({ status, error: null }, true), 'ready', status);
+    assert.equal(agencyGate(load(status), true), 'ready', status);
   }
 });
 

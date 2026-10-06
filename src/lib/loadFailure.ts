@@ -14,6 +14,17 @@ export interface AgenciesLoad {
   status: LoadStatus;
   /** Plain-language reason when `status` is 'failed'; null otherwise. */
   error: string | null;
+  /**
+   * When this read last SUCCEEDED, as epoch ms, or null if it never has (AUDIT G110).
+   *
+   * ⚠ IT RECORDS WHEN THIS TAB READ, NOT WHETHER THE SERVER HAS CHANGED SINCE. "Data read 2 minutes ago" is
+   * answerable from here; "your data is stale" is not, and must not be implied from it. The two facts a refresh
+   * control can honestly state are this one and whether a NEWER BUNDLE is deployed (lib/deployedVersion) - they are
+   * different facts and are deliberately shown as separate lines.
+   *
+   * Left unchanged by a failed read, so a failure does not read as a fresh load. It is the age of the data in hand.
+   */
+  loadedAt: number | null;
 }
 
 /** What the app shell may say about the agency, in the order the facts decide it. */

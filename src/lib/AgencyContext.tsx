@@ -1170,7 +1170,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [globalConfigError, setGlobalConfigError] = useState<string | null>(null);
   const [globalConfigLoaded, setGlobalConfigLoaded] = useState<boolean>(!!cachedGlobalDefaultEstimateMaster);
   const [loading, setLoading] = useState(true);
-  const [agenciesLoad, setAgenciesLoad] = useState<AgenciesLoad>({ status: 'loading', error: null });
+  const [agenciesLoad, setAgenciesLoad] = useState<AgenciesLoad>({ status: 'loading', error: null, loadedAt: null });
   const [loadAttempt, setLoadAttempt] = useState(0);
   const retryLoad = () => setLoadAttempt(n => n + 1);
 
@@ -1191,7 +1191,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
   const [agencyJobs, setAgencyJobs] = useState<any[]>([]);
   const [agencyInspections, setAgencyInspections] = useState<any[]>([]);
   const [agencyOil, setAgencyOil] = useState<any[]>([]);
-  const [agencyDataLoad, setAgencyDataLoad] = useState<AgenciesLoad>({ status: 'loading', error: null });
+  const [agencyDataLoad, setAgencyDataLoad] = useState<AgenciesLoad>({ status: 'loading', error: null, loadedAt: null });
   const [agencyDataAttempt, setAgencyDataAttempt] = useState(0);
   /** Re-read the agency's work. Called by a screen that has just written some of it. */
   const refreshAgencyData = () => setAgencyDataAttempt(n => n + 1);
@@ -1317,7 +1317,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
     async function fetchData() {
       if (!auth.currentUser) return;
       setLoading(true);
-      setAgenciesLoad({ status: 'loading', error: null });
+      setAgenciesLoad(prev => ({ status: 'loading', error: null, loadedAt: prev.loadedAt }));
       try {
         // 1. Fetch Global System Default Estimate Rates from Firestore public_config
         let fetchedGlobalMaster: GlobalDefaultEstimateMaster | null = null;
@@ -1493,12 +1493,12 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
           const activeAts = fetchedAts.filter(at => at.status === 'Active');
           setActiveAtMasterId(activeAts.length > 0 ? activeAts[0].id : fetchedAts[0].id);
         }
-        setAgenciesLoad({ status: 'loaded', error: null });
+        setAgenciesLoad({ status: 'loaded', error: null, loadedAt: Date.now() });
       } catch (err) {
         console.error('Error fetching context data:', err);
         // ⚠ NOT A SILENT EMPTY LIST (AUDIT G70, O71). This catch used to log and fall through, leaving `agencies` empty,
         // and every screen told the customer their agency did not exist while the database was refusing to read it.
-        setAgenciesLoad({ status: 'failed', error: describeLoadFailure(err) });
+        setAgenciesLoad(prev => ({ status: 'failed', error: describeLoadFailure(err), loadedAt: prev.loadedAt }));
       } finally {
         setLoading(false);
       }
@@ -1511,7 +1511,7 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
       setActiveAgencyId(null);
       setActiveAtMasterId(null);
       setLoading(false);
-      setAgenciesLoad({ status: 'loaded', error: null });
+      setAgenciesLoad({ status: 'loaded', error: null, loadedAt: Date.now() });
     }
     // loadAttempt: retryLoad() re-runs this load after a failure.
   }, [auth.currentUser, loadAttempt]);
@@ -1559,10 +1559,10 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         setAgencyInspections([]);
         setAgencyOil([]);
         // Nothing to read is a completed load, not a failed one.
-        setAgencyDataLoad({ status: 'loaded', error: null });
+        setAgencyDataLoad({ status: 'loaded', error: null, loadedAt: Date.now() });
         return;
       }
-      setAgencyDataLoad({ status: 'loading', error: null });
+      setAgencyDataLoad(prev => ({ status: 'loading', error: null, loadedAt: prev.loadedAt }));
       // Cleared BEFORE the read, so a failure cannot leave the previous agency's rows on screen.
       setAgencyJobs([]);
       setAgencyInspections([]);
@@ -1591,11 +1591,11 @@ export function AgencyProvider({ children }: { children: ReactNode }) {
         setAgencyJobs(jobSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setAgencyInspections(inspSnap.docs.map(d => ({ id: d.id, ...d.data() })));
         setAgencyOil(oilSnap.docs.map(d => ({ id: d.id, ...d.data() })));
-        setAgencyDataLoad({ status: 'loaded', error: null });
+        setAgencyDataLoad({ status: 'loaded', error: null, loadedAt: Date.now() });
       } catch (err) {
         if (cancelled) return;
         console.error("Error loading the agency's work:", err);
-        setAgencyDataLoad({ status: 'failed', error: describeLoadFailure(err) });
+        setAgencyDataLoad(prev => ({ status: 'failed', error: describeLoadFailure(err), loadedAt: prev.loadedAt }));
       }
     }
     loadAgencyWork();

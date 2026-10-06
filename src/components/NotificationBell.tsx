@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { Bell, AlertTriangle, Info, CircleAlert, Check, X } from 'lucide-react';
+import { Bell, AlertTriangle, Info, CircleAlert, Check, X, RefreshCw, Download } from 'lucide-react';
 import { useAgency } from '../lib/AgencyContext';
 import { buildNotifications, sortNotifications, type NotificationItem } from '../lib/notifications';
 import { isDismissed, dismiss, undismiss } from '../lib/notificationDismissal';
+import { checkDeployedVersion, describeAge, type VersionCheck } from '../lib/deployedVersion';
 
 /**
  * THE STANDING FACTS, BEHIND ONE BELL (AUDIT G93).
@@ -68,8 +69,51 @@ export default function NotificationBell() {
   const {
     activeAgency, agencies, agencyJobs, agencyOil, atMasters, activeAtMaster,
     viewingAllTenders, agencyDataLoad, atSupersededNotice, agencyPointerNotice, globalConfigError,
+    refreshAgencyData,
   } = useAgency();
   const [open, setOpen] = useState(false);
+
+  /**
+   * THE TWO FACTS A REFRESH CONTROL CAN HONESTLY STATE, AS TWO LINES (AUDIT G110).
+   *
+   * ⚠ THEY ARE DIFFERENT FACTS AND MUST NOT MERGE INTO ONE REASSURING SENTENCE. "Data read 4 minutes ago" is about
+   * this tab's last successful Firestore read; "a new version is available" is about the bundle the server is
+   * serving. One is answered by `agencyDataLoad.loadedAt`, the other by fetching index.html past the cache. A single
+   * "Refresh" that did both would in practice do neither visibly: a reload discards the re-read.
+   *
+   * ⚠ AND NEITHER IS A HEADER ICON, BY DECISION. AppLayout's own note says the bell "is the only control here that
+   * reports a state of the work; the rest change how the app looks or ends the session" - staleness is a state of
+   * the work. Measured at 380px the header's right cluster is already 134px against a 178px agency name that
+   * truncates; another 38px icon would take the name down to ~134px, and the agency an operator is working in is
+   * the one thing in that bar they need at a glance.
+   */
+  const [version, setVersion] = useState<VersionCheck>({ state: 'unknown', reason: 'not checked' });
+  const [reReading, setReReading] = useState(false);
+  const [ageTick, setAgeTick] = useState(0);
+
+  // Checked when the panel OPENS, not on a timer: it is read at the moment someone is asking, and a background
+  // poll would fetch index.html for every tab all day to answer a question nobody had.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    void checkDeployedVersion().then(v => { if (!cancelled) setVersion(v); });
+    // Re-render while open so "4 minutes ago" does not sit at the figure it had when the panel was opened.
+    const t = window.setInterval(() => setAgeTick(n => n + 1), 30000);
+    return () => { cancelled = true; window.clearInterval(t); };
+  }, [open]);
+
+  const dataAge = describeAge(agencyDataLoad.loadedAt, Date.now());
+  void ageTick;
+
+  const reRead = () => {
+    setReReading(true);
+    refreshAgencyData();
+    // The read is not awaitable from here - refreshAgencyData bumps an attempt counter. The spinner is released
+    // when the load reports back, below.
+  };
+  useEffect(() => {
+    if (reReading && agencyDataLoad.status !== 'loading') setReReading(false);
+  }, [reReading, agencyDataLoad.status]);
   /** Bumped on dismiss so the list recomputes - localStorage is not reactive. */
   const [dismissTick, setDismissTick] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
@@ -276,6 +320,52 @@ export default function NotificationBell() {
               </div>
             );
           })}
+
+          {/* ⚠⚠ TWO LINES, NOT ONE (AUDIT G110). The age of the data and the age of the BUNDLE are different facts
+              with different fixes, and merging them into one "Refresh" would hide which of the two an operator
+              actually needs. The version line appears ONLY when a newer bundle is genuinely deployed - a reload
+              control shown unconditionally is a thing people press hopefully. */}
+          <div className="mx-2 mt-1 mb-1.5 border-t border-slate-200 pt-2 space-y-1.5">
+            {dataAge && (
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-slate-500">
+                  Data read <span className="font-semibold text-slate-700">{dataAge}</span>
+                </p>
+                <button
+                  type="button"
+                  onClick={reRead}
+                  disabled={reReading || agencyDataLoad.status === 'loading'}
+                  className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-700 hover:text-blue-900 underline disabled:text-slate-400 disabled:no-underline"
+                  title="Read this agency's jobs, inspections and oil again. Does not reload the app."
+                >
+                  <RefreshCw className={`w-3 h-3 ${reReading || agencyDataLoad.status === 'loading' ? 'animate-spin' : ''}`} />
+                  {reReading || agencyDataLoad.status === 'loading' ? 'Reading…' : 'Re-read data'}
+                </button>
+              </div>
+            )}
+
+            {version.state === 'stale' && (
+              <div className="rounded-lg border border-blue-300 bg-blue-50 p-2">
+                <div className="flex items-start gap-2">
+                  <Download className="w-3.5 h-3.5 text-blue-700 shrink-0 mt-0.5" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11px] font-bold text-blue-900">A new version is available</p>
+                    <p className="text-[10px] text-blue-800/80 mt-0.5 leading-snug">
+                      This tab is running an older build. Reloading picks up the new one; nothing unsaved is
+                      affected on this panel.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => window.location.reload()}
+                      className="mt-1 text-[11px] font-bold text-blue-800 hover:text-blue-950 underline"
+                    >
+                      Reload now
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* The promise the X makes, stated where it is made. */}
           {showing.length > 0 && (

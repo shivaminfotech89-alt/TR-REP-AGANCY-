@@ -21121,3 +21121,128 @@ about what those agencies were promised, not a code one.
   `firebase deploy --only functions`. ZENITH's single history entry was written by the admin script, not by the
   function, so **the cohort above would record nothing if any of them paid today.** That is worth settling before any
   rule change, not after: a replace that removes 521 days and writes no history is the G100 shape again.
+
+---
+
+## G110. A refresh control that states two facts - and the cache-header diagnosis behind it was wrong
+
+**Asked for:** a refresh button in the top bar, so an agency can reload without knowing about hard refresh. Twice in
+one day a hard refresh had been the fix.
+
+### ⚠⚠ THE DIAGNOSIS I ARGUED FOR WAS WRONG, AND MEASURING IT FIRST IS THE ONLY REASON THAT IS KNOWN
+
+I reported that the real cause was a missing cache header on `index.html`, that `vercel.json` set none, and that
+*"a refresh button on top of a cacheable index.html is a manual workaround for a misconfiguration."* The owner
+asked to see the header value before it was set, and gave the URL - which this repository had never recorded.
+
+**Measured against the live site, before changing anything:**
+
+| path | served | note |
+|---|---|---|
+| `https://www.transregister.com/` | `Cache-Control: public, max-age=0, must-revalidate` | **already the value I proposed** |
+| `/dashboard` | `public, max-age=0, must-revalidate` | the SPA route, same |
+| `/assets/index-BildkAnj.js` | `public, max-age=0, must-revalidate` | **not** `immutable` |
+
+**Vercel's default for the HTML was already correct.** The header half of my fix is a no-op for correctness, and
+**it does not explain the two incidents at all.**
+
+**And the deploy was current.** The live bundle `index-BildkAnj.js`, downloaded and grepped, contains the strings
+G101, G105, G107 and G108 introduced - `data-sheet-row`, `DPC (not S.E.)`, `stamped with a tender that does not
+belong`, `Every tender has its own prefix` - and correctly lacks G110's own. So nothing was failing to deploy either.
+
+### SO WHAT ACTUALLY CAUSED IT - the likeliest explanation, stated as that
+
+With `max-age=0, must-revalidate`, a browser revalidates `index.html` on every **page load**. **A single-page app
+does not load a page.** Client-side routing means a tab opened in the morning never re-requests `index.html`, so it
+keeps running the bundle it started with for as long as it stays open - across any number of deploys. A hard refresh
+fixed it because *any* reload would have.
+
+That is not a caching defect. It is **session longevity across a deploy**, and no header can fix it: the fix is for
+the running tab to be told. **Which is the part of this change I had framed as the secondary one.**
+
+⚠ Stated as the likeliest explanation rather than a proven one: the two incidents cannot be reproduced after the
+fact, and the edge `Age` values (9.6h on the HTML, 32.8h on the asset) are consistent with a post-deploy edge copy
+but do not rule out an edge-staleness window.
+
+### WHAT WAS BUILT
+
+**1. `vercel.json` - and only one of its two rules changes anything.**
+
+```json
+{"source": "/assets/(.*)",        "Cache-Control": "public, max-age=31536000, immutable"}
+{"source": "/((?!assets/).*)",    "Cache-Control": "public, max-age=0, must-revalidate"}
+```
+
+- The **assets rule is a real change**: hashed filenames cannot change content without changing name, so
+  revalidating them on every load is pure cost. `immutable` is what stops it.
+- The **HTML rule is deliberately redundant**. It matches what Vercel already serves; written down, it no longer
+  depends on a platform default that can change under a project with no header config at all.
+
+**⚠ THE SOURCE PATTERN IS THE PART THAT WOULD HAVE BEEN GOT WRONG.** Vercel matches `headers` against the REQUEST
+path, not the rewrite destination. A rule on `/index.html` applies only to a literal request for `/index.html` -
+never to `/` or `/dashboard`, which is where all real traffic goes and which the rewrite sends to that file. Hence
+the negative lookahead. The owner named this as the point they would have missed.
+
+**2. `loadedAt` on `AgenciesLoad`** - set only by a successful read. A failed read and an in-flight re-read both keep
+the previous value, so the panel reports the age of the data **in hand** rather than resetting to "just now" on a
+failure. tsc named all ten call sites, which is how it is known none was missed.
+
+**3. `lib/deployedVersion.ts`** - fetches `index.html` with `cache: 'no-store'` and compares the hashed bundle it
+names against the one the running page loaded.
+
+- **⚠ `no-store`, or the check reads the very file it is looking for** and reports "current" with confidence,
+  forever. There is a test asserting the option is passed.
+- **⚠ A failure is `unknown`, never `current`.** Offline, a 404, a captive portal answering with a login page, or a
+  dev build with no hashed bundle - none is evidence the tab is up to date, and reporting them as such is how a
+  check comes to reassure instead of inform. Only `stale` draws anything.
+- **No service worker is involved.** The app ships a manifest and icons but registers none, so there is no worker
+  cache to blame and no `updatefound` to listen for. If one is added, its lifecycle is the better signal and this
+  should give way rather than run alongside.
+
+**4. Two lines in the notification panel, not a header icon.**
+
+> Data read **4 minutes ago** — Re-read data
+>
+> **A new version is available** — Reload now  *(only when one is)*
+
+**⚠ TWO LINES, NEVER ONE.** They are different facts with different fixes: the first is this tab's last successful
+Firestore read, the second is the bundle the server is serving. A single "Refresh" doing both would visibly do
+neither - **a reload discards the re-read.**
+
+**⚠ AND `window.location.reload(true)` DOES NOT EXIST AS A BEHAVIOUR.** The `forceReload` argument was removed from
+the specification and is ignored by current browsers. The request was for it; a button built to that instruction
+would have been a plain reload wearing a stronger name, and the owner recorded the correction as worth having.
+
+### ⚠ WHY NOT A HEADER ICON - MEASURED, NOT ASSUMED
+
+At 380px, non-super-admin: the right cluster is bell **38** + 6 + theme **46** + 6 + sign-out **38** = **134px**.
+With `px-3` padding and a 44px hamburger that leaves **178px** for `AgencySwitcher`, which absorbs pressure by
+truncating. Another 38px icon plus its gap takes the agency name to **~134px**, or ~100px for a super admin.
+
+Nothing overflows - everything has `min-w` or truncates - but **the element that gets squeezed is the one telling an
+operator which agency they are in**, which is the one thing in that bar needed at a glance. `AppLayout`'s own note
+settles where it belongs instead: the bell *"is the only control here that reports a state of the work; the rest
+change how the app looks or ends the session."* Staleness is a state of the work. A test asserts no refresh control
+appears in the header, with those figures as its failure message.
+
+### VERIFIED
+
+- **Served headers read before the change**, above, which is the only reason the diagnosis is known to have been
+  wrong. **The after-reading is owed and is not in this entry**: it needs this commit pushed and Vercel rebuilt.
+- **418 tests in 34 files**, 18 new: the dev build never reporting stale, a failed or non-HTML response being
+  `unknown` rather than `current`, the `no-store` option, the coarse age wording, a future `loadedAt` not yielding
+  a negative age, and three source assertions - two lines present, the version line conditional, and no refresh
+  control in the header.
+- **`agencyGate` does not consult `loadedAt`** and a test says so; the gate has never depended on it and must not
+  start.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files.
+
+### NOT EXERCISED
+
+- **The `immutable` header's effect** - unmeasurable until deployed, and then only as fewer revalidation requests.
+- **The version notice has never fired**, because it needs a deploy newer than a running tab. Its own test suite is
+  the only thing that has seen `stale`.
+- **The two original incidents are not reproducible** after the fact, so the SPA-long-session explanation is the
+  likeliest reading of the evidence rather than a demonstrated cause.
+- **No harness opens the notification panel**, so the two lines are verified by source assertion and by reading -
+  the same standing gap as G106, G107 and G108.
