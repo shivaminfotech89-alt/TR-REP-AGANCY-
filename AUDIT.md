@@ -21405,3 +21405,100 @@ without producing it and a second test fails.
   only be re-tested there.
 - **Messages 2, 3 and 5 remain unexercised by real data**, as G107 recorded. What changed is that message 1 is no
   longer firing in their place.
+
+---
+
+## G112. The composition is testable now - and "exists on EVERY job" was wrong by fourteen
+
+Two small things, both the residue of G111.
+
+### 1. THE DECISION MOVED OUT OF THE COMPONENT, SO A TEST CAN RUN IT
+
+**Not the full dialog harness.** The threshold for that was never argued and still has not been; what is built is
+the smallest thing that would have caught G111, on the owner's decision: a stored MR's jobs, through the real
+mapping, into the real gate. No DOM, no browser, no new dependency.
+
+`lib/mrAddDecision.ts` now holds `resolveMrAt` - the three AT-resolution arms - and `mrAddDecision`, which adds the
+wrong-agency case and the status check. `MrLedger`'s `mrAddGate` and `atForEditingMr` are both one-line delegations.
+
+**⚠ WHY THIS IS A FIX AND NOT JUST A REFACTOR.** G111 shipped a feature that had never worked once, and every check
+written for it passed:
+
+| | had tests | passed |
+|---|---|---|
+| `existingMrIntake` | yes (G107) | yes, correctly |
+| the resolution arms | correct by inspection | - |
+| `mrEditJob` | yes (G111) | yes |
+| **the composition of the three** | **nothing** | - |
+
+The defect was in the hand-off: the draft carried no `atId`, so the first arm answered "no AT on any job" for every
+MR in the app. **A rule that lives inside a component cannot be composed by a test**, and that is what made the
+untested hand-off possible rather than merely likely.
+
+The new suite's fixtures are **stored job shapes**, mapped with `mrEditJob` exactly as the dialog does. Nothing is
+hand-built in the draft shape, because hand-building the draft is precisely what would have hidden it again.
+
+**What it asserts** - ADMIN MR 45645 opens and names the tender the save will stamp; MR 1154's ten-job shape opens;
+each of the five refusals fires on the data that causes it, including AARATI MR 12's mis-stamped shape by its
+wording; a superseded-but-Active tender still takes units; and **every refusal says what is still possible**,
+because one that does not reads as "this MR is broken".
+
+**⚠ TWO G107 ASSERTIONS FAILED, AND BOTH WERE RIGHT TO.** They asserted `existingMrIntake(` and the fifth message
+appeared **in the component** - pinning the rule to a place no test could reach, which is the condition that let
+G111 through. They now assert the component delegates and the decision owns the text. **A source assertion that
+pins code to a file resists exactly the move that makes it testable**, which is worth knowing before writing the
+next one.
+
+### 2. "KEYED ON repairType / isGp, WHICH EXIST ON EVERY JOB" - WRONG BY FOURTEEN
+
+Found by removing an `as any` cast (G111), which made tsc ask whether `isGp` was declared at all.
+
+**Counted against the live database: `isGp` is on 162 of 176 jobs.**
+
+| | |
+|---|---|
+| latest job WITHOUT the field | **2026-08-15** |
+| earliest job WITH it | **2026-08-15** |
+
+So the field began being written that day and **nothing since has been saved without it**. The fourteen are history,
+not a broken mechanism - the comment was wrong about the count and right about the behaviour. All fourteen are
+Dispatched; twelve are `repairType: 'OGP'`, for which `false` is the correct answer, and the remaining two are
+`repairType: 'GP'` and are caught by the first arm of the `||`. **The or is why the wrong claim cost nothing.**
+
+The fourteen: MEGHA's MR 9344 (2), MR 1, MR 2555 (4), MR 1563 (4), MR 989; AARATI's MR 12; ADMIN's MR 111.
+
+**⚠ THE POINT IS THE SHAPE, NOT THE FOURTEEN.** "Exists on every job" is a statement about ALL the data, written at
+the code, that no check could see and nobody re-ran - this file's opening pattern in its purest form. The corrected
+comment names the count and the date, and tells the next reader to re-run it rather than trust the new sentence
+either.
+
+### WHAT WAS NOT BUILT, AND WHAT IT WOULD TAKE
+
+The full dialog harness is **not** built. Reported because the question was asked:
+
+- **It does not need jsdom, and the premise that there is no browser is wrong.** `print-check` already launches real
+  Chrome over DevTools on Node's built-in WebSocket, builds with Vite and serves the output - `findChrome`,
+  `launch`, `serve`, `evaluate` in `scripts/print-check/lib/chrome.mjs`. A screen harness is that machinery with a
+  different entry point, not new infrastructure. There is **no** jsdom, happy-dom, testing-library or vitest in the
+  tree, and adding one would be a second rendering story beside the one that exists.
+- **It would reach the other uncovered screens** - the Divisions panel, the intake form - because they are
+  components like any other. **The Excel exports it would not**, or not usefully: `XLSX.writeFile` hands a file to
+  the browser, so asserting a cell means lifting the row builder out of the component first, which is the same
+  extraction done here for the gate.
+- **Cost:** print-check is ~8s per document today and is deliberately **not a gate** (G60) - it needs Chrome, a
+  service-account key and a minute. A screen harness would inherit all three, so it would stay on demand, which
+  means it would not have caught G111 at commit time either. **That is the argument for the small test being the
+  right first move** rather than a stand-in for the large one.
+
+### VERIFIED
+
+- **445 tests in 36 files**, 14 new. tsc (exit 0); build; hooks guard, 50 files; `print-subtree-hashes` 13
+  byte-identical.
+- **The fourteen `isGp` jobs were counted, not estimated**, and the dates compared to establish that none is recent.
+
+### NOT EXERCISED
+
+- **Still nothing renders a screen.** The hand-off this closes is draft to gate; the hand-off from a rendered dialog
+  to the draft is still unproved, and `handleOpenFullMrEdit` is still only reachable by reading.
+- **G111's fix is not confirmed against the running app** - the deploy landed and the live bundle carries it, but no
+  one has opened MR 45645 since.

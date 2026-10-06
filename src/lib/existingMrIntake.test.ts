@@ -62,7 +62,12 @@ const ledger = readFileSync(new URL('../components/MrLedger.tsx', import.meta.ur
 
 test('⚠ MrLedger no longer gates adding on the session tender', () => {
   assert.ok(!ledger.includes('isIntakeOpen('), 'the session gate is back in the add-unit path');
-  assert.ok(ledger.includes('existingMrIntake('), 'the MR gate is not used');
+  // ⚠ THE CALL MOVED, AND THAT IS THE IMPROVEMENT (AUDIT G112). This asserted `existingMrIntake(` appeared in the
+  // COMPONENT, which pinned the rule to a place no test could reach - the reason G111's composition was never run.
+  // The gate now lives in lib/mrAddDecision, which calls it, and the component delegates.
+  assert.ok(ledger.includes('mrAddDecision({'), 'the component must delegate to the shared decision');
+  const decision = readFileSync(new URL('./mrAddDecision.ts', import.meta.url), 'utf8');
+  assert.ok(decision.includes('existingMrIntake('), 'the MR gate is not used by the decision');
 });
 
 test('⚠ the control and the handler ask the SAME gate', () => {
@@ -72,9 +77,12 @@ test('⚠ the control and the handler ask the SAME gate', () => {
 });
 
 test('the fifth case has a message, and it blames the record rather than the operator', () => {
-  const i = ledger.indexOf('stamped with a tender that does not belong to');
+  // Also moved to lib/mrAddDecision with the rest of the decision, where mrAddDecision.test.ts asserts it fires on
+  // AARATI MR 12's shape rather than merely existing in the source.
+  const decision = readFileSync(new URL('./mrAddDecision.ts', import.meta.url), 'utf8');
+  const i = decision.indexOf('stamped with a tender that does not belong to');
   assert.ok(i > 0, 'the mis-stamped case has no message');
-  const msg = ledger.slice(i, i + 700);
+  const msg = decision.slice(i, i + 700);
   assert.match(msg, /fault in the record rather than anything done on this screen/);
   assert.match(msg, /find-misattached-at-console/, 'it must point at what actually fixes it');
   assert.match(msg, /can still be edited/, 'it must say what is still possible');

@@ -15,9 +15,25 @@ export function getJobFullEstimate(job: any, externalData: any, internalData: an
  * estimates, forwarding letters, and bills of both types. Oil accounting is NOT
  * affected: oil is consumed regardless of who pays for the repair.
  *
- * Keyed on `repairType` / `isGp`, which exist on EVERY job. Deliberately NOT on
- * `gpSource`, which was added later and therefore exists only on jobs saved since -
- * keying off it would leave the entire pre-existing GP population billable.
+ * Keyed on `repairType` / `isGp`. Deliberately NOT on `gpSource`, which was added later and
+ * therefore exists only on jobs saved since - keying off it would leave the entire pre-existing
+ * GP population billable.
+ *
+ * ⚠ THIS SAID `repairType` / `isGp` "exist on EVERY job". THEY DO NOT, AND THE CLAIM WAS NEVER
+ * RE-RUN (corrected 2026-10-06, AUDIT G112). Counted against the live database: `isGp` is on
+ * **162 of 176** jobs. The 14 without it all predate it - the latest is 2026-08-15 and the
+ * earliest job carrying it is the same day, so the field began being written then and nothing
+ * since has been saved without it. **History, not a broken mechanism.**
+ *
+ * ⚠ AND THE OR IS WHY IT STILL ANSWERS CORRECTLY, which is the only reason the wrong claim cost
+ * nothing. Of those 14, two are `repairType: 'GP'` and are caught by the first arm; the other
+ * twelve are OGP, so `false` is the right answer for them. Every one of the 14 is Dispatched.
+ *
+ * ⚠ THE POINT IS THE SHAPE, NOT THE 14. "Exists on every job" is a statement about ALL the data,
+ * written at the code, that no check could see and nobody re-ran - this file's opening pattern in
+ * its purest form. It was found by removing an `as any` cast elsewhere, which made tsc ask whether
+ * `isGp` was declared at all. If a future reader needs the count, re-run it; do not trust this
+ * sentence either.
  */
 export function isGpJob(job: any): boolean {
   return job?.repairType === 'GP' || job?.isGp === true;

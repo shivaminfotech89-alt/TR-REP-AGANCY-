@@ -13,7 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned } from '../lib/AgencyContext';
-import { existingMrIntake } from '../lib/tenderState';
+import { mrAddDecision, resolveMrAt } from '../lib/mrAddDecision';
 import { mrEditJob } from '../lib/mrEditDraft';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
@@ -509,43 +509,14 @@ export default function MrLedger() {
 
   /**
    * The AT this MR belongs to, read from its own jobs - never from the session (F66).
+   *
+   * ⚠ THE ARMS LIVE IN lib/mrAddDecision NOW (AUDIT G112), with the gate they feed. They were here, inside a
+   * component, which is why nothing could run the composition they are half of - and the composition is what G111
+   * broke. This delegates so there is one implementation and a test can reach it.
    */
   const atForEditingMr = (): { atId: string } | { error: string } => {
     if (!editingMr) return { error: 'No MR is open.' };
-    // ⚠ NO CAST (AUDIT G111). `(j as any).atId` compiled, read undefined every time, and WITHOUT the cast tsc
-    // would have refused it - the draft type had no such field. The cast was not working around a type error, it
-    // was creating one nothing could see. `atId` is declared on MrEditJob, so this reads it plainly.
-    const ids = [...new Set(editingMr.jobs.map(j => j.atId.trim()).filter(Boolean))];
-    const without = editingMr.jobs.filter(j => !j.atId.trim()).length;
-
-    if (ids.length === 1 && without === 0) return { atId: ids[0] };
-
-    /**
-     * ⚠ EVERY MESSAGE BELOW IS ABOUT ADDING A TRANSFORMER, AND NOW ONLY FIRES WHEN ONE IS BEING ADDED
-     * (AUDIT G79). They were accurate about the case they were written for and silent about the case they
-     * were shown for: an operator who renamed an MR number met three sentences on job numbering and AT
-     * percentages, none of which described what they had done. The caller decides when to ask; these say
-     * plainly what cannot be done and what can.
-     */
-    if (ids.length === 0) {
-      return { error: `A transformer cannot be added to MR ${editingMr.mrNo}: it does not record which AT it was issued under - none of its ${editingMr.jobs.length} transformer(s) carries one.
-
-A new unit would have to take its job number and AT percentage from whichever AT is selected today, which may not be the tender this MR belongs to.
-
-The units already on this MR can still be edited - their numbers, serials, MR number and status all save normally. Set the AT on them if you need to add one.` };
-    }
-    if (ids.length === 1) {
-      return { error: `A transformer cannot be added to MR ${editingMr.mrNo}: it is partly unstamped - ${without} of its ${editingMr.jobs.length} transformer(s) carry no AT.
-
-The AT is known from the others, but adding a unit while the MR disagrees with itself would spread the inconsistency.
-
-The units already on this MR can still be edited. Set the AT on the unstamped ones if you need to add one.` };
-    }
-    return { error: `A transformer cannot be added to MR ${editingMr.mrNo}: its transformers sit under ${ids.length} DIFFERENT ATs.
-
-An MR belongs to one tender, so there is no single sequence to draw a job number from and no single percentage to price a new unit at.
-
-The units already on this MR can still be edited.` };
+    return resolveMrAt({ mrNo: editingMr.mrNo, jobs: editingMr.jobs });
   };
 
   /**
@@ -560,38 +531,14 @@ The units already on this MR can still be edited.` };
    * computed from different things (G3's fault, in a new form). The handler now asks this and nothing else.
    */
   const mrAddGate = (): { open: boolean; reason: string } => {
-    const at = atForEditingMr();
-    if ('error' in at) return { open: false, reason: at.error };
-
-    const master = atMasters.find((a: any) => a.id === at.atId);
-
-    /**
-     * ⚠ THE FIFTH CASE, AND IT HAD NO MESSAGE UNTIL NOW (AUDIT G107). `atForEditingMr` succeeds whenever the jobs
-     * agree on ONE atId - it does not ask whether that id names a tender this agency has. One live MR is in exactly
-     * that state: AARATI's MR 12 carries job MSBT-5 - a MEGHA prefix - stamped with MEGHA's AT.
-     *
-     * Refused, because nothing here can be answered honestly: there is no series to draw a number from and no
-     * percentage to price at, and the app cannot tell whether the job is in the wrong agency or the tender is
-     * (F22's shape). The wording states the fault without blaming the operator and points at the diagnostic,
-     * because no screen can re-stamp a job's AT - `scripts/find-misattached-at-console.js` reports which way round
-     * it is and an administrator corrects the record.
-     */
-    if (!master || String(master.agencyId ?? '') !== String(activeAgency?.id ?? '')) {
-      return {
-        open: false,
-        reason: `A transformer cannot be added to MR ${editingMr?.mrNo}: it is stamped with a tender that does not belong to ${activeAgency?.name || 'this agency'}.
-
-This is a fault in the record rather than anything done on this screen - the transformer and the tender it names sit under different agencies, so there is no series to take a job number from and no accepted percentage to price a new unit at.
-
-The units already on this MR can still be edited, inspected, tested and dispatched. Correcting the stamp is an administrator's job: scripts/find-misattached-at-console.js reports whether the tender or the transformer is the one in the wrong place.`,
-      };
-    }
-
-    const gate = existingMrIntake(master);
-    if (gate.open) return { open: true, reason: '' };
-    return { open: false, reason: `A transformer cannot be added to MR ${editingMr?.mrNo}: ${gate.reason}
-
-The units already on this MR can still be edited, inspected, tested and dispatched.` };
+    if (!editingMr) return { open: false, reason: 'No MR is open.' };
+    return mrAddDecision({
+      mrNo: editingMr.mrNo,
+      jobs: editingMr.jobs,
+      agencyAts: atMasters,
+      agencyId: activeAgency?.id ?? '',
+      agencyName: activeAgency?.name,
+    });
   };
 
   // Add new transformer row to editing MR
