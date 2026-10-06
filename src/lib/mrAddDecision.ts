@@ -31,6 +31,16 @@ export type MrAddDecision =
   /** Refused, with the sentence an operator reads. */
   | { open: false; reason: string };
 
+/** One MR of this agency, as much as the latest-MR rule needs. */
+export interface MrSummary {
+  mrNo: string;
+  division?: string | null;
+  /** When the MR was entered - the earliest `createdAt` among its jobs. */
+  createdAt: number;
+  /** True when every job on it is cancelled. Such an MR is not "latest": see `latestMrInDivision`. */
+  allCancelled: boolean;
+}
+
 export interface MrAddInput {
   mrNo: string;
   /** The MR's jobs as the dialog holds them - see lib/mrEditDraft. Only `atId` is consulted. */
@@ -39,6 +49,44 @@ export interface MrAddInput {
   agencyAts: readonly DecisionAt[];
   agencyId: string;
   agencyName?: string;
+  /**
+   * The division this MR belongs to, and every MR of this agency - for the latest-MR rule.
+   *
+   * ⚠ REQUIRED, NOT OPTIONAL, DELIBERATELY. An optional input that a caller forgets silently disables the rule,
+   * and a rule that is silently off is the shape G111 shipped. Required means tsc names every call site.
+   */
+  division?: string | null;
+  agencyMrs: readonly MrSummary[];
+}
+
+/**
+ * THE LATEST MR OF ONE DIVISION - WHICH IS THE ONLY ONE THAT TAKES A NEW UNIT (AUDIT G113).
+ *
+ * ⚠⚠ PER DIVISION, NOT PER AGENCY, AND THE AGENCY-WIDE VERSION WAS MEASURED AND REJECTED. The job-number series is
+ * per division, so `ZBP-7` and `ZSBT-15` never interleave and a BOPAL MR cannot put a SABARMATI number out of
+ * sequence. An agency-wide rule would have frozen **three of ZENITH's four divisions** - KALOL, SABARMATI and
+ * BAVLA - because a BOPAL MR happened to be entered most recently, and the same for MEGHA's KALOL and AARATI's
+ * SABARMATI. The sequence argument only applies within one series.
+ *
+ * ⚠ BY `createdAt`, NOT BY MR NUMBER OR DATE. MR numbers are division references - `STD-02`, `00008`, and one
+ * that is 451 followed by a stray backtick - and are not ordered. `dateOfIssue` is operator-typed and ties: SAMOR's MR 2938 and MR 2222 share 2026-09-11 and
+ * disagree about which is later.
+ *
+ * ⚠ FULLY CANCELLED MRs ARE NOT CANDIDATES, OR THE ROUTE OUT OF THIS RULE BLOCKS ITSELF. The way to add to an older
+ * MR is to cancel the newer one, add, then reactivate - and if a cancelled MR still counted as latest, cancelling
+ * it would change nothing. Live proof that this is not hypothetical: GUJARAT ENERGY's latest MR, 1217, is fully
+ * cancelled, so without this its live MR 1742 could never take a unit.
+ */
+export function latestMrInDivision(
+  mrs: readonly MrSummary[],
+  division: string | null | undefined,
+): MrSummary | null {
+  const want = String(division ?? '').trim().toUpperCase();
+  const candidates = mrs
+    .filter(m => !m.allCancelled)
+    .filter(m => String(m.division ?? '').trim().toUpperCase() === want);
+  if (!candidates.length) return null;
+  return candidates.reduce((latest, m) => (m.createdAt > latest.createdAt ? m : latest));
 }
 
 /**
@@ -108,12 +156,51 @@ The units already on this MR can still be edited, inspected, tested and dispatch
     };
   }
 
+  /**
+   * ⚠ THE TENDER IS ASKED BEFORE THE SEQUENCE, AND THE ORDER IS THE POINT (AUDIT G113).
+   *
+   * A Closed tender cannot be opened from this screen; a not-the-latest MR can be reached by cancelling the newer
+   * one. Telling an operator to walk a three-step route and then refusing them at the end for a reason no route
+   * can fix is G107's trap - "pick the tender this MR belongs to", which led straight to "superseded". So the
+   * unfixable refusal comes first.
+   *
+   * Live case: SAMOR's MR 2938 is the latest in its division AND on a Closed tender. It gets the Closed message.
+   */
   const gate = existingMrIntake(master as any);
-  if (gate.open) return { open: true, atId: at.atId, reason: '' };
-  return {
-    open: false,
-    reason: `A transformer cannot be added to MR ${input.mrNo}: ${gate.reason}
+  if (!gate.open) {
+    return {
+      open: false,
+      reason: `A transformer cannot be added to MR ${input.mrNo}: ${gate.reason}
 
 The units already on this MR can still be edited, inspected, tested and dispatched.`,
-  };
+    };
+  }
+
+  /**
+   * ⚠⚠ ONLY THE LATEST MR OF THE DIVISION TAKES A NEW UNIT - the owner's rule, 2026-10-07.
+   *
+   * The reasoning is about paper rather than arithmetic: a unit added to an older MR gets a job number out of
+   * sequence with the MRs around it, and that is confusing to read however correct the number is. The existing
+   * route handles it properly and keeps every number in order.
+   */
+  const latest = latestMrInDivision(input.agencyMrs, input.division);
+  if (latest && String(latest.mrNo) !== String(input.mrNo)) {
+    const where = String(input.division ?? '').trim();
+    return {
+      open: false,
+      reason: `A transformer cannot be added to MR ${input.mrNo} - it is not the latest MR${where ? ` in ${where}` : ''}.
+
+MR ${latest.mrNo} was received after it, so a unit added here would take a job number out of sequence with the MRs around it. Correct on the counter, confusing on paper.
+
+To add a transformer to MR ${input.mrNo}: cancel MR ${latest.mrNo} - which releases its job numbers and keeps the record, jobs and all - then add the transformer here so it takes the next free number, then reactivate MR ${latest.mrNo}. Three steps, and Reactivate is a button on the cancelled MR rather than re-entering it.
+
+If the new unit takes a number the cancelled MR held, you will be asked to renumber before reactivating - that is a known step, not a fault.
+
+The recreated MR is yours to see through; the app does not track that you have done it.
+
+The units already on MR ${input.mrNo} can still be edited, inspected, tested and dispatched.`,
+    };
+  }
+
+  return { open: true, atId: at.atId, reason: '' };
 }

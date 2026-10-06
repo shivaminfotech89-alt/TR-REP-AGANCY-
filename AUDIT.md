@@ -21500,5 +21500,159 @@ The full dialog harness is **not** built. Reported because the question was aske
 
 - **Still nothing renders a screen.** The hand-off this closes is draft to gate; the hand-off from a rendered dialog
   to the draft is still unproved, and `handleOpenFullMrEdit` is still only reachable by reading.
-- **G111's fix is not confirmed against the running app** - the deploy landed and the live bundle carries it, but no
-  one has opened MR 45645 since.
+- ~~**G111's fix is not confirmed against the running app** - the deploy landed and the live bundle carries it,
+  but no one has opened MR 45645 since.~~ **CONFIRMED 2026-10-06 18:10:06** - MR 45645 gained `SU-12`, 63
+  minutes after `SU-11`. The first time a unit has been added to an existing MR in the life of the database;
+  see G113.
+
+---
+
+## G113. Only the latest MR of a division takes a new unit - and the number it takes is the series', not the MR's
+
+### ⚠ FIRST, THE CONFIRMATION G111 WAS OWED: THE FEATURE WORKS, AND HAD NEVER BEEN USED
+
+ADMIN's MR 45645 now holds two jobs:
+
+```
+SU-11   created 2026-10-06 17:07:03
+SU-12   created 2026-10-06 18:10:06
+```
+
+**That is the first time a unit has been added to an existing MR, ever.** Across the whole database the largest gap
+between sibling job creations on any other MR is **0 seconds** - every other multi-job MR was entered in one sitting.
+Nobody had used the feature because, as G111 found, it had never worked once. It was fixed and deployed, and 63
+minutes later it was used.
+
+### THE RULE: THE LATEST MR OF THE DIVISION, AND ONLY THAT ONE
+
+The owner's decision, 2026-10-07, and the reasoning is about paper rather than arithmetic: **a unit added to an older
+MR gets a job number out of sequence with the MRs around it, and that is confusing to read however correct the number
+is.** The existing route handles it and keeps every number in order - cancel the newer MR, add here, reactivate.
+
+**⚠⚠ PER DIVISION, NOT PER AGENCY - AND THE AGENCY-WIDE VERSION WAS MEASURED BEFORE IT WAS BUILT.** The instruction
+was "only the LATEST MR". Measured against live data, agency-wide would have frozen:
+
+| Agency | agency-wide latest | would be blocked |
+|---|---|---|
+| ZENITH | MR 1156 (BOPAL) | **KALOL, SABARMATI, BAVLA** - three of four divisions |
+| MEGHA | MR 451 + a stray backtick (SABARMATI) | KALOL |
+| AARATI | MR 8888 (GNR) | SABARMATI |
+
+ZENITH could only ever have added to BOPAL work again. **The job-number series is per division** - `ZBP-7` and
+`ZSBT-15` never interleave - so a BOPAL MR cannot put a SABARMATI number out of sequence, and the sequence argument
+only applies within one series. Reported and corrected before building; the owner accepted the narrowing.
+
+### HOW "LATEST" IS DECIDED, AND WHY NOT THE OBVIOUS WAYS
+
+- **Not by MR number.** They are division references, not a sequence: `45645`, `1961`, `00008`, `MR-105`,
+  `STD-02`, and one that is the digits 451 followed by a stray backtick.
+- **Not by `dateOfIssue`.** Operator-typed, and it **ties**: SAMOR's MR 2938 and MR 2222 both read 2026-09-11 and
+  disagree about which is later.
+- **By `createdAt`** - per job, always written, monotonic. An MR's own is the earliest among its jobs.
+- **⚠ EXCLUDING FULLY CANCELLED MRs, OR THE ROUTE OUT OF THE RULE BLOCKS ITSELF.** Cancel the newer MR to clear the
+  way and, if a cancelled MR still counted as latest, nothing would have changed. **Live proof it is not
+  hypothetical: GUJARAT ENERGY's newest MR, 1217, is entirely cancelled**, so without this its live MR 1742 could
+  never take a unit.
+
+### ⚠ THE TENDER IS ASKED BEFORE THE SEQUENCE, AND THE ORDER IS THE POINT
+
+A Closed tender cannot be opened from this screen. A not-the-latest MR can be reached by cancelling the newer one.
+**Sending an operator down a three-step route that ends in a second refusal is G107's trap** - "pick the tender this
+MR belongs to", which led straight to "superseded". So the unfixable refusal comes first.
+
+Live case: **SAMOR's MR 2938 is the latest in its division AND on a Closed tender.** It gets the Closed message and
+says nothing about sequence, because no amount of cancelling opens a closed tender. A test holds that line.
+
+### THE REFUSAL NAMES THE ROUTE, INCLUDING THE STEP THAT LOOKS LIKE A FAULT
+
+> A transformer cannot be added to MR 1961 - it is not the latest MR in DEESA.
+>
+> MR 45645 was received after it, so a unit added here would take a job number out of sequence with the MRs around
+> it. Correct on the counter, confusing on paper.
+>
+> To add a transformer to MR 1961: cancel MR 45645 - which releases its job numbers and keeps the record, jobs and
+> all - then add the transformer here so it takes the next free number, then reactivate MR 45645. **Three steps, and
+> Reactivate is a button on the cancelled MR rather than re-entering it.**
+>
+> **If the new unit takes a number the cancelled MR held, you will be asked to renumber before reactivating - that is
+> a known step, not a fault.**
+>
+> **The recreated MR is yours to see through; the app does not track that you have done it.**
+>
+> The units already on MR 1961 can still be edited, inspected, tested and dispatched.
+
+Three things in there were found by asking rather than assumed:
+
+- **It is three steps, not four.** `handleReactivateMr` exists, so the cancelled MR is reactivated by a button rather
+  than re-entered. The route is simpler than it was described as.
+- **The stall at step three is real.** Cancelling frees `SU-11`, the added unit may take it, and reactivation then
+  refuses - *"Job No SU-11 has already been assigned to another active transformer… edit its Job Number first"*. An
+  operator meeting that mid-route would think they had broken something, so the refusal names it in advance.
+- **No tracking was built for the recreate step, deliberately.** A system that chases a half-finished three-step
+  route is a larger thing than the route is worth. **Asked whether a half-done route is visible: it is.**
+  `statusFilter` defaults to `'ALL'`, so a cancelled MR stays in the register with its jobs listed and a badge
+  reading "Job numbers released for reuse". The warning is a reminder, not the only safeguard - and reactivation
+  refusing on a reused number is a second one.
+
+### THE NUMBER IT TAKES - THE SERIES', NOT THE MR'S
+
+Kept, and **not made unnecessary by the rule above**, which was the owner's question. It used to be:
+
+```js
+const base = onThisMr > 0 ? onThisMr : inAgency;
+```
+
+so adding to an MR continued **that MR's** numbering. Measured on live data, with the latest-MR rule in force:
+
+```
+ADMIN   latest live MR = 45645
+   SU    onLatestMR= 12   series= 24
+         old code offers SU-13, the series says SU-25
+```
+
+`SU-21`…`SU-24` sit on MRs **5545** and **00008** - older MRs with higher numbers, because numbers were typed by hand
+before G107. **So even the latest MR's own maximum can sit below the series', and `SU-13` against a series at 24 is a
+silent gap** - free, so the save would not refuse, which is worse than a refusal. The same can happen through a GP
+job reusing an old number, or a cancelled job releasing one.
+
+It now calls `predictNextJobNo` on **the MR's own AT** (F66) and `nextFreeJobNumber`, exactly as New Job does since
+G107 - **the other half of the split G107 fixed on one side and left here.** Rows already added in this sitting count
+as taken, or a second Add would offer the first one's number and the save would refuse the operator for pressing a
+button twice.
+
+### AND THE REFUSAL AT THE SAVE NOW OFFERS A NUMBER
+
+The duplicate guard said *"Use a free number"* and offered none - on the screen that had just suggested a taken one.
+It now names one per clashing row, from the same function that fills the field, **each offer folded in before the next
+is drawn** so two clashing rows are not handed the same replacement.
+
+### THE DATE, SAID RATHER THAN ASKED
+
+A new unit inherits the MR's `dateOfIssue`, which is **left as it is** - the only consistent answer when an MR has
+one date and the model has no per-unit delivery date. But the screen used to write a months-old date in silence, so
+it now says so beside the control:
+
+> A unit added here takes MR 45645's date, **06-10-2026** - not today's.
+
+ROLLOVER.md is why it matters: a job is priced by the AT it was booked under, and clause 39.0 turns on when the
+transformer was **delivered**. A silently back-dated unit is noticed at estimate time rather than at entry.
+
+### VERIFIED
+
+- **457 tests in 36 files**, 16 new: the latest MR opens; an older one refuses with every element of the route
+  asserted by its wording; **ZENITH's per-division case, which agency-wide would have frozen**; GUJARAT ENERGY's
+  all-cancelled newest MR; the tender-before-sequence order both ways; `createdAt` beating MR number and surviving a
+  missing value; division matching ignoring case and padding.
+- **Required inputs, not optional** - `agencyMrs` is required on `MrAddInput`, so tsc named every call site rather
+  than letting a caller silently disable the rule. That is G111's lesson applied.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files; `print-subtree-hashes` 13 byte-identical.
+
+### NOT EXERCISED
+
+- **The summaries come from `agencyJobs`, not from `mrGroups`**, deliberately - "is this the latest MR in its
+  division" is a question about the division's history, and a tender-scoped list would answer about the scope. That
+  choice is reasoned, not tested against a scoped session.
+- **Nothing renders the dialog**, so the date line and the refusal text are verified by reading and by asserting the
+  strings. The standing gap, now also argued in G112 as one that should stay on demand.
+- **The route has never been walked.** Cancel-add-reactivate is three real operations and no one has done them in
+  sequence; the stall at step three is reasoned from `handleReactivateMr`'s refusal, not observed.

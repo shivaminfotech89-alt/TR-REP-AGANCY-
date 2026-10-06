@@ -14,6 +14,7 @@ import {
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned } from '../lib/AgencyContext';
 import { mrAddDecision, resolveMrAt } from '../lib/mrAddDecision';
+import { jobNumberTail, nextJobNoFor, takenJobNumbers } from '../lib/jobNumbering';
 import { mrEditJob } from '../lib/mrEditDraft';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
@@ -225,7 +226,7 @@ function LockedMrHeaderField({ label, mix, reason }: {
 
 export default function MrLedger() {
   const {
-    activeAgency, activeAtMaster, atMasters, getJobNoPrefix, viewingAllTenders,
+    activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, viewingAllTenders,
     // ⚠ `agencyOil` IS READ HERE SO AN MR RAISED FOR OIL ALONE CAN BE SEEN (AUDIT O78). The
     // division raises MRs for oil issue with no transformers on them, and this register built
     // its list from jobs alone - so those MRs appeared nowhere, could not be opened, and could
@@ -530,6 +531,34 @@ export default function MrLedger() {
    * places and the AT precondition in a third, so the refusal an operator SAW and the refusal that HAPPENED were
    * computed from different things (G3's fault, in a new form). The handler now asks this and nothing else.
    */
+  /**
+   * EVERY MR OF THIS AGENCY, FOR THE LATEST-MR RULE (AUDIT G113).
+   *
+   * ⚠ FROM `agencyJobs`, NOT FROM `mrGroups`. `mrGroups` is scoped to the selected tender, and "is this the latest
+   * MR in its division" is a question about the division's whole history - an MR hidden by the tender filter is
+   * still an MR that was received later. Asking a scoped list would answer about the scope, which is the mistake
+   * G107 removed from the gate beside this one.
+   */
+  const agencyMrSummaries = useMemo(() => {
+    const byMr = new Map<string, { mrNo: string; division?: string | null; createdAt: number; allCancelled: boolean }>();
+    for (const job of agencyJobs as any[]) {
+      const mrNo = String(job?.mrNo ?? '').trim();
+      if (!mrNo) continue;
+      const created = Number(job?.createdAt) || 0;
+      const dead = job?.status === 'Cancelled' || job?.isCancelled === true || job?.mrStatus === 'Cancelled';
+      const seen = byMr.get(mrNo);
+      if (!seen) {
+        byMr.set(mrNo, { mrNo, division: job?.division ?? null, createdAt: created, allCancelled: dead });
+        continue;
+      }
+      // The MR was entered when its FIRST job was, and it is cancelled only when EVERY job on it is.
+      if (created > 0 && (seen.createdAt === 0 || created < seen.createdAt)) seen.createdAt = created;
+      if (!seen.division && job?.division) seen.division = job.division;
+      seen.allCancelled = seen.allCancelled && dead;
+    }
+    return [...byMr.values()];
+  }, [agencyJobs]);
+
   const mrAddGate = (): { open: boolean; reason: string } => {
     if (!editingMr) return { open: false, reason: 'No MR is open.' };
     return mrAddDecision({
@@ -538,6 +567,8 @@ export default function MrLedger() {
       agencyAts: atMasters,
       agencyId: activeAgency?.id ?? '',
       agencyName: activeAgency?.name,
+      division: editingMr.division,
+      agencyMrs: agencyMrSummaries,
     });
   };
 
@@ -573,37 +604,42 @@ export default function MrLedger() {
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
 
-    // CONTINUE FROM THE HIGHEST ACTIVE NUMBER SAVED ON THIS MR (AUDIT F70).
-    // Cancelled jobs are excluded so their numbers are reused.
+    /**
+     * THE NEXT FREE NUMBER IN THE TENDER'S SERIES - THE SAME FUNCTION NEW JOB USES (AUDIT G113).
+     *
+     * ⚠⚠ IT USED TO TAKE THIS MR'S OWN HIGHEST, WHICH ON AN OLDER MR IS A NUMBER ALREADY ISSUED.
+     * `base = onThisMr > 0 ? onThisMr : inAgency` meant adding to an older MR continued THAT MR's numbering
+     * rather than the tender's. **A live example, measured 2026-10-06:** ADMIN's MR 1961 holds SU-6...SU-10, so
+     * adding a unit there offered **SU-11** - which MR 45645 had taken an hour earlier. The save's guard refused
+     * it correctly and then said "Use a free number", offering none, so the operator was left guessing.
+     *
+     * ⚠ THE SERIES IS THE TENDER'S, NOT THE MR'S. That is the whole point: a job added today belongs after
+     * everything booked since, whatever MR it joins. `predictNextJobNo` reads the counter of **this MR's own AT**
+     * (F66 - never the session's), and `nextFreeJobNumber` steps past anything in use.
+     *
+     * ⚠ G107 FIXED THIS ON THE NEW JOB SIDE AND LEFT IT HERE - two implementations of "the next number", which is
+     * the shape this audit keeps recording. One function now serves both.
+     */
     let nextJobNo = '';
     if (activeAgency && editingMr.repairType !== 'GP') {
       // The gate above already refused every case in which this cannot resolve, so this reads the id rather than
       // re-asking the question - two answers to one question is what G107 removed from this handler.
       const at = atForEditingMr();
       if ('error' in at) return;
-      const { prefix } = getJobNoPrefix(editingMr.division, coreType, at.atId);
+      const { prefix, nextNum } = predictNextJobNo(editingMr.division, coreType, editingMr.repairType, at.atId);
       if (prefix) {
-        const head = `${prefix.toUpperCase()}-`;
-        const tailOf = (v: unknown): number => {
-          const raw = String(v ?? '').trim().toUpperCase();
-          if (!raw.startsWith(head)) return 0;
-          const n = Number(raw.slice(head.length));
-          return Number.isFinite(n) && n > 0 ? n : 0;
-        };
-
-        const onThisMr = editingMr.jobs
-          .filter(j => j.status !== 'Cancelled' && !j.isCancelled && (editingMr.repairType || '').toUpperCase() !== 'GP')
-          .reduce((m, j) => Math.max(m, tailOf(j.jobNo)), 0);
-
-        const inAgency = mrGroups
-          .filter(g => !g.isCancelled && (g.repairType || '').toUpperCase() !== 'GP')
-          .reduce(
-            (m, g) => g.jobs
-              .filter(j => j.status !== 'Cancelled' && !j.isCancelled && (j.repairType || '').toUpperCase() !== 'GP' && !j.isGp)
-              .reduce((n, j) => Math.max(n, tailOf(j.jobNo)), m), 0);
-
-        const base = onThisMr > 0 ? onThisMr : inAgency;
-        nextJobNo = `${prefix}-${base + 1}`;
+        /**
+         * ⚠ THE ROWS ALREADY ADDED IN THIS SITTING COUNT AS TAKEN, THOUGH NOTHING HAS BEEN SAVED YET. Without
+         * them a second Add would offer the same number as the first, and `duplicateWithinBatch` would refuse the
+         * save - the operator punished for pressing a button twice. This is the analogue of New Job's
+         * `usedCandidates`.
+         */
+        const taken = takenJobNumbers(agencyJobs, prefix);
+        for (const row of editingMr.jobs) {
+          const n = jobNumberTail(row.jobNo, prefix);
+          if (n > 0) taken.add(n);
+        }
+        nextJobNo = nextJobNoFor(prefix, nextNum - 1, taken);
       }
     }
 
@@ -780,6 +816,10 @@ export default function MrLedger() {
      * agency was selected. A number booked in another tab since this modal opened is absent from it, and
      * absent means the clash is not seen - which is the one thing this guard exists to catch.
      */
+    // The MR's own tender, so a replacement is drawn from the right counter (F66).
+    const offerAt = resolveMrAt({ mrNo: editingMr.mrNo, jobs: editingMr.jobs });
+    const mrAtIdForOffers = 'error' in offerAt ? undefined : offerAt.atId;
+
     const addedRows = editingMr.jobs.filter((j: any) => j.isNew || !j.id);
     if (addedRows.length > 0) {
       // The same number typed onto two new rows of one save. Not offerable: the operator typed one
@@ -819,19 +859,49 @@ export default function MrLedger() {
       );
 
       if (clashes.length > 0) {
-        const lines = clashes.map(c => [
+        /**
+         * ⚠ A REFUSAL NOW NAMES A FREE NUMBER (AUDIT G113). This said "Use a free number" and offered none, so an
+         * operator refused at the save had to work one out by hand - on the very screen that had just suggested a
+         * taken one. New Job has offered alternatives since F62; this is the other half of that split, and the
+         * offer comes from the same function that fills the field.
+         *
+         * ⚠ EACH OFFER IS FOLDED IN BEFORE THE NEXT IS DRAWN, or two clashing rows would be handed the same
+         * replacement - a refusal that issues a duplicate.
+         */
+        const offers = new Map<number, string>();
+        clashes.forEach((c, i) => {
+          const row = c.row as any;
+          const { prefix, nextNum } = predictNextJobNo(
+            row.division ?? editingMr.division, row.coreType || 'CRGO', editingMr.repairType, mrAtIdForOffers,
+          );
+          if (!prefix) return;
+          const free = takenJobNumbers(agencyJobsForGuard, prefix);
+          for (const r of editingMr.jobs) {
+            const n = jobNumberTail(r.jobNo, prefix);
+            if (n > 0) free.add(n);
+          }
+          for (const already of offers.values()) {
+            const n = jobNumberTail(already, prefix);
+            if (n > 0) free.add(n);
+          }
+          const suggestion = nextJobNoFor(prefix, nextNum - 1, free);
+          if (suggestion) offers.set(i, suggestion);
+        });
+
+        const lines = clashes.map((c, i) => [
           `Job Number "${String(c.row.jobNo ?? '').trim()}" is already in use:`,
           ...c.existing.map(e => `    ${describeHolder(e)}`),
           `  This row - Serial ${c.row.serialNo || '-'}, ${c.row.capacityKva || '-'} KVA, Make ${c.row.make || '-'}.`,
-        ].join('\n'));
+          offers.get(i) ? `  A FREE NUMBER YOU CAN USE: ${offers.get(i)}` : '',
+        ].filter(Boolean).join('\n'));
         alert([
           `${clashes.length} job number(s) on this MR belong to a different transformer.`,
           '',
           ...lines,
           '',
           'A job number identifies one physical transformer. It may repeat only when the SAME unit returns '
-          + 'under guarantee - serial number, make and capacity must all match. Use a free number, or correct '
-          + 'the serial, make and capacity if this really is the same transformer coming back.',
+          + 'under guarantee - serial number, make and capacity must all match. Type the free number above, or '
+          + 'correct the serial, make and capacity if this really is the same transformer coming back.',
         ].join('\n'));
         return;
       }
@@ -2115,14 +2185,35 @@ export default function MrLedger() {
                       tender it is not (AUDIT F83). Editing the units already here is
                       unaffected - only adding a NEW one is refused. */}
                   {mrAddGate().open ? (
-                    <button
-                      type="button"
-                      onClick={handleAddTransformerToMr}
-                      className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Add Unit to this MR</span>
-                    </button>
+                    <div className="flex flex-col items-start gap-1">
+                      <button
+                        type="button"
+                        onClick={handleAddTransformerToMr}
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Unit to this MR</span>
+                      </button>
+                      {/**
+                        * ⚠ THE DATE THE UNIT WILL TAKE, SAID BEFORE IT IS WRITTEN (AUDIT G113).
+                        *
+                        * A new unit inherits the MR's `dateOfIssue` - the only consistent answer when an MR has one
+                        * date - but on an MR received in August that means writing an August date in October, and
+                        * the screen used to do it silently. ROLLOVER.md is the reason it matters: a transformer is
+                        * priced by the AT it was booked under and clause 39.0 turns on when it was DELIVERED, so a
+                        * months-old date written without a word is the thing noticed at estimate time rather than
+                        * at entry.
+                        *
+                        * Stated, not asked: there is no per-unit delivery date in the model to offer instead.
+                        */}
+                      {editingMr.dateOfIssue && (
+                        <span className="text-[10px] text-slate-500 leading-snug max-w-xs">
+                          A unit added here takes MR {editingMr.mrNo}&rsquo;s date,{' '}
+                          <strong className="font-semibold text-slate-700">{formatDDMMYYYY(editingMr.dateOfIssue)}</strong>
+                          {' '}&mdash; not today&rsquo;s.
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <span className="inline-flex items-start gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-900 border border-l-2 border-l-amber-500 border-amber-300 rounded text-[11px] font-semibold max-w-xs">
                       {/* Dot added; text untouched (AUDIT G10). */}
