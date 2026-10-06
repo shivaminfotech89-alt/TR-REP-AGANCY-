@@ -40,6 +40,42 @@ a clean bill closes it.
 
 ---
 
+## Pattern: a cast on a field that should exist is a suppressed question
+
+**`(j as any).atId` compiled, returned `undefined` on every call, and broke a feature for every record in the app
+(G111). Without the cast TypeScript would have refused the line.** So the cast was not working around a type error -
+**it was manufacturing one that nothing could see.**
+
+That is the whole shape. A cast is normally read as "I know better than the checker here". This kind is the
+opposite: it is "do not ask whether this field exists", asked of a field that *ought* to exist, where the honest
+answer would have been a compile error pointing at the one line that needed changing.
+
+**What it cost.** The draft the MR edit dialog builds had no `atId`, because its field list omitted one name. The
+gate read that field through a cast, got `undefined` every time, and concluded "none of its N transformer(s)
+carries one" - for MRs whose jobs all carried a valid, Active, same-agency AT. Two separate reports of a blocked
+Add Unit were diagnosed against the database, which was correct, and against the gate's logic, which was correct.
+Neither could explain the behaviour because the defect was in the hand-off between them, held open by a cast.
+
+**And removing one found another.** Deleting the redundant `(j as any).isGp` on a *stored* job - expected to be a
+no-op, since stored jobs are typed `any` throughout - produced `Property 'isGp' does not exist on type 'Job'`. The
+field is on **162 of 176 live jobs**, is read by `isGpJob` and by the job-number scan, and the `Job` interface had
+simply never declared it. A second suppressed question, under the same kind of cast, found by removing the first.
+
+**How to apply:**
+
+- **A cast that reads a property is a claim that the type is wrong.** Check which way: either the type is missing a
+  real field - declare it - or the object genuinely does not have it, and the read is the bug. Both outcomes are
+  better than the cast.
+- **`as any` to read, and `as any` to write, are not the same risk.** Writing through one puts a value somewhere;
+  reading through one invents an `undefined` that then flows into a comparison, a message or a figure, and nothing
+  downstream can tell it from real absent data.
+- **Remove redundant casts even when they look like no-ops.** The `isGp` one cost nothing to delete and surfaced a
+  type gap of 162 documents. A cast on an `any` value is free to remove and occasionally not free at all.
+- **When a defect sits in the hand-off between two correct components, the cast is where to look.** The database was
+  right, the gate was right, and a field was being dropped between them with a cast holding the gap open.
+
+---
+
 ## Pattern: the check that cannot see its subject, now inside the print harness itself
 
 **The opening pattern of this file is a check that structurally cannot fail. On 2026-10-01 it appeared twice in one
@@ -20730,6 +20766,24 @@ its export. Nothing is owed there.
 
 ## G107. The add-unit gate asked the session about the wrong tender, and the prefill ignored the rule O89 set
 
+> **⚠⚠ ITS HEADLINE MEASUREMENT WAS FALSE, AND NEVER MEASURED AGAINST THE RUNNING PATH (corrected 2026-10-06, G111).**
+> The table below says **24 MRs on Active ATs "the control now appears"**. The real number was **zero**: the
+> dialog's job mapping omitted `atId`, so the gate saw no tender on any job and answered message 1 - "none of its
+> N transformer(s) carries one" - **for every MR in the app**, including MRs whose jobs all carry a valid, Active,
+> same-agency AT.
+>
+> **This change made it worse, not better.** Before it the session gate hid the button in most states, so the
+> failure was a click away and read as the AT precondition working. After it the button and the handler share one
+> gate, so the control is hidden on every MR. A latent total failure became a visible total failure.
+>
+> **⚠ AND THE 24 WAS A CENSUS OF THE DATABASE, NOT OF THE FEATURE.** It counted MRs whose stored jobs sit on an
+> Active AT - which was true - and then stated what the control would do, which was never run. Every check in
+> G107's VERIFIED section was a unit test on `existingMrIntake` or a source assertion that the right function was
+> called; **none exercised `handleOpenFullMrEdit` to `atForEditingMr`, the only path that matters.** This file's
+> opening pattern again: a measurement that cannot see its subject, cited as though it had.
+>
+> Fixed in G111, with a test on the draft contract rather than on the instance.
+
 Two reports, one commit, because both turn on the same thing: which tender is the subject.
 
 ### 1. THE GATE WAS ASKED OF THE SESSION'S TENDER, AND WAS UNREACHABLE EITHER WAY
@@ -20767,7 +20821,7 @@ Measured over all 42 live MRs:
 
 | | |
 |---|---|
-| 24 MRs on **Active** ATs - including MEGHA's ten | **the control now appears** |
+| 24 MRs on **Active** ATs - including MEGHA's ten | ~~**the control now appears**~~ **FALSE - zero did; see the correction at the head of this entry (G111)** |
 | 15 MRs on **Closed** ATs | still refused, naming their own tender |
 | 2 MRs with no AT (MEGHA MR 1, MR 9344) | **message 1, now reachable** |
 | 1 MR with an unusable atId (AARATI MR 12) | **a message that did not exist** |
@@ -21246,3 +21300,108 @@ appears in the header, with those figures as its failure message.
   likeliest reading of the evidence rather than a demonstrated cause.
 - **No harness opens the notification panel**, so the two lines are verified by source assertion and by reading -
   the same standing gap as G106, G107 and G108.
+
+---
+
+## G111. The edit dialog dropped atId, so the gate refused every MR - and G107 claimed 24 without running the path
+
+**Reported:** ADMIN's MR 45645 shows message 1, *"none of its 1 transformer(s) carries one"*.
+
+### THE JOB WAS FULLY STAMPED
+
+Read from live data:
+
+```
+MR 45645, job SU-11   (doc q0JajLjBieExdnizF4bZ)
+  agency : ADMIN          created: 2026-10-06 17:07:03
+  atId   : "O141gDio6XTRyuMyZeQl"  -> AT 2026-28/AT/1819, status Active, agency ADMIN
+```
+
+Valid AT, Active, same agency. Message 1 was **factually wrong about it**, and so was message 5.
+
+**And stamping is not broken.** Across every agency, **zero jobs created in the last seven days lack a usable
+`atId`**; ADMIN's eight newest all carry one. The two historical unstamped cases - MEGHA's MR 1 and MR 9344 - remain
+historical. The worry that jobs were still being created without a tender is, on the data, unfounded.
+
+### ⚠⚠ THE CAUSE: A HAND-WRITTEN FIELD LIST THAT OMITTED ONE NAME
+
+`handleOpenFullMrEdit` built each draft with an explicit list - `id, jobNo, capacityKva, make, serialNo, coreType,
+status, division, repairType, prevAtNo, prevJobNo, prevDeliveryDate, gpReason, isNew, isCancelled`. **`atId` was not
+in it.** So every job the gate saw had no tender, `ids.length === 0`, and message 1 fired **for every MR in the
+app**.
+
+That also explains the earlier MR 1154 report, which the data could not account for. Same cause. I checked the
+database and the gate's logic, both correct, and never checked what the dialog hands the gate.
+
+**⚠ AND A CAST HELD THE GAP OPEN.** The gate read `(j as any).atId`. It compiled, returned `undefined` every time,
+and **without the cast tsc would have refused it** - the draft type had no such field. Recorded as its own pattern:
+*a cast on a field that should exist is a suppressed question.*
+
+### ⚠ THIS IS A REGRESSION FROM G107, AND G107'S HEADLINE FIGURE WAS NEVER MEASURED
+
+- **Before G107:** the session gate hid the button in most states. Where it was visible, clicking called
+  `atForEditingMr` and refused. Adding a unit never worked, but the failure was a click away and read as the AT
+  precondition doing its job.
+- **After G107:** the control and the handler share one gate, so the button is hidden on every MR. **A latent total
+  failure became a visible total failure.**
+
+G107's table claims **24 MRs "the control now appears"**. The real number was **zero**. That figure was a census of
+the DATABASE - MRs whose stored jobs sit on an Active AT, which was true - restated as a claim about the FEATURE,
+which was never run. Every check in its VERIFIED section was a unit test on `existingMrIntake` or a source assertion
+that the right function was called. **None exercised `handleOpenFullMrEdit` to `atForEditingMr`.** Corrected at
+G107's own entry, and the claim struck where it stands.
+
+**No data was corrupted.** `handleSaveFullMr` refuses outright when a row is added and the AT cannot resolve, which
+is why no job carries an empty `atId` and why nothing silently wrote one.
+
+### WHAT WAS BUILT
+
+**`lib/mrEditDraft.ts`** - the field list declared once as `DRAFT_JOB_FIELDS`, the draft typed as `MrEditJob` with
+`atId` **required**, and `mrEditJob(job)` producing it. The dialog now maps `group.jobs.map(mrEditJob)`.
+
+**⚠ THE TEST IS ABOUT THE GENERAL FORM, NOT ABOUT `atId`.** Asserting that one field survives would catch this
+instance and nothing else - the same mapping can drop the next field someone adds, and a field missing from a draft
+reads as absent DATA rather than as a mistake. So the test derives what the gate actually reads, from source, and
+requires it to be a subset of the declared contract. Add a read without declaring it and the test fails; declare one
+without producing it and a second test fails.
+
+**⚠ THE DIVISION OF LABOUR IS DELIBERATE, because neither half covers the other:**
+
+| | guards | a miss shows up as |
+|---|---|---|
+| **tsc**, via `atId` being required | draft CONSTRUCTION | a compile error |
+| **the source scan** | draft READS | an `undefined` at runtime |
+
+### ⚠ THREE MORE INSTANCES, EACH FOUND BY THE PREVIOUS FIX
+
+1. **tsc caught the newly-added row.** Making `atId` required made it refuse the row `handleAddTransformerToMr`
+   builds, which also omitted the field. Left alone, **a second add on the same MR would have read "partly
+   unstamped"** - message 2 - a state the operator would have created by using the feature. It now carries the MR's
+   own AT, the same id the save stamps.
+2. **The test caught its own comments.** The first run flagged `(j as any).atId` twice - both inside the notes this
+   change wrote, quoting the old code. A source check that cannot tell a quotation from a call reports the
+   explanation as the defect. Comments are stripped, and a test proves the stripper works.
+3. **Removing a redundant cast surfaced a type gap of 162 documents.** `(j as any).isGp` on a *stored* job was
+   expected to be a no-op; deleting it produced `Property 'isGp' does not exist on type 'Job'`. The field is on
+   **162 of 176 live jobs**, is read by `isGpJob` and by the job-number scan, and `Job` had never declared it. Now
+   declared, optional, because 14 older documents predate it.
+
+### VERIFIED
+
+- **431 tests in 35 files**, 13 new - the subset check, every declared field produced and none left undefined, the
+  comment stripper shown able to see the difference, `atId` surviving and trimming, the old mapping reproduced to
+  show it yields message 1, the added row needing the AT or reading partly-unstamped, and no cast reading a draft
+  field.
+- **Gates:** tsc (exit 0); build; hooks guard, 50 files; `print-subtree-hashes` 13 byte-identical.
+- **The live job was read directly**, which is the only reason the report could be contradicted rather than acted on.
+
+### NOT EXERCISED
+
+- **⚠ STILL NO HARNESS OPENS THE MR EDIT DIALOG.** The fix is proved by a contract test and by reading; nothing
+  renders the dialog and clicks Add. That gap is what let this ship, it has now been flagged across G106, G107,
+  G108 and G110, and it is still open. A test that mounted the dialog on one stored MR and asserted the button
+  appears would have caught this in a line.
+- **The fix is not confirmed against the running app** - it needs a deploy, and the two reports that prompted it can
+  only be re-tested there.
+- **Messages 2, 3 and 5 remain unexercised by real data**, as G107 recorded. What changed is that message 1 is no
+  longer firing in their place.

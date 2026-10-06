@@ -14,6 +14,7 @@ import {
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned } from '../lib/AgencyContext';
 import { existingMrIntake } from '../lib/tenderState';
+import { mrEditJob } from '../lib/mrEditDraft';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
 import { issuedMarks } from '../lib/issuedDocuments.js';
 import { jobNumberClashes, duplicateWithinBatch, describeHolder } from '../lib/jobNumberGuard';
@@ -76,6 +77,13 @@ interface Job {
   isCancelled?: boolean;
   mrStatus?: string;
   cancelledAt?: string | null;
+  /**
+   * ⚠ DECLARED BECAUSE A CAST WAS HIDING THAT IT WAS NOT (AUDIT G111). `(j as any).isGp` compiled; removing the
+   * cast made tsc say "Property 'isGp' does not exist on type 'Job'" - and the field is on **162 of 176** live
+   * jobs, read by `isGpJob` and by the job-number scan here. The type was simply missing it, and the cast is why
+   * nobody found out. Optional, because 14 older documents predate it.
+   */
+  isGp?: boolean;
 }
 
 interface MrGroup {
@@ -130,6 +138,16 @@ interface EditableJobEntry {
   gpReason?: string;
   isNew?: boolean;
   isCancelled?: boolean;
+  /**
+   * ⚠ DECLARED, NOT CAST (AUDIT G111). This field was absent and the gate read it as `(j as any).atId` - which
+   * compiled, returned undefined on every job, and made "none of its N transformer(s) carries one" fire on every
+   * MR in the app. Declaring it is what makes tsc able to answer the question the cast suppressed: a draft that
+   * stops carrying the tender is now a type error rather than a refusal nobody can explain.
+   *
+   * Required, not optional: a draft built by `mrEditJob` always sets it, to '' when the stored job has none, and
+   * the gate's two arms both distinguish '' from a value.
+   */
+  atId: string;
 }
 
 interface MrEditState {
@@ -481,25 +499,10 @@ export default function MrLedger() {
       // Carried so the save can tell an emptied MR from one raised for oil alone (AUDIT O78).
       oilRows: group.oilRows ?? [],
       isCancelled: group.isCancelled,
-      jobs: group.jobs.map(j => ({
-        id: j.id,
-        jobNo: j.jobNo,
-        capacityKva: String(j.capacityKva || '63'),
-        make: j.make || '',
-        serialNo: j.serialNo || '',
-        coreType: j.coreType || 'CRGO',
-        status: j.status || 'Received',
-        // Each job's OWN values, so the save has something to write that is not the group's
-        // sampled one (AUDIT G11).
-        division: j.division,
-        repairType: j.repairType,
-        prevAtNo: j.prevAtNo || '',
-        prevJobNo: j.prevJobNo || '',
-        prevDeliveryDate: j.prevDeliveryDate || '',
-        gpReason: j.gpReason || '',
-        isNew: false,
-        isCancelled: j.status === 'Cancelled' || j.isCancelled === true
-      })),
+      // ⚠ ONE DECLARED FIELD LIST, NOT A LITERAL HERE (AUDIT G111). This was a hand-written map that omitted
+      // `atId`, so every job the gate saw had no tender and "none of its N transformer(s) carries one" fired on
+      // EVERY MR. lib/mrEditDraft declares what a draft must carry and a test holds the consumers to it.
+      jobs: group.jobs.map(mrEditJob),
       deletedJobIds: []
     });
   };
@@ -509,8 +512,11 @@ export default function MrLedger() {
    */
   const atForEditingMr = (): { atId: string } | { error: string } => {
     if (!editingMr) return { error: 'No MR is open.' };
-    const ids = [...new Set(editingMr.jobs.map(j => String((j as any).atId ?? '').trim()).filter(Boolean))];
-    const without = editingMr.jobs.filter(j => !String((j as any).atId ?? '').trim()).length;
+    // ⚠ NO CAST (AUDIT G111). `(j as any).atId` compiled, read undefined every time, and WITHOUT the cast tsc
+    // would have refused it - the draft type had no such field. The cast was not working around a type error, it
+    // was creating one nothing could see. `atId` is declared on MrEditJob, so this reads it plainly.
+    const ids = [...new Set(editingMr.jobs.map(j => j.atId.trim()).filter(Boolean))];
+    const without = editingMr.jobs.filter(j => !j.atId.trim()).length;
 
     if (ids.length === 1 && without === 0) return { atId: ids[0] };
 
@@ -612,6 +618,10 @@ The units already on this MR can still be edited, inspected, tested and dispatch
       return;
     }
 
+    // The gate above refused every case in which this cannot resolve, so this reads the id rather than re-asking.
+    const resolved = atForEditingMr();
+    const mrAtId = 'error' in resolved ? '' : resolved.atId;
+
     const lastJob = editingMr.jobs[editingMr.jobs.length - 1];
     const coreType = lastJob?.coreType || 'CRGO';
     const capacityKva = lastJob?.capacityKva || '63';
@@ -642,8 +652,8 @@ The units already on this MR can still be edited, inspected, tested and dispatch
           .filter(g => !g.isCancelled && (g.repairType || '').toUpperCase() !== 'GP')
           .reduce(
             (m, g) => g.jobs
-              .filter(j => j.status !== 'Cancelled' && !j.isCancelled && (j.repairType || '').toUpperCase() !== 'GP' && !(j as any).isGp)
-              .reduce((n, j) => Math.max(n, tailOf((j as any).jobNo)), m), 0);
+              .filter(j => j.status !== 'Cancelled' && !j.isCancelled && (j.repairType || '').toUpperCase() !== 'GP' && !j.isGp)
+              .reduce((n, j) => Math.max(n, tailOf(j.jobNo)), m), 0);
 
         const base = onThisMr > 0 ? onThisMr : inAgency;
         nextJobNo = `${prefix}-${base + 1}`;
@@ -668,7 +678,12 @@ The units already on this MR can still be edited, inspected, tested and dispatch
             prevDeliveryDate: lastJob?.prevDeliveryDate || '',
             gpReason: lastJob?.gpReason || '',
             isNew: true,
-            isCancelled: false
+            isCancelled: false,
+            // ⚠ THE MR'S OWN AT, ON THE DRAFT ROW TOO - CAUGHT BY tsc WHEN atId BECAME REQUIRED (AUDIT G111).
+            // Without it a second add would see one AT and one blank and refuse with "partly unstamped", which is
+            // a state the operator would have created by using the feature. The save stamps the same id
+            // (`mrAt.atId`), so the draft and the write agree rather than the draft being merely tolerable.
+            atId: mrAtId,
           }
         ]
       };
