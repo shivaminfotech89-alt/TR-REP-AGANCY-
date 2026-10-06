@@ -20032,6 +20032,19 @@ reaches: the write gate (still open for any future date), the admin panel's days
 customer's **receipt, which prints "Runs to <expiry>" live from the record** - a reprint shows the new
 date.
 
+> **⚠ APPLIED 2026-10-06, AND NOT BY THIS SCRIPT'S RULE. ZENITH is now 16 Sep 2027.** The operator chose the
+> **replace** reading - the paid year replaces the grant - which is the third row of the table below, the one
+> this entry recorded the owner as having declined. It is **365 days from `lastPaymentDate`** (16 Sep 2026),
+> and the subscription now reads `status: active`, `planAmount: 5900`, 345 days left.
+>
+> The one `history` entry it carries states the ground in its own words: `op=correct_expiry`, `by=admin-script`,
+> `before=10 Mar 2031`, `after=16 Sep 2027`, **`reason="correcting duplicate period addition"`**. So the record
+> says this was the correction of a DEFECT - the duplicate period G100 found - rather than the application of a
+> business rule to a sound grant. That distinction is what G109 turns on.
+>
+> **The extend rule stands for renewals and is unchanged in code.** Whether a granted agency converting to paid
+> should replace rather than extend is open - see G109 for the measured exposure and the recommendation.
+
 **The target date was an unfilled placeholder**, so nothing was applied. Dry-run for the three the
 evidence supports:
 
@@ -20992,3 +21005,119 @@ Working notes:
   to that screen and is not done here.
 - **None of the five groups is corrected by this change**, by design. The list above is the work.
 - **The validation has never refused anything in production** - it is new, and no AT has been edited since.
+
+---
+
+## G109. ZENITH corrected by the replace reading - and why that should not become the automatic rule
+
+**Applied 2026-10-06 by the operator: ZENITH TRANSFORMERS is now 16 Sep 2027**, 365 days from its payment date,
+`status: active`, `planAmount: 5900`. The **replace** reading - the paid year replaces the grant - which is the
+reading recorded in G100 as argued against and declined at the time, and which the operator has now applied for this
+case. Recorded at G100's own ZENITH section as well, since that section said nothing had been applied.
+
+**The extend rule stands for renewals and is unchanged in code.** Nothing was built here; this entry is the record
+and the recommendation.
+
+### ⚠ "A ONE-LINE BRANCH ON THE PREVIOUS STATUS" WAS WRONG, AND I SAID IT
+
+The base is computed in **three** places, and a fourth mirrors it for the screen:
+
+| | |
+|---|---|
+| `functions/adminSubscription.js:75` | grant **and** mark-paid, admin actions |
+| `functions/subscription.js:398` | the self-serve Razorpay payment |
+| `src/lib/subscriptionExtension.ts` | the form's preview - a deliberate mirror (G100) |
+
+Branching only `mark_paid` makes the form's preview disagree with the server on **every** granted mark-paid. That
+disagreement is not a side effect to tidy up: G100 built the mirror precisely so a disagreement appears on screen,
+and this change would make it appear every time. So the minimum is two edits plus a decision about the third.
+
+### ⚠⚠ THE RAZORPAY PATH IS THE SHARPEST ARGUMENT AGAINST MAKING IT AUTOMATIC
+
+`functions/subscription.js` extends, and its comment says why:
+
+> *"the eighteen-month founding grants make early renewal the normal case here, not an edge one."*
+
+That path was written **knowing** grants are the normal case, and chose to extend. If mark-paid replaced while
+Razorpay extended, **the same agency would get a different expiry depending on whether an admin recorded the payment
+or the agency paid online.** That is a worse defect than the one being fixed, and it is the kind this file keeps
+recording: one rule, two implementations, disagreeing on the normal case.
+
+### ⚠ ZENITH'S OWN RECORD SAYS IT WAS A DEFECT, NOT A RULE
+
+The single `history` entry reads:
+
+```
+op=correct_expiry  by=admin-script  before=10 Mar 2031  after=16 Sep 2027
+reason="correcting duplicate period addition"
+```
+
+ZENITH's 2031 expiry came from G100's defect - three 365-day grants and a paid year, 82 seconds apart. Setting it to
+365 days from the payment date **removed a duplication**. Deciding that a *sound* 547-day grant should be cancelled
+by a payment is a different act, and the seven agencies below hold sound grants.
+
+### WHAT REPLACE WOULD DO TO THE GRANTED COHORT - NINE, NOT EIGHT
+
+**There are nine granted subscriptions, not eight.** Measured 2026-10-06.
+
+| Agency | granted | expires | grant span | mark-paid today: EXTEND | REPLACE | days removed |
+|---|---|---|---|---|---|---|
+| AARATI TRANSFORMER | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| DYNAMIC TRAMSFORMER | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| GUJARAT ENERGY TRANSMISSION | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| IDEAL ENGINEERING COMPANY | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| megha transformer | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| PATEL ELECTRICALS | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| UPENDRA | 10 Sep 2026 | 10 Mar 2028 | 547 d | 10 Mar 2029 | 6 Oct 2027 | **521** |
+| MEGHA | 10 Sep 2026 | 10 Oct 2026 | 30 d | 10 Oct 2027 | 6 Oct 2027 | 4 |
+| DRISHIV | 10 Sep 2026 | 10 Sep 2026 | **0 d** | 6 Oct 2027 | 6 Oct 2027 | **0** |
+
+**If all nine paid today, replace removes 3,651 days of granted time** - about ten years across the cohort, and
+**~17 months each from seven agencies holding the eighteen-month founding grant.**
+
+Two facts that matter to the decision:
+
+- **The rule only bites while a grant is still ahead.** DRISHIV's grant expired on the day it was made (0 days) and
+  lapsed 26 days ago, so `base = now` either way and the reading is irrelevant to it. MEGHA's 30-day grant has 4
+  days left, so the difference is 4 days.
+- **The seven at 521 days are one batch** - all granted 10 Sep 2026 for 547 days. They are the grants
+  `functions/subscription.js` names as making early renewal normal.
+
+### THE RECOMMENDATION: AN EXPLICIT CHOICE, NOT AN AUTOMATIC RULE
+
+**Do not branch on the previous status.** Put the choice on the mark-paid form - *"Replace the grant instead of
+extending it"* - defaulting to **extend**, with the preview showing the resulting date either way and naming the
+days being removed.
+
+That reading of the evidence:
+
+- **It matches what actually happened.** ZENITH was a deliberate, per-case decision by the operator, on a record
+  whose own reason says it was correcting a defect. A per-case control is that act, made repeatable.
+- **It cannot silently remove 521 days from seven agencies.** G100's recorded reasoning - *"silently removing months
+  a customer was told were free is the harder mistake to explain"* - applies with most force to exactly this cohort,
+  and they were told eighteen months.
+- **It needs no change to the Razorpay path**, because the choice exists only where an admin is recording a payment.
+  The self-serve path keeps extending, and the two no longer disagree about the normal case.
+- **It keeps one rule per place.** The server branch and the preview are parameterised by the same flag, so the
+  mirror G100 built still mirrors.
+
+**⚠ AND THE FORM HAS NO LANGUAGE FOR AN EXPIRY GOING BACKWARDS.** It currently says whether the days stack or start
+today. Replace turns 10 Mar 2028 into 6 Oct 2027 - a reduction - and the wording has to say *"this removes 521 days
+of granted time"* rather than only showing two dates. G100 made the dates visible; this would make the loss visible,
+which is the thing an operator would want to be sure of before pressing it.
+
+**If the general rule really is replace**, the honest form of that is not a hidden branch either: it is the automatic
+rule PLUS the same visible day-count, PLUS the Razorpay path changed in the same commit so the two cannot disagree -
+and a decision about whether the seven existing grants are honoured or shortened, which is a commercial question
+about what those agencies were promised, not a code one.
+
+### NOT MEASURED
+
+- **Whether any of the nine intends to pay.** The exposure above is what the rule would do if they did; nothing here
+  predicts that they will.
+- **Nothing was built**, so nothing is verified beyond the figures, which come from a read-only census of the live
+  `subscriptions` collection.
+- **G100's fix 3 is still not deployed** - the per-call `history` on cancel, grant and mark-paid needs
+  `firebase deploy --only functions`. ZENITH's single history entry was written by the admin script, not by the
+  function, so **the cohort above would record nothing if any of them paid today.** That is worth settling before any
+  rule change, not after: a replace that removes 521 days and writes no history is the G100 shape again.
