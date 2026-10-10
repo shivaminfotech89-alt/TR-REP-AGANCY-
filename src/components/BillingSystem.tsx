@@ -19,6 +19,7 @@ import { mrStageSummary } from '../lib/inspectionStage';
 // in any one of them is how the statement and the screen come to disagree without either being
 // wrong on its own terms.
 import { isScrapAdjustment, isScrapJob } from '../lib/scrapState';
+import { placeOilTransaction, OIL_UNPLACED_TEXT, type OilPlacedBy } from '../lib/oilPlacement';
 import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
@@ -991,6 +992,16 @@ export default function BillingSystem() {
     return selectedMrDate;
   }, [selectedMrNo, selectedJobsData, inspections, selectedMrDate]);
 
+  /**
+   * ⚠ THE PLACEMENT RULE LIVES IN lib/oilPlacement (AUDIT G124), not here. It was inline, which meant the
+   * `mrNo`-only path - the one that must print a marker - could not be tested at all: no live receipt lacks
+   * both identifiers, so the only way to exercise it is a fixture, and a fixture needs an importable function.
+   */
+  const knownAtIds = useMemo(
+    () => new Set((atMasters || []).map((a: any) => String(a.id ?? ''))),
+    [atMasters],
+  );
+
   // Master MR-wise Summary matching OilInward logic identically
   const allMrSummary = useMemo(() => {
     const summary: Record<
@@ -1001,8 +1012,21 @@ export default function BillingSystem() {
         division: string;
         totalShortage: number;
         totalReceived: number;
+        /** Litres on this row placed by MR NUMBER ALONE - no jobId, no atId. Printed as a marker. */
+        unverifiedLiters: number;
+        /**
+         * ⚠ LITRES ON AN MR WITH NO TRANSFORMERS BEHIND IT (AUDIT G124). The tender reference is sound, so
+         * the receipt belongs on this statement - but the MR carries no jobs, so the litres sit against no
+         * work. ADMIN's MR 5585 is 2,110 L in exactly that state. Open with the division, not settled.
+         */
+        noJobsLiters: number;
+        /** How each contributing transaction was placed, for the marker and for diagnosis. */
+        placedBy: OilPlacedBy[];
       }
     > = {};
+
+    /** Transactions no identifier can place. Reported on the sheet in their own group. */
+    const unplaced: Array<{ mrNo: string; division: string; liters: number; reason: string }> = [];
 
     // Group shortage from external inspections via jobs
     jobs.forEach((job) => {
@@ -1016,6 +1040,9 @@ export default function BillingSystem() {
           division: job.division || "",
           totalShortage: 0,
           totalReceived: 0,
+          unverifiedLiters: 0,
+          noJobsLiters: 0,
+          placedBy: [],
         };
       } else if (summary[mrNo].mrDate === "-" && mrDate !== "-") {
         summary[mrNo].mrDate = mrDate;
@@ -1067,9 +1094,30 @@ export default function BillingSystem() {
        * that rule being applied, not broken.
        */
       if (isScrapAdjustment(tx)) return;
-      const mrNo = tx.mrNo;
-      if (!mrNo) return;
-      const txMrDate = tx.mrDate || getMrDate(tx.mrNo);
+
+      const liters = Number(tx.netLiters || 0);
+      const placed = placeOilTransaction(tx, {
+        scopedJobs: jobs,
+        atId: String(activeAtMaster?.id ?? ''),
+        viewingAllTenders,
+        knownAtIds,
+      });
+
+      // ⚠ UNPLACEABLE LITRES ARE KEPT, NOT DROPPED, and the reason printed is the true one.
+      // `'reason' in placed`, not `!placed.placed` - no strictNullChecks, so a boolean-literal
+      // discriminant does not narrow. Same idiom as lib/mrAddDecision.
+      if ('reason' in placed) {
+        unplaced.push({
+          mrNo: String(tx.mrNo ?? '').trim(),
+          division: tx.division || '',
+          liters,
+          reason: OIL_UNPLACED_TEXT[placed.reason],
+        });
+        return;
+      }
+
+      const mrNo = placed.mrNo;
+      const txMrDate = tx.mrDate || getMrDate(mrNo);
       if (!summary[mrNo]) {
         summary[mrNo] = {
           mrNo,
@@ -1077,15 +1125,25 @@ export default function BillingSystem() {
           division: tx.division || "",
           totalShortage: 0,
           totalReceived: 0,
+          unverifiedLiters: 0,
+          noJobsLiters: 0,
+          placedBy: [],
         };
       } else if (summary[mrNo].mrDate === "-" && txMrDate !== "-") {
         summary[mrNo].mrDate = txMrDate;
       }
-      summary[mrNo].totalReceived += Number(tx.netLiters || 0);
+      summary[mrNo].totalReceived += liters;
+      summary[mrNo].placedBy.push(placed.by);
+      // ⚠ THE MARKER IS CARRIED IN LITRES, NOT AS A BOOLEAN. "2,110 L of this row is unverified" is
+      // actionable on a statement the division reconciles; "this row is unverified" is not.
+      if (placed.by === 'mrNo-only') summary[mrNo].unverifiedLiters += liters;
+      // ⚠ Counted separately from `unverifiedLiters`: the two are different doubts. One is "we matched this
+      // by a string"; this one is "we matched it soundly, onto an MR with nothing behind it".
+      if (placed.mrHasNoJobs) summary[mrNo].noJobsLiters += liters;
     });
 
-    return Object.values(summary);
-  }, [jobs, inspections, oilTransactions]);
+    return { rows: Object.values(summary), unplaced };
+  }, [jobs, inspections, oilTransactions, activeAtMaster, viewingAllTenders, knownAtIds]);
 
   const [customOilUptoDate, setCustomOilUptoDate] = useState<string>('');
 
@@ -1157,13 +1215,22 @@ export default function BillingSystem() {
         priorNetBalance: 0,
         // Nothing is bounded when no division is selected, so nothing is excluded to declare.
         scrapAdjustmentExcluded: 0,
+        /**
+         * ⚠ RETURNED FROM BOTH BRANCHES, for the reason the note on `scrapAdjustmentExcluded` already
+         * gives: omitting a field from one branch still typechecks, and the printed marker reading it would
+         * render `undefined` on every statement that has a division - which is every real one (AUDIT G124).
+         */
+        unverifiedInwardLiters: 0,
+        noJobsInwardLiters: 0,
+        noJobsInwardMrs: [] as string[],
+        unplacedOil: allMrSummary.unplaced,
       };
     }
 
     const uptoTimestamp = parseDateToTimestamp(effectiveOilUptoDate);
 
     // Filter MR summary for concern division up to the effective MR date identically to OilInward
-    const divisionMrList = allMrSummary.filter((s) => {
+    const divisionMrList = allMrSummary.rows.filter((s) => {
       if (currentDivision) {
         const sDiv = (s.division || "").trim().toUpperCase();
         const cDiv = currentDivision.trim().toUpperCase();
@@ -1248,6 +1315,25 @@ export default function BillingSystem() {
        * paper.
        */
       scrapAdjustmentExcluded,
+      /**
+       * ⚠ LITRES ON THIS STATEMENT PLACED BY MR NUMBER ALONE (AUDIT G124). Summed over the rows actually
+       * included, not over every transaction, so the figure qualifies the same population as the statement -
+       * the F86 rule, which this file has broken before on a page that goes to a division office.
+       */
+      unverifiedInwardLiters: divisionMrList.reduce((n, s) => n + (Number(s.unverifiedLiters) || 0), 0),
+      /** Litres on this statement landing on an MR with no transformers. Same population rule. */
+      noJobsInwardLiters: divisionMrList.reduce((n, s) => n + (Number(s.noJobsLiters) || 0), 0),
+      noJobsInwardMrs: divisionMrList.filter(s => Number(s.noJobsLiters) > 0).map(s => s.mrNo),
+      /**
+       * ⚠ TRANSACTIONS NO IDENTIFIER COULD PLACE - shown, never dropped. Bounded by division the same way
+       * the statement is; the date bound is deliberately NOT applied, because an unplaceable transaction has
+       * no reliable date either and excluding it by one would hide it twice.
+       */
+      unplacedOil: allMrSummary.unplaced.filter(u => {
+        const uDiv = (u.division || '').trim().toUpperCase();
+        const cDiv = currentDivision.trim().toUpperCase();
+        return !(uDiv && cDiv && uDiv !== cDiv && !uDiv.includes(cDiv) && !cDiv.includes(uDiv));
+      }),
     };
     // `oilTransactions` is read by the exclusion total above; without it here the declared
     // figure freezes while the statement around it updates.
@@ -3848,6 +3934,51 @@ export default function BillingSystem() {
                           oil retained from scrapped units, pending confirmation of its treatment
                           with the division.
                         </p>
+                      )}
+
+                      {/* ⚠ PLACED BY MR NUMBER ALONE - SAID ON THE PAGE, NOT ONLY IN THE CODE (AUDIT G124).
+                          An inward figure built partly from a string match is a claim this app cannot stand
+                          behind, and this statement is reconciled against the division's own workbook. Same
+                          spirit as "Scrap - Returned": the sheet states what it knows and what it does not. */}
+                      {divisionOilStatement.unverifiedInwardLiters > 0 && (
+                        <p className="text-[7px] leading-tight pt-1 font-bold text-slate-900">
+                          Includes {divisionOilStatement.unverifiedInwardLiters.toFixed(1)} Ltr matched to
+                          this division by MR number only - the receipt records no job or tender reference.
+                          Unconfirmed with the division.
+                        </p>
+                      )}
+
+                      {/* ⚠ PLACED SOUNDLY, ONTO AN MR WITH NOTHING BEHIND IT (AUDIT G124). A different
+                          doubt from the one above: the tender reference is good, the MR carries no
+                          transformers. 2,110 L against no jobs is an open question with the division, and a
+                          row that does not say so presents it as settled. */}
+                      {divisionOilStatement.noJobsInwardLiters > 0 && (
+                        <p className="text-[7px] leading-tight pt-1 font-bold text-slate-900">
+                          Includes {divisionOilStatement.noJobsInwardLiters.toFixed(1)} Ltr received against
+                          MR {divisionOilStatement.noJobsInwardMrs.join(', ')}, which carries no transformers on
+                          this statement. The receipt is recorded; the work it was issued for is not.
+                        </p>
+                      )}
+
+                      {/* ⚠ LITRES NOTHING COULD PLACE ARE SHOWN, NEVER DROPPED. Oil vanishing from a
+                          statement that is settled against is worse than oil shown as unplaced. */}
+                      {divisionOilStatement.unplacedOil.length > 0 && (
+                        <div className="pt-1">
+                          <p className="text-[7px] leading-tight font-bold text-slate-900">
+                            Not included above - {divisionOilStatement.unplacedOil.length} oil receipt(s)
+                            totalling{' '}
+                            {divisionOilStatement.unplacedOil
+                              .reduce((n, u) => n + (Number(u.liters) || 0), 0).toFixed(1)} Ltr
+                            could not be placed on any MR of this statement:
+                          </p>
+                          <ul className="text-[7px] leading-tight text-slate-800 pl-2">
+                            {divisionOilStatement.unplacedOil.map((u, i) => (
+                              <li key={i}>
+                                MR {u.mrNo || '(none)'} — {Number(u.liters || 0).toFixed(1)} Ltr — {u.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
                       )}
                     </div>
                   </div>

@@ -122,6 +122,140 @@ that two pieces of code agree about data neither author chose.
 
 ---
 
+## Pattern: a missing value that resolves to a sentinel which DISABLES a check reads as a pass, and says nothing
+
+Recorded 2026-10-10, from the circle limits (G123).
+
+```ts
+hasLimit: limit > 0                                                       // getCircleLimitForJob
+const exceeds = limitInfo.hasLimit && comparisonAmt > limitInfo.limit;    // checkJobCircleLimit
+```
+
+**A stored `0` means "no limit recorded". An ABSENT capacity key means the same thing**, because
+`Number(undefined) || 0` is `0`. Either way `hasLimit` is false, `exceeds` is false, and the job passes. **No
+screen says it was not checked.** "Within limit" and "never compared" are rendered identically, and the second
+is the one nobody looks for.
+
+**⚠ IT HAS ALREADY HAPPENED.** `26VRSAM-4` — VAARAHI, 63 kVA, Level-1, comparison total **Rs 23,240.94** — sat
+in exactly that state because the Level-1 column's 63 kVA cell was zero. It read as fine for as long as the
+column was wrong. It was not flagged, not queried, and appeared in no over-limit list.
+
+**⚠ THE SIBLING CASE, AND THE DIFFERENCE IN HOW IT WAS HANDLED.** A3 found the same shape in the allotment
+gate: an unrecorded quota resolved to `0`, the whole check sat inside `if (allowed > 0)`, and the quota
+silently did nothing. That one was **fixed** — an unrecorded allotment now blocks, on the reasoning that it
+"is not a quota of zero and not a quota of infinity, it is missing data". **The circle limit has not been
+fixed**, because a limit is the sanctioning authority's power and making a missing one block would stop work
+on capacities the tender may simply not price. The decision is the owner's; what is recorded here is that the
+two siblings are resolved differently and that only one of them announces itself.
+
+### ⚠⚠ THE SAME PATTERN IN A DIFFERENT HAT: DEMOTING A BROKEN REFERENCE TO A WEAKER JOIN
+
+Recorded 2026-10-10, from the oil join (G124).
+
+An oil receipt is placed on a statement by `jobId`, else by `atId` + `mrNo`, else by `mrNo` alone with a printed
+marker. **The question is what to do with an `atId` that is PRESENT and resolves to no `atMasters` document.**
+One live receipt is in that state - ADMIN's MR 5585, `atId` `NpJKH9fZpMoijypO1GZr`, 2,110 L, worth
+**Rs 260,386.50** of deduction.
+
+Letting it fall through to the `mrNo` path is the obvious thing and it is **this file's own sentinel pattern
+wearing a different hat**: the strong identifier is there and it is broken, and treating "present but
+unresolvable" as "absent" lets a dangling reference **buy a weaker join** and then pass as an ordinary string
+match - marked as a string match, which is a true statement about the wrong fact. The marker would say "matched
+by MR number only" when the truth is "carries a tender reference that points at nothing".
+
+So `at-missing` is its own outcome with its own printed phrase - *"belongs to a tender that no longer exists"* -
+and a test asserts the four phrases are distinct, because two reasons sharing a phrase makes one of them a lie
+on a page the division reconciles.
+
+**The general rule: a reference that is absent and a reference that is broken are different facts, and the
+broken one must never be allowed to degrade into the absent one.** An absent reference announces itself at the
+first lookup; a broken one looks like a real link and fails only where something tries to resolve it. Degrading
+the second into the first converts a loud failure into a quiet one, which is the whole shape of this pattern.
+
+### THE TRAP THAT IS STILL OPEN, AND IT IS NOT THE ONE IT LOOKS LIKE
+
+The authority's table has a **22 KV Level-1** column the app cannot represent at all. `RATING_LEVEL_OPTIONS`
+offers one `22 KV`, and `getCircleLimitForJob` maps it to row `05`, which is the paper's *"22KV 3,4-Star &
+Others"* column. The two cells the paper gives for 22 KV Level-1 — **200 kVA 141,250** and
+**500 kVA 301,741** — have nowhere to live.
+
+**⚠⚠ SO THE FIRST 22 KV LEVEL-1 UNIT WOULD NOT GO UNCHECKED AT THOSE CAPACITIES. IT WOULD BE CHECKED AGAINST
+A FIGURE ROUGHLY HALF THE RIGHT ONE.** Measured by resolving every capacity through the real lookup:
+
+| kVA | app resolves | paper, 22KV Level-1 | what happens |
+|---|---|---|---|
+| 5, 10 | 0 | — | **unchecked, silently** |
+| 16, 25, 63, 100 | 16,455 / 18,889 / 33,661 / 48,700 | — | checked against the 3,4-Star figure; the paper gives no 22KV Level-1 cell, so there is no right answer |
+| **200** | **87,710** | **141,250** | **checked against 62 % of the authority's limit** |
+| **500** | **161,287** | **301,741** | **checked against 53 % of the authority's limit** |
+| 50, 315 | 0 | — | unchecked, silently (no row in the paper either) |
+
+**That is the more dangerous half and it is the opposite failure.** A 200 kVA 22 KV Level-1 unit estimated
+anywhere between 87,710 and 141,250 would be asserted **"REPAIRABLE (> CIRCLE LIMIT)" on a printed estimate
+addressed to the circle office** — a false over-limit claim about that officer's own sanction power, sending
+an estimate up for higher sanction that does not need it.
+
+**⚠ THE LESSON IS THAT ONE UNREPRESENTABLE COLUMN PRODUCES TWO DIFFERENT FAILURES, AND THE QUIET ONE IS NOT
+THE WORST.** The silence at 5 and 10 kVA is what the shape suggests; the wrong-figure comparison at 200 and
+500 is what the data does. **Live today: 0 jobs carry the `22 KV` rating**, so neither has occurred — which is
+exactly why it is recorded as a trap rather than fixed. No rating option was added and no code changed.
+
+---
+
+## Pattern: an AT number does not identify a tender — only the document id does
+
+Recorded 2026-10-10, from a per-tender count that looked implausible.
+
+**Four agencies share the string `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819`**: ZENITH, MEGHA, VAARAHI and
+SANA each hold a tender recorded under that number. It is the DISCOM's reference for the tender *round*, not
+for any one agency's contract under it.
+
+Counted rather than assumed - the first version of this entry said six, and it is four:
+
+```
+19 atMasters   15 distinct atNumber strings   6 of 19 carry a SHARED number
+
+  4x  UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819   MEGHA, SANA ELECTRICALS, VAARAHI, ZENITH
+  2x  2026-27                                     AARATI TRANSFORMER, suchit
+```
+
+⚠ And `UPENDRA`'s `UGVCL/2026-28/01/AT/1819` is a **different string** for the same tender round - no
+`EE-T-1/TRANS-REP` segment. So the number does not even reliably group the tenders that genuinely belong
+together: it over-groups four and under-groups a fifth.
+
+**So keying any grouping on `atNumber` conflates them.** A per-tender over-limit table did exactly that and
+collapsed **164 jobs into a single row**, attributed to whichever agency's document the map happened to insert
+first - reported under ZENITH, containing VAARAHI's and SANA's work. Re-keyed on the document id, the same data
+separates into ZENITH 100, VAARAHI 59, SANA 5. (MEGHA holds the shared number too but its jobs sit on its other
+tender, `AT 26-27`, so it contributed none of the 164 - which is why the collapsed row was not even a complete
+conflation of the four.)
+
+```
+keyed on atNumber   ZENITH TRANSFORMERS  …/AT/1819   164 jobs   10 over
+keyed on at.id      ZENITH TRANSFORMERS  …/AT/1819   100 jobs    0 over
+                    VAARAHI ELECTRICALS  …/AT/1819    59 jobs    6 over
+                    SANA ELECTRICALS     …/AT/1819     5 jobs    4 over
+```
+
+The totals were right; every attribution was wrong.
+
+**⚠⚠ IT WAS CAUGHT BY A COUNT THAT LOOKED IMPLAUSIBLE, NOT BY THE CODE.** 164 jobs on one agency's tender did
+not match anything else known about ZENITH, and that is the only reason it was questioned. **A correct-looking
+query over a shared key gives a wrong answer quietly** — there is no error, no empty result and no exception;
+the groups are simply the wrong groups. Had the number been 100 rather than 164 it would have passed.
+
+**The rule: group, count, join and report on `at.id`. Use `atNumber` only as a label, and print the agency
+beside it** — a tender reference without an agency name is ambiguous on six of nineteen tenders in this
+database.
+
+**⚠ THIS IS THE THIRD IDENTIFIER IN THIS FILE THAT IS NOT ONE.** MR numbers are division references and are not
+ordered or unique (`45645`, `1961`, `00008`, `STD-02`, one that is digits followed by a stray backtick) — G113
+rejected them as a sequence. Job numbers are not uniquely allocated (O2). Now AT numbers. **The pattern is a
+human-facing reference being used as a key**, and in each case the code reads naturally and the result is wrong
+only in the data.
+
+---
+
 ## Pattern: an audit statement that declared data clean closed the question for everyone after it
 
 **Two entries in this file said the rate masters were clean, and both were read as settled.**
@@ -23118,6 +23252,13 @@ So nothing is unchecked today **except** `26VRSAM-4`, which was unchecked becaus
 commit fills. **After the data correction, zero jobs on A/T 1819 are unchecked.** The semantics are left as they
 are: silent-unchecked versus always-over is a real decision and it is the owner's.
 
+**⚠ RECORDED AS A STANDING TRAP, 2026-10-10** - see the Pattern entry *"a missing value that resolves to a
+sentinel which DISABLES a check reads as a pass, and says nothing"* at the top of this file. It carries the
+measured 22 KV Level-1 table and **one correction to how that trap was first described**: at 200 and 500 kVA a
+22 KV Level-1 unit would **not** go unchecked - it resolves to row `05`'s 3,4-Star figure, **62 % and 53 % of
+the authority's limit**, producing a FALSE over-limit assertion on a printed estimate rather than silence. The
+silence applies only at 5, 10, 50 and 315 kVA.
+
 ### ⚠ 22 KV IS ONE RATING OPTION BUT TWO COLUMNS IN THE PAPER - REPORTED, NOT CHANGED
 
 `RATING_LEVEL_OPTIONS` offers a single `22 KV`, and `getCircleLimitForJob` maps it to row `05`. The authority's
@@ -23128,6 +23269,11 @@ capacities - **200 kVA 141,250 and 500 kVA 301,741**.
 - **The 22KV Level-1 column has no row in the app at all.** Two cells are unrepresentable.
 - **Live: 0 jobs carry the `22 KV` rating**, so no job is currently indistinguishable and nothing is mispriced
   by the gap today. No rating option was added, as instructed.
+- **⚠ BUT THE CONSEQUENCE IS NOT WHAT IT LOOKS LIKE.** Resolved through the real lookup at every capacity: a
+  22 KV Level-1 unit at **200 kVA** would be checked against **87,710** where the paper says **141,250**, and at
+  **500 kVA** against **161,287** where the paper says **301,741**. **Not unchecked - checked against roughly
+  half the right figure**, which asserts "> CIRCLE LIMIT" on an estimate addressed to the officer whose
+  sanction power it misstates. Recorded in the Pattern entry at the top of the file.
 
 ### VERIFIED
 
@@ -23145,3 +23291,143 @@ capacities - **200 kVA 141,250 and 500 kVA 301,741**.
   absent from the repo. Correcting the figures does not make the hierarchy in clause 4.0 reachable.
 - **The 22KV Level-1 and the 50 / 315 kVA gaps are recorded, not closed**, and are only harmless because no
   live job lands on them.
+
+---
+
+## G124. The oil join keyed on an MR number, and a dangling tender reference counted 2,110 L twice
+
+### THE TWO HALVES OF ONE CORRECTION - CODE AND DATA, EITHER ALONE WRONG
+
+**The code half.** `BillingSystem.allMrSummary` joined two lists on `tx.mrNo`, and the two sides were scoped
+differently: `jobs` is agency AND tender scoped (`matchesAtScope`), `oilTransactions` is `agencyOil`, agency
+scoped only. Every live receipt carries `atId`; seven of ten carry `jobId`. **The identifiers were on both
+sides and the code keyed on the human-facing string.**
+
+Measured, not theorised - two receipts were landing on statements they do not belong to:
+
+```
+MEGHA  MR 8989   420 L   atId = AT 26-27          -> appeared on MEGHA's 1819 statement too
+ADMIN  MR 5585  2110 L   atId = a DELETED tender  -> appeared on BOTH of ADMIN's statements
+```
+
+**The data half.** `oilTransactions/jiRVY3ADM9JmhFfJoQTj` carried `atId: NpJKH9fZpMoijypO1GZr`, and no such
+`atMasters` document exists. It was the only dangling `atId` in the database.
+
+**⚠⚠ AND THE DANGLING REFERENCE HAD ALREADY CORRUPTED SOMETHING ELSE.** `2026-28/AT/1819` opened with
+`openingOilBalanceByDivision: {"DEESA": 2212}`, carried from `2026_27` on 2026-09-07 - and 2,212 is
+`2026_27`'s **gross shortage**. The carry-forward never saw the 2,110 L receipt, because its `atId` already
+pointed nowhere when the balance was computed. Correct arithmetic over the records it could see; wrong about
+the facts.
+
+**So fixing only the receipt would have made it worse.** The printed statement would be right and the Oil
+Account screen - which reads `openingOilBalance` - would show a 2,110 L debt the agency had already settled.
+Both halves went in one batch.
+
+### WHICH TENDER, FROM EVIDENCE
+
+| | `2026_27` | `2026-28/AT/1819` |
+|---|---|---|
+| startDate | **2026-08-15** | **2026-09-07** |
+| live on 2026-08-28 (the receipt date) | **YES** | no - ten days away |
+| DEESA jobs | 20, spanning **2026-08-15 .. 2026-09-07** | 13, earliest **2026-10-06** |
+| DEESA jobs within 21 days of the receipt | **20** | **0** |
+
+`2026_27` is the only candidate: the other tender did not exist. **MR 5585 appears exactly once in the whole
+database** - the receipt itself, no job, no inspection, no bill - and `NpJKH9fZpMoijypO1GZr` appears on no
+other record, so nothing else could say what that tender was. Dates and the job population are the whole
+evidence, and they agree.
+
+### ⚠ THE CARRIED FIGURE WAS RECOMPUTED BY THE APP, NOT TYPED IN
+
+`scripts/admin/fix-mr5585-tender-and-carry.js` imports `computeOilBalance` and `openingMapFrom` from
+`src/lib/oilBalance.ts` - the functions `addAtMaster` itself calls - and reproduces the surrounding block at
+`AgencyContext` ~2108, including the F86 rule that a source tender's own opening is part of what it closes
+with. **Writing 102 by hand would have been a figure that could drift from what the screen computes.**
+
+```
+source 2026_27: jobs 20, receipts 1   shortage 2212 L   received 2110 L   net 102 L
+openingOilBalance            2212  ->  102
+openingOilBalanceByDivision  {"DEESA":2212}  ->  {"DEESA":102}
+```
+
+It refuses on a wrong current `atId`, a missing target, a carry whose `openingOilBalanceFromAtId` is not the
+tender being repaired, a source with no records (F82/F92 - an absence must not be written as a settled zero),
+and **on a recomputed figure equal to the stored one**, which would mean the repair was not reaching the
+arithmetic.
+
+### FIVE SIGNALS, EVERY FALLBACK VISIBLE ON THE PAGE
+
+`lib/oilPlacement` places a receipt by `jobId`, else `atId`+`mrNo`, else `mrNo` alone, else not at all. Four
+unplaced phrases, each printed verbatim and each true of its own case:
+
+```
+job-out-of-scope  "names a job that is not on this tender"
+other-tender      "belongs to another tender"
+at-missing        "belongs to a tender that no longer exists"
+no-identifiers    "has no job, tender or MR reference"
+```
+
+**⚠⚠ A BROKEN REFERENCE IS NOT DEMOTED TO A WEAKER JOIN.** An `atId` resolving to nothing goes to
+`at-missing`, never to the `mrNo`-only path. Falling back would be this file's sentinel pattern in a new hat:
+the strong identifier is present and broken, and treating "present but unresolvable" as "absent" lets a
+dangling reference **buy a weaker join** and then pass as an ordinary string match - marked as a string match,
+which is a true statement about the wrong fact. Recorded as its own section in that Pattern entry.
+
+**The fifth signal: `mrHasNoJobs`.** A receipt can be placed soundly and still land on an MR with no
+transformers behind it. That is a different doubt from a string match and is counted separately. Live, it fires
+on **three** statements, not one:
+
+```
+ADMIN  / 2026_27     DEESA      2110 L  no-jobs
+ZENITH / .../AT/1819 BAVLA       840 L  no-jobs
+MEGHA  / AT 26-27    SABARMATI   420 L  no-jobs
+```
+
+So 3,370 L of oil sits against MRs with no work recorded, across three agencies. **MR 5585 was not special;
+it was the one with a broken tender reference on top.**
+
+### VERIFIED FROM THE DATABASE, NOT FROM THE SCRIPT'S PROJECTION
+
+```
+receipt atId   krdXRrzgCl0aTbJNTiL4 -> 2026_27
+1819 opening   102   byDivision {"DEESA":102}   fromAtId unchanged
+
+ADMIN / 2026_27         DEESA  short 2212.0  inward 2110.0  netDue  102.0  deduction Rs  11,220.00
+ADMIN / 2026-28/AT/1819 DEESA  short  257.1  inward    0.0  netDue  257.1  deduction Rs  28,286.50
+                                                             unplaced[5585:other-tender]  <- now TRUE
+Oil Account screen, 1819 DEESA: opens at 102 L
+
+dangling references: 5 -> 4   (the four orphaned External inspections remain; LAUNCH-BLOCKERS knows them)
+```
+
+**No other statement moved.** Every other row reads inward 0.0 or carries its litres on the one tender that
+owns them.
+
+**⚠ THE NET EFFECT ON THE AGENCY, STATED WITH ITS SIGN.** `netOilDue = shortage - inward` and
+`netPayable = grandTotal - netOilDue x 110`, so inward litres count **in the agency's favour**. Against the
+behaviour that shipped before this change, ADMIN's 1819 statement gains **Rs 28,286.50** of deduction - the
+double count in the agency's favour, removed - and `2026_27` is unchanged at Rs 11,220. **The agency is charged
+Rs 28,286.50 more, and that is the correct figure**; the 2,110 L now counts once, on the tender that issued it.
+
+### VERIFIED
+
+- **554 tests in 39 files**, 17 new on `oilPlacement`. tsc (exit 0); build; hooks guard, 50 files.
+- **`print-subtree-hashes`: 12 byte-identical, 1 changed** - `BillingSystem.tsx#3`, the OIL ACCOUNT SHEET, and
+  only that one.
+- **⚠ THE `mrNo`-ONLY PATH CANNOT FIRE ON CURRENT DATA AND IS TESTED ANYWAY.** All ten live receipts carry an
+  `atId`, so nothing exercises rule 3 - which is exactly why it needs a fixture. The marker it sets is what
+  prints "matched by MR number only"; an untested marker is a claim nobody has checked.
+- A test asserts the four unplaced phrases are **distinct**, because two reasons sharing a phrase makes one of
+  them a lie on a page the division reconciles.
+- Backups, whole documents, outside the repo:
+  `C:/Users/Administrator/circle-limits-backup/mr5585-repair-backup-2026-10-10T11-53-39-810Z.json`
+
+### NOT EXERCISED
+
+- **Nothing renders the oil account sheet.** The markers are verified by executing `placeOilTransaction`
+  against live records and by asserting the call sites in source; no one has printed the sheet since.
+- **MR 5585 still has no transformers.** The tender reference is now sound and the litres land on the right
+  statement, but 2,110 L of fresh oil against an MR with no work recorded is an open question with the
+  division, not a settled row - which is what the marker says and all it says.
+- **The four orphaned inspections are untouched**, and the `openingOilBalanceAt` timestamp on the repaired
+  carry was left as it was: the carry's date is when the tender opened, not when the arithmetic was corrected.

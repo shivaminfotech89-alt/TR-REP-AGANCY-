@@ -305,6 +305,51 @@ assertable for free.
 — one by the owner reading the diff, one by its own entry admitting the gap. **The risk is the next one, where
 nobody is reading.**
 
+### 25b. A fully paid bill on a job that belongs to no tender — **HIGH** — G124
+
+`MSBT-12`, document `ScUE3NkHxAKW6T9C9623`, MEGHA, MR 1, SABARMATI, 100 kVA CRGO, `repairType: GP`,
+`status: Dispatched`, created 2026-08-11 — **and `atId` is absent.**
+
+It is not a draft. It has been through the whole cycle:
+
+```
+estimateAmount      5661          estimateRefNo   UGVCL/EE-T-1/TRANS-REP/1
+estimateStatus      Sent          estimateSentDate 2026-08-15
+billNo              BILL/1        billStatus      Sent      billSentDate 2026-08-15
+billTotalMrAmount   6680
+paidAmount          6680          paymentDate     2026-08-15  paymentStatus Paid
+paymentRefNo        UTR/2026/1    approvedAmount  5661
+```
+
+**⚠⚠ IT SITS OUTSIDE EVERY PER-TENDER TOTAL IN THE APP, BY CONSTRUCTION.** Every count, query and scope in the
+codebase resolves a tender by document id:
+
+- the three allotment count sites query `where('atId', '==', …)` — a job with no `atId` matches none of them;
+- `matchesAtScope` returns `false` for an empty `atId` unless "all tenders" is on, so it is absent from the
+  register, the billing screen, the estimate screen and the dispatch screen while any tender is selected;
+- `atResolutionForJob` returns `source: 'no-at'`, so it has no AT percentage and no schedule.
+
+So **Rs 6,680 has been invoiced and paid against work that no tender total includes.** It is not that the figure
+is wrong; it is that the figure is nowhere. Any reconciliation of a tender's billed value against this
+database will be short by it, and nothing in the app reports the discrepancy because nothing can see the job.
+
+**⚠ AND IT IS GP, WHICH MAKES THE AMOUNT ITSELF A QUESTION.** A GP job is guarantee rework at no cost — it
+draws no allotment precisely because "the quota already paid for it" — yet this one carries
+`estimateAmount: 5661`, `approvedAmount: 5661` and `paidAmount: 6680`. Either the GP classification is wrong or
+the billing is. **That is a second fault on the same record and it is the owner's to resolve**; recording it
+here rather than guessing which half is right.
+
+**Why HIGH rather than the tier this sits in.** The three other atId-less jobs (`MSBT-12`/MR 9344,
+`MSBT-1`/MR 9344, both MEGHA) carry **no money at all** — they are the historical shape O2 describes and are
+harmless. This one is the only atId-less job in the database with a bill or a payment, and the only one where
+the missing reference has already produced an issued document.
+
+**Not fixable from the data.** Which tender this job belonged to is not recoverable from the job: MEGHA holds
+two (`AT 26-27` and `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819`), the estimate reference
+`UGVCL/EE-T-1/TRANS-REP/1` names neither unambiguously, and stamping one would decide an AT percentage and a
+schedule for an estimate that has already been approved at 5,661. **The operator has to say which tender MR 1
+was issued under.** No script ships for it, because a script would have to choose.
+
 ---
 
 ## Tier 5 — design decisions, not defects

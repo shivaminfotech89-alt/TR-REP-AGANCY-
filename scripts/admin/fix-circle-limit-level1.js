@@ -91,9 +91,21 @@ for (const h of holders) {
     }
   }
 }
-console.log(otherDiffs === 0
-  ? '  all four rows match the paper in every stored copy - nothing to correct there\n'
-  : `  ⚠ ${otherDiffs} disagreement(s) above - report before deciding what to do about them\n`);
+/**
+ * ⚠ A DISAGREEMENT IN THE OTHER FOUR ROWS NOW REFUSES, RATHER THAN BEING REPORTED AND IGNORED.
+ *
+ * Added before the live run. If 01, 02, 04 or 05 does not match the paper in some holder, then that holder's
+ * table is not the table this script was reasoned about - and writing row 03 into it would be writing into an
+ * unknown. The count is 0 across all 39 copies today, so this costs nothing and removes a way for a future run
+ * to do damage quietly.
+ */
+if (otherDiffs > 0) {
+  console.log(`  ⚠ ${otherDiffs} disagreement(s) above in rows this script does NOT write.`);
+  console.log('\nREFUSED - a holder whose other rows do not match the paper is not the table this script was');
+  console.log('reasoned about. Resolve those before writing row 03 into it.');
+  process.exit(1);
+}
+console.log('  all four rows match the paper in every stored copy - nothing to correct there\n');
 
 // --- what row 03 would become ------------------------------------------------------------------------------
 console.log('ROW 03, 11 KV LEVEL-1 - WHAT CHANGES');
