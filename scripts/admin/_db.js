@@ -80,11 +80,20 @@ export async function all(collection) {
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
-export function banner(title) {
+/**
+ * ⚠ THE READ-ONLY LINE IS A CLAIM, AND IT WAS PRINTED BY A SCRIPT THAT WROTE (AUDIT G118).
+ *
+ * `fix-msbt5-at-stamp.js --apply` printed "READ-ONLY - nothing in this script writes." immediately before
+ * updating a job document. Every other script here is read-only and the line was right for all of them, which
+ * is exactly why nobody noticed it was unconditional. A write-capable script passes `{ writes: true }`.
+ */
+export function banner(title, opts = {}) {
   console.log(`\n${title}`);
   console.log(`project ${projectId}  ·  database ${databaseId}`);
   console.log(`key ${keyPath.replace(process.cwd(), '.')}`);
-  console.log('READ-ONLY — nothing in this script writes.\n');
+  console.log(opts.writes
+    ? '⚠⚠ THIS RUN WRITES TO THE PRODUCTION DATABASE.\n'
+    : 'READ-ONLY — nothing in this script writes.\n');
 }
 
 /** Dates from Firestore come as Timestamp, number, or ISO string. See AUDIT F58. */

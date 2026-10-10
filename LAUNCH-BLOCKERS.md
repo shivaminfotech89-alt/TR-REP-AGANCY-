@@ -140,6 +140,63 @@ No code path resolves them. Each is work the tender prices and the app cannot bi
 B/C/D (valve, tap-changing switch, main tank replacement, overhauling-as-one-line) are
 domain questions awaiting answers.
 
+### 12a. Schedule-A sr 7, tap changing switch, is unreachable from any screen — **MEDIUM** — G118
+
+The internal inspection sheet has **no tap-changer field**. Its twenty-three stored fields are `condition,
+damB, damR, damY, dc, hvCoilLimb, hvSeConductor, inPnt, inspectedBy, inspectionDate, insula, lvCoilB, lvCoilR,
+lvCoilY, totCoil, totWt, totWtLv, totWtLvReIns, tstTrn, wasring, windingType, wtOfCoil, wtOfCoilLv` — none of
+them is a tap changer (`totCoil` is a coil count). Nothing records the observation, so nothing can price it.
+Same class as `12A-a1` and the "originals missing" rates (item 13, **O21**): a priced row the app cannot reach.
+
+**Why it is LOW rather than a gap in the set — clause 21.0 narrows it sharply.** The clause says a tapping
+switch on an old **25, 63 or 100 kVA** unit is **discarded**, the transformer made fixed-ratio at normal tap, and
+the damaged switch deposited to UGVCL's Divisional store. It is not replaced. Switches at **200 and 500 kVA are
+essential and shall not be discarded**. So sr 7 is only ever claimable at capacities the clause does not
+discard — in practice 50, 75, 200 and 500 kVA.
+
+Measured against 257 live jobs:
+
+| capacity | jobs | band | schedule | clause 21.0 |
+|---|---|---|---|---|
+| 5 | 2 | B5 | pays 0 | — |
+| 10 | 64 | B10_16 | pays 0 | — |
+| 16 | 32 | B10_16 | pays 0 | — |
+| 25 | 48 | B25 | pays 0 | discard |
+| 63 | 67 | B50_63_75 | **pays 3435** | **discard** |
+| 100 | 30 | B100 | **pays 4008** | **discard** |
+| 200 | 14 | B_ABOVE_100 | **pays 5153** | essential |
+
+```
+band pays 0                                        146 of 257
+band pays BUT clause 21.0 says discard (25/63/100)  97
+genuinely claimable                                 14   all at 200 kVA
+```
+
+**⚠⚠ RAISED FROM LOW TO MEDIUM, 2026-10-10, AND THE CORRECTION IS TO THE OWNER'S OWN REASONING.** It was
+filed LOW on "200/500 are rare for these agencies" - stated as fact, and it is a guess. Measured: **200 kVA is
+14 of 257 jobs, 5.4%**, and there is **not a single 50, 75 or 500 kVA job in the database**. So the exposure is
+one capacity band, present in real volume.
+
+**And clause 21.0 points the other way for that band.** It says switches at 200 and 500 kVA are *"essential and
+shall not be discarded"* - so **replacement is the expected route there**, not the exception. sr 7 is genuinely
+claimable at 200 kVA, and at Rs 5,153 a unit that is **up to Rs 72,142 across the 14 live jobs that the app
+cannot record at all**.
+
+The correction came from the measurement, not from the reasoning: the figures were produced to support parking
+this and instead argued for raising it.
+
+**⚠ AND THE CLAUSE AND THE SCHEDULE DISAGREE ABOUT 63 AND 100 kVA, WHICH NOBODY HAS NOTICED.** Clause 21.0 names
+both as discarded; Schedule-A pays Rs 3,435 and Rs 4,008 for them. 97 live jobs sit in that overlap. The note in
+`1819AT.md` under clause 21.0 reads *"matches Schedule-A item 7, which pays 0 for bands B1–B3 and pays only from
+50/63/75 KVA upward"* — **which is true about the bands and silent about the contradiction**: it treats the 0s
+below 25 as the whole story and does not observe that two of the three discarded capacities are paid ones. Either
+the schedule prices a switch the clause says is thrown away, or the clause's list is about something narrower
+than the rate row. **Not resolvable from either document alone.**
+
+**Open to the operator:** has any 200 kVA unit come in needing a tapping switch? If yes, this is a field plus a
+rate lookup and stops being low. If no, it stays parked — but parked with the figures above rather than on an
+assumption about rarity.
+
 ### 13. "Originals missing" coil rates are unreachable — **O21**
 
 `12B` / `13B` — the higher rates for a stripped unit — have no code path, because nothing
@@ -204,6 +261,49 @@ know "when did this happen" ran into it.
 MR-scoped so a single row cannot be removed; orphans inspections with no cleanup and no count
 in the confirmation; **no guard on issued documents**, so an MR with a sent and paid bill can
 be deleted, leaving the bill referenced by nothing.
+
+### 25a. Nothing in this repo renders a screen, so a claim about a template can only be a source assertion — **MEDIUM** — G121
+
+**Promoted out of "deferred, never argued" on 2026-10-10.** It had been flagged across G106, G107, G108, G110,
+G111 and G112 as something that would be useful; it is on this list now because it has twice been the reason a
+check could not be written as a check.
+
+**The two instances, which are the justification:**
+
+| | what could not be verified by execution | what was written instead |
+|---|---|---|
+| **G121** | that `{isScrapJob ? 'SCRAP' : 'REPAIRABLE'}` does not hold a bare reference to the imported function — truthy always, so **every forwarding letter would print SCRAP** | a source assertion scanning for `isScrapJob` used as a value. `tsc` returns **0 errors** on the bug, proved by reintroducing it |
+| **G68** | that the estimate-master grid shows the inherited figure in the cell an operator reads | recorded in that entry's own words: *"the grid was not rendered in a browser. The census reads the functions the grid calls and the rows it seeds, not pixels."* |
+
+**⚠ THE PATTERN THIS SITS UNDER IS THE FIRST ONE IN `AUDIT.md`** — a check that reads a description of the
+behaviour rather than executing it. Nine checks in that file have failed that way, two of them *in the same
+change* as G121: a ban on `<option value="OH"` that matched a different select, and a ban on an expression that
+matched the comment explaining why the expression was replaced. A source assertion is not merely weaker; it
+fails in a direction that reads as a pass.
+
+**Most of the machinery already exists.** `print-check` launches real Chrome over DevTools on Node's built-in
+WebSocket, builds with Vite and serves the output — `findChrome`, `launch`, `serve`, `evaluate` in
+`scripts/print-check/lib/chrome.mjs`. **A screen harness is that machinery with a different entry point, not new
+infrastructure.** There is no jsdom, happy-dom, testing-library or vitest in the tree, and adding one would be a
+second rendering story beside the one that works.
+
+**What it would and would not reach**, measured when the question was first asked (G112):
+
+- **Would:** the MR edit dialog, the Divisions panel, the intake form, the estimate-master grid, and any
+  template whose contents are currently asserted from source.
+- **Would not, usefully:** the Excel exports. `XLSX.writeFile` hands a file to the browser, so asserting a cell
+  means lifting the row builder out of its component first — the same extraction done for the add-unit gate in
+  G112 and for the coil predicate in G114.
+
+**Cost and status.** `print-check` is ~8s per document and is deliberately **not a gate** (G60): it needs
+Chrome, a service-account key and a minute. A screen harness inherits all three, so **it would stay on demand** —
+which means it would not have caught the G121 trap at commit time either. That is an argument about what it is
+for, not against building it: its value is making a template's contents assertable at all, not making them
+assertable for free.
+
+**Why MEDIUM and not higher:** no live defect is known to be hiding behind it today. Both instances were caught
+— one by the owner reading the diff, one by its own entry admitting the gap. **The risk is the next one, where
+nobody is reading.**
 
 ---
 
