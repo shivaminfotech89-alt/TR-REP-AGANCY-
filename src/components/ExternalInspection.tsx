@@ -226,8 +226,18 @@ export default function ExternalInspection() {
           nuteBolt: existingInsp.data.nuteBolt || 'Y',
           dryActPart: existingInsp.data.dryActPart || 'Y',
           clnDrtyTank: existingInsp.data.clnDrtyTank || 'Y',
-          breather: existingInsp.data.breather || 'Y',
-          oilLevGls: existingInsp.data.oilLevGls || 'Y',
+          // ⚠ 'N', NOT 'Y' - AND THE DEFAULT IS THE PRICE (AUDIT G117). Both items charge on an explicit
+          // 'Y' only (F46), so whichever value an untouched field carries decides the money: Schedule-A sr 5
+          // (oil level gauge glass, Rs 46) and sr 6 (breather, Rs 309), Rs 355 base per job before the AT
+          // percentage. 'N' moves it in the safe direction - a field nobody looked at now charges nothing
+          // rather than charging for a part that may never have been fitted.
+          //
+          // ⚠ NO SAVED RECORD CHANGES. Measured, not assumed: all 245 stored external inspections carry an
+          // explicit value for both fields - breather 172 'Y' / 73 'N', oilLevGls 180 'Y' / 60 'N' / 5 '-',
+          // zero absent and zero empty. So this fallback never fires on existing data and no estimate already
+          // issued can move. It applies to inspections entered from now on.
+          breather: existingInsp.data.breather || 'N',
+          oilLevGls: existingInsp.data.oilLevGls || 'N',
           outsidePaint: existingInsp.data.outsidePaint || 'Y',
           namePlate: existingInsp.data.namePlate || '-',
           damCtTank: (existingInsp.data.damCtTank !== undefined ? String(Math.round(Number(existingInsp.data.damCtTank) || 0)) : '0'),
@@ -260,8 +270,9 @@ export default function ExternalInspection() {
           nuteBolt: 'Y',
           dryActPart: 'Y',
           clnDrtyTank: 'Y',
-          breather: 'Y',
-          oilLevGls: 'Y',
+          // 'N' on a new form too - see the note on the rehydration branch above (AUDIT G117).
+          breather: 'N',
+          oilLevGls: 'N',
           outsidePaint: 'Y',
           namePlate: '-',
           damCtTank: '0',
