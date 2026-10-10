@@ -4,8 +4,11 @@
 // moved on to 'Dispatched', and a job that is scrap ONLY in its inspection.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   scrapEvidence, isScrapJob, scrapCounts, SCRAP_STATUS_VARIANT,
+  challanDisposition, scrapCategoryLabel,
+  CHALLAN_SCRAP_DISPOSITION, CHALLAN_REPAIRED_DISPOSITION, CATEGORY_SCRAP, CATEGORY_REPAIRABLE,
   isScrapAdjustment, inwardOnly, scrapAdjustmentsOnly, SCRAP_OIL_TYPE,
 } from './scrapState';
 
@@ -133,4 +136,74 @@ test('whitespace around the marker does not hide it', () => {
 test('the split handles an empty list', () => {
   assert.deepEqual(inwardOnly([]), []);
   assert.deepEqual(scrapAdjustmentsOnly([]), []);
+});
+
+// ── ⚠⚠ THE TWO PRINTED LABELS, BOTH BRANCHES (AUDIT G121) ───────────────────────────────────────────────────
+
+// ⚠ THE NON-SCRAP BRANCH IS THE POINT OF THESE TESTS. The defect they exist to catch is a bare `isScrapJob`
+// identifier in the JSX - the imported FUNCTION, truthy always - which prints the scrap word on every document.
+// A test that only asserts the scrap case passes against it. tsc cannot see it either: a function reference is
+// a valid truthy expression in a conditional.
+
+const repaired = { id: 'r1', jobNo: 'ZB-5', status: 'Dispatched', condition: 'Repairable' };
+const scrapped = { id: 's1', jobNo: 'ZB-12', status: 'Scrap', condition: 'Scrap' };
+// ASU-2's exact live shape: the declaration reached the inspection and never the job (O80).
+const asu2 = { id: 'asu2', jobNo: 'ASU-2', status: 'Dispatched', condition: undefined };
+const asu2Insp = [{ jobId: 'asu2', type: 'Internal', data: { condition: 'Scrap' } }];
+
+test('⚠ the delivery challan prints "Tested OK" for a repaired unit', () => {
+  assert.equal(challanDisposition(repaired), 'Tested OK');
+  assert.equal(challanDisposition(repaired), CHALLAN_REPAIRED_DISPOSITION);
+});
+
+test('the delivery challan prints "Scrap - Returned" for a scrapped unit', () => {
+  assert.equal(challanDisposition(scrapped), 'Scrap - Returned');
+  assert.equal(challanDisposition(scrapped), CHALLAN_SCRAP_DISPOSITION);
+});
+
+test('⚠ the forwarding letter prints REPAIRABLE for a non-scrap job', () => {
+  assert.equal(scrapCategoryLabel(repaired), 'REPAIRABLE');
+  assert.equal(scrapCategoryLabel(repaired), CATEGORY_REPAIRABLE);
+});
+
+test('the forwarding letter prints SCRAP for a scrapped job', () => {
+  assert.equal(scrapCategoryLabel(scrapped), 'SCRAP');
+  assert.equal(scrapCategoryLabel(scrapped), CATEGORY_SCRAP);
+});
+
+test('⚠⚠ ASU-2: both documents follow the inspection, which is the whole change', () => {
+  // Without the inspection list both labels read the job alone and get it wrong - which is exactly what the
+  // two inline sites did while they printed.
+  assert.equal(challanDisposition(asu2), 'Tested OK', 'the job document alone cannot answer it');
+  assert.equal(scrapCategoryLabel(asu2), 'REPAIRABLE', 'ditto');
+  assert.equal(challanDisposition(asu2, asu2Insp), 'Scrap - Returned');
+  assert.equal(scrapCategoryLabel(asu2, asu2Insp), 'SCRAP');
+});
+
+test('the labels are two vocabularies for one fact, and never the same string', () => {
+  // Merging them would force one document to use the other's wording. They must stay distinct.
+  assert.notEqual(CHALLAN_SCRAP_DISPOSITION, CATEGORY_SCRAP);
+  assert.notEqual(CHALLAN_REPAIRED_DISPOSITION, CATEGORY_REPAIRABLE);
+});
+
+test('an omitted inspection list is treated as none, not as an error', () => {
+  // Both printed sites pass `agencyInspections`, which is `[]` while the agency data is still loading.
+  assert.equal(challanDisposition(repaired, []), 'Tested OK');
+  assert.equal(scrapCategoryLabel(repaired, []), 'REPAIRABLE');
+  assert.equal(challanDisposition(scrapped, []), 'Scrap - Returned', 'the job-level arms still work');
+});
+
+// ── The printed sites must call the label, never hold a boolean ─────────────────────────────────────────────
+
+test('⚠⚠ neither printed site declares a local boolean the JSX could shadow', () => {
+  const challan = readFileSync(new URL('../components/DispatchChallan.tsx', import.meta.url), 'utf8');
+  const letter = readFileSync(new URL('../components/EstimateGenerate.tsx', import.meta.url), 'utf8');
+  for (const [name, src] of [['DispatchChallan', challan], ['EstimateGenerate', letter]]) {
+    // A bare `isScrapJob` used as a value - the silent failure. Only calls and the import may mention it.
+    const bare = src.split('\n').filter(l =>
+      /\bisScrapJob\b/.test(l) && !/isScrapJob\s*\(/.test(l) && !/^import/.test(l.trim()));
+    assert.deepEqual(bare, [], `${name} has a bare isScrapJob reference: ${bare.join(' | ')}`);
+  }
+  assert.ok(challan.includes('challanDisposition(job, agencyInspections)'));
+  assert.ok(letter.includes('scrapCategoryLabel(job, agencyInspections)'));
 });

@@ -36,7 +36,7 @@ import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { confirmWholeBeforePrint, triggerUniversalPrint } from '../lib/printUtils';
-import { isScrapJob } from '../lib/scrapState';
+import { isScrapJob, challanDisposition } from '../lib/scrapState';
 
 export default function DispatchChallan() {
   const {
@@ -1712,7 +1712,6 @@ export default function DispatchChallan() {
                         </thead>
                         <tbody>
                           {printData.jobs?.map((job: any, idx: number) => {
-                            const isScrap = isScrapJob(job, agencyInspections);
                             const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
                             return (
                               <tr key={job.id || idx}>
@@ -1727,7 +1726,7 @@ export default function DispatchChallan() {
                                 </td>
                                 <td className="border border-slate-800 p-1 font-mono">{job.serialNo || '-'}</td>
                                 <td className="border border-slate-800 p-1 text-center text-[11px] font-semibold">
-                                  {isScrap ? 'Scrap - Returned' : 'Tested OK'}
+                                  {challanDisposition(job, agencyInspections)}
                                 </td>
                               </tr>
                             );

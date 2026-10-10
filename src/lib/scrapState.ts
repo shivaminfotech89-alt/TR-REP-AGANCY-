@@ -160,3 +160,53 @@ export function scrapCounts(jobs: any[], inspections: any[] = []) {
   }
   return { byStatus, byCondition, byInspection, any, total: (jobs || []).length };
 }
+
+// ---------------------------------------------------------------------------
+// THE TWO PRINTED VOCABULARIES FOR ONE FACT (AUDIT G121)
+// ---------------------------------------------------------------------------
+
+/**
+ * ⚠⚠ THESE EXIST TO REMOVE A LOCAL BOOLEAN FROM TWO PRINTED SUBTREES, NOT FOR TIDINESS.
+ *
+ * Both printed sites used to read:
+ *
+ *     const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';   // the inline two-arm copy
+ *     ...
+ *     {isScrap ? 'Scrap - Returned' : 'Tested OK'}
+ *
+ * and at `EstimateGenerate` the local was named `isScrapJob` - the same name as the imported predicate.
+ * Renaming that local without renaming its JSX reference would make `{isScrapJob ? …}` resolve to the
+ * IMPORTED FUNCTION, which is truthy always, so **every forwarding letter would print SCRAP**.
+ *
+ * ⚠ AND `tsc` CANNOT SEE IT. A function reference is a valid truthy expression in a conditional, so there is no
+ * type error. The four `const isScrapJob = isScrapJob(...)` collisions in the same change WERE caught, because
+ * self-reference is an error; a bare reference in JSX is not. Same shadowing, silent instead of loud, on paper.
+ *
+ * So the local goes away entirely. With no boolean to shadow, the failure mode cannot recur at these sites -
+ * and the branch becomes executable, which is the only way to test that a NON-scrap job prints the other word.
+ * A test that checks only the scrap case passes against the bug.
+ *
+ * ⚠ THE TRADE-OFF, STATED: the printed JSX no longer contains the literal it prints, so a reader of the
+ * printed subtree follows one hop to see it. That is the cost of making it testable, and the strings are
+ * exported below so the hop is one step and greppable from either end.
+ *
+ * ⚠ TWO VOCABULARIES, ONE FACT. The delivery challan states a DISPOSITION - what happened to the unit - and the
+ * estimate forwarding letter states a CATEGORY. They are deliberately not merged into one label: the words are
+ * the division's, not the app's, and a single string would have to be wrong on one of the two documents.
+ */
+
+export const CHALLAN_SCRAP_DISPOSITION = 'Scrap - Returned';
+export const CHALLAN_REPAIRED_DISPOSITION = 'Tested OK';
+
+/** What the delivery challan prints in the result column for this unit. */
+export function challanDisposition(job: any, inspections: any[] = []): string {
+  return isScrapJob(job, inspections) ? CHALLAN_SCRAP_DISPOSITION : CHALLAN_REPAIRED_DISPOSITION;
+}
+
+export const CATEGORY_SCRAP = 'SCRAP';
+export const CATEGORY_REPAIRABLE = 'REPAIRABLE';
+
+/** What the estimate forwarding letter prints in the category column for this unit. */
+export function scrapCategoryLabel(job: any, inspections: any[] = []): string {
+  return isScrapJob(job, inspections) ? CATEGORY_SCRAP : CATEGORY_REPAIRABLE;
+}

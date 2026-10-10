@@ -1,7 +1,7 @@
 
 import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, matchesAtScope } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
-import { isScrapJob } from '../lib/scrapState';
+import { isScrapJob, scrapCategoryLabel } from '../lib/scrapState';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
 import { useSearchParams } from 'react-router-dom';
@@ -1283,7 +1283,6 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     // The ESTIMATE TOTAL, which is what the Amount column shows. Not the
                     // Clause 4.0 figure - nothing on this sheet reads that.
                     const finalAmt = est.finalAmount.toFixed(2);
-                    const isScrap = isScrapJob(job, agencyInspections);
                     // NO checkJobCircleLimit HERE ANY MORE. Nothing on the printed sheet
                     // reads the circle limit, so computing it per row would price every job
                     // twice to render nothing. See the note below the table.
@@ -1306,7 +1305,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                             figures behind it lived only in a `title` tooltip, which does not
                             exist on paper. */}
                         <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
-                          {isScrap ? 'SCRAP' : 'REPAIRABLE'}
+                          {scrapCategoryLabel(job, agencyInspections)}
                         </td>
                       </tr>
                     );
