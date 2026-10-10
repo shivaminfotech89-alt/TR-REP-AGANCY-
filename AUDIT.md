@@ -9362,6 +9362,32 @@ Engineer's sanction authority and correcting it from inference is exactly the fa
 pattern this audit exists to prevent. Two cells that look wrong are not evidence of what the
 right ones are.
 
+> ### ⚠⚠ WITHDRAWN 2026-10-10 - BOTH CELLS ARE THE AUTHORITY'S OWN FIGURES
+>
+> The owner typed the **Circle Authority Approval Power Limit table** from the paper (see G123). Both
+> suspected transcription errors appear in it exactly as stored:
+>
+> | | stored | authority's table |
+> |---|---|---|
+> | 4-Star @ 10 kVA | 7,707 | **7,707** |
+> | 3-Star @ 16 kVA | 8,696 | **8,696** |
+>
+> So 4-Star really does dip below 3-Star at 10 kVA, and 3-Star's ceiling really does fall from 10 to
+> 16 kVA. **The table is not monotonic and was never meant to be.** The operator's report that the
+> same 4-Star reversal appears on the 2026-28 paper is now the right reading of the two: a quirk
+> carried across tenders, not a transcription repeated.
+>
+> **The entry is kept rather than deleted, because the reasoning was sound and only the conclusion
+> changed.** Two anomalies in an otherwise ordered table *are* worth flagging, and refusing to
+> correct them from inference *was* right - that refusal is why the figures survived to be checked
+> against the source instead of being quietly "fixed" into a shape that looked tidier.
+>
+> **⚠ AND THE COST SECTION BELOW IS WITHDRAWN WITH THEM.** Every 10 and 16 kVA job was NOT checked
+> against a wrong ceiling; those two columns were right all along. The real wrong column was
+> **Level-1**, which nobody had suspected - all eight of its populated cells disagreed, and five of
+> its ten A/T 1819 jobs were reported over a limit the authority puts them comfortably inside. The
+> anomaly that looked wrong was correct; the column that looked orderly was not.
+
 #### What it costs if they are errors
 
 **Every 10 and 16 kVA job has been checked against a wrong ceiling since the schedule was
@@ -22965,3 +22991,157 @@ scrap predicate mirror       257 jobs, 37 agree scrap, 219 agree not       DISAG
 - **`overhaulEvidence`'s `matched` array has no caller yet.** It exists because `scrapEvidence`'s provenance
   turned out to be what made O80 reportable, and omitting it here would have been the same omission; nothing
   reads it today.
+
+---
+
+## G123. The 11 KV Level-1 circle limits were wrong in all eight cells - and the column nobody suspected
+
+### THE SOURCE, RECORDED AS WHAT IT IS
+
+**The Circle Authority Approval Power Limit table, typed by the owner from the paper on 2026-10-10.**
+USER-SUPPLIED: not inferred, not derived from any figure in this repo, not reconstructed from the 25 % rule.
+This is the provenance line that matters, because the previous figures have no provenance at all.
+
+| Sr | Capacity | 11KV 3-Star & other | 11KV 4-Star | 11KV Level-1 | 11KV Level-2 | 22KV 3,4-Star & Others | 22KV Level-1 |
+|---|---|---|---|---|---|---|---|
+| 01 | 1-ph 5 kVA | 5422 | 6206 | **13287** | — | — | — |
+| 02 | 10 kVA | 8716 | 7707 | **14367** | — | — | — |
+| 03 | 16 kVA | 8696 | 11729 | **15546** | 10851 | 16455 | — |
+| 04 | 25 kVA | 10124 | 15651 | **18585** | 13998 | 18889 | — |
+| 05 | 63 kVA | 20423 | 23684 | **34156** | 22137 | 33661 | — |
+| 06 | 100 kVA | 24609 | 31094 | **44750** | 27700 | 48700 | — |
+| 07 | 200 kVA | 47170 | 65139 | **85124** | 55986 | 87710 | 141250 |
+| 08 | 500 kVA | 148260 | 193768 | **294789** | 198914 | 161287 | 301741 |
+
+**⚠ `ugvcl-2026-estimate-approval.txt` IS STILL NOT IN THE REPOSITORY.** `1819AT.md` clause 4.0 cites it as the
+authoritative extract - *"Full extract in `ugvcl-2026-estimate-approval.txt`"* - and `find` returns nothing. The
+table above is therefore the only source for these figures that exists anywhere in the project.
+
+### WHAT WAS STORED, CELL BY CELL
+
+Verified against the paper across the seed **and all 39 stored copies** - 18 of 19 ATs and 21 of 22 agencies
+hold their own:
+
+| row | result |
+|---|---|
+| `01` 3-Star & other | **matches the paper exactly**, every cell, every copy |
+| `02` 4-Star | **matches exactly** |
+| `04` Level-2 | **matches exactly** |
+| `05` 22 KV | **matches exactly** |
+| `03` **Level-1** | **every one of the eight populated cells disagreed** |
+
+```
+                 5      10      16      25      63     100     200     500
+stored           0    8010    8475    9859       0       0       0       0
+authority    13287   14367   15546   18585   34156   44750   85124  294789
+```
+
+**Not a fill-in-the-blanks edit.** The three figures that were present were all low - 8,010 against 14,367,
+8,475 against 15,546, 9,859 against 18,585 - and the five that were zero read as *no limit recorded*, so those
+capacities went unchecked entirely.
+
+### ⚠⚠ THE COLUMN THAT LOOKED ORDERLY WAS THE WRONG ONE
+
+G96's entry flagged two cells as suspected transcription errors because they broke an otherwise monotonic order:
+4-Star dipping below 3-Star at 10 kVA, and 3-Star falling from 10 to 16 kVA. **Both are the authority's own
+figures.** Withdrawn at that entry rather than deleted, because the reasoning was sound and only the conclusion
+changed - and that refusal to correct from inference is precisely why the figures survived to be checked against
+the paper instead of being tidied into a shape that looked right.
+
+**Meanwhile Level-1 attracted no suspicion at all.** Its stored column *was* monotonic - 0, 8010, 8475, 9859 -
+and monotonic is what the eye accepts. The anomaly that looked wrong was correct; the column that looked
+orderly was wrong in every cell. **An ordering heuristic finds the cells that break a pattern, never the ones
+that keep it.**
+
+### ⚠⚠ CORRECTING THE SEED MOVES NO LIVE JOB BY ITSELF
+
+`getCircleLimitForJob` prefers a stored copy:
+
+```ts
+const limits = (circleLimitsData && circleLimitsData.length > 0) ? circleLimitsData : defaultCircleLimitsEstimateData;
+```
+
+and **39 holders have one, all 39 carrying the old Level-1 row.** So the code change in this commit fixes only
+agencies and tenders created from now on. The data correction is a separate decision:
+`scripts/admin/fix-circle-limit-level1.js`, `MODE = 'dry-run'`, which
+
+- **verifies rows 01, 02, 04 and 05 against the same paper and writes none of them** - rewriting a row that
+  already agrees would put the script's authorship on figures it did not establish;
+- **refuses outright if any affected job carries a bill**, because the limit is recomputed live and printed in
+  the Condition column of the estimate, so moving it under an issued bill changes what a reprint would say;
+- reports all 11 affected Level-1 jobs with their old and new limits. **None carries a bill or a payment.**
+
+### THE EFFECT ON A/T 1819, MEASURED THROUGH `checkJobCircleLimit`
+
+176 jobs priced, the corrected table simulated against the stored one:
+
+| | OVER LIMIT | within limit | unchecked |
+|---|---|---|---|
+| **before** | **14** | 161 | 1 |
+| **after** | **9** | 167 | 0 |
+
+**Six jobs change side, all of them Level-1:**
+
+| job | agency | kVA | comparison | old limit | new limit | |
+|---|---|---|---|---|---|---|
+| `26VRSAM-4` | VAARAHI | 63 | 23,240.94 | **none** | 34,156 | unchecked → within |
+| `WSU-8` | ADMIN | 25 | 16,395.93 | 9,859 | 18,585 | OVER → within |
+| `WSU-10` | ADMIN | 25 | 16,153.47 | 9,859 | 18,585 | OVER → within |
+| `WSU-12` | ADMIN | 25 | 16,081.67 | 9,859 | 18,585 | OVER → within |
+| `WSU-4` | ADMIN | 16 | 13,132.00 | 8,475 | 15,546 | OVER → within |
+| `26VRSWC-3` | VAARAHI | 16 | 9,651.40 | 8,475 | 15,546 | OVER → within |
+
+**All ten A/T 1819 Level-1 jobs are now within limit** - five were already, four moved from OVER, one from
+unchecked. The four worst by margin in the whole tender (166.3 %, 163.8 %, 163.1 %, 154.9 %) were all Level-1
+and all now sit inside. `26VRSAM-4` moved from **unchecked** rather than from over: its 63 kVA cell was zero.
+
+**Nine remain over, and the paper confirms every one of their limits**: six 3-Star (`26VRSAM-2` 152.2 %,
+`26VRSAM-1` 132.9 %, `26SNSAM-2` 127.7 %, `26SNSAM-5/-4/-3` ~110 %, `26VRS-10` 102.7 %) and two Level-2
+(`26VRSAM-3` 106.9 %, `26VRSAM-5` 105.0 %). Those are genuine.
+
+### ⚠ ZERO MEANS UNCHECKED, NOT A LIMIT OF NOTHING - REPORTED, NOT CHANGED
+
+```ts
+hasLimit: limit > 0                                        // getCircleLimitForJob
+const exceeds = limitInfo.hasLimit && comparisonAmt > limitInfo.limit;   // checkJobCircleLimit
+```
+
+A stored `0` - and an **absent capacity key**, which `Number(undefined) || 0` also makes `0` - produces
+`hasLimit: false`, `exceeds: false`. **The job goes silently unchecked.** It does NOT compare against zero and
+does not read as over limit. That is true of both cases the owner asked about:
+
+- **no 50 kVA and no 315 kVA row** in the authority's table → those capacities are unchecked. **Live: 0 jobs at
+  either capacity.** Capacity distribution is 5 ×2, 10 ×64, 16 ×32, 25 ×48, 63 ×67, 100 ×30, 200 ×14.
+- **dashes at the small capacities** for Level-2 and 22KV Level-1 → unchecked. **Live: 0 jobs on a dash cell.**
+
+So nothing is unchecked today **except** `26VRSAM-4`, which was unchecked because of the Level-1 zeros this
+commit fills. **After the data correction, zero jobs on A/T 1819 are unchecked.** The semantics are left as they
+are: silent-unchecked versus always-over is a real decision and it is the owner's.
+
+### ⚠ 22 KV IS ONE RATING OPTION BUT TWO COLUMNS IN THE PAPER - REPORTED, NOT CHANGED
+
+`RATING_LEVEL_OPTIONS` offers a single `22 KV`, and `getCircleLimitForJob` maps it to row `05`. The authority's
+table has **two** 22 KV columns: "3,4-Star & Others" and a separate **22KV Level-1** with figures at only two
+capacities - **200 kVA 141,250 and 500 kVA 301,741**.
+
+- **Row `05` is the first of the two, and it matches exactly.**
+- **The 22KV Level-1 column has no row in the app at all.** Two cells are unrepresentable.
+- **Live: 0 jobs carry the `22 KV` rating**, so no job is currently indistinguishable and nothing is mispriced
+  by the gap today. No rating option was added, as instructed.
+
+### VERIFIED
+
+- 537 tests in 38 files; tsc (exit 0); build; hooks guard, 50 files; `print-subtree-hashes` unchanged by this
+  commit.
+- **All three mirrors re-run clean**: coil 0 missed, band 0 mismatched, scrap 1 expected (ASU-2).
+- The dry run reports 39 of 39 copies needing the correction and 0 affected jobs carrying a bill.
+
+### NOT EXERCISED
+
+- **The migration has not been applied.** Every figure in the before/after table above is the corrected table
+  simulated against live records, not read back from the database.
+- **The authority is still neither stamped nor named.** Nothing records SE (O&M) or CE (OP) on a job, and
+  nothing implements the 25 % / 30 % routing - the limits are absolute rupee ceilings whose percentage base is
+  absent from the repo. Correcting the figures does not make the hierarchy in clause 4.0 reachable.
+- **The 22KV Level-1 and the 50 / 315 kVA gaps are recorded, not closed**, and are only harmless because no
+  live job lands on them.

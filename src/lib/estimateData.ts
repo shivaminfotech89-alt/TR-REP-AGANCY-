@@ -160,21 +160,38 @@ export const defaultCircleLimitsEstimateData: EstimateItem[] = [
     }
   },
   {
+    /**
+     * ⚠⚠ CORRECTED 2026-10-10 FROM THE AUTHORITY'S OWN TABLE (AUDIT G123). Every one of the eight
+     * populated cells was wrong, not merely incomplete: 10 kVA read 8,010 against 14,367, 16 read 8,475 against
+     * 15,546, 25 read 9,859 against 18,585, and 5 / 63 / 100 / 200 / 500 were all ZERO - which this lookup
+     * reads as "no limit" rather than "limit of nothing", so those capacities went UNCHECKED.
+     *
+     * ⚠ SOURCE: the Circle Authority Approval Power Limit table, typed by the owner on 2026-10-10. It is
+     * USER-SUPPLIED, not inferred and not derived from any figure in this repo. The file 1819AT.md cites as the
+     * authoritative extract - `ugvcl-2026-estimate-approval.txt` - is still NOT in the repository.
+     *
+     * ⚠ 50 AND 315 kVA STAY ZERO BECAUSE THE AUTHORITY'S TABLE HAS NO ROW FOR THEM. That is a real absence,
+     * not an omission here, and zero means unchecked - see the note on `hasLimit` in getCircleLimitForJob.
+     *
+     * ⚠⚠ CHANGING THIS SEED MOVES NO LIVE JOB BY ITSELF. 18 of 19 ATs and 21 of 22 agencies hold their
+     * own copy of this table and the lookup prefers it; all 39 carry the old Level-1 row. The data correction is
+     * a separate decision - scripts/admin/fix-circle-limit-level1.js, MODE = 'dry-run'.
+     */
     itemCode: "03",
     itemName: "11 KV - Level-1",
     unit: "Rs.",
     fixedRate: null,
     rates: {
-      "5": 0.00,
-      "10": 8010.00,
-      "16": 8475.00,
-      "25": 9859.00,
+      "5": 13287.00,
+      "10": 14367.00,
+      "16": 15546.00,
+      "25": 18585.00,
       "50": 0.00,
-      "63": 0.00,
-      "100": 0.00,
-      "200": 0.00,
+      "63": 34156.00,
+      "100": 44750.00,
+      "200": 85124.00,
       "315": 0.00,
-      "500": 0.00
+      "500": 294789.00
     }
   },
   {
