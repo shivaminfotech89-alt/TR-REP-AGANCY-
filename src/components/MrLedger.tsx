@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned } from '../lib/AgencyContext';
+import { CREATABLE_REPAIR_TYPES, type RepairType } from '../lib/repairType';
 import { mrAddDecision, resolveMrAt } from '../lib/mrAddDecision';
 import { jobNumberTail, nextJobNoFor, takenJobNumbers } from '../lib/jobNumbering';
 import { mrEditJob } from '../lib/mrEditDraft';
@@ -66,7 +67,8 @@ interface Job {
   serialNo: string;
   coreType?: string;
   status: string;
-  repairType: string;
+  /** `OGP` | `GP` | `OH` - OH is declared at internal inspection, never created (lib/repairType). */
+  repairType: RepairType;
   division: string;
   prevAtNo?: string;
   prevJobNo?: string;
@@ -2106,8 +2108,13 @@ export default function MrLedger() {
                         onChange={(e) => setEditingMr(prev => prev ? ({ ...prev, repairType: e.target.value }) : null)}
                         className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white cursor-pointer"
                       >
-                        <option value="OGP">OGP (Out of Guarantee)</option>
-                        <option value="GP">GP (Guarantee Period Warranty)</option>
+                        {/* ⚠ TWO OPTIONS, FROM `CREATABLE_REPAIR_TYPES` (AUDIT G114). `repairType` now also holds
+                            'OH', and OH must NOT be offered here: a job is never created as overhauled - it is
+                            declared so at internal inspection, with the unit open on the bench. The narrower type is
+                            what stops a third option being added here by analogy. */}
+                        {CREATABLE_REPAIR_TYPES.map(rt => (
+                          <option key={rt.value} value={rt.value}>{rt.label}</option>
+                        ))}
                       </select>
                     </div>
                   )}

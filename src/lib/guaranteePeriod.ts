@@ -51,10 +51,28 @@ export const GUARANTEE_DEFAULTS: Record<string, number> = {
   'LSTC / PAT': LSTC_GUARANTEE_MONTHS,
 };
 
-/** True when this core type carries no guarantee term at all. See the note above. */
-export function hasNoGuarantee(coreType: string | null | undefined): boolean {
-  const t = String(coreType || '').trim().toUpperCase();
-  return t === 'OH' || t.includes('OVERHAUL');
+/**
+ * True when this job carries no guarantee term at all. See the note above.
+ *
+ * ⚠⚠ TWO ARMS, ONE PREDICATE - AND THE SECOND ARM IS WHY (AUDIT G114). Overhauling reaches a job two
+ * different ways and only one of them is a core type:
+ *
+ *   - `coreType: 'OH'`     a separately-issued overhauling MR. Prices on Schedule-A sr 21. Six agencies use it.
+ *   - `repairType: 'OH'`   a job DECLARED overhauled at internal inspection. Its core type is still CRGO (or
+ *                          Amorphous, or whatever the unit is), because the unit's core did not change - only
+ *                          what was found when it was opened.
+ *
+ * The core-type arm alone would hand the second kind CRGO's eighteen months. The tender's silence is about
+ * overhauling as an ACT, not about a category of transformer, so both arms answer the same question and there is
+ * one function rather than two that can drift apart.
+ */
+export function hasNoGuarantee(
+  coreType: string | null | undefined,
+  repairType?: string | null | undefined,
+): boolean {
+  const core = String(coreType || '').trim().toUpperCase();
+  if (core === 'OH' || core.includes('OVERHAUL')) return true;
+  return String(repairType || '').trim().toUpperCase() === 'OH';
 }
 
 /**
@@ -69,8 +87,15 @@ export function guaranteeMonthsFor(
   at: Pick<AtMaster, 'guaranteeMonths'> | null | undefined,
   coreType: string | null | undefined,
   storedOnJob?: number | null,
+  repairType?: string | null | undefined,
 ): number | null {
-  if (hasNoGuarantee(coreType)) return null;
+  /**
+   * ⚠ BEFORE THE STORED FIGURE, DELIBERATELY. A job declared overhauled may already carry a stamped
+   * `gpGuaranteeMonths` from when it was booked as an ordinary repair. The declaration is later and it is the
+   * truth about the work, so the absence wins over the stamp - which is only reachable because this test is
+   * first.
+   */
+  if (hasNoGuarantee(coreType, repairType)) return null;
   if (typeof storedOnJob === 'number' && storedOnJob > 0) return storedOnJob;
   const key = normaliseCoreLabel(coreType);
   const v = at?.guaranteeMonths?.[key];

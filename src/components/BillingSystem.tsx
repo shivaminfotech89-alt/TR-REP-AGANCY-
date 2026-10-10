@@ -3,7 +3,7 @@ import { inspectionFor } from '../lib/inspectionLink.js';
 import { useSearchParams, useParams, useNavigate } from 'react-router-dom';
 import { useAgency, getAtPercentage, atForJob, getEstimateMasterForCore, getBillDivisionRecipient, matchesAtScope } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
-import { guaranteeMonthsFor, normaliseCoreLabel } from '../lib/guaranteePeriod';
+import { guaranteeMonthsFor, hasNoGuarantee, normaliseCoreLabel } from '../lib/guaranteePeriod';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { resolveScrapCharge, getScrapItemCodeForCore, isGpJob, getJobFullEstimate,
          RepairWithinLimitConsent, activeConsent } from '../lib/estimateCalc';
@@ -381,9 +381,22 @@ export default function BillingSystem() {
   const certGuaranteeRows = useMemo(() => {
     const seen = new Map<string, number | null>();
     selectedJobsData.forEach(j => {
-      const label = normaliseCoreLabel(j.coreType);
+      /**
+       * ⚠ A DECLARED-OH UNIT IS LABELLED 'Overhauling', NOT BY ITS CORE TYPE (AUDIT G114).
+       *
+       * Under reading (a) an inspection-declared overhaul keeps `coreType: 'CRGO'` - the unit's core did not
+       * change. So `normaliseCoreLabel(j.coreType)` alone put it in the CRGO bucket, and because the bucket is
+       * keyed by label and filled by the FIRST job that lands in it, a CRGO repair and a CRGO overhaul on one
+       * bill would have given the overhauled unit CRGO's eighteen months on a signed certificate.
+       *
+       * ⚠ THE LABEL ALREADY EXISTS - `ALL_CORE_TYPES` carries 'Overhauling' for the `coreType: 'OH'` path,
+       * so both kinds of overhaul land in one row and `noGuaranteeAtAll` keeps working unchanged.
+       */
+      const label = hasNoGuarantee(j.coreType, j.repairType)
+        ? normaliseCoreLabel('OH')
+        : normaliseCoreLabel(j.coreType);
       if (!seen.has(label)) {
-        seen.set(label, guaranteeMonthsFor(activeAtMaster, j.coreType, j.gpGuaranteeMonths));
+        seen.set(label, guaranteeMonthsFor(activeAtMaster, j.coreType, j.gpGuaranteeMonths, j.repairType));
       }
     });
     return [...seen.entries()].map(([label, months]) => ({ label, months }));

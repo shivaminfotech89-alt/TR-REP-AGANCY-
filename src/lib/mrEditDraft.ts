@@ -37,6 +37,8 @@ export const DRAFT_JOB_FIELDS = [
 export type DraftJobField = typeof DRAFT_JOB_FIELDS[number];
 
 /** The draft the dialog edits. `atId` is a real field here, so reading it needs no cast. */
+import type { RepairType } from './repairType';
+
 export interface MrEditJob {
   id?: string;
   jobNo: string;
@@ -46,7 +48,7 @@ export interface MrEditJob {
   coreType: string;
   status: string;
   division: string;
-  repairType: string;
+  repairType: RepairType | '';
   prevAtNo: string;
   prevJobNo: string;
   prevDeliveryDate: string;

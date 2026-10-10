@@ -23,6 +23,7 @@ import { estimateMasterLink } from '../lib/settingsLinks';
 import { issuedMarks } from '../lib/issuedDocuments';
 import { OtherTenderNote } from './OtherTenderNote';
 import { classifyCoreType, classifyWindingMaterial } from './SingleJobEstimateReport';
+import { CONDITION_OPTIONS, CONDITION_OH, CONDITION_SCRAP, conditionSaveCheck, coilReplacementRecorded, jobUpdatesForCondition } from '../lib/inspectionCondition';
 import { HV_SE_OPTIONS, HV_SE_NOT_APPLICABLE, HV_SE_WITH, HV_SE_WITHOUT, hvSeApplies, hvSeCell } from '../lib/hvSeConductor';
 import { InspectionLegend } from './InspectionLegend';
 import { INTERNAL_LEGEND_COLUMNS, INTERNAL_LEGEND_VALUES, columnTitle } from '../lib/inspectionAbbreviations';
@@ -536,8 +537,16 @@ export default function InternalInspection() {
           .some(v => v !== undefined && v !== null && String(v).trim() !== '');
         const hasDamageNote = [jobData.damR, jobData.damY, jobData.damB]
           .some(v => v !== undefined && v !== null && String(v).trim() !== '');
-        const isScrapDecision = jobData.condition === 'Scrap';
-        return !(hasCoilWeight || hasDamageNote || isScrapDecision);
+        /**
+         * ⚠ AN OH DECLARATION COUNTS AS HAVING LOOKED, EXACTLY AS SCRAP DOES (AUDIT G114).
+         *
+         * This guard exists because an untouched form - no damage, no weight, condition 'Repairable' - passes
+         * validation without anyone having inspected the unit. A declared OH is the opposite: the engineer
+         * opened it and found nothing to replace, so there IS no coil weight and no damage note, by definition.
+         * Without this arm the new path would be refused as an empty form on every job it is correct for.
+         */
+        const isDetermination = jobData.condition === CONDITION_SCRAP || jobData.condition === CONDITION_OH;
+        return !(hasCoilWeight || hasDamageNote || isDetermination);
       })
       .map(job => job.jobNo);
 
@@ -566,7 +575,7 @@ export default function InternalInspection() {
         && jobData.hvSeConductor !== HV_SE_WITH && jobData.hvSeConductor !== HV_SE_WITHOUT) {
         missing.push('HV S.E. (S.E. / DPC)');
       }
-      if (!jobData.condition || jobData.condition.trim() === '') missing.push('Condition (Repairable / Scrap)');
+      if (!jobData.condition || jobData.condition.trim() === '') missing.push('Condition (Repairable / OH / Scrap)');
       if (!jobData.wasring || jobData.wasring.trim() === '') missing.push('WAS Ring');
       if (!jobData.inPnt || jobData.inPnt.trim() === '') missing.push('Inside Paint');
 
@@ -585,6 +594,44 @@ export default function InternalInspection() {
 
     if (incompleteJobs.length > 0) {
       alert(`⚠️ Blank or incomplete internal inspection forms are NOT acceptable!\n\nPlease fill in all required inspection details before saving:\n\n${incompleteJobs.join('\n')}`);
+      return;
+    }
+
+    /**
+     * ⚠ THE DECLARATION IS ASYMMETRIC, AND IT IS CHECKED BEFORE ANYTHING IS WRITTEN (AUDIT G114).
+     *
+     * `condition` records what the unit WAS. Scrap cannot be undiscovered, and OH cannot be reverted once a
+     * replacement job has been issued against it - reverting would make both consume quota and put the agency
+     * over its allotment through no act of the operator's. The rule and its wording live in
+     * lib/inspectionCondition, so a test runs them without a screen.
+     *
+     * ⚠ `jobs` HERE IS AGENCY-WIDE ACROSS EVERY TENDER, deliberately. A replacement issued against this unit
+     * may sit on a later MR under a newer tender, and a tender-scoped list would answer "no replacement exists"
+     * about a scope rather than about the agency.
+     */
+    const blockedDeclarations: string[] = [];
+    for (const job of mrJobs) {
+      if (job.status === 'Dispatched' || job.isClosed === true) continue;
+      const jobData = formsData[job.id];
+      if (!jobData) continue;
+      const verdict = conditionSaveCheck({
+        jobId: job.id,
+        jobNo: job.jobNo,
+        // ⚠ FROM THE JOB, NOT FROM THE INSPECTION. The stored condition on the job is what decides both the
+        // permitted transition and WHICH WAY ROUND the coil contradiction is being created.
+        from: job.condition,
+        to: jobData.condition,
+        // The same form row the estimate will price from, so the refusal and the charge cannot disagree.
+        coil: jobData,
+        replacements: jobs,
+      });
+      // `'reason' in verdict`, not `!verdict.ok` - this project compiles without strictNullChecks, so a
+      // boolean-literal discriminant does not narrow. Same idiom as lib/mrAddDecision.
+      if ('reason' in verdict) blockedDeclarations.push(verdict.reason);
+    }
+
+    if (blockedDeclarations.length > 0) {
+      alert(blockedDeclarations.join(`\n\n———\n\n`));
       return;
     }
 
@@ -707,7 +754,9 @@ export default function InternalInspection() {
           updatedAt: now
         };
         if (job.status === 'External Done' || job.status === 'Received' || job.status === 'Internal Done' || job.status === 'Scrap') {
-          jobUpdates.status = jobData.condition === 'Scrap' ? 'Scrap' : 'Internal Done';
+          // ⚠ OH IS NOT A WORKFLOW STAGE. A declared-OH unit is still overhauled, tested and dispatched, so
+          // its status moves to 'Internal Done' like any other - only Scrap diverts the workflow (AUDIT G114).
+          jobUpdates.status = jobData.condition === CONDITION_SCRAP ? 'Scrap' : 'Internal Done';
         }
 
         // `condition` records what the unit WAS, not where it is.
@@ -727,11 +776,24 @@ export default function InternalInspection() {
         // can be discovered late, but it cannot be undiscovered. A later inspection
         // may find damage that condemns a unit previously called repairable; nothing
         // can un-condemn one that was already opened and found to be scrap.
-        const declaredScrap = jobData.condition === 'Scrap';
-        if (!job.condition) {
-          jobUpdates.condition = declaredScrap ? 'Scrap' : 'Repairable';
-        } else if (job.condition !== 'Scrap' && declaredScrap) {
-          jobUpdates.condition = 'Scrap';
+        /**
+         * ⚠ THE PERMITTED TRANSITIONS ARE lib/inspectionCondition's, AND THEY WERE ALREADY CHECKED ABOVE
+         * (AUDIT G114). This used to re-derive them from two booleans, which is why adding a third value could
+         * not be done here: `declaredScrap ? 'Scrap' : 'Repairable'` has no room for one.
+         *
+         * ⚠⚠ AND THE DECLARATION IS WHAT MOVES `repairType` TO 'OH' - the single write that makes an
+         * inspection-declared overhaul behave like one. It draws no allotment (`drawsOnAllotment`), carries no
+         * guarantee (`hasNoGuarantee`) and prints `Service Type: OH`, all from this one field. It does NOT touch
+         * `coreType`, `jobNo` or `mrNo`: the job number was issued on a division MR and the MR cannot be
+         * rewritten - "DONT CHANGE JOB NO WHICH ACTUALLY CREATED".
+         */
+        const declared = jobUpdatesForCondition({
+          condition: jobData.condition || 'Repairable',
+          currentRepairType: job.repairType,
+        });
+        if (String(job.condition ?? '') !== declared.condition) jobUpdates.condition = declared.condition;
+        if (declared.repairType !== undefined && declared.repairType !== job.repairType) {
+          jobUpdates.repairType = declared.repairType;
         }
 
         batch.update(jobRef, jobUpdates);
@@ -1678,7 +1740,12 @@ export default function InternalInspection() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {mrJobs.map((job, index) => {
-                      const isScrap = formsData[job.id]?.condition === 'Scrap';
+                      const isScrap = formsData[job.id]?.condition === CONDITION_SCRAP;
+                      /** ⚠ ITS OWN COLOUR, NOT SCRAP'S RED AND NOT REPAIRABLE'S PLAIN. OH is a third
+                          determination with its own consequences - no guarantee, no allotment drawn - and a
+                          cell that looked like either of the other two would hide a declaration the operator
+                          has to be sure of (AUDIT G114). */
+                      const isOh = formsData[job.id]?.condition === CONDITION_OH;
                       const limbRaw = formsData[job.id]?.hvCoilLimb;
                       const hvLimbMax = limbRaw !== undefined && limbRaw.trim() !== '' && !isNaN(Number(limbRaw)) ? Number(limbRaw) : undefined;
                       return (
@@ -1810,14 +1877,35 @@ export default function InternalInspection() {
                             value={formsData[job.id]?.condition || 'Repairable'}
                             onChange={(e) => handleChange(job.id, 'condition', e.target.value)}
                             className={`px-2 py-1 text-xs font-bold border rounded focus:ring-1 bg-white cursor-pointer shadow-2xs w-full ${
-                              isScrap 
-                                ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500 ring-1 ring-red-400' 
+                              isScrap
+                                ? 'border-red-500 text-red-700 bg-red-50 focus:ring-red-500 ring-1 ring-red-400'
+                                : isOh
+                                ? 'border-amber-500 text-amber-800 bg-amber-50 focus:ring-amber-500 ring-1 ring-amber-400'
                                 : 'border-slate-300 text-slate-800 focus:ring-blue-500'
                             }`}
                           >
-                            <option value="Repairable">Repairable</option>
-                            <option value="Scrap">Scrap</option>
+                            {/* ⚠ FROM THE SHARED LIST, NOT THREE LITERALS (AUDIT G114). The stored values drive
+                                `drawsOnAllotment` and `hasNoGuarantee`; a label typed here could not disagree
+                                with them silently. */}
+                            {CONDITION_OPTIONS.map(opt => (
+                              <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
                           </select>
+                          {/*
+                            ⚠ THE CONTRADICTION, SHOWN WHERE IT IS CREATED (AUDIT G114). The save refuses it
+                            either way round, but a refusal that only arrives on Save makes the operator hunt for
+                            which of twenty rows caused it. This is the same predicate, not a second one - so the
+                            cell cannot say "fine" about something the save will reject.
+                          */}
+                          {isOh && (() => {
+                            const coil = coilReplacementRecorded(formsData[job.id]);
+                            if (!coil.recorded) return null;
+                            return (
+                              <div className="text-[9px] font-bold text-red-700 leading-tight mt-1 text-left">
+                                Cannot be OH: {coil.parts.join(', ')}. A unit with coils replaced is a repair.
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td className="p-1 border-r border-slate-200 text-center bg-amber-50/30">
                           {renderHvSeSelect(job.id, formsData[job.id]?.windingType || 'AL')}
