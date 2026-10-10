@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useAgency, isUnassigned } from '../lib/AgencyContext';
+import { isScrapJob } from '../lib/scrapState';
 import { DEFAULT_GUARANTEE_MONTHS } from '../lib/guaranteePeriod';
 import { isGpJob } from '../lib/estimateCalc';
 import { computeOilBalance, describeOil } from '../lib/oilBalance';
@@ -242,7 +243,7 @@ export default function Dashboard() {
     filteredJobs.forEach(j => {
       if (j.mrNo) mrSet.add(j.mrNo);
       const cap = Number(j.capacityKva) || 0;
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       const isGP = j.repairType === 'GP';
 
       // GP / OGP counters
@@ -351,7 +352,7 @@ export default function Dashboard() {
       if (!map[div]) map[div] = { total: 0, repaired: 0, underRepair: 0, scrap: 0 };
       map[div].total++;
 
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       if (isScrap) {
         map[div].scrap++;
       } else if (j.status === 'Dispatched' || j.status === 'Tested - Ready for Dispatch') {

@@ -6,6 +6,7 @@ import {
   CONDITION_OH, CONDITION_SCRAP, CONDITION_REPAIRABLE, CONDITION_OPTIONS,
   conditionChange, conditionIsNonConsuming, jobUpdatesForCondition,
   COIL_ITEM_CODES, coilReplacementRecorded, conditionSaveCheck,
+  overhaulEvidence, isOverhauledJob, internalDeclaredCondition,
 } from './inspectionCondition';
 import { CREATABLE_REPAIR_TYPES } from './repairType';
 
@@ -360,4 +361,59 @@ test('⚠ the fields this rule reads are the fields the estimate prices from', (
   }
 });
 
-// ── ⚠⚠ 
+// ── ⚠⚠ THE OH EXCLUSION'S THREE ARMS (AUDIT G122) ───────────────────────────────────────────────────────────
+
+test('all three arms recognise an overhaul, and report which matched', () => {
+  assert.deepEqual(overhaulEvidence({ repairType: 'OH' }).matched, ['repairType']);
+  assert.deepEqual(overhaulEvidence({ condition: 'OH' }).matched, ['condition']);
+  assert.deepEqual(
+    overhaulEvidence({ id: 'j1' }, [{ jobId: 'j1', type: 'Internal', data: { condition: 'OH' } }]).matched,
+    ['inspection']);
+  assert.deepEqual(
+    overhaulEvidence({ id: 'j1', repairType: 'OH', condition: 'OH' },
+      [{ jobId: 'j1', type: 'Internal', data: { condition: 'OH' } }]).matched,
+    ['repairType', 'condition', 'inspection']);
+});
+
+test('an ordinary job matches no arm', () => {
+  const e = overhaulEvidence({ id: 'j1', repairType: 'OGP', condition: 'Repairable' },
+    [{ jobId: 'j1', type: 'Internal', data: { condition: 'Repairable' } }]);
+  assert.equal(e.isOverhauled, false);
+  assert.deepEqual(e.matched, []);
+});
+
+test('⚠⚠ ASU-2\'s shape for OH: the declaration survives only in the inspection', () => {
+  // The exact gap O80 found for scrap. The job document alone cannot answer it.
+  const job = { id: 'asu2', repairType: 'OGP', condition: undefined };
+  const insp = [{ jobId: 'asu2', type: 'Internal', data: { condition: 'OH' } }];
+  assert.equal(isOverhauledJob(job), false, 'the job record alone says nothing');
+  assert.equal(isOverhauledJob(job, insp), true, 'the inspection is the third arm');
+});
+
+test('⚠ the withheld-repairType shape: condition says OH, repairType was left alone', () => {
+  // jobUpdatesForCondition withholds repairType unless the job is currently OGP, by design.
+  const out = jobUpdatesForCondition({ condition: 'OH', currentRepairType: 'GP' });
+  assert.deepEqual(out, { condition: 'OH' }, 'repairType is deliberately not written');
+  assert.equal(isOverhauledJob({ condition: out.condition, repairType: 'GP' }), true,
+    'and the predicate still recognises it, through the condition arm');
+});
+
+test('only an Internal inspection counts, and only this job\'s', () => {
+  const job = { id: 'j1' };
+  assert.equal(isOverhauledJob(job, [{ jobId: 'j1', type: 'External', data: { condition: 'OH' } }]), false);
+  assert.equal(isOverhauledJob(job, [{ jobId: 'OTHER', type: 'Internal', data: { condition: 'OH' } }]), false);
+  assert.equal(isOverhauledJob({ id: '' }, [{ jobId: '', type: 'Internal', data: { condition: 'OH' } }]), false,
+    'a job with no id must not match an inspection with no jobId');
+});
+
+test('values are trimmed, as everywhere else', () => {
+  assert.equal(isOverhauledJob({ repairType: ' OH ' }), true);
+  assert.equal(isOverhauledJob({ condition: ' OH ' }), true);
+  assert.equal(isOverhauledJob({ id: 'j1' }, [{ jobId: ' j1 ', type: ' Internal ', data: { condition: ' OH ' } }]), true);
+});
+
+test('⚠ coreType OH is NOT an arm - it is the separately-issued MR, a different fact', () => {
+  // Such an MR carries no allotment at all ("not 0 consumed, but not counted"), prices on sr 21, and must not
+  // be offered as a freed slot. drawsOnAllotment tests it separately; this predicate must not absorb it.
+  assert.equal(isOverhauledJob({ coreType: 'OH', repairType: 'OGP' }), false);
+});

@@ -5,12 +5,19 @@ import { db } from '../lib/firebase';
 import { auth } from '../lib/firebase';
 import { collection as fsCollection, query as fsQuery, where as fsWhere, getDocs as fsGetDocs } from 'firebase/firestore';
 import { drawsOnAllotment } from '../lib/allotments';
+import { allotmentOverrun } from '../lib/replacementJob';
 import { shortAtNumber } from '../lib/utils';
 import { inheritsAgencyQuota } from '../lib/allotmentInheritance';
 
 export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
-  const { activeAgency, activeAtMaster } = useAgency();
+  const { activeAgency, activeAtMaster, agencyInspections } = useAgency();
   const [counts, setCounts] = useState<Record<string, Record<string, number>>>({});
+  /**
+   * ⚠ THE SAME ROWS THE COUNT CAME FROM, KEPT (AUDIT G115). The bar needs one number; the line underneath
+   * it has to say WHY the number is lower than the job count - "2 OH, 1 scrap released" - and that cannot be
+   * recovered from a total. Re-querying for it would be a second read that could disagree with the first.
+   */
+  const [rows, setRows] = useState<any[]>([]);
   
   useEffect(() => {
     async function fetchCounts() {
@@ -29,13 +36,21 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
         snap.forEach(doc => {
           const data = doc.data();
           if (data.ownerId !== auth.currentUser.uid) return;
+          // ⚠ THE AGENCY, NOT JUST THE OWNER AND THE TENDER (AUDIT G116). The query cannot express it - it is
+          // scoped by `ownerId` + `atId` - so it is filtered here. AARATI's MSBT-5 carries MEGHA's AT and was
+          // counted as MEGHA's 21st SABARMATI/CRGO job.
+          if (String(data.agencyId ?? '') !== String(activeAgency.id ?? '')) return;
           const div = data.division;
           const cType = data.coreType || 'CRGO';
-          
+
           // ⚠ THE SAME RULE AS INTAKE, FROM ONE PLACE (AUDIT G72). This counted GP rework as quota used while New
           // Job did not, so the Dashboard overstated usage for any agency with guarantee work - MEGHA's
           // SABARMATI/CRGO row read 25 here and 21 at intake. One quantity may not have two counts.
-          if (!drawsOnAllotment(data)) return;
+          //
+          // ⚠ `agencyInspections` IS WHAT MAKES SCRAP VISIBLE HERE (AUDIT G115). ASU-2 is scrap only in its
+          // internal inspection; without the second argument this bar would show it as quota used while the
+          // intake gate - which gets the same list - would not.
+          if (!drawsOnAllotment(data, agencyInspections)) return;
           
           if (!newCounts[div]) newCounts[div] = {};
           if (!newCounts[div][cType]) newCounts[div][cType] = 0;
@@ -43,12 +58,14 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
         });
         
         setCounts(newCounts);
+        setRows(snap.docs.map(d => ({ id: d.id, ...d.data() })).filter(
+          (d: any) => String(d.agencyId ?? '') === String(activeAgency.id ?? '')));
       } catch (err) {
         console.error("Failed to fetch allotment usage", err);
       }
     }
     fetchCounts();
-  }, [activeAgency, atMaster]);
+  }, [activeAgency, atMaster, agencyInspections]);
 
   if (!activeAgency) return null;
   const divisions = Object.keys((activeAtMaster && activeAtMaster.prefixes && Object.keys(activeAtMaster.prefixes).length > 0) ? activeAtMaster.prefixes : (activeAgency?.prefixes || {}));
@@ -113,6 +130,37 @@ export function AllotmentWidget({ atMaster }: { atMaster: AtMaster }) {
                         <div className={`${barColor} h-1.5 rounded-full`} style={{ width: `${percent}%` }}></div>
                       </div>
                       <div className="text-[9px] text-slate-400 text-right">Total: {total}</div>
+                      {/*
+                        ⚠ THE OVERRUN EXPLAINED WHERE IT IS READ (AUDIT G115). A division's 10-unit allotment
+                        can legitimately carry job numbers up to SU-13 - ten repaired, two OH, one scrap. The
+                        bar shows ten used and nothing wrong; the question it provokes is why the agency's
+                        highest job number is 13, and this line answers it on the same row.
+
+                        ⚠ IT NAMES THE UNREPLACED BALANCE TOO, because that is the actionable half: an
+                        agency with two freed slots and one replacement is still entitled to one more job.
+                      */}
+                      {(() => {
+                        const o = allotmentOverrun(rows, {
+                          division: div,
+                          coreType,
+                          agencyId: String(activeAgency.id ?? ''),
+                          inspections: agencyInspections,
+                        });
+                        const freed = o.freedOh + o.freedScrap;
+                        if (freed === 0) return null;
+                        const parts: string[] = [];
+                        if (o.freedOh > 0) parts.push(`${o.freedOh} OH`);
+                        if (o.freedScrap > 0) parts.push(`${o.freedScrap} scrap`);
+                        const open = freed - o.replacements;
+                        return (
+                          <div className="text-[9px] text-amber-700 leading-snug text-right">
+                            {o.total} job{o.total === 1 ? '' : 's'} booked, {parts.join(' + ')} drew nothing
+                            {open > 0
+                              ? ` · ${open} replacement${open === 1 ? '' : 's'} still available`
+                              : o.replacements > 0 ? ` · ${o.replacements} replaced` : ''}
+                          </div>
+                        );
+                      })()}
                     </div>
                   );
                 }) : (

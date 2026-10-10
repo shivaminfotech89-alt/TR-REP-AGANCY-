@@ -1,6 +1,7 @@
 
 import { useAgency, getAtPercentage, atForJob, atResolutionForJob, getEstimateMasterForCore, getEstimateCircleRecipient, getEstimateCcText, getCircleLimitsEstimateMaster, matchesAtScope } from '../lib/AgencyContext';
 import { useTrialGate, trialRefusal } from '../lib/trialGate';
+import { isScrapJob } from '../lib/scrapState';
 import { CARD, CARD_PAD, NUM, TABLE } from '../lib/ui';
 import { scheduleNeedsConfirmation, scheduleProvenance, scheduleSetForAt } from '../lib/ugvclSchedules';
 import { useSearchParams } from 'react-router-dom';
@@ -760,7 +761,7 @@ export default function EstimateGenerate() {
    * the division had ruled. See the note in BillingSystem's jobPricingErrors.
    */
   const consentPendingInMr = (mr: string) => estimableJobs(mr)
-    .filter(j => !isGpJob(j) && !(j.status === 'Scrap' || j.condition === 'Scrap'))
+    .filter(j => !isGpJob(j) && !(isScrapJob(j, agencyInspections)))
     .map(job => ({ job, check: checkJobCircleLimit(job) }))
     .map(x => ({ ...x, eligibility: consentEligibility(x.check) }))
     .filter(x => (x.eligibility === 'OFFER' && !activeConsent(x.job)) || x.eligibility === 'SCRAP');
@@ -1282,7 +1283,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                     // The ESTIMATE TOTAL, which is what the Amount column shows. Not the
                     // Clause 4.0 figure - nothing on this sheet reads that.
                     const finalAmt = est.finalAmount.toFixed(2);
-                    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+                    const isScrap = isScrapJob(job, agencyInspections);
                     // NO checkJobCircleLimit HERE ANY MORE. Nothing on the printed sheet
                     // reads the circle limit, so computing it per row would price every job
                     // twice to render nothing. See the note below the table.
@@ -1305,7 +1306,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                             figures behind it lived only in a `title` tooltip, which does not
                             exist on paper. */}
                         <td className="p-1 text-center text-[9px] font-bold whitespace-nowrap">
-                          {isScrapJob ? 'SCRAP' : 'REPAIRABLE'}
+                          {isScrap ? 'SCRAP' : 'REPAIRABLE'}
                         </td>
                       </tr>
                     );
@@ -1613,7 +1614,7 @@ Circle Office : ${currentSelectedDivision || 'SABARMATI'}`}
                         const divName = groupJobs[0]?.division || '-';
                         const gpCount = groupJobs.filter(j => isGpJob(j)).length;
                         const chargeableJobs = groupJobs.filter(j => !isGpJob(j));
-                        const scrapCount = chargeableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+                        const scrapCount = chargeableJobs.filter(j => isScrapJob(j, agencyInspections)).length;
                         const repairableCount = chargeableJobs.length - scrapCount;
                         const estTotal = calculateMrEstimateTotal(mr);
                         const isSent = groupJobs.some(j => j.estimateSentDate || j.estimateStatus === 'Sent' || j.estimateRefNo);

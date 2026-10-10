@@ -34,6 +34,7 @@ import * as XLSX from 'xlsx';
 import { formatDDMMYYYY } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { resolveScrapCharge, getScrapItemCodeForCore, getJobFullEstimate } from '../lib/estimateCalc';
+import { isScrapJob } from '../lib/scrapState';
 import { atForJob } from '../lib/AgencyContext';
 
 export default function Reports() {
@@ -95,14 +96,14 @@ export default function Reports() {
     if (job.estimateAmount) return Number(job.estimateAmount) || 0;
     try {
       const kva = String(job.capacityKva);
-      const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+      const isScrap = isScrapJob(job, agencyInspections);
       const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
 
       // A scrap transformer is one flat charge, resolved by the mapped scrap item
       // code for its core type via the shared helper (lib/estimateCalc.ts) - the same
       // resolution the estimate and the bill use, so these three can't drift apart.
       // An unresolvable rate reports 0 rather than a guessed figure.
-      if (isScrapJob) {
+      if (isScrap) {
         const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData, atForJob(job, atMasters) ?? activeAtMaster);
         return Math.round(scrapCharge.rate ?? 0);
       }
@@ -138,7 +139,7 @@ export default function Reports() {
 
   // Helper to get enriched lifecycle details for a job
   const getJobLifecycle = (job: any) => {
-    const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+    const isScrap = isScrapJob(job, agencyInspections);
     const isDelivered = job.status === 'Dispatched' || job.isClosed === true || Boolean(job.deliveryDate) || Boolean(job.challanNo);
 
     // External Inspection check
@@ -236,7 +237,7 @@ export default function Reports() {
     let paymentReceivedCount = 0;
 
     jobs.forEach(j => {
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       if (isScrap) {
         scrap++;
       } else if (j.status === 'Dispatched') {
@@ -270,7 +271,7 @@ export default function Reports() {
 
   // Stage Badge helper
   const getStageBadge = (job: any) => {
-    const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+    const isScrap = isScrapJob(job, agencyInspections);
     if (isScrap) {
       return (
         <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-rose-100 text-rose-800 border border-rose-300">
@@ -333,7 +334,7 @@ export default function Reports() {
       if (!matchesGpFilter(j, gpFilter)) return false;
 
       // Stage filter
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       if (stageFilter === 'Pending External' && (j.status === 'External Done' || j.status === 'Internal Done' || j.status === 'Tested - Ready for Dispatch' || j.status === 'Dispatched' || isScrap)) return false;
       if (stageFilter === 'Pending Internal' && j.status !== 'External Done') return false;
       if (stageFilter === 'Pending Testing' && j.status !== 'Internal Done') return false;
@@ -446,7 +447,7 @@ export default function Reports() {
 
     sortedJobsForExport.forEach((job, idx) => {
       const cycle = getJobLifecycle(job);
-      const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+      const isScrap = isScrapJob(job, agencyInspections);
 
       exportRows.push({
         'S.N.': idx + 1,
@@ -750,7 +751,7 @@ export default function Reports() {
               <tbody className="divide-y divide-slate-200">
                 {filteredJobs.map((job, idx) => {
                   const cycle = getJobLifecycle(job);
-                  const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                  const isScrap = isScrapJob(job, agencyInspections);
 
                   return (
                     <tr key={job.id} className="hover:bg-slate-50 transition-colors">

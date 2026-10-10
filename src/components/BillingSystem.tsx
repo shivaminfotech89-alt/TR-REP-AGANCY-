@@ -18,7 +18,7 @@ import { mrStageSummary } from '../lib/inspectionStage';
 // log, the invoice's oil deduction, two Excel exports and the Oil Account's totals - and a copy
 // in any one of them is how the statement and the screen come to disagree without either being
 // wrong on its own terms.
-import { isScrapAdjustment } from '../lib/scrapState';
+import { isScrapAdjustment, isScrapJob } from '../lib/scrapState';
 import { StageCell } from '../lib/jobDisplay';
 import { missingForTaxInvoice } from '../lib/jobDisplay';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
@@ -248,8 +248,8 @@ export default function BillingSystem() {
     // GP is excluded from both bill types before anything else - see isGpJob.
     const billable = groupJobs.filter(j => !isGpJob(j));
     const typeJobs = wantScrap
-      ? billable.filter(j => (j.status === 'Scrap' || j.condition === 'Scrap') && j.status === 'Dispatched' && Boolean(j.challanNo))
-      : billable.filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'));
+      ? billable.filter(j => (isScrapJob(j, agencyInspections)) && j.status === 'Dispatched' && Boolean(j.challanNo))
+      : billable.filter(j => !(isScrapJob(j, agencyInspections)));
     const deliveredJobs = typeJobs.filter(j => j.status === 'Dispatched');
     return deliveredJobs.length > 0 ? deliveredJobs : typeJobs;
   };
@@ -297,7 +297,7 @@ export default function BillingSystem() {
       // nothing-to-bill modal handles the empty case.
       const hasMatchingType = groupJobs.some(j => {
         if (isGpJob(j)) return false;
-        const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+        const isScrap = isScrapJob(j, agencyInspections);
         return billTypeFilter === 'scrap' ? isScrap : !isScrap;
       });
 
@@ -320,7 +320,7 @@ export default function BillingSystem() {
     // division on a challan. Scrap at any earlier stage is not billable yet - the
     // pending ones are counted separately and surfaced as the scrap-committee warning.
     const matchingTypeJobs = mrJobs.filter(j => {
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       if (billTypeFilter !== 'scrap') return !isScrap;
       return isScrap && j.status === 'Dispatched' && Boolean(j.challanNo);
     });
@@ -344,7 +344,7 @@ export default function BillingSystem() {
 
     // Belt and braces: a mixed set must be impossible even if something above changes.
     const wantScrap = billTypeFilter === 'scrap';
-    const singleType = targetList.filter(j => ((j.status === 'Scrap' || j.condition === 'Scrap') === wantScrap));
+    const singleType = targetList.filter(j => ((isScrapJob(j, agencyInspections)) === wantScrap));
 
     return [...singleType].sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
   }, [jobs, selectedMrNo, billTypeFilter]);
@@ -418,7 +418,7 @@ export default function BillingSystem() {
     const mrJobs = jobs.filter(j => j.mrNo === selectedMrNo);
     const targetJobs = mrJobs.filter(j => {
       if (isGpJob(j)) return false;
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     });
     return targetJobs.filter(j => j.status !== 'Dispatched' && !j.challanNo && !j.deliveryDate).length;
@@ -458,7 +458,7 @@ export default function BillingSystem() {
     setCustomOilUptoDate('');
     const mrJobs = jobs.filter(j => j.mrNo === mr);
     const billableJobs = mrJobs.filter(j => !isGpJob(j));
-    const scrapCount = billableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+    const scrapCount = billableJobs.filter(j => isScrapJob(j, agencyInspections)).length;
     const repairableCount = billableJobs.length - scrapCount;
 
     // A DEFAULT, not an override. This used to force 'repairable' whenever an MR had
@@ -495,7 +495,7 @@ export default function BillingSystem() {
     // Approval no./date are AT-level, not per bill type, so they stay MR-wide.
     const wantScrapNow = billTypeFilter === 'scrap';
     const typeJobsForPrefill = mrJobs.filter(j =>
-      ((j.status === 'Scrap' || j.condition === 'Scrap') === wantScrapNow)
+      ((isScrapJob(j, agencyInspections)) === wantScrapNow)
     );
     const prefillSource = typeJobsForPrefill.length > 0 ? typeJobsForPrefill : mrJobs;
 
@@ -522,7 +522,7 @@ export default function BillingSystem() {
     const allMrJobs = jobs.filter(j => j.mrNo === mr);
     const targetJobs = allMrJobs.filter(j => {
       if (isGpJob(j)) return false;
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       return billTypeFilter === 'scrap' ? isScrap : !isScrap;
     });
     const delJobs = targetJobs.filter(j => j.status === 'Dispatched' || j.challanNo || j.deliveryDate);
@@ -605,7 +605,7 @@ export default function BillingSystem() {
    * without the builder and would otherwise report no errors at all.
    */
   const jobPricingErrors = (job: any): EstimateRateError[] => {
-    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+    const isScrap = isScrapJob(job, agencyInspections);
 
     /* ⚠ NO CIRCLE-LIMIT *DECISION* HERE, AND IT MUST NOT COME BACK. Consent is recorded
        before the estimate is SENT, because the estimate is what the division approves and
@@ -640,7 +640,7 @@ export default function BillingSystem() {
      * There is no general requirement in this app that an estimate be sent or approved
      * before billing, and this is not the place to introduce one.
      */
-    if (!isScrapJob) {
+    if (!isScrap) {
       const consent = activeConsent(job);
       const approvedFig = Number(job.approvedAmount);
       if (consent && !(Number.isFinite(approvedFig) && approvedFig > 0)) {
@@ -655,7 +655,7 @@ export default function BillingSystem() {
       }
     }
 
-    if (isScrapJob) {
+    if (isScrap) {
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
       const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
       return error ? [{ kind: 'missing-rate', message: error }] : [];
@@ -736,7 +736,7 @@ export default function BillingSystem() {
     }
 
     const kva = String(job.capacityKva);
-    const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
+    const isScrap = isScrapJob(job, agencyInspections);
     const jobMasterData = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
     const atPct = getAtPercentage(atForJob(job, atMasters) ?? activeAtMaster);
 
@@ -745,7 +745,7 @@ export default function BillingSystem() {
     // repair item list. The old itemName substring matching ('scrap'/'dismental') plus
     // itemCode '1a' priced CRGO scrap off Labour Charge (Rs 2,061 at 25 KVA) instead.
     // An unresolvable rate contributes nothing and is reported - never a hardcoded 500.
-    if (isScrapJob) {
+    if (isScrap) {
       const scrapCharge = resolveScrapCharge(job.coreType, kva, jobMasterData, atForJob(job, atMasters) ?? activeAtMaster);
       // Unreachable now - `jobPricingErrors` returns the same resolution's error above and
       // this function has already returned null. Kept as null rather than 0 so the two
@@ -821,8 +821,8 @@ export default function BillingSystem() {
     const seen = new Set<string>();
     const errors: string[] = [];
     selectedJobsData.forEach(job => {
-      const isScrapJob = job.status === 'Scrap' || job.condition === 'Scrap';
-      if (!isScrapJob) return;
+      const isScrap = isScrapJob(job, agencyInspections);
+      if (!isScrap) return;
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
       const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
       if (error && !seen.has(error)) {
@@ -1630,7 +1630,7 @@ export default function BillingSystem() {
     // Never send a scrap bill whose flat charge could not be resolved from the master.
     const unresolvedScrap: string[] = [];
     jobsForBillType(sendTargetMr).forEach(job => {
-      if (!(job.status === 'Scrap' || job.condition === 'Scrap')) return;
+      if (!(isScrapJob(job, agencyInspections))) return;
       const master = getEstimateMasterForCore({ at: atForJob(job, atMasters) ?? activeAtMaster, agency: activeAgency }, job.coreType);
       const { error } = resolveScrapCharge(job.coreType, String(job.capacityKva), master, atForJob(job, atMasters) ?? activeAtMaster);
       if (error && !unresolvedScrap.includes(error)) unresolvedScrap.push(error);
@@ -2236,11 +2236,11 @@ export default function BillingSystem() {
                           const stages = mrStageSummary(groupJobs, inspections);
                           const gpJobs = groupJobs.filter(j => isGpJob(j));
                           const billableJobs = groupJobs.filter(j => !isGpJob(j));
-                          const scrapJobs = billableJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+                          const scrapJobs = billableJobs.filter(j => isScrapJob(j, agencyInspections));
                           const repairableJobs = billableJobs.filter(j => j.status !== 'Scrap' && j.condition !== 'Scrap');
 
                           const matchingJobs = billableJobs.filter(j => {
-                            const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+                            const isScrap = isScrapJob(j, agencyInspections);
                             return billTypeFilter === 'scrap' ? isScrap : !isScrap;
                           });
                           const deliveredJobs = matchingJobs.filter(j => j.status === 'Dispatched');
@@ -2290,7 +2290,7 @@ export default function BillingSystem() {
                                   const statusRank = (j: any) => {
                                     if (j.status === 'Dispatched') return 0;
                                     if (j.status === 'Tested - Ready for Dispatch') return 1;
-                                    if (j.status === 'Scrap' || j.condition === 'Scrap') return 2;
+                                    if (isScrapJob(j, agencyInspections)) return 2;
                                     return 3;
                                   };
                                   const orderedJobs = isExpanded
@@ -2322,7 +2322,7 @@ export default function BillingSystem() {
                                             } else if (j.status === 'Tested - Ready for Dispatch') {
                                               badgeText = 'Tested (Awaiting Delivery Challan)';
                                               badgeClass = 'bg-blue-100 text-blue-800 border-blue-300';
-                                            } else if (j.status === 'Scrap' || j.condition === 'Scrap') {
+                                            } else if (isScrapJob(j, agencyInspections)) {
                                               badgeText = 'Scrap (Awaiting Return)';
                                               badgeClass = 'bg-rose-100 text-rose-800 border-rose-300';
                                             } else if (j.status === 'Internal Done') {
@@ -3059,15 +3059,15 @@ export default function BillingSystem() {
           )}
 
           {/* Scrap Jobs Notice Banner inside Editor */}
-          {billTypeFilter === 'repairable' && jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).length > 0 && (
+          {billTypeFilter === 'repairable' && jobs.filter(j => j.mrNo === selectedMrNo && (isScrapJob(j, agencyInspections))).length > 0 && (
             <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-lg text-purple-950 flex items-start gap-3 print:hidden shadow-sm">
               <AlertCircle className="w-5 h-5 text-purple-600 flex-shrink-0 mt-0.5" />
               <div className="text-sm">
                 <p className="font-bold">
-                  ℹ️ Scrap Transformers Returned ({jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).length} Scrap Job)
+                  ℹ️ Scrap Transformers Returned ({jobs.filter(j => j.mrNo === selectedMrNo && (isScrapJob(j, agencyInspections))).length} Scrap Job)
                 </p>
                 <p className="mt-0.5 text-purple-800 text-xs">
-                  MR <strong>{selectedMrNo}</strong> includes <strong>{jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).length}</strong> scrap transformer(s) [{jobs.filter(j => j.mrNo === selectedMrNo && (j.status === 'Scrap' || j.condition === 'Scrap')).map(j => j.jobNo).join(', ')}] delivered back to division. No repair bill is prepared for scrap jobs.
+                  MR <strong>{selectedMrNo}</strong> includes <strong>{jobs.filter(j => j.mrNo === selectedMrNo && (isScrapJob(j, agencyInspections))).length}</strong> scrap transformer(s) [{jobs.filter(j => j.mrNo === selectedMrNo && (isScrapJob(j, agencyInspections))).map(j => j.jobNo).join(', ')}] delivered back to division. No repair bill is prepared for scrap jobs.
                 </p>
               </div>
             </div>

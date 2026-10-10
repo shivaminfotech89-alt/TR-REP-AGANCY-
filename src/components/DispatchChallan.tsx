@@ -36,11 +36,12 @@ import { formatDDMMYYYY, byDateDesc } from '../lib/utils';
 import { GP_TEXT_CLASS, GpChip, GP_FILTER_OPTIONS, matchesGpFilter, GpFilter } from '../lib/jobDisplay';
 import { downloadHtmlAsWord } from '../lib/wordExport';
 import { confirmWholeBeforePrint, triggerUniversalPrint } from '../lib/printUtils';
+import { isScrapJob } from '../lib/scrapState';
 
 export default function DispatchChallan() {
   const {
     activeAgency, activeAtMaster, viewingAllTenders,
-    agencyJobs, agencyDataLoad, refreshAgencyData,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
   } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
@@ -108,7 +109,7 @@ export default function DispatchChallan() {
   const pendingJobs = useMemo(() => {
     return allJobs.filter(j => {
       if (j.status === 'Dispatched' || j.isClosed === true) return false;
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       const isTested = j.status === 'Tested - Ready for Dispatch';
       return isTested || isScrap;
     }).sort((a, b) => (a.jobNo || '').localeCompare(b.jobNo || '', undefined, { numeric: true }));
@@ -119,7 +120,7 @@ export default function DispatchChallan() {
   }, [pendingJobs]);
 
   const scrapCount = useMemo(() => {
-    return pendingJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+    return pendingJobs.filter(j => isScrapJob(j, agencyInspections)).length;
   }, [pendingJobs]);
 
   // Extract all available divisions
@@ -148,7 +149,7 @@ export default function DispatchChallan() {
     if (jobCategoryFilter === 'Repairable') {
       result = result.filter(j => j.status === 'Tested - Ready for Dispatch' && j.condition !== 'Scrap');
     } else if (jobCategoryFilter === 'Scrap') {
-      result = result.filter(j => j.status === 'Scrap' || j.condition === 'Scrap');
+      result = result.filter(j => isScrapJob(j, agencyInspections));
     }
     if (selectedDivision !== 'All') {
       result = result.filter(j => (j.division || '').trim().toLowerCase() === selectedDivision.trim().toLowerCase());
@@ -223,7 +224,7 @@ export default function DispatchChallan() {
   const historyJobsBeforeMr = useMemo(() => {
     return allDispatchedJobs.filter(j => {
       if (historyDivisionFilter !== 'All' && j.division !== historyDivisionFilter) return false;
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       if (historyCategoryFilter === 'Repairable' && isScrap) return false;
       if (historyCategoryFilter === 'Scrap' && !isScrap) return false;
       if (!matchesGpFilter(j, historyGpFilter)) return false;
@@ -265,7 +266,7 @@ export default function DispatchChallan() {
         return false;
       }
       // Category filter
-      const isScrap = j.status === 'Scrap' || j.condition === 'Scrap';
+      const isScrap = isScrapJob(j, agencyInspections);
       if (historyCategoryFilter === 'Repairable' && isScrap) return false;
       if (historyCategoryFilter === 'Scrap' && !isScrap) return false;
       if (!matchesGpFilter(j, historyGpFilter)) return false;
@@ -341,7 +342,7 @@ export default function DispatchChallan() {
   }, [filteredDispatchedJobs]);
 
   const historyScrapCount = useMemo(() => {
-    return filteredDispatchedJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+    return filteredDispatchedJobs.filter(j => isScrapJob(j, agencyInspections)).length;
   }, [filteredDispatchedJobs]);
 
   const handleToggleJob = (id: string) => {
@@ -386,7 +387,7 @@ export default function DispatchChallan() {
   }, [selectedJobs]);
 
   const selectedScrapCount = useMemo(() => {
-    return selectedJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length;
+    return selectedJobs.filter(j => isScrapJob(j, agencyInspections)).length;
   }, [selectedJobs]);
 
   const uniqueDivisions = useMemo(() => {
@@ -514,7 +515,7 @@ export default function DispatchChallan() {
       wsData.push([]);
       wsData.push(['S.N.', 'Job No', 'MR No & Date', 'Capacity (KVA)', 'Make', 'Serial No', 'Division', 'Remarks / Job Condition']);
       data.jobs.forEach((job: any, idx: number) => {
-        const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+        const isScrap = isScrapJob(job, agencyInspections);
         const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
         wsData.push([
           idx + 1,
@@ -538,7 +539,7 @@ export default function DispatchChallan() {
       wsData.push([]);
       wsData.push(['S.N.', 'Job No', 'MR No & Date', 'Capacity (KVA)', 'Make', 'Serial No', 'Division', 'Remarks / Job Condition']);
       selectedJobs.forEach((job: any, idx: number) => {
-        const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+        const isScrap = isScrapJob(job, agencyInspections);
         const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
         wsData.push([
           idx + 1,
@@ -573,7 +574,7 @@ export default function DispatchChallan() {
     wsData.push(['S.N.', 'Job No', 'MR No & Receive Date', 'Challan No', 'Challan Date', 'Vehicle No', 'Capacity (KVA)', 'Make', 'Serial No', 'Division', 'Condition / Remarks']);
     
     filteredDispatchedJobs.forEach((job: any, idx: number) => {
-      const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+      const isScrap = isScrapJob(job, agencyInspections);
       const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
       wsData.push([
         idx + 1,
@@ -1058,7 +1059,7 @@ export default function DispatchChallan() {
                          * Everything around them uses the token vocabulary. The point of this
                          * screen in the restyle pass was to show the two can sit side by side.
                          */
-                        const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                        const isScrap = isScrapJob(job, agencyInspections);
                         const isSelected = selectedJobIds.has(job.id);
 
                         return (
@@ -1198,7 +1199,7 @@ export default function DispatchChallan() {
             <div className="bg-white border border-rose-200 rounded-xl p-3 shadow-xs">
               <span className="text-[10px] font-bold uppercase text-rose-800 block">Scrap Returned</span>
               <span className="text-lg sm:text-2xl font-black text-rose-950 font-mono tabular-nums">
-                {allDispatchedJobs.filter(j => j.status === 'Scrap' || j.condition === 'Scrap').length}
+                {allDispatchedJobs.filter(j => isScrapJob(j, agencyInspections)).length}
               </span>
               <span className="text-[10px] text-rose-700 block mt-0.5">Delivered to Store</span>
             </div>
@@ -1509,7 +1510,7 @@ export default function DispatchChallan() {
                     <div className="p-2.5 sm:p-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-2">
                         {data.jobs.map(job => {
-                          const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                          const isScrap = isScrapJob(job, agencyInspections);
                           const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
                           
                           return (
@@ -1568,7 +1569,7 @@ export default function DispatchChallan() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredDispatchedJobs.map((job) => {
-                      const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                      const isScrap = isScrapJob(job, agencyInspections);
 
                       return (
                         <tr key={job.id} className={`transition-colors whitespace-nowrap ${isScrap ? 'bg-amber-50/60 hover:bg-amber-100/60' : 'hover:bg-slate-50'}`}>
@@ -1711,7 +1712,7 @@ export default function DispatchChallan() {
                         </thead>
                         <tbody>
                           {printData.jobs?.map((job: any, idx: number) => {
-                            const isScrap = job.status === 'Scrap' || job.condition === 'Scrap';
+                            const isScrap = isScrapJob(job, agencyInspections);
                             const mrDateStr = formatDDMMYYYY(job.dateOfIssue || job.mrDate || job.createdAt);
                             return (
                               <tr key={job.id || idx}>

@@ -152,15 +152,74 @@ test('GP rework and Overhauling draw no quota; an OGP job does', () => {
   assert.equal(drawsOnAllotment({ repairType: 'OGP' }), true, 'a missing core type counts as CRGO');
 });
 
-test('bookedFor counts one division and core type, by that same rule', () => {
+test('bookedFor counts one division, core type and AGENCY, by that same rule', () => {
   const jobs = [
-    { division: 'SABARMATI', coreType: 'CRGO', repairType: 'OGP' },
-    { division: 'SABARMATI', coreType: 'CRGO', repairType: 'GP' },
-    { division: 'SABARMATI', coreType: 'Amorphous', repairType: 'OGP' },
-    { division: 'KALOL', coreType: 'CRGO', repairType: 'OGP' },
-    { division: 'SABARMATI', repairType: 'OGP' },
+    { division: 'SABARMATI', coreType: 'CRGO', repairType: 'OGP', agencyId: 'megha' },
+    { division: 'SABARMATI', coreType: 'CRGO', repairType: 'GP', agencyId: 'megha' },
+    { division: 'SABARMATI', coreType: 'Amorphous', repairType: 'OGP', agencyId: 'megha' },
+    { division: 'KALOL', coreType: 'CRGO', repairType: 'OGP', agencyId: 'megha' },
+    { division: 'SABARMATI', repairType: 'OGP', agencyId: 'megha' },
   ];
-  assert.equal(bookedFor(jobs, 'SABARMATI', 'CRGO'), 2);
-  assert.equal(bookedFor(jobs, 'SABARMATI', 'Amorphous'), 1);
-  assert.equal(bookedFor(jobs, 'KALOL', 'CRGO'), 1);
+  const megha = (division: string, coreType: string) =>
+    bookedFor(jobs, { division, coreType, agencyId: 'megha' });
+  assert.equal(megha('SABARMATI', 'CRGO'), 2);
+  assert.equal(megha('SABARMATI', 'Amorphous'), 1);
+  assert.equal(megha('KALOL', 'CRGO'), 1);
+});
+
+test('⚠ MSBT-5: another agency job on this tender is not counted (AUDIT G116)', () => {
+  // The live case. AARATI's MSBT-5 carries MEGHA's AT, so a count scoped by owner and tender alone made it
+  // MEGHA's 21st SABARMATI/CRGO job - against MEGHA's quota of 30, on work MEGHA never did.
+  const jobs = [
+    { jobNo: 'MSBT-20', division: 'SABARMATI', coreType: 'CRGO', repairType: 'OGP', agencyId: 'megha' },
+    { jobNo: 'MSBT-5', division: 'SABARMATI', coreType: 'CRGO', repairType: 'OGP', agencyId: 'aarati' },
+  ];
+  assert.equal(bookedFor(jobs, { division: 'SABARMATI', coreType: 'CRGO', agencyId: 'megha' }), 1);
+  assert.equal(bookedFor(jobs, { division: 'SABARMATI', coreType: 'CRGO', agencyId: 'aarati' }), 1);
+});
+
+test('⚠ a scrap job does not count as booked, including one scrap ONLY in its inspection', () => {
+  // ASU-2's shape: the job document says nothing, the internal inspection says Scrap (O80).
+  const jobs = [
+    { id: 'a', jobNo: 'SU-1', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', agencyId: 'ag' },
+    { id: 'b', jobNo: 'SU-2', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', agencyId: 'ag', condition: 'Scrap' },
+    { id: 'c', jobNo: 'SU-3', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', agencyId: 'ag', status: 'Dispatched' },
+  ];
+  const inspections = [{ jobId: 'c', type: 'Internal', data: { condition: 'Scrap' } }];
+  const scope = { division: 'DEESA', coreType: 'CRGO', agencyId: 'ag' };
+  assert.equal(bookedFor(jobs, scope), 2, 'without inspections the inspection-only scrap still counts');
+  assert.equal(bookedFor(jobs, { ...scope, inspections }), 1, 'with them, only the repaired unit does');
+});
+
+// ── ⚠⚠ THE OH EXCLUSION'S INSPECTION ARM, AT THE COUNTING BOUNDARY (AUDIT G122) ──────────────────────────────
+
+test('⚠⚠ a job overhauled only in its inspection does NOT draw on allotment', () => {
+  // The hole this closes. Before the third arm, drawsOnAllotment read `repairType` alone and this job consumed
+  // quota it did not earn - the agency silently losing a job it was entitled to.
+  const job = { id: 'j9', jobNo: 'SU-9', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', agencyId: 'ag' };
+  const insp = [{ jobId: 'j9', type: 'Internal', data: { condition: 'OH' } }];
+  assert.equal(drawsOnAllotment(job), true, 'the job record alone says it is an ordinary repair');
+  assert.equal(drawsOnAllotment(job, insp), false, 'the inspection says it was overhauled');
+});
+
+test('a job overhauled by its condition alone does not draw either', () => {
+  const job = { id: 'j9', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', condition: 'OH', agencyId: 'ag' };
+  assert.equal(drawsOnAllotment(job), false);
+});
+
+test('⚠ bookedFor sees it too - the count, not just the predicate', () => {
+  const jobs = [
+    { id: 'a', jobNo: 'SU-1', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', agencyId: 'ag' },
+    { id: 'b', jobNo: 'SU-2', division: 'DEESA', coreType: 'CRGO', repairType: 'OGP', agencyId: 'ag' },
+  ];
+  const scope = { division: 'DEESA', coreType: 'CRGO', agencyId: 'ag' };
+  assert.equal(bookedFor(jobs, scope), 2);
+  assert.equal(bookedFor(jobs, { ...scope, inspections: [{ jobId: 'b', type: 'Internal', data: { condition: 'OH' } }] }), 1);
+});
+
+test('⚠ and the separately-issued OH MR is still excluded by its own test, not by the arms', () => {
+  // coreType 'OH' is the sr-21 path: no allotment at all. It must keep working with no inspection in hand.
+  const job = { id: 'oh1', division: 'DEESA', coreType: 'OH', repairType: 'OGP', agencyId: 'ag' };
+  assert.equal(drawsOnAllotment(job), false);
+  assert.equal(drawsOnAllotment(job, []), false);
 });

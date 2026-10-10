@@ -14,6 +14,7 @@ import {
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
 import { useAgency, highWaterJobNos, matchesAtScope, isUnassigned } from '../lib/AgencyContext';
 import { CREATABLE_REPAIR_TYPES, type RepairType } from '../lib/repairType';
+import { receivedAgainstLabel } from '../lib/replacementJob';
 import { mrAddDecision, resolveMrAt } from '../lib/mrAddDecision';
 import { jobNumberTail, nextJobNoFor, takenJobNumbers } from '../lib/jobNumbering';
 import { mrEditJob } from '../lib/mrEditDraft';
@@ -541,6 +542,19 @@ export default function MrLedger() {
    * still an MR that was received later. Asking a scoped list would answer about the scope, which is the mistake
    * G107 removed from the gate beside this one.
    */
+  /**
+   * JOB NUMBER BY DOCUMENT ID - so a replacement can name the unit it was issued against (AUDIT G115).
+   *
+   * ⚠ FROM `agencyJobs`, NOT THE TENDER-SCOPED LIST. A replacement issued against an OH unit on an earlier
+   * tender would otherwise show "a OH unit" instead of the job number, on the one screen where the pairing is
+   * read. The id is stored rather than the number for the usual reason: numbers are editable, ids are not.
+   */
+  const jobNoById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const j of agencyJobs as any[]) if (j?.id) m.set(String(j.id), String(j.jobNo ?? ''));
+    return m;
+  }, [agencyJobs]);
+
   const agencyMrSummaries = useMemo(() => {
     const byMr = new Map<string, { mrNo: string; division?: string | null; createdAt: number; allCancelled: boolean }>();
     for (const job of agencyJobs as any[]) {
@@ -1890,7 +1904,23 @@ export default function MrLedger() {
                         {group.jobs.map((job, idx) => (
                           <tr key={job.id} className={group.isCancelled ? 'opacity-70 hover:bg-rose-50/20' : 'hover:bg-white'}>
                             <td className="py-2 px-2.5 text-slate-400 font-mono">{idx + 1}</td>
-                            <td className="py-2 px-2.5 font-mono font-bold text-slate-900">{job.jobNo}</td>
+                            <td className="py-2 px-2.5 font-mono font-bold text-slate-900">
+                              {job.jobNo}
+                              {/*
+                                ⚠ WHY THE SERIES RUNS PAST THE QUOTA, BESIDE THE NUMBER THAT RUNS PAST IT
+                                (AUDIT G115). SU-13 against a 10-unit allotment is correct when two units were
+                                OH and one was scrap, and this is where someone reconciling the register against
+                                the division's letter will be looking.
+                              */}
+                              {(() => {
+                                const label = receivedAgainstLabel(job as any, id => jobNoById.get(id));
+                                return label ? (
+                                  <div className="text-[9px] font-sans font-bold text-sky-700 leading-tight mt-0.5 whitespace-nowrap">
+                                    {label}
+                                  </div>
+                                ) : null;
+                              })()}
+                            </td>
                             <td className="py-2 px-2.5 text-slate-700 uppercase">{job.make}</td>
                             <td className="py-2 px-2.5 font-semibold text-slate-800">{job.capacityKva} KVA</td>
                             <td className="py-2 px-2.5 font-mono text-slate-600">{job.serialNo}</td>

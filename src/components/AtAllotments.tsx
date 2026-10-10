@@ -22,7 +22,7 @@ export interface AllotmentConfirmationData {
 }
 
 export function AtAllotments({ at }: { at: AtMaster }) {
-  const { activeAgency, updateAtMaster, updateAgency } = useAgency();
+  const { activeAgency, agencyInspections, updateAtMaster, updateAgency } = useAgency();
   const [isSaving, setIsSaving] = useState(false);
   
   /**
@@ -79,7 +79,10 @@ export function AtAllotments({ at }: { at: AtMaster }) {
    *   - IT IS A FLOOR, AND A FLOOR MUST BE TRUE WHEN IT REFUSES. The shared list is a snapshot
    *     taken when the agency was selected. A job booked in another tab since then must still be
    *     counted, or a correction slips under a quota that is already committed.
-   *   - IT IS SCOPED BY TENDER ACROSS THE ACCOUNT (`atId`), not by agency.
+   *   - IT IS SCOPED BY TENDER ACROSS THE ACCOUNT (`atId`), and THEN BY AGENCY IN MEMORY (AUDIT G116). A
+   *     Firestore query cannot add the third equality without another composite index, and the floor must be
+   *     right rather than cheap: AARATI's MSBT-5 carries MEGHA's AT, so without the agency filter MEGHA's
+   *     SABARMATI/CRGO floor stood one job higher than MEGHA's own work justified.
    *
    * The cost is one query when this panel opens, for an action taken a few times a year.
    */
@@ -104,7 +107,18 @@ export function AtAllotments({ at }: { at: AtMaster }) {
     return () => { live = false; };
   }, [at.id, auth.currentUser?.uid]);
 
-  const booked = (division: string, coreType: string) => bookedFor(atJobs || [], division, coreType);
+  /**
+   * ⚠ THE SCOPE IS AN OBJECT WITH A REQUIRED `agencyId` (AUDIT G116), so tsc names this call site rather than
+   * letting it keep the old owner+tender scope silently. `inspections` carries the scrap declarations that never
+   * reached the job document (O80) - without it the floor counts a scrapped unit as booked work and refuses a
+   * correction the agency is entitled to make.
+   */
+  const booked = (division: string, coreType: string) => bookedFor(atJobs || [], {
+    division,
+    coreType,
+    agencyId: String(at.agencyId ?? activeAgency?.id ?? ''),
+    inspections: agencyInspections,
+  });
 
   const startEdit = (record: AllotmentRecord) => {
     setCorrectionError(null);

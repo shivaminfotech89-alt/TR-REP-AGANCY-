@@ -335,3 +335,90 @@ export function conditionSaveCheck(args: {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
+// IS THIS JOB OVERHAULED? - THREE ARMS, LIKE SCRAP'S, AND FOR THE SAME REASON (AUDIT G122)
+// ---------------------------------------------------------------------------------------------------------------
+
+/**
+ * ⚠⚠ `drawsOnAllotment` RECOGNISED AN OVERHAUL BY `repairType` ALONE, WHICH IS THE HOLE O80 FOUND FOR SCRAP.
+ *
+ * O80's finding was that one declaration can live in more than one place and the narrow test misses a real unit:
+ * `ASU-2` is scrap ONLY in its internal inspection, with an empty `condition` on the job, and every census that
+ * tested the job document alone understated by its 90 litres. `isScrapJob` therefore has three arms.
+ *
+ * The OH exclusion had one. It read `job.repairType === 'OH'` and nothing else - not `job.condition`, which is
+ * the field the declaration always writes, and not the inspection, which is the audit trail. Two shapes reach
+ * that gap:
+ *
+ *   - **`jobUpdatesForCondition` withholds `repairType` unless the job is currently `'OGP'`**, by design, so a
+ *     declaration on any other repair type records `condition: 'OH'` and leaves `repairType` alone. GP is
+ *     already excluded from the allotment so it costs nothing there - but the exclusion was relying on a
+ *     coincidence rather than on reading the field that was written.
+ *   - **ASU-2's shape.** A job document restored, migrated or re-written without `condition` leaves the
+ *     declaration surviving only in the inspection. That is not hypothetical: it has already happened once in
+ *     this database, for scrap.
+ *
+ * ⚠ MEASURED BEFORE BUILDING: zero live jobs carry `repairType: 'OH'`, `condition: 'OH'`, or an inspection
+ * declaring OH, because none of this is deployed yet. The count that matters is the forward one, and it is why
+ * the arm goes in before the feature ships rather than after a census finds the first miss.
+ *
+ * ⚠ `coreType === 'OH'` IS NOT ONE OF THESE ARMS, DELIBERATELY. That is the separately-issued overhauling MR -
+ * the Schedule-A sr 21 path, six agencies using it - and the owner's rule is that such MRs **carry no allotment
+ * at all**, "not 0 consumed, but not counted". It is a different fact from a unit declared overhauled on an
+ * allotted MR, so `drawsOnAllotment` keeps its own separate test for it and a coreType-OH job is never offered
+ * as a freed slot.
+ */
+
+/**
+ * The condition an Internal inspection records for this job, or '' when there is none.
+ *
+ * ⚠ THIS WALK EXISTS TWICE - here and inside `scrapState.scrapEvidence` - AND THAT IS A KNOWN PAIR. Reconciling
+ * them means changing `scrapEvidence`'s contract, which four callers and the oil census depend on, so it is
+ * listed rather than done (pair 1c). Both match on `jobId` and require `type === 'Internal'`; if they ever
+ * disagree about which inspection is authoritative, that is the defect to look for.
+ */
+export function internalDeclaredCondition(job: any, inspections: readonly any[] = []): string {
+  const jobId = norm(job?.id);
+  if (!jobId) return '';
+  const found = (inspections || []).find((i: any) =>
+    norm(i?.jobId) === jobId && norm(i?.type) === 'Internal');
+  return norm(found?.data?.condition);
+}
+
+export interface OverhaulEvidence {
+  /** `job.repairType` says OH - what the declaration writes on an OGP job. */
+  byRepairType: boolean;
+  /** `job.condition` says OH - what the declaration always writes. */
+  byCondition: boolean;
+  /** The Internal inspection says OH, whatever the job document says. */
+  byInspection: boolean;
+  /** True when ANY of the above did. */
+  isOverhauled: boolean;
+  /** Which ones, for a caller that must show provenance. Empty when not overhauled. */
+  matched: Array<'repairType' | 'condition' | 'inspection'>;
+}
+
+/** Every test, kept apart so a disagreement between them stays visible - `scrapEvidence`'s shape exactly. */
+export function overhaulEvidence(job: any, inspections: readonly any[] = []): OverhaulEvidence {
+  const byRepairType = norm(job?.repairType) === CONDITION_OH;
+  const byCondition = norm(job?.condition) === CONDITION_OH;
+  const byInspection = internalDeclaredCondition(job, inspections) === CONDITION_OH;
+
+  const matched: Array<'repairType' | 'condition' | 'inspection'> = [];
+  if (byRepairType) matched.push('repairType');
+  if (byCondition) matched.push('condition');
+  if (byInspection) matched.push('inspection');
+
+  return { byRepairType, byCondition, byInspection, isOverhauled: matched.length > 0, matched };
+}
+
+/**
+ * THE WIDEST TEST - a job is overhauled if ANY evidence says so.
+ *
+ * ⚠ WIDEST ON PURPOSE, AND THE SAFE DIRECTION IS THE OPPOSITE OF SCRAP'S. For an oil figure an understatement
+ * hides litres the DISCOM settles against. Here an understatement makes an overhauled unit CONSUME quota it did
+ * not earn - the agency loses a job it was entitled to, quietly, and the figure the division queries is the
+ * app's fault. A caller needing a narrower answer should read `overhaulEvidence` and say which arm it used.
+ */
+export function isOverhauledJob(job: any, inspections: readonly any[] = []): boolean {
+  return overhaulEvidence(job, inspections).isOverhauled;
+}

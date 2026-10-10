@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
+import { isScrapJob } from '../lib/scrapState';
 import { collection, doc, query, where, getDocs, runTransaction } from 'firebase/firestore';
 import { 
   Loader2, 
@@ -41,6 +42,8 @@ import SetupGapDialog, { SetupGap } from './SetupGapDialog';
 import { getCircleLimitForJob, RATING_LEVEL_OPTIONS } from '../lib/estimateData';
 import { APP_MARK } from '../lib/ui';
 import { inheritsAgencyQuota } from '../lib/allotmentInheritance';
+import { drawsOnAllotment } from '../lib/allotments';
+import { replaceableJobs, freedSlotReason } from '../lib/replacementJob';
 import { jobNumberTail, nextJobNoFor, takenJobNumbers } from '../lib/jobNumbering';
 
 interface TransformerEntry {
@@ -63,6 +66,15 @@ interface TransformerEntry {
    * number" cannot be answered by index.
    */
   rowKey: string;
+  /**
+   * ⚠ THE OH OR SCRAP UNIT THIS ROW REPLACES, AND WHY (AUDIT G115). Set only when the operator picks one;
+   * absent on an ordinary intake, which is every job in the database today. It explains an allotment count
+   * running past its quota - ten repaired, two OH and one scrap is thirteen job numbers, all correct - and the
+   * division asks about exactly that. It does NOT exempt the row: a replacement is work the agency did do and
+   * draws on the allotment normally.
+   */
+  issuedAgainstJobId?: string;
+  issuedAgainstReason?: 'OH' | 'Scrap';
   prevAtNo?: string;
   prevJobNo?: string;
   prevDeliveryDate?: string;
@@ -210,7 +222,7 @@ export default function NewJob() {
   const {
     activeAgency, activeAtMaster, atMasters, getJobNoPrefix, predictNextJobNo, syncCountersState,
     setActiveAtMasterId, viewingAllTenders,
-    agencyJobs, agencyDataLoad, refreshAgencyData,
+    agencyJobs, agencyInspections, agencyDataLoad, refreshAgencyData,
   } = useAgency();
   /**
    * ⚠ A SOFT GATE, NOT A BOUNDARY (AUDIT G49). It runs in the browser and the security
@@ -794,7 +806,7 @@ export default function NewJob() {
     if (!q) return [];
     return pastJobs
       .filter(j => j.status === 'Dispatched')
-      .filter(j => !(j.status === 'Scrap' || j.condition === 'Scrap'))
+      .filter(j => !(isScrapJob(j, agencyInspections)))
       .filter(j => (j.jobNo || '').toLowerCase().includes(q))
       .slice(0, limit);
   };
@@ -1555,16 +1567,37 @@ ${intakeGate.reason}`);
           }
 
           if (allowed > 0) {
+            /**
+             * ⚠⚠ THE SHARED PREDICATE, NOT A COPY OF IT (AUDIT G115). These four lines used to be:
+             *
+             *     if (data.repairType === 'OH' || data.repairType === 'GP') return;
+             *     const docType = data.coreType || 'CRGO';
+             *     if (docType === 'OH') return;
+             *
+             * - a hand-rolled restatement of `drawsOnAllotment` in the one place that REFUSES an intake, while
+             * the two display sites imported the library. G72 called that library "the one definition" and it
+             * was not. A copy in the ENFORCEMENT path is the worse direction of the split: the screen says
+             * allowed and the save refuses.
+             *
+             * ⚠ `agencyInspections` IS PASSED BECAUSE SCRAP IS NOT KNOWABLE FROM THE JOB ALONE. One live
+             * unit - ADMIN's ASU-2 - is scrap only in its internal inspection, with an empty `condition` on the
+             * job (O80). Counting it as quota used would refuse an intake the agency is entitled to make.
+             *
+             * ⚠ AND THE AGENCY FILTER (AUDIT G116). The query is scoped by `ownerId` + `atId` only, so an
+             * owner's two agencies on one tender counted against each other's quota. AARATI's MSBT-5 carries
+             * MEGHA's AT and was MEGHA's 21st CRGO job.
+             *
+             * ⚠ A LEGITIMATE OVERRUN NOW PASSES. Ten repaired, two OH and one scrap is thirteen job numbers
+             * against a quota of ten, and all thirteen are correct. The OH and scrap units are excluded here, so
+             * `used` counts repaired work only and `SU-13` clears the comparison below without the quota being
+             * raised.
+             */
             let used = 0;
             existingJobsData.forEach(data => {
               if (data.ownerId !== auth.currentUser.uid || data.division !== commonData.division) return;
-              if (data.repairType === 'OH' || data.repairType === 'GP') return;
-              
-              const docType = data.coreType || 'CRGO';
-              if (docType === 'OH') return;
-              if (docType === cType) {
-                used++;
-              }
+              if (String(data.agencyId ?? '') !== String(activeAgency.id ?? '')) return;
+              if (!drawsOnAllotment(data as any, agencyInspections)) return;
+              if ((data.coreType || 'CRGO') === cType) used++;
             });
             
             if (used + countToAdd > allowed) {
@@ -1731,6 +1764,12 @@ ${intakeGate.reason}`);
               gpStatus: rowGpCalc 
                 ? (rowGpCalc.isWithinWarranty ? 'Within GP Warranty' : 'GP Period Exceeded') 
                 : (commonData.repairType === 'GP' ? 'GP Warranty' : ''),
+              // ⚠ OMITTED RATHER THAN WRITTEN EMPTY (AUDIT G115). `receivedAgainstLabel` and
+              // `replaceableJobs` both test this for truthiness, so an empty string would be harmless - but a
+              // job that replaces nothing should not carry a field implying it might.
+              ...(t.issuedAgainstJobId
+                ? { issuedAgainstJobId: t.issuedAgainstJobId, issuedAgainstReason: t.issuedAgainstReason || 'OH' }
+                : {}),
               prevAtNo: t.prevAtNo || '',
               prevJobNo: t.prevJobNo || (commonData.repairType === 'GP' ? t.jobNo : ''),
               gpReason: t.gpReason || '',
@@ -2682,6 +2721,75 @@ ${intakeGate.reason}`);
                           </div>
                         </div>
                       ) : null}
+                    </div>
+                  );
+                })()}
+
+                {/* =================================================================== */}
+                {/* RECEIVED AGAINST AN OH OR SCRAP UNIT (AUDIT G115)                   */}
+                {/* =================================================================== */}
+                {/*
+                  ⚠ WHY A PICKER AND NOT A FREE-TEXT NOTE. A count of 13 against a quota of 10 with nothing
+                  recorded is indistinguishable from an over-allotment error, and the division asks which units
+                  were OH and which were scrap. A typed note could name a job that does not exist, or the same
+                  freed unit twice - which would take two slots for one and reintroduce the over-allotment the
+                  rule exists to prevent.
+
+                  ⚠ OGP ONLY. A GP job draws nothing from the allotment in the first place, so it cannot be
+                  a replacement for a freed slot.
+                */}
+                {commonData.repairType === 'OGP' && (() => {
+                  const chosenElsewhere = new Set(
+                    transformers
+                      .filter((_, oi) => oi !== index)
+                      .map(o => String(o.issuedAgainstJobId || ''))
+                      .filter(Boolean));
+                  const candidates = (t.coreType && commonData.division)
+                    ? replaceableJobs(agencyJobs as any[], {
+                        division: commonData.division,
+                        coreType: t.coreType,
+                        agencyId: String(activeAgency?.id ?? ''),
+                        inspections: agencyInspections,
+                      }).filter(c => !chosenElsewhere.has(String(c.id || '')))
+                    : [];
+                  // Nothing to offer and nothing chosen - say nothing. An empty select on every intake row
+                  // would read as a question the operator had failed to answer.
+                  if (!candidates.length && !t.issuedAgainstJobId) return null;
+                  return (
+                    <div className="mt-3 pt-3 border-t border-sky-200/80 bg-sky-50/70 p-3 rounded-lg">
+                      <label className="block text-[10px] font-bold uppercase text-sky-950 mb-1 flex items-center gap-1.5">
+                        <Info className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                        <span>Received against an OH / Scrap unit <span className="font-normal normal-case text-sky-800">(optional)</span></span>
+                      </label>
+                      <select
+                        value={t.issuedAgainstJobId || ''}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          const picked = candidates.find(c => String(c.id || '') === id);
+                          handleTransformerChange(index, 'issuedAgainstJobId', id);
+                          // ⚠ THE REASON IS STORED, NOT DERIVED LATER (lib/replacementJob). The replaced
+                          // unit's condition may still move - OH -> Scrap is permitted - and this records what
+                          // the replacement was issued FOR at the time it was issued.
+                          handleTransformerChange(index, 'issuedAgainstReason',
+                            (picked ? freedSlotReason(picked, agencyInspections) : null) as any);
+                        }}
+                        className="w-full px-2.5 py-1.5 border border-sky-300 rounded-lg text-xs font-bold bg-white text-sky-950 outline-none focus:ring-1 focus:ring-sky-500 cursor-pointer"
+                      >
+                        <option value="">Not a replacement - this job draws on the allotment normally</option>
+                        {candidates.map(c => {
+                          const why = freedSlotReason(c, agencyInspections);
+                          return (
+                            <option key={String(c.id)} value={String(c.id)}>
+                              {why} {c.jobNo} - {c.coreType || 'CRGO'}, {c.division}
+                            </option>
+                          );
+                        })}
+                      </select>
+                      <p className="text-[10px] text-sky-800 mt-1.5 leading-snug">
+                        {t.issuedAgainstJobId
+                          ? 'Recorded on the job, so the division can see why the series runs past the quota. This job still draws on the allotment - the unit it replaces does not.'
+                          : `${candidates.length} unit${candidates.length === 1 ? '' : 's'} in ${commonData.division} freed a slot and ${candidates.length === 1 ? 'has' : 'have'} not been replaced yet.`}
+                      </p>
                     </div>
                   );
                 })()}

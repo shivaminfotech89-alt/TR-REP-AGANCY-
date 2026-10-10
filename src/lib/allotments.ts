@@ -39,6 +39,9 @@
  * "cannot delete" without the numbers leaves the operator guessing what to do next.
  */
 
+import { isScrapJob } from './scrapState';
+import { isOverhauledJob } from './inspectionCondition';
+
 export interface AllotmentLetter {
   id: string;
   date: string;
@@ -53,31 +56,101 @@ export interface AllotmentLetter {
 export type QuotaMap = Record<string, Record<string, number>>;
 
 export interface QuotaJob {
+  /** Needed to match an inspection that declares this job scrap - see `drawsOnAllotment`. */
+  id?: string;
   division?: string;
   coreType?: string;
   repairType?: string;
+  condition?: string;
+  status?: string;
+  agencyId?: string;
 }
 
 /**
- * WHETHER A JOB DRAWS ON AN ALLOTMENT - the one definition, so two screens cannot disagree.
+ * WHETHER A JOB DRAWS ON AN ALLOTMENT - the one definition, so no two screens can disagree.
  *
  * ⚠ THIS EXISTS BECAUSE THEY DID (AUDIT G72). New Job excluded GP rework and Overhauling; the Dashboard widget
  * excluded only Overhauling, and counted GP jobs as quota used. MEGHA's SABARMATI/CRGO row read 21 used at intake and
  * 25 on the Dashboard - one quantity, two counts, the shape this audit keeps finding. New Job's rule is the correct
  * one: a guarantee repair is rework on a job the quota already paid for.
+ *
+ * ⚠⚠ AND G72's CLAIM TO BE "the one definition" WAS NOT TRUE UNTIL G115. Two of the three count sites
+ * imported this. The third - `NewJob`, the one that BLOCKS an intake - re-implemented it inline:
+ *
+ *       if (data.repairType === 'OH' || data.repairType === 'GP') return;
+ *       const docType = data.coreType || 'CRGO';
+ *       if (docType === 'OH') return;
+ *
+ * A hand-rolled copy in the enforcement path is worse than one in a display, because the direction of the
+ * disagreement is "the screen says allowed and the save refuses". All three sites now call this.
+ *
+ * ⚠⚠ WHAT THE ALLOTMENT ACTUALLY MEASURES IS JOBS THE AGENCY REPAIRED (AUDIT G115), from the operator:
+ *
+ *   > "IF REPAIRER AGANCIES GET 10 NO OF JOB FROM SU-1 TO SU-10 AND GOUND 2 NOS OF JO SU-9 AND SU-10 'OH' ...
+ *   >  FURTHER JOB NO WIL CONTINUE FROM SU-11 ... THEN AGANCIES GET 2 MORE JOB FOR REPAIRE AGAINST 'OH' JOB
+ *   >  ... SO TOTAL ALLOTMENT FOR CRGO JOB IS 10 NOS AND AGANCIES JOB NO UPTO 13"
+ *
+ * A unit the agency did not repair - because it was overhauled or scrapped - consumed none of the quota. So a
+ * 10-unit allotment legitimately carries job numbers up to `SU-13`: ten repaired, two OH, one scrap. Job numbers
+ * are never reused, renumbered or backfilled; the series simply continues.
+ *
+ * ⚠ THE SCRAP TEST IS `scrapState`'s, NOT A FOURTH ONE. O80 found four disagreeing scrap tests spanning more
+ * than half the population, and the narrow ones each miss a real scrapped unit: six of the 36 live scrap jobs are
+ * findable only by `status`, and `ASU-2` is scrap ONLY in its internal inspection, with an empty `condition` on the
+ * job. That is why `inspections` is a parameter rather than something a caller may omit - a count that quietly
+ * used the narrow test would overstate usage by exactly the units the rule is about.
+ *
+ * ⚠ A REPLACEMENT JOB DRAWS NORMALLY. `issuedAgainstJobId` records WHY the series ran past the quota; it does
+ * not exempt. The replacement is work the agency did do, and it takes the slot the OH or scrap unit left. That is
+ * what keeps the arithmetic closed: ten drawing jobs against a quota of ten, whatever the highest job number is.
  */
-export function drawsOnAllotment(job: QuotaJob): boolean {
-  const core = String(job.coreType || 'CRGO');
-  const repair = String(job.repairType || '');
-  if (repair === 'GP' || repair === 'OH') return false;
-  return core !== 'OH';
+export function drawsOnAllotment(job: QuotaJob, inspections: readonly any[] = []): boolean {
+  // Guarantee rework: the quota already paid for the job being reworked.
+  if (String(job.repairType || '') === 'GP') return false;
+
+  /**
+   * ⚠ THE SEPARATELY-ISSUED OVERHAULING MR - a DIFFERENT FACT from a unit declared overhauled, kept as its
+   * own test. Such an MR carries no allotment at all (the owner's rule: "not 0 consumed, but not counted"), it
+   * prices on Schedule-A sr 21, and six agencies have prefixes configured for it.
+   */
+  if (String(job.coreType || 'CRGO') === 'OH') return false;
+
+  /**
+   * ⚠⚠ THREE ARMS, NOT `repairType` ALONE (AUDIT G122). This line used to be `repair === 'OH'`, which
+   * read one of the three places a declaration lives - and missing one is exactly the defect O80 found for
+   * scrap, where ASU-2's declaration survives only in its inspection. Understating here makes an overhauled
+   * unit consume quota it did not earn, so the agency silently loses a job it was entitled to.
+   */
+  if (isOverhauledJob(job, inspections)) return false;
+
+  return !isScrapJob(job, inspections as any[]);
 }
 
-/** How many of `jobs` are booked against one division and core type. Jobs must already be scoped to the AT. */
-export function bookedFor(jobs: QuotaJob[], division: string, coreType: string): number {
-  return jobs.filter(j => drawsOnAllotment(j)
-    && String(j.division || '') === division
-    && String(j.coreType || 'CRGO') === coreType).length;
+/**
+ * WHICH DIVISION, CORE TYPE AND AGENCY A BOOKED COUNT IS FOR.
+ *
+ * ⚠⚠ `agencyId` IS REQUIRED, AND THAT IS THE FIX RATHER THAN A TIDY-UP (AUDIT G116). All three count
+ * sites scoped their query by `ownerId` + `atId` and nothing else. An owner's two agencies on one tender
+ * therefore counted against each other's quota, and one live job proves it: AARATI's `MSBT-5` carries MEGHA's AT
+ * (the G107 mis-stamp), so MEGHA's SABARMATI/CRGO read 21 of 30 with the 21st belonging to another agency.
+ *
+ * Required rather than optional, so tsc names every call site instead of letting one silently keep the old scope.
+ */
+export interface BookedScope {
+  division: string;
+  coreType: string;
+  agencyId: string;
+  /** Internal inspections, for the scrap declarations that never reached the job - see `drawsOnAllotment`. */
+  inspections?: readonly any[];
+}
+
+/** How many of `jobs` are booked against one division, core type and agency. Jobs must already be scoped to the AT. */
+export function bookedFor(jobs: readonly QuotaJob[], scope: BookedScope): number {
+  const agency = String(scope.agencyId ?? '');
+  return jobs.filter(j => drawsOnAllotment(j, scope.inspections)
+    && String(j.division || '') === scope.division
+    && String(j.coreType || 'CRGO') === scope.coreType
+    && String(j.agencyId ?? '') === agency).length;
 }
 
 /** What this division and core's letters add up to. NOT the quota - see the header. */
