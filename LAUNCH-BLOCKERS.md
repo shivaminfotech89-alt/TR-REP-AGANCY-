@@ -350,6 +350,59 @@ two (`AT 26-27` and `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819`), the estimate r
 schedule for an estimate that has already been approved at 5,661. **The operator has to say which tender MR 1
 was issued under.** No script ships for it, because a script would have to choose.
 
+### 25c. 3,370 litres of oil received against MRs with no transformers recorded — **MEDIUM** — G124
+
+| agency | tender | division | MR | received | litres |
+|---|---|---|---|---|---|
+| ADMIN | `2026_27` | DEESA | 5585 | 2026-08-28 | **2,110** |
+| ZENITH TRANSFORMERS | `UGVCL/EE-T-1/TRANS-REP/2026-28/01/AT/1819` | BAVLA | 1072 | 2026-10-09 | **840** |
+| MEGHA | `AT 26-27` | SABARMATI | 8989 | 2026-09-15 | **420** |
+| | | | | **total** | **3,370** |
+
+One receipt each, counted against the live records - not an aggregate of several. `oilType: Fresh` on all three.
+
+Each is a real oil receipt — `oilType: Fresh`, a date, a division, and now a sound tender reference — sitting on
+an MR under which **no transformer was ever entered.** The oil arrived and the division issued it; what is
+missing is the work it was issued for.
+
+**Each one reduces the shortage deduction on its statement**, because `netOilDue = shortage − inward` and
+`netPayable = grandTotal − netOilDue × 110`. So these litres currently count in the agency's favour against
+work the app has no record of. That is not an accusation — the likeliest explanation is an MR received and the
+transformers not yet entered, or a mistyped MR number — but it is unreconciled, and on a statement the division
+settles against.
+
+**⚠⚠ ONLY ONE OF THE THREE WAS EVER CONSPICUOUS, AND FOR THE WRONG REASON.** MR 5585 drew attention because its
+`atId` pointed at a deleted tender, which the identifier join surfaced as `at-missing`. **ZENITH's 840 L and
+MEGHA's 420 L had sound references all along and had been sitting in plain sight** — nothing looked wrong about
+them, and nothing would have, because the old join keyed on the MR number and a row built from a transaction
+alone is indistinguishable from one built from jobs. They became visible only once `mrHasNoJobs` existed as a
+signal. **The marker found twice as many litres as the defect that motivated it.**
+
+**Now stated on the page rather than inferred.** The oil account sheet prints, per statement:
+
+> Includes 2,110.0 Ltr received against MR 5585, which carries no transformers on this statement. The receipt
+> is recorded; the work it was issued for is not.
+
+**⚠ DISTINCT FROM THE 1,180 L SCRAP-RETAINED QUESTION, AND THE TWO MUST NOT BE MERGED.** That one asks whether
+a division's oil account shows the top-up and the oil an agency retains when a transformer is **scrapped** —
+litres the agency holds, a question about the division's four terms, and it waits on one question to the
+operator. **This is the opposite shape:** litres the agency **received**, against work that does not exist in
+the record. Different litres, different direction, different question.
+
+**For the operator, three questions, one per row:**
+
+> MR 5585 (ADMIN, DEESA, 2,110 L, 28-08-2026), MR 1072 (ZENITH, BAVLA, 840 L, 09-10-2026) and MR 8989 (MEGHA,
+> SABARMATI, 420 L, 15-09-2026) each show oil received with no transformers entered against them. Were those
+> MRs received and the units not yet entered, or is the MR number on the oil receipt wrong?
+
+⚠ **ZENITH's MR 1072 is only two days old at the time of writing**, so that one may simply be an MR whose
+units have not been entered yet - the ordinary case. ADMIN's is six weeks old and MEGHA's four, which is what
+makes those two worth asking about rather than waiting on.
+
+**Nothing is changed by this item.** The receipts stay counted — removing real oil from a statement because the
+app lacks the matching jobs would move the figure against the agency on no evidence. They are counted and
+marked.
+
 ---
 
 ## Tier 5 — design decisions, not defects

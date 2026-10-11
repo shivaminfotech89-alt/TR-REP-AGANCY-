@@ -256,6 +256,50 @@ only in the data.
 
 ---
 
+## Pattern: a verification step that defeats itself reports nothing while looking like diligence
+
+Recorded 2026-10-11, from this session's own deploy probe.
+
+The probe is sound: push, wait for Vercel, fetch the live bundle, grep it for a string only the new commit
+contains. It ran twice and proved two deploys. The third time it produced nothing, because of how it was run:
+
+```
+polling https://www.transregister.com/ every 15 s for ten minutes
+plus three ~3 MB bundle downloads in the same session
+-> HTTP/1.1 403 Forbidden
+   <title>Vercel Security Checkpoint</title>
+```
+
+**The forty-dot poll was grepping challenge pages, not the app.** Every request came back 200-shaped to a loop
+that only compared bundle names, so the loop reported "no new bundle" for ten minutes while the real answer was
+"you are being refused". The deploy had very likely succeeded; the verification could no longer see it either
+way, and **it could not report that it had stopped working** - it reported the same thing as a deploy that had
+not happened.
+
+**⚠ THE FAILURE IS NOT THE BLOCK. IT IS THAT A GREEN-LOOKING CHECK AND A BROKEN CHECK WERE THE SAME OUTPUT.**
+That is this file's first pattern in a new place: the check read something that resembled its subject and
+reported on the resemblance. A poll that distinguishes "no new bundle" from "not reachable" would have said so
+in fifteen seconds.
+
+### THE RULE THAT REPLACES IT
+
+- **Wait for the deploy, then probe ONCE.** Two deploys in this session appeared in ~45 s; a single fetch after
+  a pause would have caught both and cost two requests instead of forty-three.
+- **If it must be polled: minutes apart, `HEAD` not `GET`, and a hard cap on attempts.** A bundle name comes
+  from the HTML, so the 3 MB body is only needed for the final marker check - once, on the one bundle.
+- **Assert the response, not just the payload.** Check the status and that the body is the app before comparing
+  anything; a probe that cannot tell a challenge page from a stale deploy has no result to give.
+- **And count the cost against a human.** The owner can confirm a deploy by eye in one look. A verification
+  step that burns a production URL's goodwill to tell him something he can see is not worth running at all -
+  which is the judgement that was missing, not the technique.
+
+**⚠ THE SELF-INFLICTED PART IS THE POINT.** Nothing about the site changed; the probe degraded its own access by
+being run too eagerly, and then its results were reported as if they were observations about the deploy. No
+retries were made after the block was understood, because each one extends it - the recovery for this is
+patience, not another request.
+
+---
+
 ## Pattern: an audit statement that declared data clean closed the question for everyone after it
 
 **Two entries in this file said the rate masters were clean, and both were read as settled.**
