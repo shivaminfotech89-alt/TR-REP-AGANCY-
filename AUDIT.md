@@ -23475,3 +23475,113 @@ Rs 28,286.50 more, and that is the correct figure**; the 2,110 L now counts once
   division, not a settled row - which is what the marker says and all it says.
 - **The four orphaned inspections are untouched**, and the `openingOilBalanceAt` timestamp on the repaired
   carry was left as it was: the carry's date is when the tender opened, not when the arithmetic was corrected.
+
+---
+
+## G125. A whole editor placed inside a header row, above the only action a new tender has
+
+### THE FAULT, AS THE OPERATOR MET IT
+
+Two complaints about the AT / Tender tab: it opens oversized and does not fit the screen, and "Guarantee period
+for this AT" gets in the way of reaching **Add Division**. **They are one fault.**
+
+`AtDivisions`' top section was a flex row with **three** children:
+
+```jsx
+<div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b">
+  <div>…title + subtitle…</div>
+  <div className="mb-4 border border-slate-200 rounded-lg p-3 bg-slate-50">…guarantee editor…</div>
+  <button>Add Division</button>
+</div>
+```
+
+The middle child is a complete editor: four number inputs in a `grid-cols-2 sm:grid-cols-4`, each with a label
+and a `describeGuaranteeState` line, plus **two paragraphs of prose** about overhauling and LSTC.
+
+**⚠ AND IT CARRIED NO WIDTH CONSTRAINT** - no `w-`, `max-w-`, `basis-` or `shrink`. In a `justify-between` row
+a flex child sizes to its content, so an editor containing prose dominated the row, squeezed the title and
+pushed the action to the far right. Below `sm:` the row is `flex-col`, so the order on a phone became: title,
+four inputs over two rows with a state line each, two paragraphs, **and only then Add Division.**
+
+**⚠ NOTHING WAS CLIPPED, WHICH IS WHY "oversized" IS THE RIGHT WORD AND "overflow" IS NOT.** `AtDivisions`
+mounts in `<div className="pt-1">` with no `max-h` and no `overflow` - the `fixed inset-0 … max-h-[90vh]
+overflow-y-auto` nearby is an unrelated dialog. The tab was simply very tall and the action was past the fold.
+The one place that could have broken horizontally was already handled: the prefix table has `overflow-x-auto`
+with `min-w-[90px]`/`min-w-[70px]` inputs, so it scrolls inside its own box.
+
+### ⚠⚠ WHY THE POSITION WAS EXACTLY BACKWARDS
+
+**A division is the root of everything on this tab.** `prefixes` is keyed by division NAME
+(`AtDivisions`: `prefixes[divName] = {…}`), and the Allotments tab derives its rows from that map
+(`AtAllotments`: `divisions = Object.keys(currentPrefixes)`). So with no division there are no prefixes, **no
+allotment rows at all**, and job numbers fall back to the `'JOB'` sentinel. The order is
+**division → prefix → allotment → job number.**
+
+Meanwhile the guarantee period is **not required at creation and is not even written there.** The create form's
+`required` fields are AT number, start date, end date and AT percentage; `guaranteeMonths` appears nowhere in
+it, and `AtMaster.guaranteeMonths` is optional with *"Absent means 18"*. Eleven of fifteen live ATs store
+nothing and price at the clause figure - correct, and unconfirmed (G78).
+
+**So the most valuable position on the first-run screen was occupied by an optional later confirmation of a
+value that is already right, and the one action everything else depends on was the hardest thing to reach.**
+
+### WHAT CHANGED
+
+1. **The header row is two children** - title and `Add Division`. That alone fixes both reported faults at both
+   viewports, and removes the squeeze.
+2. **The editor moved below the division cards**, immediately above Save - next to the read-only echo each
+   division's table already shows, so the editable figure and its per-division repetition are on one screen.
+   Not a third AT-level tab: that would imply the guarantee is a peer of Divisions and Allotments, when it is
+   one optional field per core type.
+3. **Collapsed by default**, with a one-line summary. The four inputs and both paragraphs live in the expanded
+   body. The open state **does not persist**: this is a field confirmed once per tender, not worked in, and
+   remembering it would put the height back permanently for whoever expanded it once.
+
+### ⚠ ON A FRESH AT IT IS DEFERRED AND LABELLED, NOT HIDDEN
+
+The owner amended the plan here, and the amendment is the better rule. The first proposal was to hide the row
+until a division exists. Instead it stays visible, disabled, reading:
+
+> **Guarantee period for this AT**
+> Set this once the tender's divisions are added.
+
+**Absent reads as "nothing to do here"; a disabled row with a reason reads as "later".** Same principle as an
+unanswered HV S.E. field printing blank rather than `-` (G105), and an unplaceable oil receipt shown as
+unplaced rather than dropped (G124) - the screen states what it knows and what it is waiting for.
+
+### THE SUMMARY REPORTS THE WEAKEST STATE, NOT A COUNT
+
+`describeGuaranteeState` distinguishes three things (G78): a clause default nobody has confirmed, a figure
+recorded on the tender, and one deliberately set away from the clause. The collapsed line is
+`18 / 18 / 18 / 6 months — clause 38.2 default, not confirmed against this A/T`, and it reports **the weakest
+state present** across the four core types.
+
+**A summary that said "18 / 18 / 18 / 6 months" and stopped would have hidden the only part worth acting on** -
+that nothing has been confirmed - which is the distinction G78 exists for. Collapsing a block is only safe if
+the summary carries the part that would have prompted someone to open it.
+
+### NO BEHAVIOUR CHANGED
+
+- `guaranteeMonths` stays optional; the defaults stay 18, and 6 for LSTC / PAT; nothing new is required at
+  creation. `handleSave` and `updateAtMaster` are untouched - they do not appear in the diff.
+- **⚠ COLLAPSING CANNOT LOSE AN EDIT.** `guaranteeMonths` is component state initialised from the AT, and
+  `handleSave` reads that state, not the DOM. Collapsing unmounts the inputs and nothing else, so an operator
+  who types, collapses and saves still saves what they typed.
+
+### VERIFIED
+
+- tsc (exit 0); **554 tests in 39 files**; build; hooks guard, 50 files.
+- **`print-subtree-hashes`: 13 byte-identical, 0 changed** - checked before AND after rather than assumed,
+  because the owner asked for that specifically. The guarantee block sits in no printed region.
+
+### NOT EXERCISED
+
+- **⚠⚠ NOTHING HERE WAS RENDERED, AND NOTHING IN THIS REPO CAN RENDER IT.** Chrome is present and print-check
+  drives it, but print-check **stubs Firebase** and mounts document components with injected props - it never
+  signs in. This tab is `AgencySettings → AtMasters → AtSettings → AtDivisions`, and `AtMasters` takes no
+  props: the chain reads `useAgency()`. Rendering it needs a fabricated context provider, which is
+  `LAUNCH-BLOCKERS` 25a, deliberately not built. **No screenshots were taken at 1366×768 or 390×844, no
+  first-run state was observed, and the owner's eyes are the only check on this change.**
+- Every height claim above is reasoned from the CSS. **No pixel was measured.**
+- The collapsed summary's three states are derived from `guaranteeState`, which has tests - but the summary
+  string itself has none, and nothing asserts the disabled first-run wording.

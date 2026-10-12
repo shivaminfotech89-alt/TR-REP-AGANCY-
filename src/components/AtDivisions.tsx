@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAgency, AtMaster } from '../lib/AgencyContext';
-import { Plus, Trash2, Save, Loader2, Check, AlertTriangle, Layers } from 'lucide-react';
+import { Plus, Trash2, Save, Loader2, Check, AlertTriangle, Layers, ChevronDown } from 'lucide-react';
 import { validateDivisionPrefixes, validatePrefixesAcrossAgency, configuredPrefixes, prefixHasBookedWork } from '../lib/prefixValidation';
 import { getCounterKey } from '../lib/AgencyContext';
 import { shortAtNumber } from '../lib/utils';
@@ -15,6 +15,43 @@ export function AtDivisions({ at }: { at: AtMaster }) {
   const [isSaving, setIsSaving] = useState(false);
   const [divisions, setDivisions] = useState<any[]>([]);
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  /**
+   * ⚠ COLLAPSED BY DEFAULT, AND THE STATE DOES NOT PERSIST (AUDIT G125). `guaranteeMonths` is optional and
+   * its default is already correct - 18 months under clause 38.2, 6 for LSTC / PAT - so this is a field an
+   * operator confirms once per tender, not one they work in. Remembering that it was open would put the height
+   * back on every visit for the one person who expanded it once.
+   */
+  const [guaranteeOpen, setGuaranteeOpen] = useState(false);
+
+  /**
+   * ⚠ A DIVISION IS THE ROOT OF EVERYTHING ON THIS TAB. `prefixes` is keyed by division NAME, and the
+   * Allotments tab reads its rows from that map (`AtAllotments`: `Object.keys(currentPrefixes)`), so with no
+   * division there are no prefixes, no allotment rows, and job numbers fall back to the 'JOB' sentinel. That
+   * ordering is why Add Division owns the header row and why the guarantee row below defers to it.
+   */
+  const hasDivisions = divisions.length > 0;
+
+  /**
+   * THE COLLAPSED SUMMARY - the four months and what kind of fact each one is.
+   *
+   * ⚠ IT REPORTS THE WEAKEST STATE PRESENT, not a count. `describeGuaranteeState` distinguishes three
+   * things (G78): a clause default nobody has confirmed, a figure recorded on the tender, and one deliberately
+   * set away from the clause. A summary that said "18 / 18 / 18 / 6 months" and stopped would hide the only
+   * part worth acting on - that nothing has been confirmed - which is the distinction that entry exists for.
+   */
+  const guaranteeSummary = (() => {
+    const labels = Object.keys(GUARANTEE_DEFAULTS);
+    const states = labels.map(l => guaranteeState(at, l));
+    const months = states.map(s => s.months).join(' / ');
+    const anyDefault = states.some(s => s.kind === 'default');
+    const anyDiffers = states.some(s => s.kind === 'differs');
+    const note = anyDefault
+      ? 'clause 38.2 default, not confirmed against this A/T'
+      : anyDiffers
+      ? 'set on this tender, away from the clause default'
+      : 'recorded on this tender';
+    return `${months} months — ${note}`;
+  })();
 
   // ⚠ KEYED ON THE PREFIXES THIS COPIES, NOT ON THE OBJECTS HOLDING THEM (AUDIT G56).
   // `updateAtMaster` and `updateAgency` put a new object into context on every save, and this
@@ -251,70 +288,6 @@ export function AtDivisions({ at }: { at: AtMaster }) {
           </p>
         </div>
 
-        {/* ================= GUARANTEE PERIOD — ONE EDITOR, PER CORE TYPE =================
-            ⚠ A TENDER TERM, ON THE TENDER (AUDIT G42). Edited ONCE here and shown read-only
-            against every division below, because it does NOT vary by division. Repeating an
-            editable field per division would imply that it does, which is the confusion this
-            change corrects.
-
-            ⚠ THE STARTING NUMBER USED TO BE A SECOND STANDALONE BLOCK HERE. It is now a column
-            in each division's table, beside that division's prefix, because an operator asking
-            "what is SABARMATI's Amorphous setup?" was reading a prefix in one block, a starting
-            number in another and a guarantee in a third - three blocks, three column orders,
-            and the guarantee not aligned with anything because it has no division axis. */}
-        <div className="mb-4 border border-slate-200 rounded-lg p-3 bg-slate-50">
-          <div className="flex items-baseline justify-between gap-2 flex-wrap mb-2">
-            <h5 className="text-xs font-black text-slate-900">Guarantee period for this AT</h5>
-            <span className="text-[10px] text-slate-500">
-              A/T clause 38.2. Printed on the guarantee certificate, and checked when a GP job is booked.
-            </span>
-          </div>
-          {/* ⚠ WHAT IS STORED, AND WHAT IS MERELY IN FORCE, SAID IN WORDS (AUDIT G78). The number alone cannot
-              tell an operator whether this tender was checked: eleven of fifteen live ATs store nothing and price
-              at the clause figure, which is correct and unconfirmed. The label is a FACT WITH A SOURCE, not a
-              warning - nothing here is wrong, and a nag that is correct on every tender teaches people to dismiss
-              it. It reads the STORED value, not the input being typed, so it describes the tender rather than the
-              keystroke. */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {Object.keys(GUARANTEE_DEFAULTS).map(label => {
-              const state = guaranteeState(at, label);
-              const tone = state.kind === 'differs'
-                ? 'text-indigo-700'
-                : state.kind === 'recorded' ? 'text-slate-600' : 'text-amber-700';
-              return (
-                <div key={label}>
-                  <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">{label}</label>
-                  <div className="flex items-center gap-1">
-                    <input
-                      type="number"
-                      min={1}
-                      value={guaranteeMonths[label] ?? ''}
-                      onChange={e => setGuaranteeMonths(prev => ({ ...prev, [label]: e.target.value }))}
-                      className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-mono tabular-nums"
-                    />
-                    <span className="text-[10px] text-slate-500 shrink-0">mo</span>
-                  </div>
-                  <span className={`block text-[9px] mt-0.5 leading-snug ${tone}`}>
-                    {describeGuaranteeState(state)}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          {/* ⚠ OVERHAULING IS ABSENT FROM THE EDITOR BECAUSE IT HAS NO GUARANTEE AT ALL, stated
-              rather than left as a blank column. Verified in BOTH tender documents: "overhaul"
-              appears nowhere in 1819AT.md, and Schedule-A Sr. No. 21 ("Overhauling of transformer
-              including outside cleaning and painting") is a rate row with no term - a search of
-              the whole schedule for guarantee, warrant or month returns nothing for any item. */}
-          <p className="text-[10px] text-slate-500 mt-2">
-            <strong>Overhauling has no guarantee period</strong> and is not listed above &mdash; it
-            is a service, not a repair, so nothing is replaced and nothing is guaranteed. The
-            tender is silent on it in the conditions and in Schedule-A item 21.
-            {' '}<strong>LSTC / PAT is 6 months</strong> under clause 38.2, against 18 for CRGO and
-            amorphous.
-          </p>
-        </div>
-        
         <button 
           type="button" 
           onClick={handleAddDivision} 
@@ -500,6 +473,116 @@ export function AtDivisions({ at }: { at: AtMaster }) {
             </div>
           );
         })}
+      </div>
+
+      {/* ================= GUARANTEE PERIOD — ONE EDITOR, PER CORE TYPE =================
+          ⚠ A TENDER TERM, ON THE TENDER (AUDIT G42). Edited ONCE here and shown read-only
+          against every division above, because it does NOT vary by division. Repeating an
+          editable field per division would imply that it does, which is the confusion that
+          change corrected.
+
+          ⚠ THE STARTING NUMBER USED TO BE A SECOND STANDALONE BLOCK. It is now a column
+          in each division's table, beside that division's prefix, because an operator asking
+          "what is SABARMATI's Amorphous setup?" was reading a prefix in one block, a starting
+          number in another and a guarantee in a third - three blocks, three column orders,
+          and the guarantee not aligned with anything because it has no division axis.
+
+          ⚠⚠ IT USED TO SIT INSIDE THE HEADER ROW, AS THE MIDDLE OF THREE FLEX CHILDREN -
+          title, this editor, Add Division (AUDIT G125). It carried no width constraint, so in
+          a `justify-between` row it sized to its own content, which includes two paragraphs of
+          prose: it squeezed the title and pushed the action to the far right. Below `sm:` the
+          row is `flex-col`, so the order became title, four inputs over two rows with a state
+          line each, two paragraphs, and only THEN Add Division. On a brand-new AT - where
+          adding a division is the only thing to do, and everything else depends on it
+          (prefixes are keyed by division name, and the Allotments tab reads its rows from the
+          prefix map) - the one action that matters was the hardest thing on the tab to reach.
+
+          It now sits below the division cards, next to the read-only echo in each table, and
+          collapsed: the height was four inputs plus two paragraphs, permanently, for a field
+          that is OPTIONAL and whose default is already correct. */}
+      <div className="border border-slate-200 rounded-lg bg-slate-50">
+        <button
+          type="button"
+          onClick={() => setGuaranteeOpen(o => !o)}
+          disabled={!hasDivisions}
+          aria-expanded={guaranteeOpen}
+          className={`w-full flex items-center justify-between gap-2 text-left p-3 ${
+            hasDivisions ? 'cursor-pointer hover:bg-slate-100 rounded-lg transition-colors' : 'cursor-default'
+          }`}
+        >
+          <span className="min-w-0">
+            <span className="block text-xs font-black text-slate-900">
+              Guarantee period for this AT
+            </span>
+            {/*
+              ⚠ DEFERRED AND LABELLED, NOT HIDDEN (AUDIT G125). On a fresh AT this row stays
+              visible and says when to come back to it. Absent reads as "nothing to do here";
+              a disabled row with a reason reads as "later" - the same principle as an
+              unanswered HV S.E. field printing blank rather than "-", and an unplaceable oil
+              receipt shown as unplaced rather than dropped.
+            */}
+            <span className="block text-[10px] text-slate-600 mt-0.5 leading-snug">
+              {hasDivisions ? guaranteeSummary : 'Set this once the tender’s divisions are added.'}
+            </span>
+          </span>
+          {hasDivisions && (
+            <ChevronDown
+              className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${guaranteeOpen ? 'rotate-180' : ''}`}
+            />
+          )}
+        </button>
+
+        {hasDivisions && guaranteeOpen && (
+          <div className="px-3 pb-3 space-y-2">
+            <p className="text-[10px] text-slate-500">
+              A/T clause 38.2. Printed on the guarantee certificate, and checked when a GP job is booked.
+            </p>
+            {/* ⚠ WHAT IS STORED, AND WHAT IS MERELY IN FORCE, SAID IN WORDS (AUDIT G78). The number alone cannot
+                tell an operator whether this tender was checked: eleven of fifteen live ATs store nothing and price
+                at the clause figure, which is correct and unconfirmed. The label is a FACT WITH A SOURCE, not a
+                warning - nothing here is wrong, and a nag that is correct on every tender teaches people to dismiss
+                it. It reads the STORED value, not the input being typed, so it describes the tender rather than the
+                keystroke. */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {Object.keys(GUARANTEE_DEFAULTS).map(label => {
+                const state = guaranteeState(at, label);
+                const tone = state.kind === 'differs'
+                  ? 'text-indigo-700'
+                  : state.kind === 'recorded' ? 'text-slate-600' : 'text-amber-700';
+                return (
+                  <div key={label}>
+                    <label className="block text-[9px] uppercase font-bold text-slate-600 mb-0.5">{label}</label>
+                    <div className="flex items-center gap-1">
+                      <input
+                        type="number"
+                        min={1}
+                        value={guaranteeMonths[label] ?? ''}
+                        onChange={e => setGuaranteeMonths(prev => ({ ...prev, [label]: e.target.value }))}
+                        className="w-full px-2 py-1.5 text-xs border border-slate-300 rounded bg-white font-mono tabular-nums"
+                      />
+                      <span className="text-[10px] text-slate-500 shrink-0">mo</span>
+                    </div>
+                    <span className={`block text-[9px] mt-0.5 leading-snug ${tone}`}>
+                      {describeGuaranteeState(state)}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            {/* ⚠ OVERHAULING IS ABSENT FROM THE EDITOR BECAUSE IT HAS NO GUARANTEE AT ALL, stated
+                rather than left as a blank column. Verified in BOTH tender documents: "overhaul"
+                appears nowhere in 1819AT.md, and Schedule-A Sr. No. 21 ("Overhauling of transformer
+                including outside cleaning and painting") is a rate row with no term - a search of
+                the whole schedule for guarantee, warrant or month returns nothing for any item. */}
+            <p className="text-[10px] text-slate-500">
+              <strong>Overhauling has no guarantee period</strong> and is not listed above &mdash; it
+              is a service, not a repair, so nothing is replaced and nothing is guaranteed. The
+              tender is silent on it in the conditions and in Schedule-A item 21.
+              {' '}<strong>LSTC / PAT is 6 months</strong> under clause 38.2, against 18 for CRGO and
+              amorphous.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end pt-2">
